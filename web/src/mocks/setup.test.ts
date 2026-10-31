@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { SetupState } from '../api/views.ts';
+import { START_EXAMPLES } from '../setup/copy.ts';
 import { setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
 
@@ -17,9 +18,13 @@ interface Started {
   about: string | null;
 }
 
+/** How many starts this file has sent, which gives each its own client key. */
+let starts = 0;
+
 /** A new interview from `description`: what the new Desk is called, Claude's first words and the line about it. */
 async function started(description: string): Promise<Started> {
-  const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles' } });
+  const body = { description, timezone: 'America/Los_Angeles', idempotency_key: `start-${++starts}` };
+  const answer = await mockStore.dispatch('startSetup', { body });
   if ('network' in answer || answer.status !== 201) throw new Error('the mock starts a setup');
   const state = answer.body as SetupState;
   const desk = mockStore.world.desks.find((d) => d.summary.desk_id === state.desk_id);
@@ -216,6 +221,49 @@ describe('a description in Spanish', () => {
       const { business: named, first } = await started(description);
       expect(named, description).toBe(business);
       expect(first?.slice(0, greeting.length), description).toBe(greeting);
+    }
+  });
+});
+
+describe("setup's examples", () => {
+  it('each_example_gives_its_business_owner_slug_and_line', async () => {
+    // The start step's examples, in English and in Spanish, read as an owner's own description: the
+    // business's name from its first sentence, the owner greeted by the first name they give, a
+    // slug from the business's name, and the work as the line on its public page.
+    const expected = {
+      en: [
+        ['Okafor Plumbing', 'Daniel', 'okafor-plumbing-setup1', 'People often send me a photo of the problem before I come out.'],
+        [
+          "Rosa's Bakery",
+          'Rosa',
+          'rosa-s-bakery-setup1',
+          'Most orders are for birthdays and weddings, and people tell me the size, the flavors and the design they have in mind.',
+        ],
+        ['Nguyen Tax Services', 'Linh', 'nguyen-tax-services-setup1', 'People send me their documents online or bring them to my office.'],
+      ],
+      es: [
+        ['Plomería Okafor', 'Daniel', 'plomeria-okafor-setup1', 'La gente suele mandarme una foto del problema antes de que vaya.'],
+        [
+          'Panadería Rosa',
+          'Rosa',
+          'panaderia-rosa-setup1',
+          'Casi todos los pedidos son para cumpleaños y bodas, y la gente me dice el tamaño, los sabores y el diseño que tiene en mente.',
+        ],
+        ['Impuestos Nguyen', 'Linh', 'impuestos-nguyen-setup1', 'La gente me manda sus documentos por internet o los trae a mi oficina.'],
+      ],
+    } as const;
+    for (const language of ['en', 'es'] as const) {
+      const examples = START_EXAMPLES[language].examples;
+      expect(examples).toHaveLength(expected[language].length);
+      for (const [at, { chip, description }] of examples.entries()) {
+        const [business, owner, slug, about] = expected[language][at] ?? [];
+        const desk = await started(description);
+        expect(desk.business, chip).toBe(business);
+        expect(desk.first?.startsWith(`Thanks, ${owner ?? ''}. Before`), chip).toBe(true);
+        expect(desk.first, chip).toContain(`about ${business ?? ''}?`);
+        expect(desk.slug, chip).toBe(slug);
+        expect(desk.about, chip).toBe(about);
+      }
     }
   });
 });

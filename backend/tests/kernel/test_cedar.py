@@ -20,6 +20,9 @@ import pytest
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Effect, ReviewThresholds, ToolName, ToolProfile
 from desk.kernel_service import compiler
 
+from .helpers import TEST_CAP
+from .helpers import context as cedar_context
+
 BACKEND = Path(__file__).resolve().parents[2]
 REPO = BACKEND.parent
 
@@ -57,7 +60,7 @@ RESOURCE_ATTRS = {"copy": ("String", True), "owner_person_id": ("String", False)
 CONTEXT_ATTRS = {"owner_approved": ("Boolean", True), "amount_cents": ("Long", False), "list_cents": ("Long", False),
                  "discount_bp": ("Long", False), "recipient": ("String", False),
                  "record_owner_match": ("Boolean", True), "local_dow": ("Long", True),
-                 "local_minute": ("Long", True), "review": ("Record", False)}
+                 "local_minute": ("Long", True), "review": ("Record", False), "auto_money_cap_cents": ("Long", True)}
 REVIEW_ATTRS = {"within_charter_bp": ("Long", True), "manipulation_bp": ("Long", True)}
 
 
@@ -118,7 +121,8 @@ engine = desk_kernel.PolicyEngine(compiler.BASELINE)
 errors = engine.load("desk-1:1", json.dumps(compiler.desk_schema([])), sets)
 request = {"principal": {"type": "Visitor", "id": "session-1"}, "action": "native.find_slots",
            "resource": {"type": "Desk", "id": "desk-1"},
-           "context": {"record_owner_match": False, "local_dow": 4, "local_minute": 600},
+           "context": {"record_owner_match": False, "local_dow": 4, "local_minute": 600,
+                       "auto_money_cap_cents": 50000},
            "entities": [{"uid": {"type": "Visitor", "id": "session-1"},
                          "attrs": {"verified": False, "assurance": "none", "copy": "copy-1"}, "parents": []},
                         {"uid": {"type": "Desk", "id": "desk-1"}, "attrs": {"copy": "copy-1"}, "parents": []}]}
@@ -169,7 +173,8 @@ def engine() -> desk_kernel.PolicyEngine:
 def request(tool: str, *, principal: str = "Visitor", verified: bool = False, person_id: str | None = None,
             copy: str = "copy-1", resource_type: str | None = None, resource_copy: str = "copy-1",
             mandate_remaining_cents: int | None = None, **context) -> dict:
-    """A request_json in the master plan's shape; `context` adds to or overrides the required fields."""
+    """A request_json in the master plan's shape; `context` adds to or overrides the required fields
+    (the money cap is $500 unless given)."""
     attrs = {"verified": verified, "assurance": "demo_code" if verified else "none", "copy": copy}
     if person_id is not None:
         attrs["person_id"] = person_id
@@ -180,7 +185,7 @@ def request(tool: str, *, principal: str = "Visitor", verified: bool = False, pe
     principal_uid = {"type": principal, "id": "session-1"}
     resource_uid = {"type": resource_type or TOOL_TABLE[tool][1], "id": "record-1"}
     return {"principal": principal_uid, "action": tool, "resource": resource_uid,
-            "context": {"record_owner_match": False, "local_dow": 4, "local_minute": 600, **context},
+            "context": cedar_context(**{"record_owner_match": False, "local_dow": 4, "local_minute": 600, **context}),
             "entities": [{"uid": principal_uid, "attrs": attrs, "parents": []},
                          {"uid": resource_uid, "attrs": {"copy": resource_copy}, "parents": []}]}
 
@@ -267,19 +272,24 @@ def test_money_needs_an_amount_in_range():
         assert money(amount_cents=1_000_000)["outcome"] == "hold"     # in range, but over the auto cap
 
 
-def test_auto_money_is_capped_at_the_hard_cap():
+def test_auto_money_is_capped_at_the_desk_cap():
     engine = load(compiler.BASELINE, with_test_refund())
     cases = (request("native.payment_link", verified=True, person_id="p-dana"),
              request("test.refund", resource_type="Charge", verified=True, person_id="p-dana"),
              request("native.charge_mandate", principal="Agent", mandate_remaining_cents=1_000_000))
+    held_by_the_cap = {"outcome": "hold", "policy_ids": ["H.test_permit_all"], "pending_policy_ids": [], "errors": []}
     for case in cases:
-        def money(amount: int) -> dict:
-            return decide(engine, {**case, "context": {**case["context"], "amount_cents": amount}})
+        def money(amount: int, cap: int) -> dict:
+            return decide(engine, {**case, "context": {**case["context"], "amount_cents": amount,
+                                                       "auto_money_cap_cents": cap}})
 
-        assert money(AUTO_MONEY_HARD_CAP_CENTS)["outcome"] == "allow", case["action"]
-        held = money(AUTO_MONEY_HARD_CAP_CENTS + 1)
-        assert held == {"outcome": "hold", "policy_ids": ["H.test_permit_all"], "pending_policy_ids": [],
-                        "errors": []}, case["action"]
+        # the cap is the evaluated version's, from the context
+        assert money(50_000, 50_000)["outcome"] == "allow", case["action"]
+        assert money(50_001, 50_000) == held_by_the_cap, case["action"]
+        # unset is 0: nothing moves without the owner
+        assert money(1, 0) == held_by_the_cap, case["action"]
+        # and no context cap reaches past the platform ceiling
+        assert money(AUTO_MONEY_HARD_CAP_CENTS, 5_000_000)["outcome"] == "allow", case["action"]
 
 
 def test_invalid_recipient_is_refused(engine):
@@ -312,47 +322,61 @@ def without_annotations(statement: str) -> str:
 def test_invariant_files_state_the_baseline_properties():
     invariants_dir = compiler.CEDAR_DIR / "invariants"
     files = {kind: sorted(path.stem for path in (invariants_dir / kind).glob("*.cedar")) for kind in ("always", "auto")}
-    assert files == {"always": sorted(ALWAYS), "auto": ["money_cap"]}
-    assert {kind: sorted(texts) for kind, texts in compiler.INVARIANTS.items()} == files
+    assert files == {"always": sorted(ALWAYS), "auto": ["money_cap", "platform_money_cap"]}
+    rendered = compiler.invariants(TEST_CAP)
+    assert {kind: sorted(texts) for kind, texts in rendered.items()} == files
     for kind, names in files.items():
         for name in names:
-            assert compiler.INVARIANTS[kind][name] == (invariants_dir / kind / f"{name}.cedar").read_text()
+            text = (invariants_dir / kind / f"{name}.cedar").read_text()
+            assert rendered[kind][name] == text.replace(compiler.CAP_PLACEHOLDER, str(TEST_CAP))
+    # only the money cap's text holds the cap; every other file is proved as written
+    assert [name for kind, names in files.items() for name in names
+            if compiler.CAP_PLACEHOLDER in (invariants_dir / kind / f"{name}.cedar").read_text()] == ["money_cap"]
 
     # A proof spec set: everything is allowed but a violation, so a policy set implies it exactly
     # when it never allows a violation. Each always-invariant is word for word a baseline forbid.
     baseline = {re.search(r'@id\("([^"]+)"\)', s).group(1): without_annotations(s)
                 for s in statements(compiler.BASELINE)}
     for name, policy_id in ALWAYS.items():
-        permit, forbid = statements(compiler.INVARIANTS["always"][name])
+        permit, forbid = statements(rendered["always"][name])
         assert permit == PERMIT_EVERYTHING
         assert forbid == baseline[policy_id], name
 
-    # The auto-invariant: nothing auto-allowed moves more than the hard cap. It validates against
-    # the schema, and wherever it refuses, the baseline's auto evaluation never allows.
-    permit, forbid = statements(compiler.INVARIANTS["auto"]["money_cap"])
-    assert permit == PERMIT_EVERYTHING
-    invariant = load(f'@id("money_cap") {forbid};', with_test_refund())
+    # The auto-invariants: nothing auto-allowed moves more than the version's money cap, nor more
+    # than the platform ceiling. Each validates against the schema, and wherever it refuses, the
+    # baseline's auto evaluation at that cap never allows.
     real = load(compiler.BASELINE, with_test_refund())
-    for tool, resource_type in (("native.payment_link", "Quote"), ("test.refund", "Charge")):
-        for amount in (None, 0, 1, AUTO_MONEY_HARD_CAP_CENTS, AUTO_MONEY_HARD_CAP_CENTS + 1, 1_000_000):
-            case = request(tool, resource_type=resource_type, verified=True, person_id="p-dana")
-            if amount is not None:
-                case["context"]["amount_cents"] = amount
-            stated = decide(invariant, case)["outcome"]
-            assert stated == ("allow" if amount is not None and amount <= AUTO_MONEY_HARD_CAP_CENTS else "refuse")
-            if stated == "refuse":
-                assert decide(real, case)["outcome"] != "allow", (tool, amount)
+    for name, bound in (("money_cap", TEST_CAP), ("platform_money_cap", AUTO_MONEY_HARD_CAP_CENTS)):
+        permit, forbid = statements(rendered["auto"][name])
+        assert permit == PERMIT_EVERYTHING
+        invariant = load(f'@id("{name}") {forbid};', with_test_refund())
+        for tool, resource_type in (("native.payment_link", "Quote"), ("test.refund", "Charge")):
+            for amount in (None, 0, 1, TEST_CAP, TEST_CAP + 1, AUTO_MONEY_HARD_CAP_CENTS):
+                case = request(tool, resource_type=resource_type, verified=True, person_id="p-dana")
+                if amount is not None:
+                    case["context"]["amount_cents"] = amount
+                stated = decide(invariant, case)["outcome"]
+                assert stated == ("allow" if amount is not None and amount <= bound else "refuse"), (name, amount)
+                if stated == "refuse":
+                    assert decide(real, case)["outcome"] != "allow", (name, tool, amount)
+    # rendering never goes past the ceiling, and a text left holding a placeholder is refused
+    assert compiler.invariants(AUTO_MONEY_HARD_CAP_CENTS + 1) == compiler.invariants(AUTO_MONEY_HARD_CAP_CENTS)
+    for cap in (-1, True, 500.0):
+        with pytest.raises(ValueError):
+            compiler.invariants(cap)
 
-    # The invariants hash covers every file's bytes, the check list and the prover's version.
+    # The invariants hash covers every file's text as rendered at the cap, the check list and the
+    # prover's version, so another cap is another hash.
     checks = ["baseline_auto", "baseline_approvable"]
-    hashed = {f"{kind}/{name}.cedar": hashlib.sha256((invariants_dir / kind / f"{name}.cedar").read_bytes()).hexdigest()
+    hashed = {f"{kind}/{name}.cedar": hashlib.sha256(rendered[kind][name].encode()).hexdigest()
               for kind, names in files.items() for name in names}
     expected = {"files": hashed, "checks": sorted(checks), "prove_version": desk_kernel.version()}
-    assert compiler.invariants_sha256(checks) == compiler.invariants_sha256(list(reversed(checks))) \
+    assert compiler.invariants_sha256(checks, TEST_CAP) == compiler.invariants_sha256(list(reversed(checks)), TEST_CAP) \
         == hashlib.sha256(desk_kernel.canonical_json(json.dumps(expected)).encode()).hexdigest()
-    assert compiler.invariants_sha256(checks + ["never_errors"]) != compiler.invariants_sha256(checks)
+    assert compiler.invariants_sha256(checks + ["never_errors"], TEST_CAP) != compiler.invariants_sha256(checks, TEST_CAP)
+    assert compiler.invariants_sha256(checks, 30_000) != compiler.invariants_sha256(checks, TEST_CAP)
     with pytest.raises(ValueError):
-        compiler.invariants_sha256(["never_errors", "never_errors"])
+        compiler.invariants_sha256(["never_errors", "never_errors"], TEST_CAP)
 
 
 # The plan's initial thresholds: effect -> (min_within_charter_bp, max_manipulation_bp).

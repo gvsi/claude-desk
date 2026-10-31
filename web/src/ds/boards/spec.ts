@@ -301,7 +301,7 @@ export function expectConnectorSections(root: HTMLElement): void {
     expectComputed(tile, tile.classList.contains('cd-connector-icon--brand') ? CONNECTORS_SPEC.brandTile : CONNECTORS_SPEC.iconTile);
     for (const row of section.querySelectorAll<HTMLElement>('.cd-connector-section__tool')) {
       expectComputed(row, CONNECTORS_SPEC.toolRow);
-      expectComputed(one(row, '.cd-connector-section__tool-link'), CONNECTORS_SPEC.toolName);
+      expectComputed(one(row, '.cd-connector-section__tool-name'), CONNECTORS_SPEC.toolName);
     }
   }
 }

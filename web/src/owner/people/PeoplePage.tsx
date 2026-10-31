@@ -11,6 +11,7 @@ import type { PeopleOut } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, EmptyState, LeadRow, LoadingLine, Notice, PageHeader, PersonRow, RecordedHistoryLink, SectionHeader } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -67,6 +68,7 @@ export function ReadFailed({ failure }: { failure: ReadFailure | null }) {
 
 export function PeoplePage() {
   const { business, desk } = useOwnerDesk();
+  useDocumentTitle(inApp(PEOPLE_LABEL));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const people = usePeople(deskId);

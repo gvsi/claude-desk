@@ -33,12 +33,16 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
-import { pageActions } from './SendAgentPanel.tsx';
+import { agentStartLostLine } from './copy.ts';
+import { KEY_RETRY_WINDOW_MS, pageActions } from './SendAgentPanel.tsx';
 
 const PAGE = `/d/${RIVERA.slug}/agents`;
 
-/** The requests a route got, by key. */
-const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+/** The requests a route got, by key, from the `from`th request on. */
+const requests = (key: string, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
+
+/** How many runs the built-in agent has made in the mock: each opens an agent session. */
+const agentRuns = () => [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').length;
 
 /** The routes the page called, in order. */
 const calls = () => mockStore.requests.map((r) => r.key);
@@ -311,6 +315,31 @@ describe('agents page', () => {
     await expectScreenBasics(gone.screen.container, { owner: false });
   });
 
+  it('agents_page_names_the_tab', async () => {
+    // The tab carries the page's title, in the page's language; before the Desk shows, and for a
+    // Desk that isn't there, the app's own name.
+    document.title = 'Claude Desk';
+    const en = await renderRoute(PAGE);
+    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing for AI agents');
+
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing para agentes de IA');
+
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    const down = await renderRoute(PAGE);
+    await expect.element(down.screen.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+    await down.screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing for AI agents');
+
+    const gone = await renderRoute('/d/no-such-desk/agents');
+    await expect.element(gone.screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('agents_document_language_follows_the_page', async () => {
     // The document's language, as index.html sets it (the test browser's page has its own).
     document.documentElement.lang = 'en';
@@ -327,7 +356,7 @@ describe('agents page', () => {
   it('agent_page_opens_a_session_first', async () => {
     // The mock, like the API, refuses to send an agent for a browser with no chat.
     mockStore.reset('rivera');
-    const refused = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'book_visit' } });
+    const refused = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
     expect(refused).toMatchObject({ status: 401 });
 
     // A fresh render: the page opens a session before it sends the agent, and the agent goes once.
@@ -347,6 +376,10 @@ describe('agents page', () => {
     await expect.element(next.screen.getByText('The agent finished.', { exact: true })).toBeVisible();
     expect(requests('openSession')).toHaveLength(opened + 2);
     expect(requests('sendAgent').length).toBe(3);
+    // The send the 401 refused goes once more in the new session with the same key: one click.
+    const [firstKey, resentKey] = requests('sendAgent').slice(1).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(firstKey).toEqual(expect.any(String));
+    expect(resentKey).toBe(firstKey);
 
     // When it ends again right away, the chat has ended: the page says so and offers a new one.
     mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
@@ -900,6 +933,91 @@ describe('agents page', () => {
     expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
+  it('try_again_by_keyboard_keeps_the_place', async () => {
+    // The page can't be read, and the read "Try again" starts is held until the test lets it fail too.
+    let land: (value?: unknown) => void = () => {};
+    const landed = new Promise((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: landed });
+    const { screen } = await renderRoute(PAGE);
+    const tryAgain = screen.getByRole('button', { name: 'Try again' });
+    await expect.element(tryAgain).toBeVisible();
+    // Opening the page moves no focus.
+    expect(document.activeElement).toBe(document.body);
+
+    // Enter on "Try again": the opening line takes the notice's place while the page is read again,
+    // and the button goes with the notice.
+    tryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+
+    // The read fails again: focus moves to the new "Try again" rather than falling to the page, so
+    // the next Enter tries once more. The notice is still an alert, read out at once.
+    land();
+    await expect.element(tryAgain).toHaveFocus();
+    expect(tryAgain.element().matches(':focus-visible')).toBe(true);
+    await expect.element(screen.getByRole('alert').getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+
+    // Enter on it, and the page is read: it draws in the notice's place, and focus is at its start.
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // Focus put somewhere else while the page is read again stays there when the read fails. Nothing
+    // on the opening line takes focus, so here it is a control the test puts outside the page.
+    let fail: (value?: unknown) => void = () => {};
+    const failed = new Promise((resolve) => {
+      fail = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: failed });
+    const moved = await renderRoute(PAGE);
+    const movedTryAgain = moved.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(movedTryAgain).toBeVisible();
+    movedTryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(moved.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    onTestFinished(() => elsewhere.remove());
+    elsewhere.focus();
+    fail();
+    await expect.element(movedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+
+    // "Try again" pressed without focus on it, as a script's click or a browser that doesn't focus
+    // what is clicked does: focus stays on the page when the read fails, as it was.
+    let drop: (value?: unknown) => void = () => {};
+    const dropped = new Promise((resolve) => {
+      drop = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: dropped });
+    const unfocused = await renderRoute(PAGE);
+    const unfocusedTryAgain = unfocused.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+    (unfocusedTryAgain.element() as HTMLButtonElement).click();
+    await expect.element(unfocused.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    drop();
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // "Try again" clicked moves focus the same way, with no focus ring for the pointer to see.
+    mockStore.inject({ route: 'agentCard', status: 503, times: 2 });
+    const clicked = await renderRoute(PAGE);
+    const clickedTryAgain = clicked.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(clickedTryAgain).toBeVisible();
+    const read = requests('agentCard').length;
+    await clickedTryAgain.click();
+    await until(() => expect(requests('agentCard')).toHaveLength(read + 1));
+    await expect.element(clickedTryAgain).toHaveFocus();
+    expect(clickedTryAgain.element().matches(':focus-visible')).toBe(false);
+  });
+
   it('public_page_links_to_agents', async () => {
     // The public page's about column, under "For AI agents": both links lead to the agents page,
     // "Send an agent" to its panel. The about blocks stay the charter's.
@@ -1073,25 +1191,230 @@ describe('agents page', () => {
     expect(requests('sendAgent')).toHaveLength(2);
   });
 
-  it('lost_start_offers_no_second_agent', async () => {
-    // The start's answer is lost: the agent may be on its way, and no read can find its run, so the
-    // page says it couldn't confirm and offers no task to send it twice. A reload is the retry.
-    for (const status of ['network', 503] as const) {
-      mockStore.inject({ route: 'sendAgent', status, afterCommit: true });
+  it('lost_start_is_sent_again_with_its_key', async () => {
+    // The start's answer is lost (no answer or a 5xx), whether or not the API started the agent: the
+    // panel says so and offers no task, only "Try again", which sends the same task with the same
+    // key. The API answers the run the first send started, or starts it now: the agent runs once.
+    const lost = [
+      { status: 'network' as const, afterCommit: true },
+      { status: 503 as const, afterCommit: true },
+      { status: 'network' as const },
+    ];
+    for (const fault of lost) {
+      mockStore.inject({ route: 'sendAgent', ...fault });
       const { screen } = await renderRoute(PAGE);
-      await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
       const panel = screen.getByRole('region', { name: 'Send an agent' });
-      await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+      await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+      const mark = mockStore.requests.length;
+      const runs = agentRuns();
+      await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+      await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
       expect(chipsIn(screen)).toEqual([]);
-      expect(requests('agentRun')).toHaveLength(0);
+      expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(0);
+      expect(requests('agentRun', mark)).toHaveLength(0);
       await expectScreenBasics(screen.container, { owner: false });
-      // "Reload the page" reloads it: the retry, on a page that reads where things stand.
-      const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
-      await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
-      expect(reload).toHaveBeenCalledTimes(1);
-      reload.mockRestore();
+
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
+      // "Try again" goes with its line, so focus moves to the panel's title, as after a task.
+      await expect.element(panel.getByRole('heading', { level: 2, name: 'Send an agent' })).toHaveFocus();
+      const sent = requests('sendAgent', mark).map((r) => r.body as { task: string; idempotency_key?: string });
+      expect(sent, JSON.stringify(fault)).toHaveLength(2);
+      expect(sent[0]?.task).toBe('book_visit');
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[0]?.idempotency_key).toMatch(/^[^\x00-\x1f\x7f]{1,128}$/);
+      expect(agentRuns(), JSON.stringify(fault)).toBe(runs + 1);
+      expect(new Set(requests('agentRun', mark).map((r) => r.path)).size).toBe(1);
     }
+  });
+
+  it('lost_start_whose_key_moved_session_offers_a_reload', async () => {
+    // A lost start, then "Try again" finds the session gone: a new one opens and the same key goes
+    // again, but the API answers 409 `conflict`, since the key belongs to the old session, where the
+    // agent may be running. This page can't find that run, so no same-key retry is safe any more: it
+    // falls back to a reload, with no task to send it twice. (A first send's 409 stays "not sent".)
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    const runs = agentRuns();
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    // The chat's session ends: the mock answers the send 401, the page opens a new session, and the
+    // mock, which keeps the key for the old one, answers the same key 409 `conflict`.
+    const opened = requests('openSession').length;
+    mockStore.dropVisitorCookie(RIVERA.slug);
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+    await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(panel.getByText(UNREACHABLE_COPY.en).elements()).toHaveLength(0);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('openSession')).toHaveLength(opened + 1);
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+    expect(agentRuns()).toBe(runs + 1);
+    await expectScreenBasics(screen.container, { owner: false });
+    // "Reload the page" reloads it: the only retry left on this page view.
+    const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
+    await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
+    expect(reload).toHaveBeenCalledTimes(1);
+    reload.mockRestore();
+  });
+
+  it('lost_start_stays_unresolved_when_its_session_cannot_reopen', async () => {
+    // "Try again" after a lost start finds the session gone (the mock ends it, so the send is
+    // answered 401), and opening a new one fails (a 429, or no answer). The send itself never
+    // answered, so the start is still unresolved: the lost line and "Try again" stay, with no task to
+    // send a second agent and no busy line. The next "Try again" opens a new session, where the key,
+    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once.
+    for (const failure of [{ status: 429 as const }, { status: 'network' as const }]) {
+      mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+      const { screen } = await renderRoute(PAGE);
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      const what = JSON.stringify(failure);
+      await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+      const mark = mockStore.requests.length;
+      const runs = agentRuns();
+      await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+      await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+      mockStore.dropVisitorCookie(RIVERA.slug);
+      mockStore.inject({ route: 'openSession', ...failure });
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(2);
+      await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+      await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
+      expect(chipsIn(screen), what).toEqual([]);
+      expect(panel.getByText('The demo agent is busy. Try again in a minute.').elements(), what).toHaveLength(0);
+      expect(panel.getByText(UNREACHABLE_COPY.en).elements(), what).toHaveLength(0);
+
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+      await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+      expect(chipsIn(screen), what).toEqual([]);
+      expect(requests('openSession', mark), what).toHaveLength(3);
+      const keys = requests('sendAgent', mark).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+      expect(keys, what).toHaveLength(3);
+      expect(new Set(keys).size, what).toBe(1);
+      expect(agentRuns(), what).toBe(runs + 1);
+    }
+  });
+
+  it('lost_start_whose_chat_ends_offers_a_reload', async () => {
+    // "Try again" meets a 401, a new session opens, and the send meets a 401 again: the chat has
+    // ended, but the start is still unresolved, so the page offers the reload, never a new chat
+    // with fresh tasks.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    const runs = agentRuns();
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+    await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+    expect(panel.getByRole('button', { name: NEW_CHAT_LABEL.en }).elements()).toHaveLength(0);
+    expect(panel.getByText(CHAT_ENDED_COPY.en).elements()).toHaveLength(0);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('sendAgent')).toHaveLength(3);
+    expect(agentRuns()).toBe(runs + 1);
+  });
+
+  it('kernel_conflict_on_a_retry_is_not_a_moved_session', async () => {
+    // A 409 from the kernel (`{error: "kernel"}`) refused the send itself, which freed its key: as
+    // on a first send, it wasn't sent, and the tasks come back. Only the API's own key conflict
+    // means the key moved session.
+    mockStore.inject({ route: 'sendAgent', status: 'network' });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(chipsIn(screen)).toEqual(TASKS);
+    expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(0);
+  });
+
+  it('lost_start_past_its_keys_retry_window_offers_a_reload', async () => {
+    // The API keeps a send's key for its run's hour, so "Try again" is offered only while the key is
+    // younger than 55 minutes; past that, a same-key retry could start a second agent, and the page
+    // falls back to a reload. The page's clock moves only when the test moves it.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    useRunClock();
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await until(() => expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1));
+    expect(KEY_RETRY_WINDOW_MS).toBe(55 * 60_000);
+    vi.advanceTimersByTime(KEY_RETRY_WINDOW_MS - 1);
+    await settle();
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1);
+    // The visitor is on "Try again" when the window closes: the reload takes its place in the same
+    // notice, and the visitor's focus stays there, on "Reload the page", rather than falling to the page.
+    (panel.getByRole('button', { name: 'Try again' }).element() as HTMLElement).focus();
+    vi.advanceTimersByTime(1);
+    await until(() => expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(document.activeElement).toBe(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).element());
+    expect(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true }).elements()).toHaveLength(1);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('sendAgent')).toHaveLength(1);
+
+    // A tab whose timers were held back (a hidden tab's are) checks the key's age on the press as
+    // well: past the window, "Try again" sends nothing and offers the reload, which takes the same
+    // button, so the focus stays on it as on the timer's path.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const next = (await renderRoute(PAGE)).screen.getByRole('region', { name: 'Send an agent' });
+    await until(() => expect(next.getByRole('button', { name: 'Book the earliest visit' }).elements()).toHaveLength(1));
+    await next.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await until(() => expect(next.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1));
+    vi.setSystemTime(Date.now() + KEY_RETRY_WINDOW_MS);
+    await next.getByRole('button', { name: 'Try again' }).click();
+    await until(() => expect(next.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
+    expect(document.activeElement).toBe(next.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).element());
     expect(requests('sendAgent')).toHaveLength(2);
+  });
+
+  it('each_task_click_sends_a_new_key', async () => {
+    // A key belongs to one click: a task pressed again, or another task, is a new send with a new key.
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const runs = agentRuns();
+    for (const task of ['Book the earliest visit', 'Book the earliest visit', 'Try to pay more than its limit']) {
+      await panel.getByRole('button', { name: task }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    }
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(3);
+    expect(agentRuns()).toBe(runs + 3);
+  });
+
+  it('conflicting_key_is_not_sent', async () => {
+    // The API refuses the key (409 `conflict`: another task, session or Desk used it): nothing was
+    // sent, so the panel says so, keeps its lead and offers the tasks again, and the next click
+    // sends a new key.
+    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'conflict' } });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(chipsIn(screen)).toEqual(TASKS);
+    expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
+    expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
+    expect(requests('agentRun')).toHaveLength(0);
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+    await expectScreenBasics(screen.container, { owner: false });
   });
 
   it('spent_demo_budget_sends_nothing', async () => {
@@ -1102,7 +1425,7 @@ describe('agents page', () => {
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(panel.getByText(DEMO_BUDGET_COPY.en, { exact: true })).toBeVisible();
-    expect(panel.getByText(AGENT_START_LOST_COPY.en).elements()).toHaveLength(0);
+    expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
     expect(chipsIn(screen)).toEqual(TASKS);
     expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
     expect(requests('agentRun')).toHaveLength(0);

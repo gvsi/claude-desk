@@ -26,6 +26,7 @@
 | `children` | `ReactNode` | Required; in `.cd-type-pill`. |
 | `selected` | `boolean` | Left out for a suggestion. |
 | `asRadio` | `boolean` | `role="radio"` with `aria-checked`, one tab stop per group and the arrow keys. |
+| `disabled` | `boolean` | Off: dimmed to 40%, as a disabled `Button` is, with no hover or press, out of the tab order, and a press does nothing. |
 | `onClick` | `(event) => void` | Required. |
 
 28 px tall with a 1 px `line-control` outline, `line-control-hover` and a `fill-hover` fill on hover. The outline is decorative: the chip's words identify it.

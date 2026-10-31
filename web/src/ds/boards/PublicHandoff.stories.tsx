@@ -14,6 +14,8 @@ import { SPEC, expectConversationType, expectReceiptsUnderMessages, expectTabOrd
 
 const OWNER = rivera.business.ownerName;
 const ASK = `I'd like to talk to ${OWNER}.`;
+/** The chat head's line while Maria is in the chat, in place of the disclosure (take-over option A). */
+const OWNER_IN_CHAT = `${OWNER} is in this chat. Claude, an AI, is paused until ${OWNER} hands it back.`;
 
 /** The handoff: the kernel passed Dana's ask to Maria, and the visitor gets the handoff card. */
 const handoff = rivera.events.heldTurn.find((event: SseEvent): event is EvMessage => event.type === 'message');
@@ -24,6 +26,7 @@ if (!handoff) throw new Error('the Rivera fixture has no handoff reply');
 const STATES = {
   joins: {
     label: 'If Maria can join',
+    ownerInChat: true,
     turns: [
       { kind: 'visitor', text: ASK },
       { kind: 'event', event: handoff },
@@ -33,6 +36,7 @@ const STATES = {
   },
   busy: {
     label: 'If Maria is busy',
+    ownerInChat: false,
     turns: [
       { kind: 'visitor', text: ASK },
       { kind: 'event', event: handoff },
@@ -45,10 +49,13 @@ const STATES = {
       },
     ],
   },
-} satisfies Record<string, { label: string; turns: TranscriptTurn[] }>;
+} satisfies Record<string, { label: string; ownerInChat: boolean; turns: TranscriptTurn[] }>;
 
-/** One state of Dana's page: the public page, embedded so the two states share one document. */
-function State({ label, turns }: { label: string; turns: readonly TranscriptTurn[] }) {
+/**
+ * One state of Dana's page: the public page, embedded so the two states share one document, with
+ * Maria in the chat or not.
+ */
+function State({ label, ownerInChat, turns }: { label: string; ownerInChat: boolean; turns: readonly TranscriptTurn[] }) {
   return (
     <section className="board-handoff__state" aria-label={label}>
       <PublicShell
@@ -56,6 +63,7 @@ function State({ label, turns }: { label: string; turns: readonly TranscriptTurn
         ownerName={OWNER}
         language="en"
         openStatus={OPEN_NOW}
+        ownerInChat={ownerInChat}
         onAskForOwner={fn()}
         footer={false}
         composer={
@@ -96,6 +104,7 @@ const meta = {
       'One document can’t hold two pages’ landmarks, so each state is the public page embedded (PublicShell footer={false}), each as tall as the window, with its concept footer under its composer, as the page draws it.',
       'The board’s first exchange about the water heater is left out; each state starts with Dana asking for Maria, and the handoff card is the kernel’s, with its receipt. Maria’s message is the fixture’s, where the board has her greet Dana first.',
       'The board labels each state in its header; here each is a region named for its state, and the header keeps the kernel’s open status.',
+      'The chat head follows take-over option A (N-R2-TakeOver-A-1512-EN), signed after this board: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -108,8 +117,11 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     for (const state of Object.values(STATES)) {
       const page = canvas.getByRole('region', { name: state.label });
-      // The disclosure, the brand header's height, and the visitor's read-only receipts under each message.
-      await expect(page).toHaveTextContent('Claude, an AI answering for Rivera Plumbing');
+      // The disclosure (while Maria is in the chat, the line that says so, and that Claude, an AI, is
+      // paused), the brand header's height, and the visitor's read-only receipts under each message.
+      await expect(one(page, '.cd-public-shell__disclosure')).toHaveTextContent(
+        state === STATES.joins ? OWNER_IN_CHAT : 'Claude, an AI answering for Rivera Plumbing',
+      );
       // Each state is the board's 640 px and the window's height: the header 76 px high with 16 px
       // gutters and the open status at the right, then the chat, the composer and the footer at its foot.
       await expect(page.getBoundingClientRect().width).toBe(640);
@@ -141,9 +153,10 @@ export const Board: Story = {
     await expect(busy).toHaveTextContent(rivera.blocks.callback_confirmed.en.title ?? '');
     await expect(canvasElement.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(2);
 
-    // focus_order_is_logical: in each state, Ask for Maria Rivera, then the composer.
+    // focus_order_is_logical: the composer where Maria is in the chat, which has no Ask for her; then
+    // where she is busy, Ask for Maria Rivera, then the composer.
+    await expect(within(joins).queryByRole('button', { name: 'Ask for Maria Rivera' })).toBeNull();
     await expectTabOrder(userEvent, [
-      within(joins).getByRole('button', { name: 'Ask for Maria Rivera' }),
       within(joins).getByRole('textbox', { name: 'Message Rivera Plumbing' }),
       within(busy).getByRole('button', { name: 'Ask for Maria Rivera' }),
       within(busy).getByRole('textbox', { name: 'Message Rivera Plumbing' }),

@@ -74,3 +74,25 @@ export const InertSuggestions: Story = {
     await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
   },
 };
+
+/** Off while what a pick would change can't change, as setup's examples are while a start is being settled. */
+export const Disabled: Story = {
+  args: { label: 'Examples', suggestions: ['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer'], disabled: true },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws the chips off. Setup’s start step turns its examples off while a start is being settled; they stay in place, dimmed as a disabled button is.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const chips = canvas.getAllByRole('button');
+    await expect(chips.map((chip) => chip.textContent)).toEqual(['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer']);
+    for (const chip of chips) await expect(chip).toBeDisabled();
+    // Dimmed well down, in place at their 28 px, and a hover changes nothing.
+    expectComputed(chips[0] as HTMLElement, { opacity: '0.4', cursor: 'default', height: '28px' });
+    await userEvent.hover(chips[0] as HTMLElement);
+    expectComputed(chips[0] as HTMLElement, { backgroundColor: 'rgba(0, 0, 0, 0)' });
+    // A press does nothing.
+    await userEvent.click(chips[0] as HTMLElement);
+    await expect(args.onPick).not.toHaveBeenCalled();
+  },
+};

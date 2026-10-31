@@ -22,6 +22,7 @@ import type {
   PolicyVersionOut,
   RulesDraft,
   RulesView,
+  SetupState,
   Today,
   ToolConfirmedOut,
   VisitorSession,
@@ -33,6 +34,7 @@ import { chatReducer, initialChatState, type ChatState } from '../public/chatRed
 import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
+import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
 const slug = RIVERA.slug;
@@ -544,7 +546,7 @@ describe('the scripted Desk', () => {
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre, 14:00', ['120 minutos', 'Reserva B-77']],
+          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
@@ -705,7 +707,7 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
-    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit' } });
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
     expect(sent.status).toBe(202);
     const runId = (sent.body as { run_id: string }).run_id;
     await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
@@ -777,7 +779,7 @@ describe('the scripted Desk', () => {
     // The built-in agent's run goes by Answering as it stands at each of its requests: switched off
     // after the agent's quote and before its payment, the payment gets the handoff and nothing is charged.
     await openChat();
-    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit' } });
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit', idempotency_key: 'key-1' } });
     expect(sent.status).toBe(202);
     const runId = (sent.body as { run_id: string }).run_id;
     const read = async () => (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
@@ -1244,6 +1246,53 @@ describe('rules and tools', () => {
     expect((await rules()).active.version).toBe(7);
   });
 
+  it('money_cap_draft_lowers_each_money_rule_above_it_and_says_the_new_limit', async () => {
+    // As the API's money-limit route drafts it (desk.api.rules.draft_money_cap through
+    // desk.money_cap.lower_to_cap, in English): Rivera's limit is $500, with an automatic payment
+    // link up to $300 (`rv-link`) and visiting agents' deposits up to $20 (`rv-mandate`).
+    const draftCap = (body: unknown) => call('draftMoneyCap', { params: { desk_id: deskId }, body });
+    const link = rivera.ruleCards['rv-link'];
+    const mandate = rivera.ruleCards['rv-mandate'];
+
+    // Lowered to $100, the $300 link comes down to it, its reason replaced whole by the sentence
+    // for the new limit; the $20 deposit already fits and keeps its own.
+    const lowered = (await draftCap({ auto_money_cap_cents: 10_000 })).body as RulesDraft;
+    expect(lowered.auto_money_cap_cents).toBe(10_000);
+    expect(lowered.diff).toEqual({ added: [], removed: [], changed: [[link, { ...link, max_amount_cents: 10_000, reason: 'Up to $100, your payment limit.' }]] });
+    expect(lowered.cards.find((card) => card.card_id === mandate.card_id)).toEqual(mandate);
+
+    // At $0 each one asks instead, and says so, and the summary lists each reason once, as the
+    // API's `rules_draft` does: the two lowered cards are one line.
+    const zero = (await draftCap({ auto_money_cap_cents: 0 })).body as RulesDraft;
+    const asks = { mode: 'ask', max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, reason: 'Your payment limit is $0.' } as const;
+    expect(zero.diff?.changed).toEqual([
+      [link, { ...link, ...asks }],
+      [mandate, { ...mandate, ...asks }],
+    ]);
+    expect(zero.summary?.asks_you).toEqual(['Your payment limit is $0.', rivera.ruleCards['rv-refund'].reason]);
+
+    // Raised to $800, no rule changes.
+    const raised = (await draftCap({ auto_money_cap_cents: 80_000 })).body as RulesDraft;
+    expect(raised).toMatchObject({ auto_money_cap_cents: 80_000, diff: { added: [], removed: [], changed: [] } });
+
+    // The API's refusals, with its test's bodies: above the $10,000 ceiling, anything but a whole
+    // number of cents from 0 (its 500.0 parses as 500 here, so 500.5 stands in for it), or a field
+    // the body doesn't have, which its model forbids.
+    const refused: [unknown, string][] = [
+      [{ auto_money_cap_cents: 1_000_001 }, 'above_platform_ceiling'],
+      [{ auto_money_cap_cents: -1 }, 'invalid'],
+      [{ auto_money_cap_cents: 500.5 }, 'invalid'],
+      [{ auto_money_cap_cents: '500' }, 'invalid'],
+      [{ auto_money_cap_cents: true }, 'invalid'],
+      [{}, 'invalid'],
+      [{ auto_money_cap_cents: 500, cards: [] }, 'invalid'],
+    ];
+    for (const [body, error] of refused) expect(await draftCap(body), JSON.stringify(body)).toEqual({ status: 422, body: { error } });
+    expect((await draftCap({ auto_money_cap_cents: 1_000_000 })).status).toBe(200);
+    // Nothing applies until the owner confirms a draft.
+    expect((await rules()).active).toMatchObject({ version: 7, auto_money_cap_cents: 50_000 });
+  });
+
   it('confirm_tool_takes_the_batch_body', async () => {
     const stripe = ['payments.list_charges', 'payments.create_refund'];
     const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));
@@ -1649,11 +1698,12 @@ describe("Today's windows", () => {
 
     // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
     // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
-    // whispered and Claude booked her at the quoted list price.
+    // whispered and Claude booked her at the quoted list price. The stopped draft is no request the
+    // kernel refused, so the last 7 days count none stopped; the briefing still lists it as blocked.
     mockStore.reset('rivera');
     const seeded = await read();
-    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 1 });
-    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 1 });
+    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
+    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
     expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, blocked: 1, total: 3 });
     const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
     expect(seeded.briefing.newest.blocked).toMatchObject({
@@ -1727,6 +1777,27 @@ describe("Today's windows", () => {
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 
+  it('week_counts_refused_requests_only', async () => {
+    // Rivera's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
+    // built-in agent tries to charge over its signed limit, which the kernel refuses. The last 7 days
+    // count the refusal alone, as the API does; the briefing and Safety keep both.
+    mockStore.reset('rivera');
+    await openChat();
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'key-1' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+    expect(((await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun).state).toBe('done');
+
+    const today = await read();
+    expect(today.this_week.stopped).toBe(1);
+    expect(today.this_week.days.map((d) => d.stopped)).toEqual([0, 0, 0, 0, 0, 0, 1]);
+    expect(today.briefing.blocked).toBe(2);
+    expect((await list()).items.filter((item) => item.kind === 'blocked')).toHaveLength(2);
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string }[];
+    expect(attempts.map((a) => a.kind).sort()).toEqual(['refused', 'reply_blocked']);
+  });
+
   it('windows_follow_the_business_clock', async () => {
     mockStore.reset('rivera_quiet');
     const desk = mockStore.world.desks[0];
@@ -1751,5 +1822,120 @@ describe("Today's windows", () => {
     // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
     expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
     expect(today.briefing.total).toBe(1);
+  });
+});
+
+describe('idempotency keys', () => {
+  it('start_without_a_key_is_refused', async () => {
+    // As the API does (plan 02b): send_agent and setup's start each require the client's key, so a
+    // body with none (missing or null) is 422 `invalid`, as a malformed key is, and starts nothing.
+    const agentBodies = [{ task: 'book_visit' }, { task: 'book_visit', idempotency_key: null }];
+    const setup = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const setupBodies = [setup, { ...setup, idempotency_key: null }];
+
+    // The session comes first, as the API's session dependencies run before it reads the body: with
+    // no chat, or signed out, a keyless start is 401, not 422.
+    mockStore.reset('rivera', { signedIn: false });
+    for (const body of agentBodies) {
+      expect(await call('sendAgent', { params: { slug }, body })).toEqual({ status: 401, body: { error: 'no_session' } });
+    }
+    for (const body of setupBodies) {
+      expect(await call('startSetup', { body })).toEqual({ status: 401, body: { error: 'no_owner_session' } });
+    }
+
+    mockStore.reset('rivera');
+    await openChat();
+    const sessions = mockStore.world.sessions.size;
+    const desks = mockStore.world.desks.length;
+    const refused = { status: 422, body: { error: 'invalid' } };
+    for (const body of agentBodies) expect(await call('sendAgent', { params: { slug }, body })).toEqual(refused);
+    for (const body of setupBodies) expect(await call('startSetup', { body })).toEqual(refused);
+    expect(mockStore.world.sessions.size).toBe(sessions);
+    expect(mockStore.world.desks.length).toBe(desks);
+  });
+
+  it('send_agent_repeat_answers_the_same_run', async () => {
+    // As the API does (plan 02b): a repeat with the same key, task, session and Desk answers the run the
+    // first started and starts nothing; the same key with another task is 409 `conflict`.
+    await openChat();
+    const send = (task: string, key: unknown) => call('sendAgent', { params: { slug }, body: { task, idempotency_key: key } });
+    const first = await send('book_visit', 'key-1');
+    expect(first.status).toBe(202);
+    const sessions = mockStore.world.sessions.size;
+    expect(await send('book_visit', 'key-1')).toEqual(first);
+    expect(mockStore.world.sessions.size).toBe(sessions);
+    expect(await send('quote_and_deposit', 'key-1')).toEqual({ status: 409, body: { error: 'conflict' } });
+    // A new key starts a new run.
+    const second = await send('book_visit', 'key-2');
+    expect(second.status).toBe(202);
+    expect(second.body).not.toEqual(first.body);
+    // A key the API refuses (empty, over 128 characters, a control character, not a string) is 422,
+    // and claims nothing.
+    for (const bad of ['', 'k'.repeat(129), 'a\nb', 7]) expect((await send('book_visit', bad)).status).toBe(422);
+    expect((await send('book_visit', 'k'.repeat(128))).status).toBe(202);
+  });
+
+  it('send_agent_key_is_forgotten_after_its_hour', async () => {
+    // As the API does, a send's key is kept for its run's hour and then forgotten: a repeat within
+    // the hour answers the same run, and one after it starts a new run.
+    await openChat();
+    const send = () => call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
+    const first = await send();
+    vi.advanceTimersByTime(60 * 60_000 - 1);
+    expect(await send()).toEqual(first);
+    vi.advanceTimersByTime(1);
+    const later = await send();
+    expect(later.status).toBe(202);
+    expect(later.body).not.toEqual(first.body);
+  });
+
+  it('setup_start_repeat_answers_the_same_interview', async () => {
+    // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
+    // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
+    const body = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const start = (key: unknown, description = body.description) => call('startSetup', { body: { ...body, description, idempotency_key: key } });
+    const first = await start('key-1');
+    expect(first.status).toBe(201);
+    const desks = mockStore.world.desks.length;
+    expect(await start('key-1')).toEqual(first);
+    expect(await start('key-1', 'Chen Dental. I fix teeth.')).toEqual({ status: 409, body: { error: 'conflict' } });
+    expect(mockStore.world.desks.length).toBe(desks);
+    // A key the API refuses is 422; a new key makes a new interview each time.
+    for (const bad of ['', 'k'.repeat(129), 'a\u0000b', 7]) expect((await start(bad)).status).toBe(422);
+    expect(mockStore.world.desks.length).toBe(desks);
+    const ids = [await start('key-2'), await start('key-3'), await start('key-4')].map((r) => (r.body as SetupState).interview_id);
+    expect(new Set([...ids, (first.body as SetupState).interview_id]).size).toBe(4);
+  });
+
+  it('held_setup_start_answers_in_progress_until_it_ends', async () => {
+    // A start that runs long: its own answer is lost (a 504 from the proxy in front), and a repeat
+    // with its key meanwhile is 409 `in_progress` with `retry_after` 2 s. Once it has made the Desk,
+    // a repeat answers its interview, and only one Desk was made.
+    const start = (key: string) => call('startSetup', { body: { description: 'Rivera Plumbing. I fix leaks.', timezone: 'UTC', idempotency_key: key } });
+    const desks = mockStore.world.desks.length;
+    let end = holdNextStart(mockStore.world);
+    expect((await start('key-1')).status).toBe(504);
+    expect(await start('key-1')).toEqual({ status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    end('made');
+    const made = await start('key-1');
+    expect(made.status).toBe(201);
+    expect(await start('key-1')).toEqual(made);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
+
+    // One that failed before its Desk was asked for frees its key: the same request starts again.
+    end = holdNextStart(mockStore.world);
+    expect((await start('key-2')).status).toBe(504);
+    end('freed');
+    expect((await start('key-2')).status).toBe(201);
+    expect(mockStore.world.desks.length).toBe(desks + 2);
+
+    // One whose Desk may or may not exist spends its key for good: 409 `key_spent`, and only a new
+    // key starts again.
+    end = holdNextStart(mockStore.world);
+    expect((await start('key-3')).status).toBe(504);
+    end('spent');
+    expect(await start('key-3')).toEqual({ status: 409, body: { error: 'key_spent' } });
+    expect(mockStore.world.desks.length).toBe(desks + 2);
+    expect((await start('key-4')).status).toBe(201);
   });
 });

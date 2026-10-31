@@ -358,9 +358,11 @@
   scroll-padding-bottom: var(--cd-public-composer-height, 0);
 }
 
-/* The chat's head and the composer are always in view, so focus in them (Ask for the owner, the
-   text box) scrolls nothing: their parts reach back over the padding that keeps the rest from
-   under them. */
+/* The chat's head and the composer are always in view, and their parts reach back over the padding
+   that keeps the rest from under them, so that padding never scrolls them into place: focus on Ask
+   for the owner scrolls nothing. Focus coming into the composer's text box, by Tab or by script, still
+   scrolls a short shell that is back in the chat in Chromium (122 px toward the end at 568 x 320,
+   mid-chat), so the shell moves focus there itself only with preventScroll. */
 .cd-public-shell--short .cd-public-shell__chat-head * {
   scroll-margin-top: calc(-1 * var(--cd-public-head-height, 0px));
 }

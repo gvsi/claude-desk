@@ -93,6 +93,7 @@ from desk.kernel_api import (
     VerifyStartRequest,
     WhoAmI,
 )
+from desk.money_cap import lower_to_cap
 from tests.kernel_contract import ro_tables
 from tests.kernel_contract.fake_kernel import (
     FAKE_ROUTES,
@@ -1321,9 +1322,9 @@ async def test_verify_start_is_uniform(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01b")
 async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
-    """A session reads only the code entries of people whose challenges it started: never another session's, never
-    an owner alert, and nothing for typing "owner" or the business's own number. It names only its own session; the
-    owner reads every entry of the copy."""
+    """A session reads only the code entries of the challenges it started: never another session's, even for the same
+    person, never an owner alert, and nothing for typing "owner" or the business's own number. It names only its own
+    session; the owner reads every entry of the copy."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1346,7 +1347,9 @@ async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
 
     again = await verify_start(b, b_id, DANA)
     theirs = await session_inbox(b, b_id)
-    assert {notice.entry_id for notice in again.inbox} <= {entry.entry_id for entry in theirs}
+    # each reads the code it asked for, though both went to Dana
+    assert [entry.entry_id for entry in theirs] == [notice.entry_id for notice in again.inbox]
+    assert [entry.entry_id for entry in await session_inbox(a, a_id)] == [entry.entry_id for entry in mine]
     assert {entry.kind for entry in theirs} == {"verification_code"}
     every = await http.owner(copy.owner_token).call("GET /demo_inbox")
     assert {entry.entry_id for entry in mine + theirs} | {notice.entry_id for notice in held.inbox} <= {
@@ -1905,7 +1908,8 @@ def a_new_desk(**business) -> CreateDeskRequest:
 @pytest.mark.kernel_plan("01b")
 async def test_owner_creates_a_desk_with_the_starter_preset(kernel, ro_read):
     """`POST /desks` adds a Desk to the owner's own copy, with its business, native tools only and the `ask_first`
-    preset active (auto for the utility and setup tools); a `connections` list, an owner name outside the pattern
+    preset active (auto for the utility and setup tools; the setup tools' own rows come with Plan 01c, which
+    `test_owner_setup_tool_runs_on_the_owners_desk` checks); a `connections` list, an owner name outside the pattern
     or an unknown time zone is 422 `invalid`, and another copy's business 404."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
@@ -1924,7 +1928,7 @@ async def test_owner_creates_a_desk_with_the_starter_preset(kernel, ro_read):
                                                    " WHERE business_id = %s", (desk["business_id"],))
     assert business == {"name": "Okafor Electric", "owner_display_name": "Bob Okafor", "timezone": "America/New_York"}
     tools_rows = rows("SELECT tool, source, status FROM {ro}.tools WHERE desk_id = %s")
-    assert {row["source"] for row in tools_rows} == {"native"} and SETUP_TOOLS <= {row["tool"] for row in tools_rows}
+    assert {row["source"] for row in tools_rows} == {"native"}
     (active,) = rows("SELECT version, cards FROM {ro}.policy_versions WHERE desk_id = %s AND status = 'active'")
     owner_cards = [card for card in active["cards"] if not card["is_default"]]
     assert {card["applies_to"] for card in owner_cards} == ASK_FIRST_AUTO
@@ -2057,13 +2061,17 @@ async def test_no_demo_agent_for_a_deleted_desk(kernel):
 
 @pytest.mark.kernel_plan("01c")
 async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
-    """The owner session has the setup tools, and only them, on its own Desks: a memory read is decided and
-    executed as the owner on the Desk it names, storing owner-only knowledge. A visitor tool asked by the owner, a
-    setup tool asked by a visitor, or the owner of another copy naming this Desk is refused."""
+    """A Desk `POST /desks` makes has the setup tools among its native tools, and the owner session has them, and
+    only them, on its own Desks: a memory read is decided and executed as the owner on the Desk it names, storing
+    owner-only knowledge. A visitor tool asked by the owner, a setup tool asked by a visitor, or the owner of another
+    copy naming this Desk is refused."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     owner = http.owner(copy.owner_token)
     created = await owner.call("POST /desks", a_new_desk())
+    tools_rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, source FROM {ro}.tools WHERE desk_id = %s",
+                         (created.desk_id,))
+    assert {row["source"] for row in tools_rows} == {"native"} and SETUP_TOOLS <= {row["tool"] for row in tools_rows}
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
@@ -2342,6 +2350,116 @@ async def test_confirm_needs_a_proved_version(kernel, ro_read):
     assert await refused(late) == (409, "conflict")
     missing = owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=10_000))
     assert await refused(missing) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_a_draft_holds_its_auto_money_cards_to_its_cap(kernel, ro_read):
+    """Each rules version has a money cap, and its auto money cards fit it. A Desk that `POST /desks` makes starts
+    at 0, and a seed naming another cap is 422 `invalid`. A draft keeps its parent's cap unless it names one: an auto
+    `effect:charge` card for $20 is 422 `invalid` at the cap of 0 it keeps and at a named $19.99, drafting nothing,
+    and proved at a named $20, which the version carries and, once confirmed, the Desk's active version too."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    capped = a_new_desk()
+    capped.desk.auto_money_cap_cents = 2_000
+    assert await refused(owner.call("POST /desks", capped)) == (422, "invalid")
+    created = await owner.call("POST /desks", a_new_desk())
+
+    def versions() -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, "SELECT version, status, auto_money_cap_cents FROM {ro}.policy_versions"
+                                                " WHERE desk_id = %s ORDER BY version", (created.desk_id,))
+
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    assert versions() == [{"version": active["version"], "status": "active", "auto_money_cap_cents": 0}]
+    charge = RuleCard(card_id="card-charge", applies_to="effect:charge", mode="auto", who="anyone",
+                      max_amount_cents=2_000, reason="Payments up to $20 go through without asking.")
+    cards = [*owner_cards(active), charge]
+
+    def at(cap: int | None):
+        return owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=created.desk_id, cards=cards,
+                                                                   expected_parent=active["version"],
+                                                                   auto_money_cap_cents=cap))
+
+    assert await refused(at(None)) == (422, "invalid")
+    assert await refused(at(1_999)) == (422, "invalid")
+    assert [row["version"] for row in versions()] == [active["version"]]
+    version = await at(2_000)
+    proved_or_skip(version)
+    assert version.auto_money_cap_cents == 2_000
+    confirmed = await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id,
+                                                                              version=version.version))
+    assert (confirmed.status, confirmed.auto_money_cap_cents) == ("active", 2_000)
+    assert versions() == [{"version": active["version"], "status": "superseded", "auto_money_cap_cents": 0},
+                          {"version": version.version, "status": "active", "auto_money_cap_cents": 2_000}]
+
+
+def policy_rows(ro_read, ro_schema: str, copy: CopyCreated) -> list[dict]:
+    return ro_read(ro_schema, copy.copy_id, "SELECT version, status, auto_money_cap_cents FROM {ro}.policy_versions"
+                                            " WHERE desk_id = %s ORDER BY version", (copy.desk_ids[0],))
+
+
+def charge_card(cents: int) -> RuleCard:
+    return RuleCard(card_id="card-charge", applies_to="effect:charge", mode="auto", who="anyone",
+                    max_amount_cents=cents, reason="Payments up to $300 go through without asking.")
+
+
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_card_above_the_draft_cap_is_422(kernel, ro_read):
+    """The kernel holds a draft's cards to the draft's own money cap, whatever the API sends: lowering the Rivera cap
+    from $500 to $100 with an active $300 auto `effect:charge` card carried as it is, as an API that skipped the
+    lowering would send it, is 422 `invalid` with nothing drafted. The same cards lowered by
+    `desk.money_cap.lower_to_cap` draft at $100, the card at $100 and saying so."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    desk_id = copy.desk_ids[0]
+    seeded = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    first = await draft(owner, desk_id, [*owner_cards(seeded), charge_card(30_000)], seeded["version"])
+    proved_or_skip(first)
+    assert first.auto_money_cap_cents == 50_000
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=first.version))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    kept, before = owner_cards(active), policy_rows(ro_read, ro_schema, copy)
+
+    def at_100(cards: list[RuleCard]):
+        return owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                   expected_parent=active["version"],
+                                                                   auto_money_cap_cents=10_000))
+
+    assert await refused(at_100(kept)) == (422, "invalid")
+    assert policy_rows(ro_read, ro_schema, copy) == before
+    lowered = await at_100(lower_to_cap(kept, kept, 10_000, "en"))
+    proved_or_skip(lowered)
+    (charge,) = [card for card in lowered.cards if card.card_id == "card-charge"]
+    assert (lowered.auto_money_cap_cents, charge.max_amount_cents, charge.reason) == (
+        10_000, 10_000, "Up to $100, your payment limit.")
+
+
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_cap_changes_only_at_confirm(kernel, ro_read):
+    """A draft at a new money cap carries it, and the Desk's cap stays its active version's until the owner confirms
+    the draft: raising the Rivera cap from $500 to $800 drafts a version at $800 while the active one stays at $500;
+    confirming it supersedes the $500 version, and the Desk's cap is $800."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    desk_id = copy.desk_ids[0]
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    raised = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=owner_cards(active),
+                                                                       expected_parent=active["version"],
+                                                                       auto_money_cap_cents=80_000))
+    proved_or_skip(raised)
+    assert raised.auto_money_cap_cents == 80_000
+    assert policy_rows(ro_read, ro_schema, copy) == [
+        {"version": active["version"], "status": "active", "auto_money_cap_cents": 50_000},
+        {"version": raised.version, "status": "proved", "auto_money_cap_cents": 80_000}]
+    confirmed = await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id,
+                                                                              version=raised.version))
+    assert (confirmed.status, confirmed.auto_money_cap_cents) == ("active", 80_000)
+    assert policy_rows(ro_read, ro_schema, copy) == [
+        {"version": active["version"], "status": "superseded", "auto_money_cap_cents": 50_000},
+        {"version": raised.version, "status": "active", "auto_money_cap_cents": 80_000}]
 
 
 def verification_card(ro_read, ro_schema: str, copy: CopyCreated) -> tuple[dict, list[RuleCard], RuleCard]:

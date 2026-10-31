@@ -11,7 +11,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Set off a name someone chose (a visitor's, an agent's) as user text: its own `.cd-user-name` element marked `data-copy="user"`, first in its line, and never joined to a status or a trust word in one run of text. A status sits beside it in its own `Pill`, as "Signed" or "Not signed" does on an agent's request.
 - Write English and Spanish wherever a visitor reads.
 - Call the product Claude Desk: one is "your Desk", several are "Desks". Every surface carries the footer "Concept prototype by Giovanni Alcantara, not an Anthropic product" in `caption`.
-- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." It can't be turned off.
+- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." While the owner is in the chat, the public page's chat head says instead: "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back." Both forms name Claude as an AI, and neither can be turned off.
 
 ## Visual foundations
 
@@ -57,6 +57,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ### Motion
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart.
+- A drawn check goes short arm first, as a hand writes one. The check icon's path starts at the long arm's tip, so its dash offset runs from minus its dash length to 0. `expectDrawsShortArmFirst` (`test/`) pins it in a story.
 - The only loops are `motion-breathe` for presence glyphs, `motion-writing` for the writing indicator's line and typing dots, and `motion-spin` for a busy button's spinner.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.

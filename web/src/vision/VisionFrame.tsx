@@ -1,7 +1,8 @@
-import { useLayoutEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
+import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
 import { proseOf, VISION_BACK_HREF, VISION_SIDEBAR_HREFS, type VisionOwner } from './data.ts';
 
@@ -26,14 +27,7 @@ export interface VisionFrameProps {
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
 
-  // As every page that names the tab does: in a layout effect, handing the title back on leaving.
-  useLayoutEffect(() => {
-    const before = document.title;
-    document.title = title;
-    return () => {
-      document.title = before;
-    };
-  }, [title]);
+  useDocumentTitle(title);
 
   return (
     <div className="cd-vision-frame" onClick={followInAppLinks(navigate)}>

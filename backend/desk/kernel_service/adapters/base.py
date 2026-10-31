@@ -16,9 +16,21 @@ hooks in this order:
 - `reconcile(xctx, action)`: for an `unknown` action, by `action_id`: a result means it executed,
   None that it failed, `AdapterUnknown` that it is still unknown.
 
+An adapter whose `execute` writes the session's own rows (a verification start) sets
+`locks_session = True` (optional, looked up with `getattr`): the execution then holds the session
+row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take turns.
+
 `model_view_keys` are the only keys of a result's `model_view` that reach Claude.
+
+`releases_private_data` (required, a bool every adapter class sets itself) says whether its result
+gives the session data that only a verified, entitled person may see, data it reads only as its
+person (a document link). An approved hold of such an action runs only while its session still
+stands for that person (`execute.session_ended`); every other approved hold runs for a closed
+session too, as step 6 lets it. The execute path holds an adapter to its word: one declared not to
+release private data whose result carries some fails closed (`execute.undeclared_private_data`).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
@@ -61,7 +73,7 @@ class AdapterResult(BaseModel):
 
     facts: list[Fact] = []
     model_view: dict[str, Any] = {}       # filtered to model_view_keys and the session's readers before Claude sees it
-    inbox: list[InboxNotice] = []
+    inbox: list[InboxNotice] = []         # a verification code's notice only; owner alerts stay in the Demo inbox
 
 
 @dataclass(frozen=True)
@@ -82,10 +94,11 @@ class ExecCtx:
 @runtime_checkable
 class Adapter(Protocol):
     """Required members. `prepare(xctx, action)` and `on_failed(xctx, action)` are optional async
-    hooks, looked up with `getattr`."""
+    hooks, and `locks_session` an optional flag, looked up with `getattr`."""
 
     profile: ToolProfile
     Args: type[BaseModel]                 # extra="forbid", strict=True
+    releases_private_data: bool           # its result gives the session data it reads only as its person
     free_text_fields: frozenset[str]      # args that may carry visitor text: quoted, labelled untrusted, cut for the reviewer
     model_view_keys: frozenset[str]
 
@@ -94,6 +107,25 @@ class Adapter(Protocol):
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: BaseModel) -> AdapterResult: ...
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None: ...
+
+
+QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
+CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
+
+
+def quoted(text: str) -> str:
+    """Text as the owner reads it: on one line, inside quotes it can't close. It stays untrusted
+    text, never an instruction."""
+    return "“" + " ".join(text.split()).replace("“", '"').replace("”", '"') + "”"
+
+
+def claudes_note(texts: Iterable[str | None]) -> str:
+    """The free text Claude wrote into a tool call, as the owner reads it in a held request's reason
+    and in an alert: one "Claude's note" label, then each text that holds any, cut to
+    `QUOTED_CHARS` and quoted on its own, comma-joined (`Claude's note: “a”, “b”`). Claude wrote it,
+    so it is never labelled as the visitor's words, though it may repeat them. Callers pass at least
+    one text."""
+    return f"{CLAUDES_NOTE}: " + ", ".join(quoted(" ".join(text.split())[:QUOTED_CHARS]) for text in texts if text)
 
 
 async def business_timezone(ctx: KernelCtx, desk_row: Desk) -> ZoneInfo:

@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
@@ -16,14 +16,16 @@ import {
   PageHeader,
   TextLink,
   ruleDiff,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { draftFromAnswer, draftFromDiff, type RuleDraft } from './drafts.ts';
+import { RULES_TITLE } from './RulesPage.tsx';
 import { moneyCapWords } from './ruleWords.ts';
 
 import './RuleDraftReview.css';
@@ -41,6 +43,7 @@ export function peopleQuery(deskId: string) {
 /** A read the review makes once and keeps while it is open: a later read would change nothing it shows. */
 const READ_ONCE = { staleTime: 60_000, refetchOnWindowFocus: false } as const;
 
+const REVIEW_TITLE = 'Review the change';
 const SUBTITLE = "Here's exactly what changes on your Desk. Nothing changes until you confirm.";
 const UPDATED = 'Your rules are updated.';
 const CHANGED_SINCE = 'Your rules changed since this was drafted. Ask for the change again.';
@@ -48,16 +51,6 @@ const NOT_CONFIRMED = "We couldn't confirm whether your change went through. Ope
 const NOT_OPEN = "This draft isn't open anymore. Ask for the change again from Rules.";
 
 const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`;
-const connectorsPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/connectors`;
-
-/** The breadcrumb's link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /** The draft changes the payment limit and no rule: nothing else to review. */
 function onlyTheLimit(draft: RuleDraft): boolean {
@@ -121,8 +114,13 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   const tools = rules.data?.tools;
   const rows = useMemo(() => changeRows(draft, people.data ?? null, tools ?? []), [draft, people.data, tools]);
   const turningOn = draft.turnedOn.length > 0;
-  const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : 'Review the change');
-  const root = turningOn ? { label: 'Connectors', href: connectorsPath(deskId) } : { label: 'Rules', href: rulesPath(deskId) };
+  const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : REVIEW_TITLE);
+  // On its own page the tab names the review as its title does; inside another page, that page's stays.
+  useDocumentTitle(inline ? null : inApp(heading));
+  // Where the trail starts, and where keeping the rules goes when there is nothing to go back to: a
+  // turn-on's Connectors page once those pages are built (`connectorPageHref`), else Rules.
+  const connectors = turningOn ? connectorPageHref(deskId, 'connectors') : undefined;
+  const root = connectors === undefined ? { label: RULES_TITLE, href: rulesPath(deskId) } : { label: 'Connectors', href: connectors };
 
   const finish = (outcome: 'confirmed' | 'kept') => {
     if (onDone) onDone(outcome);
@@ -290,10 +288,16 @@ export function RuleDraftPage() {
     return read.data === undefined ? null : { draft: draftFromDiff(read.data, active) };
   }, [handed, active, read.data]);
 
-  if (built !== null) return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} />;
-
   const notOpen = version === null || (read.error instanceof ApiError && read.error.kind === 'not_found');
   const failed = read.isError ? read.error : rules.isError ? rules.error : null;
+  // A built review names the tab itself. Without one, the tab follows the title this page shows; while
+  // the draft is read, the page shows none (a change to the payment limit alone has its own), so the
+  // tab names Rules, the page the review is under.
+  const shownTitle = notOpen || failed !== null ? REVIEW_TITLE : RULES_TITLE;
+  useDocumentTitle(built === null ? inApp(shownTitle) : null);
+
+  if (built !== null) return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} />;
+
   let body;
   if (notOpen) {
     body = (
@@ -331,8 +335,8 @@ export function RuleDraftPage() {
   return (
     <div className="cd-rule-draft" onClick={followInAppLinks(navigate)}>
       <div className="cd-rule-draft__header">
-        <Breadcrumb items={[{ label: 'Rules', href: rulesPath(deskId) }, { label: 'Review the change' }]} linkComponent={RouterLink} />
-        <PageHeader title="Review the change" subtitle={SUBTITLE} />
+        <Breadcrumb items={[{ label: RULES_TITLE, href: rulesPath(deskId) }, { label: REVIEW_TITLE }]} linkComponent={RouterLink} />
+        <PageHeader title={REVIEW_TITLE} subtitle={SUBTITLE} />
       </div>
       {body}
     </div>

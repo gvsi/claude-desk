@@ -19,6 +19,7 @@ import type { CancelReason, PaymentLinkOut } from '../../api/views.ts';
 import { Button, ConceptFooter, DisclosureLine, MockCheckout, Notice, UNREACHABLE_COPY, type CopyLanguage } from '../../ds/index.ts';
 import { formatMoneyExact } from '../../lib/format.ts';
 import { browserLanguage } from '../../lib/language.ts';
+import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 
 import './CheckoutPage.css';
@@ -53,6 +54,10 @@ export function CheckoutPage() {
   // The page's words before a link shows follow the browser; a link's follow the link.
   const [browser] = useState(browserLanguage);
   useDocumentLanguage(load.kind === 'ready' ? load.link.language : browser);
+  // The tab says what the payment is for, as the card's title does, then the business as the card
+  // names it, when the kernel sends it. Before a link shows, the app's own name stays.
+  const shown = load.kind === 'ready' ? load.link : null;
+  useDocumentTitle(shown === null ? null : shown.business_name ? `${shown.title} · ${shown.business_name}` : shown.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   // Set while a pay or cancel is out, so a second press before the page re-renders sends nothing.

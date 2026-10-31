@@ -21,7 +21,12 @@ export function LiveNow({ live }: LiveNowProps) {
   const n = live.length;
   return (
     <section className="cd-today__section" aria-labelledby={titleId}>
-      <SectionHeader id={titleId} title="Live now" count={{ n, label: `${n} live ${n === 1 ? 'conversation' : 'conversations'}` }} />
+      <SectionHeader
+        id={titleId}
+        title="Live now"
+        count={{ n, label: `${n} live ${n === 1 ? 'conversation' : 'conversations'}` }}
+        caption="Shows while someone is chatting"
+      />
       <ul className="cd-live">
         {live.map((s) => (
           <li key={s.session_id}>

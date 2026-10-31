@@ -8,9 +8,10 @@ own tables and the tokens or signatures it checks.
 from datetime import UTC, timedelta
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
 
 from desk.contracts import (
+    AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
     ApprovalAnswer,
     ApprovalResult,
@@ -169,6 +170,8 @@ class PolicyDraftRequest(KernelRequest):      # POST /policy/draft (compiled, li
     desk_id: str
     cards: list[RuleCard]
     expected_parent: int | None
+    auto_money_cap_cents: StrictInt | None = Field(None, ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)   # the draft's money cap; None keeps the
+                                          # active version's ("Money cap")
 
 class PolicyProbeRequest(KernelRequest):      # POST /policy/{version}/probe (nothing activates)
     desk_id: str

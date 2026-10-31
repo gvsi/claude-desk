@@ -3,14 +3,14 @@ the draft, the confirm, and going live.
 
 Claude drafts rule cards from the owner's answers; code checks them (a target the Desk has, the contract's limits, the
 answered money cap, no money going out on its own), keeps the Ask me first preset's utility cards in every draft, and
-falls back to template cards when Claude's draft can't be used twice (by code or the kernel, which refuses a card that
-would change starting a verification) or its proof is rejected. The kernel compiles and
-proves every draft: the API sends cards, never Cedar. The proving routes answer 202 once their wait passes, and the
-same request sent again joins the work or takes its answer; a proof that timed out or ran bounded is "Rules can't be
-checked right now". Answering stays off through the confirm, and only going live turns it on.
+falls back to template cards when Claude's draft can't be used twice (by code or the kernel; a card that would change
+starting a verification is refused before the kernel is asked, as the kernel would) or its proof is rejected. The
+kernel compiles and proves every draft: the API sends cards, never Cedar. The proving routes answer 202 once their
+wait passes, and the same request sent again joins the work or takes its answer; a proof that timed out or ran bounded
+is "Rules can't be checked right now". Answering stays off through the confirm, and only going live turns it on.
 
 The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it. The batch
-`{desk_id}/tools/confirm` route and the draft's `auto_money_cap_cents` wait for the kernel contracts that carry them.
+`{desk_id}/tools/confirm` route waits for the kernel contract that carries it.
 """
 
 import asyncio
@@ -410,10 +410,15 @@ async def rules_reply(owner: Owner, state: dict) -> RulesDraft:
     return RulesDraft.model_validate(reply.json())
 
 
-async def test_cards_the_kernel_refuses_get_the_one_retry_then_the_template(app, browser, fake, kernel_http, model,
-                                                                          engine):
-    # Claude's cards fit, but one would change starting a verification: the kernel refuses the set (422 `invalid`,
-    # naming no card). Claude gets its one retry, told the kernel refused them, and its fixed cards are drafted.
+def posted_drafts(fake) -> list[PolicyDraftRequest]:
+    return [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
+
+
+async def test_cards_that_would_change_verification_get_the_one_retry_then_the_template(app, browser, fake,
+                                                                                       kernel_http, model, engine):
+    # Claude's cards fit, but one would change starting a verification. The API refuses the set before the kernel is
+    # asked (`desk.always_on.changes_always_on`, the check the kernel refuses the same set with), as setup takes the
+    # kernel's own refusal: Claude gets its one retry, told the set was refused, and its fixed cards are drafted.
     owner, state = await ready(app, browser, kernel_http, model)
     fake.calls.clear()
     model.add(drafted(*GOOD_CARDS, SEND_ASKS), drafted(*GOOD_CARDS))
@@ -422,10 +427,9 @@ async def test_cards_the_kernel_refuses_get_the_one_retry_then_the_template(app,
     assert len(calls) == 2
     assert calls[1].messages[-1]["content"][0]["text"] == DRAFT_RETRY.format(errors=CARDS_REFUSED)
     assert json.loads(calls[1].messages[-2]["content"][0]["text"])["cards"][-1]["applies_to"] == "effect:send_message"
-    posted = [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
-    assert [card.card_id for card in posted[0].cards[len(UTILITY):]] == [f"card-{n}" for n in range(1, 7)]
-    assert [card.card_id for card in posted[1].cards[len(UTILITY):]] == [f"card-{n}" for n in range(1, 6)]
-    assert len(posted) == 2 and draft.cards == posted[1].cards
+    (posted,) = posted_drafts(fake)                        # only the fixed cards reach the kernel
+    assert [card.card_id for card in posted.cards[len(UTILITY):]] == [f"card-{n}" for n in range(1, 6)]
+    assert draft.cards == posted.cards
     assert [card["card_id"] for card in (await stored(engine, state["interview_id"]))["draft_cards"]] == [
         f"card-{n}" for n in range(1, 6)]
 
@@ -439,16 +443,37 @@ async def test_cards_the_kernel_refuses_get_the_one_retry_then_the_template(app,
     assert draft.cards[len(UTILITY):] == template_cards("trade", answers)
     assert [card for card in draft.cards if card.applies_to in VERIFICATION_TARGETS] == [
         card for card in PRESETS["ask_first"] if card.applies_to == "native.start_verification"]
-    assert len(card_drafts(model)) == 4 and len(fake.called("POST /policy/draft")) == 3
+    assert len(card_drafts(model)) == 4
+    assert [request.cards[len(UTILITY):] for request in posted_drafts(fake)] == [template_cards("trade", answers)]
 
-    # The retry is the one every draft gets: spent on an answer that didn't fit, a set the kernel then refuses is the
+    # The retry is the one every draft gets: spent on an answer that didn't fit, a set refused then is the
     # template's, with no third drafting call.
     owner, state = await ready(app, browser, kernel_http, model)
     fake.calls.clear()
     model.add(unparseable(), drafted(*GOOD_CARDS, SEND_ASKS))
     draft = await rules_reply(owner, state)
     assert all(card.card_id.startswith("setup-") for card in draft.cards[len(UTILITY):])
-    assert len(card_drafts(model)) == 6 and len(fake.called("POST /policy/draft")) == 2
+    (posted,) = posted_drafts(fake)
+    assert len(card_drafts(model)) == 6 and not any(changes_always_on(card) for card in posted.cards)
+
+
+async def test_a_refused_template_card_is_named_to_the_owner(app, browser, fake, kernel_http, model, engine,
+                                                             monkeypatch):
+    # The template cards are setup's last resort, so a template card the API refuses (one that would change starting
+    # a verification: the shipped templates carry none, so one is made to here) is the owner's error to see, as the
+    # kernel refusing the template is: 422 naming the card, with nothing sent to the kernel.
+    send_never = RuleCard(card_id="setup-send-never", applies_to="effect:send_message", mode="never", who="anyone",
+                          reason="Nothing is sent to customers.")
+    templated = template_cards
+    monkeypatch.setattr("desk.api.setup.template_cards",
+                        lambda business_type, answers: [*templated(business_type, answers), send_never])
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(unparseable(), unparseable())            # Claude's cards can't be used: the template's turn
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (422, {"error": "changes_always_on", "card_ids": ["setup-send-never"]})
+    assert fake.called("POST /policy/draft") == []
+    assert (await stored(engine, state["interview_id"]))["draft_version"] is None
 
 
 def test_template_caps_money_and_honors_no_documents():

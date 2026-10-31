@@ -9,34 +9,65 @@ the answer is sent, so a failed commit answers 500, and it rolls back on any exc
 Row locks are taken in one order, so no two kernel transactions wait on each other:
 
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
-   breaker's strike writes it under that lock) and by a take-over or hand-back; `FOR SHARE` by
-   an allow's execution, in T1 and T2; written by a visitor's or agent's own requests
-   (`last_seen_at`, `last_language`), the reply check's only at its end, just before its ledger
-   entry, so it holds no lock on the row while the soft-promise check runs;
+   breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
+   route, in T2 by the execution of an adapter that writes the session's own rows
+   (`locks_session`, a verification start) on either path, and by the owner's writes that close
+   sessions (`desks.verified_sessions` when a person is removed or given another contact, a
+   Desk's deletion); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
+   other adapter, on either path, so a Desk's deletion, which closes the session `FOR UPDATE`,
+   commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
+   own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
+   its ledger entry, so it holds no lock on the row while the soft-promise check runs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
 4. the Desk's active `policy_versions` row, `FOR SHARE`, which issuing a payment link takes
    (Plan 01c);
-5. a payment link (Plan 01c);
-6. an adapter's own rows, which its hooks lock or write (a booking; Plan 01c's mandates), after
-   whatever of steps 4 and 5 the same transaction takes;
-7. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
-   reads it `FOR SHARE`).
+5. people, `FOR UPDATE` in ID order: by a verification route or a verification start's T2 (as its
+   adapter's own rows), and by the owner's write to them (`desks.put_people`);
+6. their live verification challenges, after the people (a Desk's deletion, which locks no
+   person, takes its live codes after its sessions);
+7. a payment link (Plan 01c);
+8. document links: an open marks its link in one UPDATE, and a person's removal or new contact,
+   or a Desk's deletion, voids theirs in one;
+9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
+   `POST /knowledge` upserts;
+10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
+    books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
+    4 to 9 the same transaction takes;
+11. facts: an open expires its link's, voiding expires the links', a removal relabels its
+    person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
+    a handoff expires its own, an hours write rewrites the Desk's;
+12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
+    reads it `FOR SHARE`).
+
+Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
+any of these, and a write to the business its row after the Desk's. The calendar write then takes
+the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
+of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
+reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
+takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
+asks for a Desk or business row.
 
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,
 and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `execute`, T3
-`on_failed`, reconciliation `reconcile` and then `on_failed`, activation its `ON_ACTIVATE`
-hooks), so a hook may wait for the rows it locks like any other step. An insert under a fresh key
+`on_failed`, reconciliation `reconcile` and then `on_failed`, or `on_failed` alone when it
+refuses a private action whose session no longer stands, activation its `ON_ACTIVATE` hooks), so
+a hook may wait for the rows it locks like any other step. An insert under a fresh key
 waits for nothing, so it may come after a later step: T1 and an approved answer run `prepare`
-(step 6) before they insert the intent row (step 3), since a new `action_id` could wait only on
+(step 10) before they insert the intent row (step 3), since a new `action_id` could wait only on
 another uncommitted insert of the same action, which the decision's lock (step 2) rules out, and
-Plan 01c's new payment link (step 5) may follow a mandate reservation (step 6). A row is taken
+Plan 01c's new payment link (step 7) may follow a mandate reservation (step 10). A row is taken
 the first time in the strongest mode the transaction will need, since going from `FOR SHARE` to
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
 say) waits for nothing and can come at any point. Reconciliation takes the decision and the
-execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it.
+execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it. For an
+action that releases private data it first holds the session row `FOR SHARE SKIP LOCKED`
+(`execute._hold_session_for`), in step 1's place, so no write that closes the session commits
+while the result is recovered; a read or an answer that already holds the decision asks for the
+session row only `SKIP LOCKED` too, which waits for nothing, and skips the reconciliation when
+another transaction holds the row outright.
 
 A decision holds the session row through its review on purpose: the closed, generation and mode
 checks then hold for the whole decision, and a take-over or hand-back comes before it (409) or
@@ -45,11 +76,50 @@ the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
 
+A person's removal or new contact (`desks.put_people`) is the one step that may ask for an
+earlier row, and only for a session a check verified as the person after the write's session
+step and before it held their row: it takes that session too once it holds the people, so the
+session closes with the rest. That waits on nothing that waits on the write, since the check has
+committed and nothing that holds a verified session's row asks for a Desk row, another session, a
+person or a challenge.
+
 Activation (`activation.confirm`) holds no session, decision or execution row and starts at step
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
 ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
-key's advisory lock before the `versions` lock.
+key's advisory lock before the `versions` lock. The rebuild of a version an earlier kernel stored
+(`activation.rebuild_version`), at startup or in the background while the kernel serves, takes the
+same `versions` lock and active row `FOR UPDATE`, then the ledger head; the owner alert it writes
+when it can't rebuild is an insert under a fresh key. Before the rebuild, in a transaction of its
+own, startup or the background gives a Desk the native tools it has no row for
+(`desks.add_native_tools`) under the Desk row `FOR UPDATE`, as an owner's write holds it: the rows
+are inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
+owner alert the background sends while a version waits (`activation._alert_waiting`) runs in a
+transaction of its own that takes the Desk's `waiting-alert` advisory lock first, before any row,
+and nothing else takes that lock; then the Desk row `FOR SHARE`, held to its commit, so a Desk's
+deletion comes before its check or waits for it. An owner write
+refused for a document canary (`desks.refuse_public_canaries`) appends in its
+`persist` alone, holding nothing else, to each Desk it names in ID order, and one refused past a
+Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted without a lock under
+the Desk row's) to its Desk likewise; the public page's owner
+alert when it withholds a field is an insert under a fresh key, in a read that locks nothing.
+
+A session's read is answered only if the session still stands once the read is done. Most routes
+check the session on the row as they read it, without a lock, and the owner may close it meanwhile
+(a person's removal or new contact, the Desk's deletion). Every session whose token a request
+proves is watched (`auth.watch_session`), and after the request's last read, as its last
+statements before it answers, `auth.still_open` reads the session, its person and its Desk afresh:
+closed, or no longer the person it read as, is 409 `closed`, and nothing the request read is
+answered. Those reads lock nothing, so they wait for nothing and add no step to the order above.
+They run in `KernelCtx.commit`, which a commit that ends what a request answers goes through (a
+repeated execution's stored result), and when the request's transaction ends having read anything
+since its last commit. A commit that records what an adapter did runs none: a rollback can't undo
+an act on the world, so an execution's T2 asks the same of its session (`auth.session_stands`)
+before the adapter runs, under the session row it holds until that commit, and records what ran
+whatever happens to the session after; the session's next read answers that. A reconciliation a
+read of a decision runs (`execute.refresh_decision`) records what already happened as well, and
+commits before the read goes on. The API's own ledger entries (`POST /ledger/append`) are records
+too, and their session isn't watched.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
@@ -64,9 +134,9 @@ import logging
 import re
 import secrets
 import traceback
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, get_args
 
@@ -75,7 +145,8 @@ from fastapi import Depends, Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from desk.db.models import Execution
+from desk.db import logs as db_logs
+from desk.db.models import Desk, Execution, PolicyVersion, Tool
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -94,6 +165,19 @@ def new_id(prefix: str) -> str:
     if not re.fullmatch(r"[a-z][a-z0-9]*", prefix):
         raise ValueError("an id prefix is lowercase letters and digits")
     return f"{prefix}-{base64.b32encode(secrets.token_bytes(10)).decode().lower()}"
+
+
+REF = re.compile(r"[A-Za-z0-9_-]{1,64}")   # an owner's ref or knowledge ID, as `desk_data` entries carry it
+
+
+def storable(text: str) -> bool:
+    """Text Postgres can hold: valid UTF-8, without NUL. Text that isn't names no row, so a lookup
+    by it finds nothing and a write of it is refused before the database sees it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
 
 
 @dataclass(frozen=True)
@@ -118,6 +202,24 @@ class KernelCtx:
     engine: AsyncEngine                   # for the credential lookups below, on their own connection
     policies: PolicyRuntime               # the policy engine, its loaded versions and the proof cache
     decisions: DecisionsBackend           # the auto reviewer
+    # what must still hold when the request's reads are done (`auth.watch_session`), by key
+    rechecks: dict[str, Callable[[], Awaitable[None]]] = field(default_factory=dict)
+
+    async def recheck(self) -> None:
+        """Runs the request's rechecks, each reading afresh what the request read its rows under (the
+        session it acts for still open, as the same person): one that no longer holds raises its
+        refusal, so the request answers nothing it read."""
+        for check in list(self.rechecks.values()):
+            await check()
+
+    async def commit(self) -> None:
+        """Commits the transaction once the request's rechecks pass. A commit that ends what a request
+        answers with, data a session reads, comes through here, and so does the end of every request
+        transaction (`kernel_transaction`). `db.commit()` is kept for a refusal's own record, which
+        answers nothing read, and for the record of what an adapter did, which no recheck may undo
+        (tests/kernel/test_session_recheck.py lists each)."""
+        await self.recheck()
+        await self.db.commit()
 
     def bind(self, copy_id: str) -> KernelRepo:
         """Run this context's transaction as `copy_id`. Binding again to the same copy is a no-op;
@@ -140,12 +242,17 @@ class KernelCtx:
 
 @asynccontextmanager
 async def kernel_transaction(runtime: KernelRuntime) -> AsyncIterator[KernelCtx]:
-    """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception."""
+    """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception.
+    When the block has read anything since its last commit, its rechecks (`KernelCtx.recheck`) run
+    first, as the last statements before the request answers: one that fails rolls it back and
+    raises its refusal. A request whose last statement was a `KernelCtx.commit` ran them there."""
     async with runtime.sessions() as db:
         ctx = KernelCtx(db=db, clock=runtime.clock, signer=runtime.signer, settings=runtime.settings,
                         engine=runtime.engine, policies=runtime.policies, decisions=runtime.decisions)
         try:
             yield ctx
+            if db.in_transaction():
+                await ctx.recheck()
         except Exception:
             await db.rollback()
             raise
@@ -189,9 +296,11 @@ def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: o
     """Logs `exc` at ERROR as `message` (a fixed event name and kernel-built values, %-formatted
     with `args`), then `kind=<its class>` and the frames it rose through, never its text: an
     error's message can quote what a visitor typed (an adapter's error its arguments, a validation
-    error the input it refused, a driver error a statement's parameters). Used in place of
-    `logger.exception` wherever a request or an execution can fail."""
-    logger.error(f"{message} kind=%s\n%s", *args, type(exc).__name__, "".join(traceback.format_tb(exc.__traceback__)),
+    error the input it refused, a driver error a statement's parameters). A database error's kind
+    adds its SQLSTATE and constraint name (`db_logs.describe`), which hold no value. Used in place
+    of `logger.exception` wherever a request or an execution can fail."""
+    kind = db_logs.describe(exc) if db_logs.is_database_error(exc) else type(exc).__name__
+    logger.error(f"{message} kind=%s\n%s", *args, kind, "".join(traceback.format_tb(exc.__traceback__)),
                  stacklevel=2)
 
 
@@ -202,14 +311,15 @@ def route_template(request: Request) -> str:
 
 
 # Credential lookups. A request names a session token, a session ID, a decision ID (whose session
-# `GET /decisions/{id}` names) or a public slug, not a copy; these find the copy it belongs to
-# through the database's copy resolvers (SECURITY DEFINER functions that return only a copy id), on
-# their own connection, so the caller can bind the request's transaction to that copy and read the
-# rows through KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions
-# and GET /public/{desk_slug} use them, and they run before the request's transaction has run
-# anything: a request that held its transaction's connection while it waited for a resolver's
-# would, with as many such requests at once as the pool has connections, wait until checkout timed
-# out. Asked later, a resolver raises (500 `internal`) instead.
+# `GET /decisions/{id}` names), a public slug or a document link's token, not a copy; these find
+# the copy it belongs to (a token by its sha256, never the token itself) through the database's
+# copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own connection,
+# so the caller can bind the request's transaction to that copy and read the rows through
+# KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
+# GET /public/{desk_slug} and GET /document_links/{token} use them, and they run before the
+# request's transaction has run anything: a request that held its transaction's connection while it
+# waited for a resolver's would, with as many such requests at once as the pool has connections,
+# wait until checkout timed out. Asked later, a resolver raises (500 `internal`) instead.
 
 async def _resolve(ctx: KernelCtx, resolver: CopyResolver, key: str) -> str | None:
     if ctx.db.in_transaction():
@@ -234,7 +344,15 @@ async def copy_of_decision_id(ctx: KernelCtx, decision_id: str) -> str | None:
     return await _resolve(ctx, "copy_of_decision_id", decision_id)
 
 
-# Startup reconciliation's one lookup across copies: which copies hold an execution to settle.
+async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None:
+    """The copy of the document link whose token has this sha256 (`release_document.token_sha256`):
+    the resolver reads hashes, never a link's token."""
+    return await _resolve(ctx, "copy_of_document_link", token_sha256)
+
+
+# Startup's lookups across copies: which copies hold an execution to settle, and, one copy at a time
+# so the startup rebuild can stop within its budget, which Desks of a copy have an active rules
+# version an earlier kernel stored, to rebuild, or lack a native tool this kernel registers, to add.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -254,3 +372,33 @@ async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[t
                 Execution.state == "unknown")).order_by(Execution.action_id)))
             found += [(copy_id, action_id) for action_id in rows]
     return found
+
+
+async def copy_ids(runtime: KernelRuntime) -> list[str]:
+    """Every copy's ID (`kernel.copy_ids()`), in order: the copies the startup rebuild
+    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`."""
+    async with runtime.engine.connect() as conn:
+        return sorted((await conn.scalars(select(func.kernel.copy_ids()))).all())
+
+
+async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, tools: Iterable[str],
+                            baseline_sha256: str) -> list[str]:
+    """The Desks of `copy_id`, in ID order, that the startup rebuild brings up: each with no
+    `tools` row for one of `tools`, the native tools the kernel registers (a Desk created before
+    one of them was), and each whose active rules version was stored under a baseline other than
+    `baseline_sha256`, the one the kernel enforces; never a deleted Desk, which decides nothing and
+    whose owner has nothing to be told. Read through the copy's own `KernelRepo`, as
+    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy."""
+    wanted = set(tools)
+    copy = KernelRepo(copy_id)
+    async with runtime.sessions() as db:
+        copy.bind(db)
+        desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).where(Desk.deleted_at.is_(None))
+                                                 .order_by(Desk.desk_id)))).all()
+        rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(sorted(wanted)))))
+        have: dict[str, set[str]] = {}
+        for desk_id, tool in rows:
+            have.setdefault(desk_id, set()).add(tool)
+        outdated = set((await db.scalars(copy.scoped(select(PolicyVersion.desk_id).where(
+            PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)))).all())
+    return [desk_id for desk_id in desk_ids if have.get(desk_id, set()) != wanted or desk_id in outdated]

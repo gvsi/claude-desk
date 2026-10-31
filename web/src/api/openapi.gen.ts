@@ -203,6 +203,15 @@ export interface CardDiff {
   changed: [unknown, unknown][];
 }
 /**
+ * 422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a
+ * verification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing
+ * was drafted.
+ */
+export interface ChangesAlwaysOn {
+  error?: "changes_always_on";
+  card_ids: string[];
+}
+/**
  * A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses.
  */
 export interface CheckedDraft {
@@ -347,6 +356,15 @@ export interface MessageAccepted {
 }
 export interface MessageIn {
   text: string;
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule
+ * may take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform
+ * ceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422
+ * `invalid`.
+ */
+export interface MoneyCapIn {
+  auto_money_cap_cents: number;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
@@ -599,7 +617,7 @@ export interface SafetyRow {
 }
 export interface SendAgentIn {
   task: "book_visit" | "quote_and_deposit" | "push_the_limit";
-  idempotency_key?: string | null;
+  idempotency_key: string;
 }
 /**
  * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
@@ -634,14 +652,14 @@ export interface SetupMessage {
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
- * spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one
- * per click, makes a repeat answer the interview the first made instead of making another.
+ * spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. The `idempotency_key`, one per click
+ * and required (422 without one), makes a repeat answer the interview the first made instead of making another.
  */
 export interface SetupStartIn {
   description: string;
   timezone: string;
   owner_display_name?: string | null;
-  idempotency_key?: string | null;
+  idempotency_key: string;
 }
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
@@ -730,7 +748,9 @@ export interface Suggestion {
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
- * one `end`.
+ * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
+ * reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
+ * drafts.
  */
 export interface ThisWeek {
   timezone: string;
@@ -744,6 +764,10 @@ export interface ThisWeek {
   stopped: number;
   days: WeekDay[];
 }
+/**
+ * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
+ * not Claude's own drafts the reply check stopped.
+ */
 export interface WeekDay {
   date: string;
   conversations: number;
@@ -932,5 +956,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/draft": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

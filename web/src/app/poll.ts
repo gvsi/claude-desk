@@ -1,8 +1,9 @@
 /**
  * How often owner screens poll, in milliseconds, through React Query's `refetchInterval` (which
  * pauses while the tab is hidden), how often typing pings go out on either side of a chat, and how
- * often the agents page reads the built-in agent's run. Tests speed every interval up with
- * `setPollScale`.
+ * often the agents page reads the built-in agent's run. The Demo inbox runs its own interval
+ * instead, so it stops the moment its sheet closes; like React Query's, it pauses while the tab is
+ * hidden. Tests speed every interval up with `setPollScale`.
  */
 export const POLL_MS = {
   needsYou: 3_000,
@@ -37,6 +38,24 @@ export const AGENT_RUN_POLL_MS = 1_000;
 /** The agent run's read interval, scaled like the polls. */
 export function agentRunPollMs(): number {
   return Math.max(1, Math.round(AGENT_RUN_POLL_MS * scale));
+}
+
+/** How long to wait before sending again after an answer's `retry_after` of `seconds`, scaled like the polls. */
+export function retryAfterMs(seconds: number): number {
+  return Math.max(1, Math.round(seconds * 1_000 * scale));
+}
+
+/** Resolves after `ms`, or at once when `signal` aborts: a wait between tries that ends with the page. */
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done);
+  });
 }
 
 let retryScale = 1;

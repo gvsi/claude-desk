@@ -1,6 +1,7 @@
 // The one import path for contract types in the web app. contracts.gen.ts is generated from
 // backend/desk/contracts.schema.json (`npm run gen:contracts`); this file adds names for the
-// unions the schema writes inline, and the exhaustive lists components iterate over.
+// unions the schema writes inline, the exhaustive lists components iterate over, and the effects
+// that move money.
 
 import type {
   Approval,
@@ -106,3 +107,10 @@ export const DECISION_STATES = Object.keys(decisionStates) as readonly DecisionS
 export const KERNEL_ERROR_CODES = Object.keys(kernelErrorCodes) as readonly KernelErrorCode[];
 /** Every `EvError.code` a visitor turn can end with, in the schema's order. */
 export const EV_ERROR_CODES = Object.keys(evErrorCodes) as readonly EvErrorCode[];
+
+/**
+ * The effects that move money (master "Decision semantics", step 5): a request with one is a money
+ * request, and an automatic rule on one takes a limit. Read as strings, so an `effect:` card's
+ * target can be looked up.
+ */
+export const MONEY_EFFECTS: ReadonlySet<string> = new Set<Effect>(['charge', 'pay_out']);

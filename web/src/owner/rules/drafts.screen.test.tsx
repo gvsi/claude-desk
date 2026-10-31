@@ -292,6 +292,31 @@ describe('rule draft review', () => {
     expect(desk().tools.find((tool) => tool.tool === refund)).toMatchObject({ status: 'needs_review', pending_sha256: 'a'.repeat(64) });
   });
 
+  it('turn_on_review_leads_back_to_rules_until_connectors_are_built', async () => {
+    // Refund's definition changed, and the owner turns it on at the changed hash.
+    const refund = 'payments.create_refund';
+    const sha = 'e'.repeat(64);
+    desk().tools = desk().tools.map((row) => (row.tool === refund ? { ...row, status: 'needs_review', pending_definition_text: 'Changed', pending_sha256: sha } : row));
+    const turned = mockStore.world.confirmTools(desk(), [{ tool: refund, definition_sha256: sha }], true);
+    if (turned === 'not_found' || turned === 'conflict' || turned.draft == null) throw new Error('the tool confirm drafts a version');
+    const row = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools.find((tool) => tool.tool === refund);
+    if (row === undefined) throw new Error('the mock lists Refund');
+    const element = <RuleDraftReview deskId={RIVERA.deskId} draft={draftFromVersion(desk().policy, turned.draft, [row])} />;
+
+    // While the Connectors pages aren't built, its trail starts at Rules.
+    const before = await renderRoute('/review', { routes: [{ path: '/review', element }] });
+    const trail = before.screen.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
+    expect(trail.getByRole('link', { name: 'Connectors' }).elements()).toEqual([]);
+    expect(before.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
+
+    // Once they are, at Connectors.
+    const built = await renderRoute('/review', { routes: [{ path: '/review', element }], connectorPages: true });
+    const builtTrail = built.screen.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect.element(builtTrail.getByRole('link', { name: 'Connectors' })).toHaveAttribute('href', `${DESK}/connectors`);
+    expect(builtTrail.getByRole('link', { name: 'Rules' }).elements()).toEqual([]);
+  });
+
   it('reload_loads_the_draft', async () => {
     // "Ask me first", as the Rules page hands it over, titled with the preset's name.
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
@@ -322,9 +347,48 @@ describe('rule draft review', () => {
     await expectScreenBasics(gone.screen.container, { owner: true });
   });
 
+  it('review_names_the_tab', async () => {
+    // The tab names the review as its title does: a preset's name, the payment limit's own, or the plain one.
+    document.title = 'Claude Desk';
+    const preset = mockStore.world.draftCards(desk(), PRESETS.ask_first);
+    const handed: RuleDraftState = { draft: draftFromDiff(preset, desk().policy, 'ask_first'), title: 'Ask me first' };
+    const named = await openDraft(preset.version, handed);
+    await expect.element(named.screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    expect(document.title).toBe('Ask me first · Claude Desk');
+
+    const limit = mockStore.world.draftCards(desk(), desk().policy.cards, { cap: 500_000 });
+    const raised = await openDraft(limit.version);
+    await expect.element(raised.screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    expect(document.title).toBe('Change your payment limit · Claude Desk');
+
+    // While a reload reads the draft, the page shows no title yet, and the tab names Rules, the page
+    // the review is under; once the draft is read, the review's own.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const read = await mockStore.dispatch('ruleDraft', { params: { desk_id: RIVERA.deskId, version: String(preset.version) } });
+    mockStore.inject({ route: 'ruleDraft', status: 200, until, body: (read as { body: unknown }).body });
+    const reloaded = await openDraft(preset.version);
+    await expect.element(reloaded.screen.getByText('Reading the change', { exact: true })).toBeVisible();
+    expect(document.title).toBe('Rules · Claude Desk');
+    release();
+    await expect.element(reloaded.screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
+    expect(document.title).toBe('Review the change · Claude Desk');
+
+    // A draft that isn't open anymore keeps the plain title, and leaving hands the tab back.
+    const gone = await openDraft(99);
+    await expect.element(gone.screen.getByText("This draft isn't open anymore. Ask for the change again from Rules.", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Review the change · Claude Desk');
+    await gone.router.navigate('/no/such/page');
+    await expect.element(gone.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('confirm_shows_the_cap_change_in_words_both_ways', async () => {
     const link = rivera.ruleCards['rv-link'];
-    const withLink = (cents: number) => desk().policy.cards.map((card) => (card.card_id === link.card_id ? { ...card, max_amount_cents: cents } : card));
+    const withLink = (cents: number, reason = link.reason) =>
+      desk().policy.cards.map((card) => (card.card_id === link.card_id ? { ...card, max_amount_cents: cents, reason } : card));
 
     // Raised from $500 to $5,000, the link rule with it: the new limit in words over the change, and nothing cancelled.
     const raise = mockStore.world.draftCards(desk(), withLink(100_000), { cap: 500_000 });
@@ -336,15 +400,20 @@ describe('rule draft review', () => {
     expect(raised.screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
     await expectScreenBasics(raised.screen.container, { owner: true });
 
-    // Lowered from $500 to $100, the $300 link rule down to $100: links may be cancelled, said above the buttons.
-    const lower = mockStore.world.draftCards(desk(), withLink(10_000), { cap: 10_000 });
+    // Lowered from $500 to $100, the $300 link rule down to $100 as the API lowers it, its reason the
+    // sentence for the new limit in place of the one that quoted $300: links may be cancelled, said
+    // above the buttons.
+    const lower = mockStore.world.draftCards(desk(), withLink(10_000, 'Up to $100, your payment limit.'), { cap: 10_000 });
     const lowered = await openDraft(lower.version);
     const newLimit = lowered.screen.getByRole('region', { name: 'Payment limit' });
     await expect.element(newLimit.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(newLimit.getByText('Was $500', { exact: true })).toBeVisible();
     const row = lowered.screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
     await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Automatic up to $300; over $300, ask me first', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'Before' }).getByText(link.reason, { exact: true })).toBeVisible();
     await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Checked by the reviewer', { exact: true })).toBeVisible();
+    // The new reason reads as a change, tagged as the other changed lines are.
+    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Up to $100, your payment limit. Changed', { exact: true })).toBeVisible();
     const cancels = lowered.screen.getByText(CANCELS_LINKS, { exact: true });
     await expect.element(cancels).toBeVisible();
     expect(before(cancels.element(), lowered.screen.getByRole('button', { name: 'Confirm change' }).element())).toBe(true);

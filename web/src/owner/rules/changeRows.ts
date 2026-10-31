@@ -9,6 +9,7 @@ import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeS
 import { formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOf } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
+import { toolOutcome } from './outcome.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
 
 /** What applies where no rule the owner set covers a request: the compiler's default ask. */
@@ -51,27 +52,6 @@ function defaultSide(): ChangeSide {
 
 /** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */
 const isEffectCard = (card: RuleCard) => card.applies_to.startsWith('effect:');
-
-/**
- * The rule that decides a tool for anyone, at any time, by the master plan's precedence. Of the
- * rules that govern it (`rulesForTool`) for anyone at all hours: a never rule always wins; else, at
- * the most specific level present (the tool's own rules before shared ones), an ask rule makes it
- * ask, else an automatic one decides, a shared one only where every effect of the tool has one for
- * anyone. None when no rule decides for anyone: the default ask does.
- */
-function governingForAnyone(tool: RulesTool, cards: readonly RuleCard[]): RuleCard | undefined {
-  const forAnyone = rulesForTool(tool, cards).filter((card) => card.who === 'anyone' && card.hours == null);
-  const never = forAnyone.find((card) => card.mode === 'never');
-  if (never !== undefined) return never;
-  const [first] = forAnyone;
-  if (first === undefined) return undefined;
-  const level = forAnyone.filter((card) => isEffectCard(card) === isEffectCard(first));
-  const ask = level.find((card) => card.mode === 'ask');
-  if (ask !== undefined) return ask;
-  const auto = level.filter((card) => card.mode === 'auto');
-  if (!isEffectCard(first)) return auto[0];
-  return tool.effects.every((effect) => auto.some((card) => card.applies_to === `effect:${effect}`)) ? auto[0] : undefined;
-}
 
 /** Every tool in the order the Connectors page lists them, then the setup interview's own. */
 const TOOL_ORDER: readonly string[] = [...new Set<string>([...CONNECTORS.flatMap((connector) => connector.tools), ...Object.keys(TOOL_NAMES)])];
@@ -179,8 +159,9 @@ function byPlace<T>(items: readonly T[], place: (item: T) => number): T[] {
 
 /**
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
- * side in words, then a `turned_on` row per tool the draft turns on, at the outcome the draft's
- * rules give it for anyone (`governingForAnyone`), else the default ask. The changed rows, then the
+ * side in words, then a `turned_on` row per tool the draft turns on, at the outcome Rules shows
+ * for the draft's rules (`toolOutcome`: the most that runs on its own for some visitor), in the
+ * words of the rule that gives it, else the default ask. The changed rows, then the
  * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`, or,
  * when it covers other tools after than before, by every tool either side covers (`coverageMove`).
  * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
@@ -239,14 +220,14 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
     const title = targetWords(row.tool);
     const connector = connectorOf(row.tool)?.view;
-    const governing = governingForAnyone({ tool: row.tool, effects: row.effects }, draft.after);
+    const { rule } = toolOutcome({ tool: row.tool, effects: row.effects }, draft.after);
     rows.push({
       key: `turned-on:${row.tool}`,
       change: 'turned_on',
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      after: governing === undefined ? defaultSide() : cardSide(governing, people, undefined),
+      after: rule === undefined ? defaultSide() : cardSide(rule, people, undefined),
       changed: [],
     });
   }

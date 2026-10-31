@@ -644,6 +644,7 @@ export function TurnRows({
           );
           pending = [];
         } else if (event.type === 'owner_joined') {
+          // A stand-in for `joined` in web/src/public/copy.ts, which the design system doesn't import.
           rows.push(<SystemLine key={index} text={`${event.name} joined the chat`} initials={initialsOf(event.name)} />);
         } else if (event.type === 'receipt' || event.type === 'held' || event.type === 'resolved') {
           pending.push(event);

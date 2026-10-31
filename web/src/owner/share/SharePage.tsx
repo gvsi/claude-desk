@@ -4,17 +4,21 @@
  * with the owner's frame.
  */
 import { PageHeader } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ShareKit } from './ShareKit.tsx';
 
 import './SharePage.css';
 
+const TITLE = 'Share';
+
 export function SharePage() {
   const { business, desk } = useOwnerDesk();
+  useDocumentTitle(inApp(TITLE));
   return (
     <div className="cd-share-page">
-      <PageHeader title="Share" subtitle="Put your Desk where customers already look for you." />
+      <PageHeader title={TITLE} subtitle="Put your Desk where customers already look for you." />
       <ShareKit publicUrl={publicLink(desk.slug)} business={business.name} ownerName={business.owner_display_name} />
     </div>
   );

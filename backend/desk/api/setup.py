@@ -7,22 +7,23 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 - **Start** (`start`): one structured model call reads the owner's description (`SetupStart`), then the kernel makes
   the Desk (`POST /desks`, which activates the `ask_first` preset: its auto cards cover the setup tools) and turns
   Answering off, so nothing answers the public until setup takes the Desk live (tried twice; a Desk that stays
-  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. A start sent with
-  the client's `idempotency_key` writes the interview's row first, holding the key and its body's hash, with no Desk
-  yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
-  key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say) deletes its row, since
-  nothing was made, so the same request can be sent again. Before the kernel is asked for the Desk, the start records
-  it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a failure too
-  (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing
-  made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again, so a new
-  click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after` 2 s),
-  holding nothing while the client waits. A row still starting after the longest a start can take
+  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. Each start carries
+  the client's `idempotency_key` (required) and writes the interview's row first, holding the key and its body's
+  hash, with no Desk yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row
+  in a copy hold a key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say)
+  deletes its row, since nothing was made, so the same request can be sent again. Before the kernel is asked for the
+  Desk, the start records it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a
+  failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
+  nothing made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again,
+  so a new click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after`
+  2 s), holding nothing while the client waits. A row still starting after the longest a start can take
   (`START_ABANDONED_S`) has stopped. One that never recorded asking for its Desk is abandoned, and a repeat deletes
   it. One that did record it, with no Desk and no failure, stays uncertain (the Desk may exist, its answer lost): it
   is kept, and its key is spent (409 `key_spent`), so only a new key starts again.
   The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
-  instead. A start without a key writes its row last.
+  instead. A row written before the key was required may hold none (the column stays nullable); it is read and
+  moved on like any other.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
   memory or website read ever runs for the interview, and a website the owner names later is kept as text.
@@ -61,10 +62,11 @@ Part 2 runs through the proving routes (`desk.api.proving`). The rules step puts
 the Desk offers, the contract's limits, the answered limits and money cap, the owner's "never" answers, no money going
 out on its own), stores them, and posts them after the Ask me first preset's utility cards to `POST /policy/draft`,
 which compiles and proves them. Cards code can't use, or that the kernel refuses as invalid (naming no card), get
-Claude's one retry, then the template cards. A re-post sends the stored cards and never drafts again; a rejected proof,
-or stored cards the kernel refuses, fall back to the template cards once. The situations (route `situations`) and the
-safety check (`SAFETY_PROBES`) are probes the kernel decides against the draft, running nothing. The confirm activates
-the draft with Answering still off, and going live turns it on.
+Claude's one retry, then the template cards; so do cards that would change starting a verification, which the API
+refuses before the kernel is asked, with the check the kernel refuses them with. A re-post sends the stored cards and
+never drafts again; a rejected proof, or stored cards the kernel refuses, fall back to the template cards once. The
+situations (route `situations`) and the safety check (`SAFETY_PROBES`) are probes the kernel decides against the draft,
+running nothing. The confirm activates the draft with Answering still off, and going live turns it on.
 """
 
 import asyncio
@@ -85,7 +87,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg.errors import LockNotAvailable
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import Interval, delete, func, insert, literal, select, update
+from sqlalchemy import Interval, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
@@ -164,12 +166,14 @@ from desk.api.schemas import (
 )
 from desk.api.setup_templates import SAFETY_PROBES, SafetyProbe, template_cards
 from desk.api.versions import (
+    ChangesAlwaysOn,
     active_row,
     checkable,
     connect_payments,
     post_draft,
     rules_draft,
     tool_rows,
+    version_cap,
     version_from_row,
 )
 from desk.contracts import (
@@ -655,8 +659,9 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
 
 
 def _failure_record(error: BaseException) -> dict:
-    """What a keyed start that failed once its Desk was asked for answered, kept on its row: the row is settled and
-    its key spent (a repeat answers 409 `key_spent`)."""
+    """What a start that failed once its Desk was asked for answered, kept on its row: the row is settled and its key
+    spent. The record is kept for diagnosis only: a repeat answers 409 `key_spent` from its presence, never from its
+    content."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
     if isinstance(error, KernelFailed):
@@ -722,21 +727,10 @@ async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
                 admit: Callable[[], Awaitable[None]]) -> SetupState:
     """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
-    limits) lets the start through. With the client's key, a repeat is answered before `admit` counts it; otherwise
-    the interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
+    limits) lets the start through. A repeat of the client's key is answered before `admit` counts it; otherwise the
+    interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
     (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
-    if key is None:
-        await admit()
-        described, desk = await _read_description(owner, engine, model, body)
-        interview, slug = await _make_desk(owner, body, described, desk, "setup-" + secrets.token_hex(16))
-        async with engine.connect() as conn:
-            await conn.execute(insert(INTERVIEWS).values(interview_id=interview.interview_id,
-                                                         copy_id=interview.copy_id, desk_id=interview.desk_id,
-                                                         business_type=interview.business_type, **_stored(interview)))
-            await conn.commit()
-        return setup_state(interview, slug)
-
     async with ADMISSIONS.admitting(owner.copy_id, key):
         repeat = await repeated_start(owner, engine, body)
         if repeat is not None:
@@ -1253,27 +1247,35 @@ async def _rule_tools(owner: OwnerCtx, desk_id: str) -> list[dict]:
     return [{"tool": row["tool"], "effects": list(row["effects"])} for row in rows if row["tool"] not in UTILITY_TOOLS]
 
 
-async def _post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard]) -> PolicyVersion:
-    """The kernel's draft of the utility cards and `cards`, on the active version (`versions.post_draft`).
+async def _post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], cap: int) -> PolicyVersion:
+    """The kernel's draft of the utility cards and `cards`, on the active version (`versions.post_draft`), at the
+    owner's answered money cap `cap` (0 when unanswered).
 
-    The money cap: setup's money cards are held to the answered cap (`template_cards`, `_card_problems`). The draft
-    names no cap yet: `PolicyDraftRequest` gains `auto_money_cap_cents` with the kernel's money cap contract (master
-    "Money cap"), and this request then sends the answered cap. Until then the kernel holds every version to the
-    platform's cap, which the answered cap can't pass."""
+    The money cap: setup's money cards are held to the answered cap (`template_cards`, `_card_problems`), and the
+    draft names it (`PolicyDraftRequest.auto_money_cap_cents`, master "Money cap"), so the kernel compiles and proves
+    the version at that cap; it becomes the Desk's only once the owner confirms the draft. The cap the owner reads
+    back is the version's (`versions.version_cap`)."""
     active = await active_row(owner, desk_id)
-    return await post_draft(owner, desk_id, [*UTILITY_CARDS, *cards], active["version"])
+    return await post_draft(owner, desk_id, [*UTILITY_CARDS, *cards], active["version"], auto_money_cap_cents=cap)
 
 
-async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard],
-                  template: list[RuleCard]) -> PolicyVersion | None:
-    """The kernel's checkable draft of setup's `cards` (`_post_draft`), or None when the kernel refuses them as invalid
-    (422, which names no card: the kernel logs why). The `template` cards refused are the owner's error to see."""
+async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], template: list[RuleCard],
+                  cap: int) -> PolicyVersion | None:
+    """The kernel's checkable draft of setup's `cards` at the answered cap (`_post_draft`), or None when the kernel
+    refuses them as invalid (422, which names no card: the kernel logs why), or when the API refuses them first for a
+    card that would change starting a verification (`ChangesAlwaysOn`, the check the kernel refuses them with). The
+    `template` cards refused are the owner's error to see."""
     try:
-        return checkable(await _post_draft(owner, desk_id, cards))
+        return checkable(await _post_draft(owner, desk_id, cards, cap))
     except KernelFailed as refused:
         if refused.code != "invalid" or cards == template:
             raise
         logger.warning("the kernel refused setup's cards as invalid")
+        return None
+    except ChangesAlwaysOn as refused:
+        if cards == template:
+            raise
+        logger.warning("setup's cards would change starting a verification: %s", ", ".join(refused.card_ids))
         return None
 
 
@@ -1319,17 +1321,17 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first
             cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards))
-            return await _posted(owner, desk_id, cards, template)
+            return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
                                     await _rule_tools(owner, desk_id), post)
     else:
-        version = await _posted(owner, desk_id, cards, template)
+        version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
         cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards))
-        version = checkable(await _post_draft(owner, desk_id, cards))
+        version = checkable(await _post_draft(owner, desk_id, cards, answers.auto_money_cap_cents))
     await _drafted(engine, owner, interview_id, version.version, "rules")
-    return rules_draft(version, answers.auto_money_cap_cents)
+    return rules_draft(version, version_cap(version))
 
 
 # Situations and the safety check -----------------------------------------------------------------------------------
@@ -1573,9 +1575,10 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     except KernelFailed as refused:
         if refused.code != "conflict":
             raise
-        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards))
+        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
+                                              interview.answers.auto_money_cap_cents))
         await _drafted(engine, owner, interview_id, version.version, "rules")
-        raise RulesChangedSinceDraft(rules_draft(version, interview.answers.auto_money_cap_cents)) from None
+        raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
     return active
 

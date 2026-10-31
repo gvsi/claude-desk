@@ -9,8 +9,14 @@ server, a stand-in prover, an offline reviewer, a frozen clock), then builds the
 refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
-(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), and
-last reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`).
+(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
+gives every Desk the native tools it was created without and rebuilds the active rules versions an
+earlier kernel stored under another baseline, within a budget that finding them counts against
+too, and from cached reports only (`activation.rebuild_at_startup`), then starts the rebuild of
+the copies and Desks startup left, which runs in the background while the kernel serves
+(`activation.rebuild_in_background`, `app.state.rebuilding`) and is cancelled at shutdown, and last
+reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`), within
+`STARTUP_RECONCILE_S`, since a read settles them too.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -18,8 +24,10 @@ route, a wrong method) the code for their status, and anything unhandled 500 `in
 the request's transaction has rolled back.
 """
 
+import asyncio
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -27,26 +35,59 @@ from typing import Annotated, Any
 
 import desk_kernel
 import uvicorn
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from pydantic import BeforeValidator
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, BeforeValidator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from desk.contracts import LedgerEntry, LedgerPage, PolicyVersion
+from desk.contracts import (DemoInboxEntry, KnowledgeItem, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult,
+                            PolicyVersion)
+from desk.db import logs as db_logs
+from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
-from desk.kernel_api import Health, KernelError, LedgerAppendRequest, PolicyConfirmRequest, PolicyDraftRequest
-from desk.kernel_service import (activation, approvals, auth, context, copies, decide, execute, ledger, public,
-                                 reply_check, sessions)
-from desk.kernel_service.auth import AuthError, Named
+from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
+                             Health, KernelError, KnowledgeRequest, LedgerAppendRequest, OwnerMessageRequest,
+                             PolicyConfirmRequest, PolicyDraftRequest)
+from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
+                                 labels, ledger, public, reply_check, sessions, verification)
+from desk.kernel_service.adapters import release_document
+from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
-from desk.kernel_service.repo import Ctx, KernelFailure, KernelRuntime, kernel_transaction, log_error, route_template
+from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
+                                      route_template, storable)
 
 log = logging.getLogger("desk.kernel_service")
+STARTUP_RECONCILE_S = 10.0         # startup's limit on settling the executions a stopped kernel left
+
+# A link's path carries its single-use token (`/document_links/{token}`, and Plan 01c's
+# `/payment_links/{token}`); its segment is written `<redacted>` wherever it is logged.
+LINK_TOKEN_PATH = re.compile(r"(/(?:document_links|payment_links)/)[^/?#\s\"]+")
+
+
+def redact_link_tokens(text: str) -> str:
+    return LINK_TOKEN_PATH.sub(r"\1<redacted>", text)
+
+
+class RedactLinkTokens(logging.Filter):
+    """On the `uvicorn.access` logger: a request line's link token, in its message or its
+    arguments, becomes `<redacted>`. `serve_config` keeps the access log off; this covers a kernel
+    run with it on (uvicorn's command line turns it on by default)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = redact_link_tokens(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(redact_link_tokens(arg) if isinstance(arg, str) else arg for arg in record.args)
+        return True
+
+
+ACCESS_LOG_FILTER = RedactLinkTokens()
 
 
 @dataclass(frozen=True)
@@ -88,6 +129,8 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     `DESK_DECISIONS`); the lifespan refuses them outside development."""
     settings = settings or KernelSettings.from_env()
     clock = clock or SystemClock()
+    logging.getLogger("uvicorn.access").addFilter(ACCESS_LOG_FILTER)   # once: the same filter isn't added twice
+    db_logs.install()                     # a database error is logged without its text; once, too
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -101,23 +144,46 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         policies = activation.PolicyRuntime.start(app.state.unproved_seeds)   # raises on a baseline it can't take
         app.state.engine, app.state.loaded_versions = policies.engine, policies.versions
         app.state.proof_mode = await activation.run_selftest()               # symcc or bounded, for the whole process
-        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+        # a failed statement's error names no bound value (some carry a code or a token); what
+        # Postgres's own text says is kept out of the log by `db_logs`
+        engine = create_async_engine(settings.database_url, pool_pre_ping=True, hide_parameters=True)
         factory = async_sessionmaker(engine, expire_on_commit=False, sync_session_class=KernelSession)
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
+        rebuilding: asyncio.Task | None = None
         try:
+            startup: activation.StartupRebuild | None = None
             try:
-                # executions a stopped kernel left behind; a read settles them too, so a failure
-                # here is logged and the kernel starts
-                await execute.reconcile_at_startup(app.state.kernel)
+                # active versions an earlier kernel stored under another baseline, rebuilt and
+                # proved before anything is decided under them; one that isn't decides nothing
+                startup = await activation.rebuild_at_startup(app.state.kernel)
+            except Exception as exc:
+                # whatever went wrong, the background lists the copies and brings them up itself
+                log_error(log, exc, "startup_rebuild_failed")
+                startup = activation.StartupRebuild(results={}, left=[], unscanned=None)
+            if startup is not None and startup.pending:
+                # the Desks and copies startup left, while the kernel serves; each Desk refuses
+                # until it is rebuilt. Started first, so nothing after it can keep it from starting
+                rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, startup))
+            app.state.rebuilding = rebuilding
+            try:
+                # executions a stopped kernel left behind; a read settles them too, so a failure or
+                # a run past STARTUP_RECONCILE_S is logged and the kernel starts
+                await asyncio.wait_for(execute.reconcile_at_startup(app.state.kernel), STARTUP_RECONCILE_S)
+            except TimeoutError:
+                log.info("startup_reconcile_cut_off")
             except Exception as exc:
                 log_error(log, exc, "startup_reconcile_failed")
             yield
         finally:
+            if rebuilding is not None:
+                rebuilding.cancel()
+                await asyncio.gather(rebuilding, return_exceptions=True)
             await engine.dispose()
 
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.proof_mode = "bounded"   # until the startup selftest passes
+    app.state.rebuilding = None        # the background rebuild of what startup left, if anything
     app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
     app.add_exception_handler(RequestValidationError, _invalid_request)
@@ -131,6 +197,12 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(context.router)
     app.include_router(reply_check.router)
     app.include_router(public.router)
+    app.include_router(verification.router)
+    app.include_router(desk_router)
+    app.include_router(document_link_router)
+    app.include_router(inbox_router)
+    app.include_router(handoff_router)
+    app.include_router(owner_router)
     app.include_router(ledger_router)
     app.include_router(policy_router)
 
@@ -142,6 +214,162 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                       key_id=signer.key_id(), unproved_seeds=sorted(request.app.state.unproved_seeds))
 
     return app
+
+
+desk_router = APIRouter()
+
+
+@desk_router.post("/desks", response_model=DeskCreated)
+async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> DeskCreated:
+    """A new Desk in the owner's copy, with the starter preset (`ask_first`) active from its shipped
+    report at a money cap of 0, in one transaction: a preset with no report for the Desk's tools is
+    503 `seed_unproved` and creates nothing. A new Desk connects no MCP server (`/tools/connect`
+    does), and its first cap is 0, every charge and payout asking ("Money cap"): a nonzero
+    `auto_money_cap_cents` is 422 `invalid`, since the presets are proved at 0; the owner raises it
+    with a draft they confirm."""
+    owner = await desks.owner_alone(ctx, request)
+    if body.desk.connections:
+        raise KernelFailure(422, "invalid", "desk_connections")
+    if body.desk.auto_money_cap_cents != 0:
+        raise KernelFailure(422, "invalid", "desk_money_cap")
+    created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
+    await activation.activate_shipped(ctx, created.desk_id, "ask_first", 0)
+    return created
+
+
+@desk_router.delete("/desks/{id}", status_code=204)
+async def delete_desk(desk_id: Annotated[str, Path(alias="id")], ctx: Ctx, request: Request) -> Response:
+    """Deletes a Desk of the owner's copy (`desks.delete_desk`); its ledger stays readable."""
+    await desks.delete_desk(ctx, await desks.owner_desk(ctx, request, desk_id))
+    return Response(status_code=204)
+
+
+@desk_router.post("/documents", response_model=DocumentCreated)
+async def post_document(body: DocumentUploadRequest, ctx: Ctx, request: Request) -> DocumentCreated:
+    """A document on a Desk of the owner's copy, with a fresh canary (`desks.upload_document`)."""
+    return await desks.upload_document(ctx, await desks.owner_desk(ctx, request, body.desk_id), body.document)
+
+
+@desk_router.post("/knowledge", response_model=KnowledgeItem)
+async def post_knowledge(body: KnowledgeRequest, ctx: Ctx, request: Request) -> KnowledgeItem:
+    """A knowledge item on a Desk of the owner's copy (`labels.store_knowledge`)."""
+    desk_row = await desks.owner_desk(ctx, request, body.desk_id)
+    return await labels.store_knowledge(ctx, desk_row.desk_id, body.item)
+
+
+def _put_route(part: str, model: type[BaseModel]) -> None:
+    """`PUT /desks/{id}/<part>` with that part's body model (`desks.PARTS`)."""
+
+    async def put(desk_id: Annotated[str, Path(alias="id")], body: model, ctx: Ctx,   # type: ignore[valid-type]
+                  request: Request) -> DeskUpdated:
+        return await desks.put_part(ctx, request, desk_id, part, body)
+
+    desk_router.put(f"/desks/{{id}}/{part}", response_model=DeskUpdated, name=f"put_desk_{part}")(put)
+
+
+for _part, (_model, _) in desks.PARTS.items():
+    _put_route(_part, _model)
+
+
+document_link_router = APIRouter()
+
+
+# A released document is stored by no one who passes it on, read as plain text and nothing else,
+# sends no Referer with its token to anywhere it is followed from, and is shown rather than saved.
+DOCUMENT_HEADERS = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+
+
+@document_link_router.get("/document_links/{token}")
+async def get_document_link(token: str, ctx: Ctx) -> Response:
+    """A released document, by its link's token alone (`release_document.open_document_link`):
+    the bytes on the link's first open within a day, under `DOCUMENT_HEADERS` and a file name made
+    from its title (never from the request), and 404 `not_found` for every other link. The API
+    proxies it at `/api/d/{token}` with these headers as they are."""
+    document = await release_document.open_document_link(ctx, token)
+    return Response(content=document.body, media_type=document.media_type, headers={
+        **DOCUMENT_HEADERS, "Content-Disposition": f'inline; filename="{document.filename}"'})
+
+
+inbox_router = APIRouter()
+
+
+@inbox_router.get("/demo_inbox", response_model=list[DemoInboxEntry])
+async def read_demo_inbox(ctx: Ctx, request: Request, session_id: str | None = None) -> list[DemoInboxEntry]:
+    """The Demo inbox: with `session_id` (`X-Session-Token`), the verification codes of the
+    challenges the session started, never another session's code for the same person, and nothing
+    else; without it, every entry of the owner's copy (`X-Owner-Session`)."""
+    if session_id is None:
+        await auth.require_owner(ctx, request)
+        return await demo_inbox.owner_entries(ctx)
+    row = await auth.require_session(ctx, request, session_id)
+    await auth.require_desk(ctx, request, row, row.desk_id)
+    return await demo_inbox.session_entries(ctx, row)
+
+
+handoff_router = APIRouter()
+
+
+@handoff_router.post("/handoffs/{handoff_id}/done", response_model=DeskUpdated)
+async def close_handoff(handoff_id: str, ctx: Ctx, request: Request) -> DeskUpdated:
+    """The owner has called the visitor back: the handoff goes from `open` to `done` under its
+    row's lock, and its `handoff:<id>` fact to `expired` (a callback that happened can't be
+    promised again), ledgered `desk_data` `{part: "handoffs", refs: [handoff_id]}` in the same
+    transaction, with the owner's credential alone. One already done is 409 `conflict`, changing
+    nothing. One the owner's copy doesn't have, unknown or another copy's (row-level security
+    hides those), is 404 `not_found`, logged, since there is no Desk of the copy to ledger it on.
+    One on a deleted Desk, open or done, is 409 `closed`, ledgered on that Desk, as on the Desk's
+    other routes: a deletion leaves its handoffs as they were.
+
+    It is an owner's write to the Desk's data, so it holds the Desk row first (`desks.held_desk`,
+    read afresh, which a deletion holds too), then the handoff, its fact and the ledger head."""
+    route = route_template(request)
+    owner = await desks.owner_alone(ctx, request)
+    desk_id = None
+    if storable(handoff_id):                          # text Postgres can't hold names no handoff
+        desk_id = (await ctx.db.execute(ctx.repo.scoped(select(Handoff.desk_id).where(
+            Handoff.handoff_id == handoff_id)))).scalar_one_or_none()
+    if desk_id is None:
+        raise AuthError(404, "not_found", "unknown_handoff", route=route)
+    await desks.held_desk(ctx, request, owner, desk_id)
+    handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(Handoff.handoff_id == handoff_id)
+                                                    .with_for_update()))).one()
+    if handoff.status != "open":
+        raise KernelFailure(409, "conflict", "handoff_done")
+    handoff.status = "done"
+    fact = (await ctx.db.scalars(ctx.repo.scoped(select(Fact).where(
+        Fact.desk_id == handoff.desk_id, Fact.fact_id == f"handoff:{handoff.handoff_id}")
+        .with_for_update()))).one_or_none()
+    if fact is not None:
+        fact.status = "expired"
+    await ledger.append(ctx, copy_id=handoff.copy_id, desk_id=handoff.desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [handoff.handoff_id]}))
+    return DeskUpdated(desk_id=handoff.desk_id, updated_at=ctx.clock.now())
+
+
+owner_router = APIRouter()
+
+
+@owner_router.post("/owner/messages", response_model=OwnerMessageResult)
+async def post_owner_message(body: OwnerMessageRequest, ctx: Ctx, request: Request) -> OwnerMessageResult:
+    """The owner says something in a conversation, or whispers to Claude in it
+    (`reply_check.owner_message`), with the owner's credential alone (a session token beside it is
+    401). The session must be a visitor's or an agent's of the owner's copy (another copy's is 404,
+    the owner's own session 422 `invalid`), open and on a Desk not deleted (409 `closed`), in any
+    mode, a take-over and a pause included; each refusal of the session is ledgered on its Desk.
+    Its row is held `FOR SHARE` until the answer commits, so a take-over running alongside is seen
+    whole and the verdict carries the generation the conversation is at."""
+    route = route_template(request)
+    if auth.SESSION_HEADER in request.headers:
+        raise AuthError(401, "auth", "bad_token", route=route, named=await auth.named_session(ctx, body.session_id))
+    owner = await auth.require_owner(ctx, request, session_id=body.session_id)
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
+        SessionRow.session_id == body.session_id).with_for_update(read=True)
+        .execution_options(populate_existing=True)))).one()
+    if row.kind == "owner":
+        raise KernelFailure(422, "invalid", "owner_session")
+    auth.require_open(ctx, request, row)
+    await auth.require_desk(ctx, request, row, row.desk_id)
+    return await reply_check.owner_message(ctx, owner, row, body)
 
 
 ledger_router = APIRouter()
@@ -167,7 +395,9 @@ async def append_api_entry(body: ApiEntry, ctx: Ctx, request: Request) -> Ledger
         owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
         copy_id, session_id = owner.copy_id, owner.session_id
     elif auth.SESSION_HEADER in request.headers and auth.OWNER_HEADER not in request.headers:
-        row = await auth.require_session_token(ctx, request)
+        # the API's record of something that already happened, answered as stored: a session that
+        # closes once its token is proved still gets it, and its next read answers the close
+        row = await auth.require_session_token(ctx, request, watch=False)
         copy_id, session_id = row.copy_id, row.session_id
         if body.desk_id != row.desk_id:
             raise AuthError(404, "not_found", "wrong_copy", route=route,
@@ -197,10 +427,13 @@ policy_router = APIRouter()
 
 @policy_router.post("/policy/draft", response_model=PolicyVersion)
 async def post_policy_draft(body: PolicyDraftRequest, ctx: Ctx, request: Request) -> PolicyVersion:
-    """The owner's cards as a draft version, proved (or, in `bounded` mode, checked) before it
-    answers; idempotent, so a re-post waits for the running proof and gets the same version."""
+    """The owner's cards as a draft version at a money cap (absent: the active version's), proved
+    (or, in `bounded` mode, checked) before it answers; idempotent, so a re-post waits for the
+    running proof and gets the same version. Nothing changes until the owner confirms it."""
     owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
-    return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent)
+    await _open_desk(ctx, request, body.desk_id)
+    return await activation.draft(ctx, owner, body.desk_id, body.cards, body.expected_parent,
+                                  body.auto_money_cap_cents)
 
 
 @policy_router.post("/policy/confirm", response_model=PolicyVersion)
@@ -208,7 +441,17 @@ async def post_policy_confirm(body: PolicyConfirmRequest, ctx: Ctx, request: Req
     """Activates a proved draft while its parent is still active and what it was proved against
     is current; 409 `conflict` otherwise, ledgered with the reason."""
     await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
     return await activation.confirm(ctx, body.desk_id, body.version)
+
+
+async def _open_desk(ctx: KernelCtx, request: Request, desk_id: str) -> None:
+    """A deleted Desk's rules don't change (409 `closed`, ledgered on it)."""
+    deleted_at = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == desk_id)))).scalar_one()
+    if deleted_at is not None:
+        raise AuthError(409, "closed", "closed", route=route_template(request),
+                        named=Named(copy_id=ctx.copy_id, desk_id=desk_id))
 
 
 def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:

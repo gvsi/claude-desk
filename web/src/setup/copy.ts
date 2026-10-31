@@ -4,7 +4,7 @@
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
 import type { QuestionKey, SetupStep } from '../api/views.ts';
-import { UNREACHABLE_COPY } from '../ds/index.ts';
+import { SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, type CopyLanguage } from '../ds/index.ts';
 
 /**
  * What setup says when its checking ran out of time on this side (the proving give-up) and the
@@ -15,6 +15,109 @@ import { UNREACHABLE_COPY } from '../ds/index.ts';
 export function stillCheckingLine(): string {
   return UNREACHABLE_COPY.en;
 }
+
+/**
+ * What the start page says when the answer to "Start" was lost: setup may have started, and "Try
+ * again" sends the same start with the same key, which goes on to the interview if it did. The
+ * design system's retry-safe line.
+ */
+export function setupStartLostLine(): string {
+  return SETUP_START_RETRY_COPY;
+}
+
+/**
+ * What the start page says when the API still answered that the start is under way after the
+ * page's own retries (409 `in_progress`): "Try again" asks once more, with the same key.
+ */
+export function setupStartSlowLine(): string {
+  return SETUP_START_SLOW_COPY;
+}
+
+/**
+ * What the start page says when the API answers that the start's key can't start anything again
+ * (409 `key_spent`): setup didn't start, and "Start" starts anew with a new key.
+ */
+export function setupStartSpentLine(): string {
+  // pending: the design system's SETUP_START_SPENT_COPY, once its wording is approved
+  return UNREACHABLE_COPY.en;
+}
+
+/**
+ * Setup's language. The owner app is English (`index.html` sets it), and setup has no language of
+ * its own yet, so every step reads English; copy kept in both languages, such as the start step's
+ * examples, is ready for when it has one.
+ */
+export const SETUP_LANGUAGE: CopyLanguage = 'en';
+
+/** One example the start step offers: its chip, and the description it puts in the box. */
+export interface StartExample {
+  /** What kind of business it is, as the chip says it. */
+  chip: string;
+  /**
+   * A description the way an owner writes one: the business's name, the owner's first name as the
+   * box's hint asks, and the work, in the first person. Words for the owner to change, not facts, so
+   * no prices, dates, discounts or promises.
+   */
+  description: string;
+}
+
+/**
+ * The start step's examples: the line and the chips in the signed board's words (UXC-P602-After),
+ * and the descriptions they put in the box, written for the build rather than taken from the board.
+ */
+export interface StartExamples {
+  /** The line over the chips. */
+  line: string;
+  /** The chips' group, for screen readers. */
+  label: string;
+  examples: readonly StartExample[];
+}
+
+/** The examples by language, as the public page keeps its words (`PUBLIC_COPY`). */
+export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
+  en: {
+    line: 'Or start from an example. You can change every word.',
+    label: 'Examples',
+    examples: [
+      {
+        chip: 'A plumber in Oakland',
+        description:
+          "Okafor Plumbing. I'm Daniel, and I fix leaks, clear drains and replace water heaters for homes around Oakland. People often send me a photo of the problem before I come out.",
+      },
+      {
+        chip: 'A bakery that takes custom orders',
+        description:
+          "Rosa's Bakery. I'm Rosa, and I bake custom cakes and pastries in Berkeley. Most orders are for birthdays and weddings, and people tell me the size, the flavors and the design they have in mind.",
+      },
+      {
+        chip: 'A tax preparer',
+        description:
+          "Nguyen Tax Services. I'm Linh, and I prepare tax returns for families, freelancers and small shops in San Jose. People send me their documents online or bring them to my office.",
+      },
+    ],
+  },
+  es: {
+    line: 'O empieza con un ejemplo. Puedes cambiar cada palabra.',
+    label: 'Ejemplos',
+    examples: [
+      {
+        chip: 'Un plomero en Oakland',
+        description:
+          'Plomería Okafor. Soy Daniel y arreglo fugas, destapo drenajes y cambio calentadores de agua en casas de Oakland. La gente suele mandarme una foto del problema antes de que vaya.',
+      },
+      {
+        chip: 'Una panadería que acepta pedidos personalizados',
+        description:
+          'Panadería Rosa. Soy Rosa y hago pasteles personalizados y pan dulce en Berkeley. Casi todos los pedidos son para cumpleaños y bodas, y la gente me dice el tamaño, los sabores y el diseño que tiene en mente.',
+      },
+      {
+        chip: 'Una preparadora de impuestos',
+        description:
+          'Impuestos Nguyen. Soy Linh y preparo declaraciones de impuestos para familias, trabajadores independientes y pequeños negocios en San José. La gente me manda sus documentos por internet o los trae a mi oficina.',
+      },
+    ],
+  },
+};
 
 /** The steps, as the bar lists them. */
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;

@@ -29,6 +29,7 @@ import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
+import { idempotencyKeyOf } from './keys.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
@@ -106,6 +107,12 @@ const NO_OWNER = fail(401, 'no_owner_session');
 const NOT_FOUND = fail(404, 'not_found');
 const INVALID = fail(422, 'invalid');
 const CONFLICT = fail(409, 'conflict');
+/** A start still starting: send it again in two seconds, as the API's `START_RETRY_S`. */
+const IN_PROGRESS = fail(409, 'in_progress', { retry_after: 2 });
+/** A start that ended with its Desk unknown: only a new key starts again. */
+const KEY_SPENT = fail(409, 'key_spent');
+/** A start that outlasted the proxy in front of the API, which answered for it while it ran on. */
+const TIMED_OUT = fail(504, 'timeout');
 
 /**
  * A phrase naming the business: "I run X", "I own X", "We run X" or "We own X", the name ending at a
@@ -532,56 +539,125 @@ function toolRows(desk: DeskRecord, only?: ReadonlySet<string>): ToolRow[] {
 
 const MOCK_PAYMENTS: ReadonlySet<string> = new Set(['payments.list_charges', 'payments.create_refund']);
 
+/** A new interview and its Desk, made with Answering off from the owner's description. */
+function newInterview(world: MockWorld, text: string, timezone: string): Interview {
+  const business = businessNameOf(text);
+  const ownerName = ownerNameOf(text);
+  const deskId = world.id('desk-setup');
+  const desk: DeskRecord = {
+    summary: { desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false },
+    policy: firstVersion(deskId),
+    ledger: [],
+    openStatus: null,
+    drafts: new Map(),
+    lastVersion: 1,
+    tools: newDeskTools(),
+    suggestions: [],
+  };
+  world.desks.push(desk);
+  const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
+  const interview: Interview = {
+    state: {
+      interview_id: world.id('setup'),
+      desk_id: deskId,
+      slug: desk.summary.slug,
+      step: 'questions',
+      consent: null,
+      question: null,
+      messages: [
+        {
+          role: 'claude',
+          text: `${greeting} Before I ask anything: can I look at what you've told Claude before about ${business}? I'll only use it to suggest answers here, and you can change any of them.`,
+        },
+      ],
+    },
+    business,
+    ownerName,
+    about: aboutOf(text),
+    timezone,
+    capCents: 0,
+    draftVersion: null,
+    holdNext: false,
+    running: null,
+  };
+  interviewsOf(world).set(interview.state.interview_id, interview);
+  return interview;
+}
+
+/**
+ * The starts by their client key (plan 02b), per copy: each start's body without the key, and
+ * what it made: its interview's id, null while it is still starting, or `spent` when it ended with
+ * its Desk unknown, so the key can't start anything again. `pending` keeps a held start's words
+ * until the test ends it.
+ */
+interface KeyedStart {
+  body: string;
+  made: string | null | 'spent';
+  pending: { text: string; timezone: string } | null;
+}
+
+const SETUP_KEYS = new WeakMap<MockWorld, { starts: Map<string, KeyedStart>; holdNext: boolean }>();
+
+function setupKeysOf(world: MockWorld): { starts: Map<string, KeyedStart>; holdNext: boolean } {
+  let found = SETUP_KEYS.get(world);
+  if (!found) {
+    found = { starts: new Map(), holdNext: false };
+    SETUP_KEYS.set(world, found);
+  }
+  return found;
+}
+
+/**
+ * For tests: the next start runs long, as a model turn or a slow kernel can. Its own answer is
+ * lost (a 504 from the proxy in front), a repeat with its key is 409 `in_progress` meanwhile, and
+ * it ends when the returned function says how: `made` its interview and Desk; `freed` its key,
+ * having failed before the Desk was asked for, so the same request starts again; or `spent` its
+ * key, its Desk unknown, so a repeat is 409 `key_spent`.
+ */
+export function holdNextStart(world: MockWorld): (outcome: 'made' | 'freed' | 'spent') => void {
+  const keys = setupKeysOf(world);
+  keys.holdNext = true;
+  return (outcome) => {
+    const held = [...keys.starts].find(([, start]) => start.made === null);
+    const pending = held?.[1].pending;
+    if (held === undefined || pending == null) throw new Error('no setup start is running');
+    const [key, start] = held;
+    if (outcome === 'freed') keys.starts.delete(key);
+    else start.made = outcome === 'spent' ? 'spent' : newInterview(world, pending.text, pending.timezone).state.interview_id;
+    start.pending = null;
+  };
+}
+
 /** The setup routes, answered from the copy the request reached. */
 export const SETUP_ROUTES: ServedRoutes = {
   startSetup(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     const body = isRecord(req.body) ? req.body : {};
     const { description, timezone } = body;
-    if (req.malformed || typeof description !== 'string' || typeof timezone !== 'string' || timezone === '') return INVALID;
+    const key = idempotencyKeyOf(body);
+    if (req.malformed || typeof description !== 'string' || typeof timezone !== 'string' || timezone === '' || key === false) return INVALID;
     const text = description.trim();
     if (text === '' || text.length > DESCRIPTION_MAX) return INVALID;
     const { world } = sv;
-    const business = businessNameOf(text);
-    const ownerName = ownerNameOf(text);
-    const deskId = world.id('desk-setup');
-    const desk: DeskRecord = {
-      summary: { desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false },
-      policy: firstVersion(deskId),
-      ledger: [],
-      openStatus: null,
-      drafts: new Map(),
-      lastVersion: 1,
-      tools: newDeskTools(),
-      suggestions: [],
-    };
-    world.desks.push(desk);
-    const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
-    const interview: Interview = {
-      state: {
-        interview_id: world.id('setup'),
-        desk_id: deskId,
-        slug: desk.summary.slug,
-        step: 'questions',
-        consent: null,
-        question: null,
-        messages: [
-          {
-            role: 'claude',
-            text: `${greeting} Before I ask anything: can I look at what you've told Claude before about ${business}? I'll only use it to suggest answers here, and you can change any of them.`,
-          },
-        ],
-      },
-      business,
-      ownerName,
-      about: aboutOf(text),
-      timezone,
-      capCents: 0,
-      draftVersion: null,
-      holdNext: false,
-      running: null,
-    };
-    interviewsOf(world).set(interview.state.interview_id, interview);
+    // A repeat with the client's key answers what the first start made, and makes nothing (plan 02b).
+    const keys = setupKeysOf(world);
+    const sent = JSON.stringify([description, timezone, body.owner_display_name ?? null]);
+    const held = keys.starts.get(key);
+    if (held !== undefined) {
+      if (held.body !== sent) return CONFLICT;
+      if (held.made === 'spent') return KEY_SPENT;
+      const interview = held.made === null ? undefined : interviewsOf(world).get(held.made);
+      return interview ? created(stateOf(interview)) : IN_PROGRESS;
+    }
+    if (keys.holdNext) {
+      // A start that runs long: it ends when the test says how (`holdNextStart`), and its own answer
+      // is lost meanwhile.
+      keys.holdNext = false;
+      keys.starts.set(key, { body: sent, made: null, pending: { text, timezone } });
+      return TIMED_OUT;
+    }
+    const interview = newInterview(world, text, timezone);
+    keys.starts.set(key, { body: sent, made: interview.state.interview_id, pending: null });
     return created(stateOf(interview));
   },
   setup(sv, req) {

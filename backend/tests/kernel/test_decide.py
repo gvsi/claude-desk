@@ -13,6 +13,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
+from types import SimpleNamespace
 
 import desk_kernel
 import httpx
@@ -30,7 +31,7 @@ from desk.db.session import database_url, libpq_url
 from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import activation, adapters, auth, compiler, decide, desks, ledger, render
-from desk.kernel_service.adapters.base import Normalized, NormalizeCtx
+from desk.kernel_service.adapters.base import QUOTED_CHARS, Normalized, NormalizeCtx
 from desk.kernel_service.repo import new_id
 
 from .fakes import FakeAdapter, FakeDecisions
@@ -139,7 +140,8 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     decides = [event for event in entries if event.kind == "decide"]
     assert [(event.session_id, event.summary) for event in decides] == [
         (visitor.session_id, {"decision_id": d.decision_id, "action_id": d.action.action_id, "tool": d.action.tool,
-                              "outcome": d.outcome, "card_ids": d.card_ids, "policy_version": 1, "reviewed": False})
+                              "outcome": d.outcome, "card_ids": d.card_ids, "policy_version": 1,
+                              "auto_money_cap_cents": 50_000, "reviewed": False})
         for d in (allowed, held, refused)]
 
     # a session that last spoke Spanish reads its status lines in Spanish
@@ -344,7 +346,8 @@ STRAY_PERMIT = ('@id("auto.stray") @card("stray") @tier("auto") @applies_to("nat
 
 
 async def activate_sets(app: FastAPI, rows: CopyRows, *, A: str) -> None:
-    """Test only: the Desk's default asks as `F` and `H`, with `A` as written, as its active version."""
+    """Test only: the Desk's default asks as `F` and `H`, with `A` as written, as its active version, at
+    the money cap of the version it replaces."""
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         current = await activation.active_version(ctx, rows.desk_id)
@@ -352,11 +355,13 @@ async def activate_sets(app: FastAPI, rows: CopyRows, *, A: str) -> None:
         await ctx.db.flush()
         profiles = await desks.enabled_profiles(ctx, rows.desk_id)
         schema = compiler.desk_schema(profiles)
-        defaults = compiler.compile_cards([], profiles)
+        cap = current.auto_money_cap_cents
+        defaults = compiler.compile_cards([], profiles, auto_money_cap_cents=cap)
         sets = compiler.CompiledSets(F=defaults.F, A=A, H=defaults.H, cards=defaults.cards)
         ctx.db.add(activation.version_row(
             copy_id=rows.copy_id, desk_id=rows.desk_id, version=current.version + 1, parent_version=current.version,
-            compiled=sets, a0=A, schema=schema, hashes=activation.version_hashes(sets, schema, profiles, cards=[]),
+            compiled=sets, a0=A, schema=schema, auto_money_cap_cents=cap,
+            hashes=activation.version_hashes(sets, schema, profiles, cards=[], auto_money_cap_cents=cap),
             status="active", proof=None, created_at=ctx.clock.now()))
 
 
@@ -1153,7 +1158,7 @@ LONG_RULE = ("Quotes from your price list, at list price, for drain clearing, le
 async def test_the_owners_rule_is_quoted_whole(app, client, registry):
     """A rule's text is the owner's own words, and the owner reads it: it is quoted whole however
     long, never cut short inside quotes where it would read as complete."""
-    assert len(LONG_RULE) > decide.QUOTED_CHARS                         # longer than free text is cut to
+    assert len(LONG_RULE) > QUOTED_CHARS                                # longer than free text is cut to
     quote = FakeAdapter("native.quote")
     quote.script["normalize"] = priced(list_cents=18_000)
     rows = await desk_with(app, [quote], [rule("quote", "auto", LONG_RULE)])
@@ -1174,13 +1179,68 @@ async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
 def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
-    assert render.STATUS_KEYS == states | {"reply_checked", "reply_handed_off"}   # one line per decision state
+    receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
+    # why an approved release of private data went nowhere, for the owner alone: the visitor mustn't read why
+    # their session ended, so these aren't status lines and `render.status` can't render them
+    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
+    assert render.STATUS_KEYS == states | receipts                         # one line per decision state
+    # a decision's line is never a receipt, so never the owner's `owner_say_blocked`
+    assert (render.DECISION_STATUS_KEYS, render.RECEIPT_KEYS) == (states, receipts)
+    assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
             line = render.status(key, lang, owner="Maria Rivera")
             assert line and not re.search(r"[0-9$€%]", line), (lang, key, line)
             assert "{" not in line
+        for key in reasons:
+            line = render.OWNER_STATUS[lang][key]
+            assert line and not re.search(r"[0-9$€%{]", line), (lang, key, line)
+            with pytest.raises(KeyError):
+                render.status(key, lang, owner="Maria Rivera")
     assert render.status("held", "es", owner="Maria Rivera") == "Esperando la aprobación de Maria Rivera"
     assert (render.language("es"), render.language("fr"), render.language(None)) == ("es", "en", "en")
     with pytest.raises(KeyError):
         render.status("held", "fr", owner="Maria Rivera")                 # no free-text fallback
+
+
+@pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
+                                 "owner_say_blocked", "owner_said", "verify_started"])
+async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
+    """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a
+    decision's status line as its template: an owner-only line (why an approved release went nowhere,
+    or the receipt of an owner's say that was never sent), a reply's or an owner say's receipt, or any
+    other text (a verify card's message) raises `ValueError` before anything changes, so the decision
+    keeps its state and line and nothing is ledgered."""
+    rows = await desk_with(app, [FakeAdapter("native.quote")],
+                           [rule("ask-quotes", "ask", "Quotes wait for your answer.")])
+    held = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert held.state == "held"
+    before = [entry.seq for entry in await ledger_rows(app, rows)]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
+            DecisionRow.decision_id == held.decision_id).with_for_update()))).one()
+        with pytest.raises(ValueError, match=key):
+            await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=key, summary={
+                "decision_id": row.decision_id, "state": "refused_at_execution", "reason": "session_ended"})
+        assert (row.state, row.visitor_plain) == ("held", held.visitor_plain)
+    [stored] = await decisions_of(app, rows)
+    assert (stored.state, stored.visitor_plain) == ("held", held.visitor_plain)
+    assert [entry.seq for entry in await ledger_rows(app, rows)] == before
+
+
+async def test_deciding_checks_what_it_relies_on_and_fails_closed():
+    """The reviewer is asked only about a normalized action, and a decision's reasons come from
+    its evaluation and version unless it was refused early: each check raises `RuntimeError`
+    with the check's name."""
+    with pytest.raises(RuntimeError, match="^review_without_action$"):
+        await decide._review(None, SimpleNamespace(action=None), [])
+    call = SimpleNamespace(subject="A visitor", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
+                           action=None, version_row=None, quotes={})
+    with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
+        decide._reason_plain(call, "allow", None, None)
+    evaluation = decide.Evaluation("allow", [], [], None, None, strike=False, needed_review=False)
+    with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
+        decide._reason_plain(call, "allow", None, evaluation)        # an evaluation, but no version
+    # refused early, a decision's reason needs neither
+    assert decide._reason_plain(call, "refuse", "unknown_tool", None).endswith(decide.REFUSED_PLAIN["unknown_tool"])

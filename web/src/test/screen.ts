@@ -2,10 +2,15 @@
  * What every screen test checks on a screen's default state: one concept footer word for word,
  * clean copy, zero axe violations at WCAG 2.2 AA, and on owner screens no technical words. From
  * that check on, the screen stays at rest until the test ends: nothing animates or transitions.
+ * Beside it, the small checks and waits screen tests share, such as counting the reads a closed
+ * Demo inbox sends.
  */
 import axe from 'axe-core';
-import { expect, onTestFinished } from 'vitest';
+import { expect, onTestFinished, vi } from 'vitest';
+import type { Locator } from 'vitest/browser';
 
+import { ROUTES } from '../api/routes.ts';
+import { pollMs } from '../app/poll.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 
 /** The axe rule tags a screen must pass with zero violations. */
@@ -144,4 +149,31 @@ export function focusIsOn(el: Element): boolean {
   const active = document.activeElement;
   if (active === null || active === document.body || active === document.documentElement) return false;
   return el.contains(active) || (active.contains(el) && active.textContent === el.textContent);
+}
+
+/** Two animation frames: long enough for a change, such as a navigation's transition, to be drawn. */
+export function nextFrames(): Promise<void> {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+/**
+ * Counts the Demo inbox reads the app sends from now on while `sheet` isn't on the page, each as it
+ * is sent: a read sent while the sheet was open isn't one, however late the mock gets it.
+ */
+export function closedInboxReads(sheet: Locator): () => number {
+  const send = window.fetch;
+  let count = 0;
+  const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (url.pathname === ROUTES.ownerInbox.path && sheet.elements().length === 0) count += 1;
+    return send(input, init);
+  });
+  onTestFinished(() => sending.mockRestore());
+  return () => count;
+}
+
+/** A whole poll of the Demo inbox's, then two frames: a sheet still polling would have read by then. */
+export async function aPollPasses(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, pollMs('inbox')));
+  await nextFrames();
 }

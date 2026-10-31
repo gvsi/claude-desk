@@ -165,6 +165,47 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
   };
 }
 
+/** A blocked reply's line as the API writes it, when no violation says more. */
+const STOPPED_REPLY = 'A reply was stopped before it was shown.';
+
+/** Safety's empty state, and its headline for any count. */
+const NOTHING = 'Nothing stopped this week';
+const HEADLINE = /^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/;
+
+/**
+ * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
+ * attempt as the API lists it.
+ */
+function stoppedDraft(seq: number, at: string): { entry: LedgerEntry; attempt: Attempt } {
+  return {
+    entry: entry(seq, at, { kind: 'reply', session_id: `ses-${seq}`, summary: { author: 'claude', ok: false, language: 'en', violations: [] } }),
+    attempt: attempt({ ref_id: String(seq), kind: 'reply_blocked', reason_plain: STOPPED_REPLY, created_at: at, ledger_seq: seq }),
+  };
+}
+
+/**
+ * The built-in agent tries to charge $250 in one go, over its signed limit, and the kernel refuses
+ * it: a request this week's count takes in, unlike a draft of Claude's the reply check stopped.
+ */
+async function refuseTheAgentsCharge(): Promise<void> {
+  const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+  const before = refused();
+  await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+  const body = { task: 'push_the_limit', idempotency_key: `refuse-${before}` };
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body });
+  if ('network' in sent || sent.status !== 202) throw new Error('the mock sends the built-in agent');
+  await expect.poll(refused, { timeout: 5_000 }).toBe(before + 1);
+}
+
+/** A read the test lets land when it chooses. */
+function held(): { until: Promise<void>; release: () => void } {
+  let release = () => {};
+  const until = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { until, release };
+}
+
 /** The open attempt beside the list. */
 function detail(screen: RenderResult) {
   return region(screen, 'Attempt details');
@@ -218,9 +259,84 @@ describe('Safety', () => {
     await expect.element(one.screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
   });
 
-  it('headline_counts_the_listed_attempts', async () => {
+  it('empty_state_only_when_nothing_was_stopped_this_week', async () => {
+    // A fresh copy, with nothing stopped ever. The empty state waits for the attempts, so it never
+    // says nothing was stopped before the list has said so too.
+    mockStore.reset('rivera_quiet');
+    const list = held();
+    mockStore.inject({ route: 'safety', status: 200, body: [], until: list.until });
+    const quiet = await renderRoute(SAFETY);
+    await readsMore('today', 2);
+    expect(quiet.screen.getByText(NOTHING).elements()).toHaveLength(0);
+    list.release();
+    await expect.element(quiet.screen.getByText(NOTHING, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByText(HEADLINE).elements()).toHaveLength(0);
+    expect(quiet.screen.getByRole('list', { name: 'Attempts, newest first' }).elements()).toHaveLength(0);
+
+    // A draft of Claude's the reply check stopped at 8:00 pm on Friday the 23rd in Los Angeles,
+    // already the 24th in UTC: before the seven days began, so this week has still stopped nothing,
+    // and the list still shows it.
+    mockStore.reset('rivera');
+    const older = stoppedDraft(1, '2026-10-24T03:00:00.000000Z');
+    injectLedger(ledgerPage([older.entry]));
+    injectAttempts([older.attempt]);
+    await stoppedThisWeek(0);
+    const { screen } = await renderRoute(SAFETY);
+    await expect.element(screen.getByText(NOTHING, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('link', { name: /^Oct 23, 8:00 pm A reply was stopped before it was shown\./ })).toBeVisible();
+  });
+
+  it('stopped_drafts_alone_show_no_headline', async () => {
+    // Only Claude's own drafts were stopped this week, at 12:30 am on its first day and at 9:52 am
+    // today, and no request was refused: nobody tried to talk Claude around, so there is no count,
+    // and nothing says nothing was stopped. The list shows both drafts.
+    const first = stoppedDraft(1, '2026-10-24T07:30:00.000000Z');
+    const second = stoppedDraft(2, isoTime(NOW.getTime() - 38 * 60_000));
+    injectLedger(ledgerPage([first.entry, second.entry]));
+    injectAttempts([second.attempt, first.attempt]);
+    await stoppedThisWeek(0);
+    const { screen } = await renderRoute(SAFETY);
+    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link');
+    await expect.element(rows.first()).toBeVisible();
+    expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, STOPPED_REPLY]);
+    await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
+
+    // Today's count has been read again with the list on screen: still no count and no empty state.
+    await readsMore('today', 2);
+    expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Open your public page' }).elements()).toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(/talk me around/);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('refused_requests_keep_the_headline', async () => {
+    // A request the kernel refused this week, beside a draft of Claude's the reply check stopped:
+    // the headline counts the refused request as Today does, and the list keeps both.
+    const refusedAt = '2026-10-29T16:51:00.000000Z';
+    const draft = stoppedDraft(3, '2026-10-29T17:10:00.000000Z');
+    const refusal = entry(2, refusedAt, {
+      kind: 'decide',
+      session_id: 'ses-1',
+      ref_id: 'dec-refund',
+      summary: { tool: 'payments.create_refund', outcome: 'refuse', state: 'refused', card_ids: [] },
+    });
+    injectLedger(ledgerPage([refusal, draft.entry]));
+    injectAttempts([draft.attempt, attempt({ created_at: refusedAt })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(SAFETY);
+    await expect.element(screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link');
+    await expect.element(rows.first()).toBeVisible();
+    expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, REFUND_REASON]);
+    expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
+  });
+
+  it('headline_counts_the_listed_refusals', async () => {
     // A visitor asks for 50% off, the Desk holds it for Maria, and she allows it. A hold is hers to
-    // answer, not an attempt that was stopped: the count and the list both leave it out.
+    // answer, not an attempt that was stopped: the count and the list both leave it out. Then the
+    // built-in agent tries to charge over its signed limit, which is refused. The count is the
+    // refused requests, the rows stopped at the action checkpoint; the seeded draft of Claude's the
+    // reply check stopped is listed, and not counted.
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
@@ -228,13 +344,17 @@ describe('Safety', () => {
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
+    await refuseTheAgentsCharge();
 
     const { screen } = await renderRoute(SAFETY);
-    const headline = screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/);
+    const headline = screen.getByText(HEADLINE);
     await expect.element(headline).toBeVisible();
-    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('listitem');
-    await expect.element(rows.first()).toBeVisible();
-    expect(rows.elements()).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+    const list = screen.getByRole('list', { name: 'Attempts, newest first' });
+    await expect.element(list.getByRole('link').first()).toBeVisible();
+    const refused = list.getByRole('link', { name: /Stopped by: Action checkpoint$/ }).elements();
+    expect(refused).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+    expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
+    expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
 
     // Newest first, by the time each row shows.
     const ledger = await mockLedger();
@@ -618,6 +738,45 @@ describe('Safety', () => {
     expect(fresh.screen.getByText('Checking the record').elements()).toHaveLength(0);
   });
 
+  it.each([
+    ['attempts', SAFETY],
+    ['entries', `${SAFETY}?view=entries`],
+  ])('empty_state_waits_out_a_failed_attempts_read_%s', async (view, path) => {
+    // A fresh copy with nothing stopped: the attempts were read, empty, and the empty state shows.
+    mockStore.reset('rivera_quiet');
+    const { screen } = await renderRoute(path);
+    const nothing = screen.getByText(NOTHING, { exact: true });
+    await expect.element(nothing).toBeVisible();
+
+    // Then a draft of Claude's is stopped (Rivera's copy keeps one, and no request refused, so the
+    // week still counts none) and every read of the attempts fails. The empty list read before
+    // mustn't pass for current: the failure says so beside the headline, in either view, and the
+    // empty state doesn't show while the reads fail.
+    mockStore.reset('rivera');
+    mockStore.inject({ route: 'safety', status: 503, times: 10_000 });
+    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    await expect.element(nothing).not.toBeInTheDocument();
+    expect(line.element().compareDocumentPosition(screen.getByText('Every entry checks out').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await readsMore('safety', 2);
+    await readsMore('today', 1);
+    expect(nothing.elements()).toHaveLength(0);
+    expect(line.elements()).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once a read works, the line is gone, and the stopped draft shows no empty state either.
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await readsMore('safety', 1);
+    await readsMore('today', 1);
+    expect(nothing.elements()).toHaveLength(0);
+    expect(screen.getByText(HEADLINE).elements()).toHaveLength(0);
+    if (view === 'attempts') {
+      const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
+      await expect.element(rows.first()).toBeVisible();
+    }
+  });
+
   it('attempts_read_failure_says_so', async () => {
     // The attempts were read; then a later read fails. The line says so over the attempts already
     // read, which stay with the one open beside them, until a read works.
@@ -661,6 +820,7 @@ describe('Safety', () => {
   it('headline_read_failure_says_so', async () => {
     // This week's count was read; then a later read fails. The line says so over the count, which
     // stays, until a read works.
+    await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
     const headline = screen.getByText(/stopped this week\.$/);
     await expect.element(headline).toBeVisible();
@@ -671,8 +831,10 @@ describe('Safety', () => {
     await expect.element(headline).toBeVisible();
     await readsMore('today', 2);
     expect(line.elements()).toHaveLength(1);
+    // A fresh copy answers again; once the agent's charge is refused in it too, the count is back.
     mockStore.reset('rivera');
     await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await refuseTheAgentsCharge();
     await expect.element(headline).toBeVisible();
   });
 

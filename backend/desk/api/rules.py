@@ -62,8 +62,14 @@ from desk.api.versions import (
 )
 from desk.contracts import MONEY_TOOLS, Effect, PolicyVersion, RuleCard
 from desk.kernel_api import PolicyConfirmRequest
+from desk.money_cap import Language, lower_to_cap
 from desk.presets import PRESETS, PresetName
 
+# The language the owner reads the rules in, for the rule copy code writes (a lowered card's reason). The owner app
+# renders rules copy in English today (its rules chat shows Claude's answers with language "en"), and `kernel_ro`
+# keeps no owner language, so this is English for every owner; an owner language source, once there is one, replaces
+# this line. It is never read from a model.
+OWNER_LANGUAGE: Language = "en"
 MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
 DRAFT_STATUSES = ("draft", "proved", "rejected")     # a version the owner can still read as a draft
 EFFECT_TARGETS = frozenset(f"effect:{effect}" for effect in get_args(Effect))
@@ -147,20 +153,36 @@ def check_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap_cents: 
         raise AboveMoneyCap(cap_cents)
 
 
-async def draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], *,
-                expected_parent: int | None = None) -> RulesDraft:
-    """The owner cards `cards` drafted on the active version (or `expected_parent`), at the active version's money
-    cap: refused before the kernel is asked when there are more than `OWNER_CARDS_MAX` (422 `invalid`, so a Desk never
-    holds more cards than a rules chat can carry) or with `AboveMoneyCap` when a new or changed card is above the cap,
-    else compiled and proved by the kernel, with how the draft differs from the active rules."""
-    if sum(not card.is_default for card in cards) > OWNER_CARDS_MAX:
+async def draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], *, expected_parent: int | None = None,
+                auto_money_cap_cents: int | None = None, carried_only: bool = False) -> RulesDraft:
+    """The owner cards `cards` drafted on the active version (or `expected_parent`), at the money cap
+    `auto_money_cap_cents` (None keeps the active version's): refused before the kernel is asked when there are more
+    than `OWNER_CARDS_MAX` (422 `invalid`, so a draft never grows a Desk past what a rules chat can carry; not checked
+    when `carried_only`, for a draft of the active owner cards and no other, whose count the Desk already holds), with
+    `AboveMoneyCap` when a new or changed card is above the draft's cap, or with `versions.ChangesAlwaysOn` naming
+    the cards that would change starting a verification; else compiled and proved by the kernel, with how the draft
+    differs from the active rules. The draft's cap is read back from the version the kernel drafted."""
+    if not carried_only and sum(not card.is_default for card in cards) > OWNER_CARDS_MAX:
         raise ApiProblem(422, "invalid")
     row = await active_row(owner, desk_id)
     active = version_from_row(row)
-    check_cap(cards, active.cards, version_cap(row))
+    check_cap(cards, active.cards, version_cap(row) if auto_money_cap_cents is None else auto_money_cap_cents)
     parent = active.version if expected_parent is None else expected_parent
-    version = checkable(await post_draft(owner, desk_id, cards, parent))
+    version = checkable(await post_draft(owner, desk_id, cards, parent, auto_money_cap_cents=auto_money_cap_cents))
     return rules_draft(version, version_cap(version), card_diff(active.cards, version.cards))
+
+
+async def draft_money_cap(owner: OwnerCtx, desk_id: str, cap: int) -> RulesDraft:
+    """The active owner cards drafted at the money cap `cap`, on the active version. Lowering it, each active auto
+    money card above it comes down to it in the draft (an `ask` card at 0), its reason the new limit in the owner's
+    language (`desk.money_cap.lower_to_cap`, `OWNER_LANGUAGE`), so the diff shows each card the change moves; raising
+    it changes no card. It adds none either, so a Desk holding more than `OWNER_CARDS_MAX` owner cards can still
+    change its cap. Nothing changes the Desk's cap until the owner confirms the draft, and the kernel holds the draft's
+    cards to its cap whatever the API sent."""
+    active = version_from_row(await active_row(owner, desk_id))
+    owned = [card for card in active.cards if not card.is_default]
+    return await draft(owner, desk_id, lower_to_cap(owned, active.cards, cap, OWNER_LANGUAGE),
+                       expected_parent=active.version, auto_money_cap_cents=cap, carried_only=True)
 
 
 async def read_draft(owner: OwnerCtx, desk_id: str, version: int) -> RulesDraft:

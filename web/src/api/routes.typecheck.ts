@@ -7,8 +7,9 @@
 // routes.contract.test.ts makes the same checks at run time from openapi.json, and is the only
 // importer of this file.
 
-import type { API_OPERATIONS } from './openapi.gen.ts';
+import type { API_OPERATIONS, SendAgentIn, SetupStartIn } from './openapi.gen.ts';
 import type { ROUTES, RouteKey } from './routes.ts';
+import type { AgentTaskBody, StartSetupBody } from './views.ts';
 
 /**
  * The schema each route's 2xx answer carries, by its name in the API's OpenAPI document (Plan 02's
@@ -114,7 +115,6 @@ export const ROUTE_MODELS = {
  */
 export const NOT_YET_SERVED = [
   // Proving
-  'draftMoneyCap',
   'confirmTool',
 ] as const satisfies readonly RouteKey[];
 
@@ -286,3 +286,26 @@ type Problems =
 
 /** `true` only when no route or operation has a problem; otherwise the compiler names each one. */
 export const routesMatchTheApi: [Problems] extends [never] ? true : Problems = true;
+
+/**
+ * Whether `Body`, a body the web sends to start something, fits the API's model for it: no field the
+ * model lacks, the client idempotency key among its fields (one per click, so a repeat finds what
+ * the first started), and each typed as the model takes it, but `task`, which the web types as a
+ * string and the mock checks.
+ */
+type KeyedBodyFits<Body, Model> = [Exclude<keyof Body, keyof Model>] extends [never]
+  ? 'idempotency_key' extends keyof Body
+    ? Body extends Omit<Model, 'task'>
+      ? true
+      : false
+    : false
+  : false;
+
+/** The two start bodies that carry a key, against the API's `SendAgentIn` and `SetupStartIn`. */
+export type KeyedBodyChecks = [
+  Assert<KeyedBodyFits<AgentTaskBody, SendAgentIn>>,
+  Assert<KeyedBodyFits<StartSetupBody, SetupStartIn>>,
+  // A body with no key, or with a field the model lacks, doesn't fit.
+  Assert<Equal<KeyedBodyFits<{ task: string }, SendAgentIn>, false>>,
+  Assert<Equal<KeyedBodyFits<{ task: string; idempotency_key?: string; extra: 1 }, SendAgentIn>, false>>,
+];

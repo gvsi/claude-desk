@@ -54,6 +54,12 @@ def alembic_config() -> Config:
     return config
 
 
+def head() -> str:
+    """The one head the migrations have; a later plan's migrations come after `api_idempotency`, on the same line."""
+    (only,) = ScriptDirectory.from_config(alembic_config()).get_heads()
+    return only
+
+
 def migrate(step: Callable[[Config, str], None], revision: str, *, lock_timeout: str = LOCK_TIMEOUT) -> None:
     """One Alembic step (`command.downgrade` or `command.upgrade`) to `revision`, as desk_admin on a connection of its
     own, committed at the end (env.py migrates on `config.attributes["connection"]`), whose transaction waits at most
@@ -80,7 +86,7 @@ def test_api_owner_revises_main_head_and_each_later_revision_the_one_before():
     assert scripts.get_revision("api_owner").down_revision == MAIN_HEAD
     assert scripts.get_revision("api_replay").down_revision == "api_owner"
     assert scripts.get_revision("api_idempotency").down_revision == "api_replay"
-    assert scripts.get_heads() == ["api_idempotency"]
+    assert "api_idempotency" in {script.revision for script in scripts.walk_revisions("base", head())}
 
 
 def test_a_lock_another_transaction_holds_fails_a_step_instead_of_hanging(db):
@@ -96,7 +102,7 @@ def test_a_lock_another_transaction_holds_fails_a_step_instead_of_hanging(db):
             stray.rollback()
     finally:
         migrate(command.upgrade, "head")                       # nothing to do at head
-    assert db.execute("SELECT version_num FROM alembic_version").fetchall() == [("api_idempotency",)]
+    assert db.execute("SELECT version_num FROM alembic_version").fetchall() == [(head(),)]
 
 
 def kept(admin: psycopg.Connection) -> list[tuple]:

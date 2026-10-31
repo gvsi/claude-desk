@@ -22,10 +22,20 @@ from sqlalchemy import text as sql
 
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
-from desk.api.owner_reads import BOOKING_CLAIM, REPLY_WHY_BY_RULE
+from desk.api.owner_reads import (
+    BOOKING_CLAIM,
+    REPLY_WHY_BY_RULE,
+    Activity,
+    People,
+    Stopped,
+    recorded_history,
+    week_counts,
+    windows,
+)
 from desk.api.ro import KernelRO
 from desk.api.deliver import Reply, Status, deliver
 from desk.api.prompts import Triage
+from desk.api.schemas import RecordedHistory
 from desk.api.store import (
     Ids,
     append_assistant,
@@ -256,16 +266,27 @@ class Scene:
         self.fake.flush()
         return entry.seq
 
-    def replayed_blocked_reply(self, who: Guest, recorded_at: datetime, written_at: datetime) -> int:
-        """A blocked reply of Claude's replayed into the copy: its entry is written at `written_at` and carries the
-        time it was recorded at in `summary.replayed.at`, as replayed history does."""
+    def replayed_entry(self, who: Guest, kind: str, summary: dict, recorded_at: datetime, written_at: datetime) -> int:
+        """A ledger entry of `kind` in the guest's session, replayed into the copy: written at `written_at`, it carries
+        the time it was recorded at in `summary.replayed.at`, as replayed history does; returns its seq."""
         self.fake.now = written_at
-        entry = self.fake.append(self.fake.desks[self.owner.desk_id], "reply", {
-            "message_id": "msg-replayed", "author": "claude", "ok": False, "language": "en",
-            "violations": ["number_in_prose"], "rule_ids": ["digit"], "fact_ids": [],
-            "replayed": {"at": signed_time(recorded_at), "recording": "a recorded night"}}, session_id=who.session_id)
+        entry = self.fake.append(self.fake.desks[self.owner.desk_id], kind, {
+            **summary, "replayed": {"at": signed_time(recorded_at), "recording": "a recorded night"}},
+            session_id=who.session_id)
         self.fake.flush()
         return entry.seq
+
+    def replayed_blocked_reply(self, who: Guest, recorded_at: datetime, written_at: datetime) -> int:
+        """A blocked reply of Claude's replayed into the copy (`replayed_entry`)."""
+        return self.replayed_entry(who, "reply", {
+            "message_id": "msg-replayed", "author": "claude", "ok": False, "language": "en",
+            "violations": ["number_in_prose"], "rule_ids": ["digit"], "fact_ids": []}, recorded_at, written_at)
+
+    def replayed_takeover(self, who: Guest, recorded_at: datetime, written_at: datetime) -> int:
+        """The owner's take-over of the guest's chat, replayed into the copy (`replayed_entry`), ledgered as the fake's
+        mode change ledgers one."""
+        return self.replayed_entry(who, "takeover", {"from": "ai", "to": "owner", "generation": 1}, recorded_at,
+                                   written_at)
 
 
 async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime) -> Scene:
@@ -663,18 +684,23 @@ async def test_this_week_handled_versus_stepped_in(app, browser, fake, kernel_ht
                                          CancelRequest(session_id=chats["cancelled"].session_id),
                                          path={"decision_id": cancelled.decision_id})
     await scene.answer(cancelled.decision_id, local(2026, 10, 29, 17) + later)                # too late: 409, ledgered
-    # replayed history: a chat three days back, whose blocked reply was written into the copy this morning
+    # replayed history, written into the copy this morning: in a chat three days back, a blocked reply of Claude's
+    # recorded then, and a take-over of the chat recorded before the week began
     replayed = await scene.visitor(local(2026, 10, 27, 10))
     await scene.text(replayed, local(2026, 10, 27, 10))
     scene.replayed_blocked_reply(replayed, local(2026, 10, 27, 10), local(2026, 10, 30, 8))
+    scene.replayed_takeover(replayed, local(2026, 10, 23, 12), local(2026, 10, 30, 8))
     clock.now = local(2026, 10, 30, 9)
     owner = scene.owner
 
     this_week = (await owner.get(f"desks/{owner.desk_id}/today")).json()["this_week"]
 
+    # The replayed take-over counts at the time it was recorded, before the window, so the chat stays handled: timed
+    # by when it was written, it would make `stepped_in` 6. The replayed blocked reply, a draft of Claude's, isn't
+    # counted as stopped.
     assert {key: this_week[key] for key in ("conversations", "stepped_in", "handled", "stopped")} == {
-        "conversations": 11, "stepped_in": 5, "handled": 6, "stopped": 1}
-    assert by_day(this_week, "stopped") == {**{f"2026-10-{day}": 0 for day in range(24, 31)}, "2026-10-27": 1}
+        "conversations": 11, "stepped_in": 5, "handled": 6, "stopped": 0}
+    assert by_day(this_week, "stopped") == {f"2026-10-{day}": 0 for day in range(24, 31)}
     assert by_day(this_week, "conversations")["2026-10-29"] == 10
     # the conversations list: the latest activity first, each with who has it and how its requests stand
     summaries = (await owner.get(f"desks/{owner.desk_id}/conversations")).json()
@@ -771,10 +797,55 @@ async def test_stopped_counts_only_attempts(scene, clock):
     today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
     safety = await owner.get(f"desks/{owner.desk_id}/safety")
 
-    assert (today["this_week"]["stopped"], today["briefing"]["blocked"]) == (2, 2)
+    # Safety and the briefing list the refusal and the blocked reply; the last 7 days count the refusal alone
+    assert (today["this_week"]["stopped"], today["briefing"]["blocked"]) == (1, 2)
     assert safety.status_code == 200, safety.text
     assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
         ("reply_blocked", str(blocked_seq)), ("refused", refused.decision_id)]
+
+
+async def test_stopped_counts_refused_requests_not_claudes_drafts(scene, clock):
+    """The last 7 days count as stopped only the requests the kernel refused: a draft of Claude's the reply check
+    stopped is no attempt anyone made. Safety still lists both kinds, and the briefing still shows each draft among
+    its blocked items, whose words claim no attempt."""
+    pushy = await scene.visitor(local(2026, 10, 29, 19))
+    refused = await scene.refusal(pushy, local(2026, 10, 29, 19))
+    first = await scene.blocked_reply(pushy, local(2026, 10, 29, 19, 10))
+    faucet = await scene.visitor(local(2026, 10, 29, 20))
+    await scene.text(faucet, local(2026, 10, 29, 20), "My kitchen faucet drips, can you fix it?")
+    second = await scene.blocked_reply(faucet, local(2026, 10, 29, 20))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
+    safety = await owner.get(f"desks/{owner.desk_id}/safety")
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+
+    assert today["this_week"]["stopped"] == 1
+    assert by_day(today["this_week"], "stopped") == {**{f"2026-10-{day}": 0 for day in range(24, 31)},
+                                                     "2026-10-29": 1}
+    assert safety.status_code == 200, safety.text
+    assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
+        ("reply_blocked", str(second)), ("reply_blocked", str(first)), ("refused", refused.decision_id)]
+    assert today["briefing"]["blocked"] == 3
+    assert [(item["kind"], item["ref_id"]) for item in listed] == [
+        ("blocked", str(second)), ("blocked", str(first)), ("blocked", refused.decision_id)]
+
+
+def test_the_week_and_the_reports_count_only_refused_requests():
+    """`week_counts`, the one count Today's last 7 days and the reports share, takes only refused requests as stopped:
+    a replayed draft of Claude's the reply check stopped neither counts nor flags the week as recorded history, while
+    "since last night", which lists it among its blocked items, is flagged."""
+    frame = windows(local(2026, 10, 30, 9), "America/Los_Angeles")
+    at = local(2026, 10, 29, 19)
+    done = Activity(people=People([], [], []), bookings=[], booked={}, leads=[], holds=[], callbacks=[], stepped=[],
+                    texts=[], replies=[], stopped=[
+                        Stopped(at=at, session_id="sess-a", ref_id="dec-refused", kind="refused"),
+                        Stopped(at=at, session_id="sess-a", ref_id="7", kind="reply_blocked", replayed=True),
+                        Stopped(at=at, session_id="sess-b", ref_id="9", kind="reply_blocked")])
+
+    assert [attempt.ref_id for attempt in week_counts(done, frame.start, frame.now).stopped] == ["dec-refused"]
+    assert recorded_history(done, frame) == RecordedHistory(needs_you=False, briefing=True, this_week=False)
 
 
 

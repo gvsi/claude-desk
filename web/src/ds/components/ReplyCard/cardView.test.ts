@@ -56,7 +56,7 @@ describe('cardView', () => {
 
   it('proxied_paths_become_links', () => {
     // The API's proxied paths are the only links a card carries: checkout and document download.
-    const pay = block('payment_link', { title: 'Service call deposit, $20', href: '/pay/k7Hq2vX9' });
+    const pay = block('payment_link', { title: 'Service call deposit, $20.00', href: '/pay/k7Hq2vX9' });
     expect(cardView(pay).href).toBe('/pay/k7Hq2vX9');
     const doc = block('document_link', { title: 'Invoice, drain clearing', href: '/api/d/9fK2mQ' });
     expect(cardView(doc).href).toBe('/api/d/9fK2mQ');

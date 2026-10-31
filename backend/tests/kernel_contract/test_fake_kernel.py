@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
-from desk.contracts import CopyCreated, SessionCreated
+from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
@@ -275,6 +275,53 @@ async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):
     assert desks(None) == []                                  # no copy set, no rows, as kernel_ro does
     with pytest.raises(psycopg.errors.InsufficientPrivilege), api_conn.transaction():
         api_conn.execute(f"DELETE FROM {FAKE_RO_SCHEMA}.desks")
+
+
+async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
+    """The Rivera seed's rules carry its $500 money cap, as the kernel's seed does (`DeskSeed`), and a
+    version the owner confirms keeps the Desk's cap."""
+    http, state = fake
+    copy, _ = await copy_and_visitor(http, state)
+    desk_id = copy.desk_ids[0]
+    state.never(desk_id, "native.quote")
+
+    with api_conn.transaction():
+        api_conn.execute("SELECT set_config('desk.copy_id', %s, true)", (copy.copy_id,))
+        rows = api_conn.execute(f"SELECT version, status, auto_money_cap_cents FROM {FAKE_RO_SCHEMA}.policy_versions"
+                                " WHERE desk_id = %s ORDER BY version", (desk_id,)).fetchall()
+    assert [(row["version"], row["status"], row["auto_money_cap_cents"]) for row in rows] == [
+        (1, "superseded", 50_000), (2, "active", 50_000)]
+
+
+async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, monkeypatch):
+    """A held money request offers "Allow for this person" only when its amount is within the Desk's
+    money cap (the Rivera seed's $500), never up to the $10,000 ceiling, as the kernel's `answers_for`
+    does; a money call with no amount, or an amount of 0, is refused outright, as the kernel's baseline
+    (`money_has_amount`) refuses it: the fake is never looser than the kernel. Payment links normalize
+    only once Plan 01c brings quotes to pay, so here one is normalized at the amount under test."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    state.verify(session_id, "dana")                         # a verified person, whom allow_person could name
+    amount: dict[str, int | None] = {}
+
+    def payment_link(session, desk, call) -> NormalizedAction:
+        return NormalizedAction(
+            action_id=f"act-{call.call_id}", copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
+            generation=session.generation, tool=call.tool, effects=desk.tools[call.tool].effects, args_sha256="args",
+            profile_sha256="profile", resource=ResourceRef(kind="quote", id=call.args["quote_id"], owner_person_id=None),
+            list_cents=amount["cents"], discount_bp=0, amount_cents=amount["cents"], recipient=None, starts_at=None)
+
+    monkeypatch.setattr(state, "_normalize", payment_link)
+    for call_id, cents, offered in (("call-1", 60_000, False), ("call-2", 50_000, True)):
+        amount["cents"] = cents
+        held = await decide(view, session_id, 0, call_id, "native.payment_link", {"quote_id": f"quote-{call_id}"})
+        assert held.outcome == "hold", held.reason_plain
+        assert ("allow_person" in held.answers) is offered, (cents, held.answers)
+    for call_id, cents in (("call-3", None), ("call-4", 0)):
+        amount["cents"] = cents
+        out = await decide(view, session_id, 0, call_id, "native.payment_link", {"quote_id": f"quote-{call_id}"})
+        assert (out.outcome, out.answers) == ("refuse", []), (cents, out.reason_plain)
 
 
 async def test_an_owner_recovers_only_its_own_decisions(fake):

@@ -22,17 +22,17 @@ agent's words go to the Desk but never back to the panel, so no text the kernel 
 then the Desk's, with the blocks and signed statuses the kernel checked. Runs live in this process's memory
 (`DemoAgents`): the 50 newest, for an hour, each readable by its launching session alone.
 
-A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
-(`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one takes
-it): a repeat answers the run the first started and starts nothing; one for another task, or from another session or to
-another Desk than the key's, is `KeyReused`. A run whose agent the kernel refused to mint (a 4xx) ends `failed` and
-frees its key, since nothing was made, so the same request can be sent again; a mint that went unanswered may have
-happened, so that failed run keeps its key, as does a run that started, however it ends. Keys live in memory beside the
-runs, in a map of their own that keeps each for its run's hour, so a key outlives a run record the 50-run bound dropped:
-its repeat answers the same run ID, whose poll is then 404, and never starts a second run. The map holds at most 1000
-and never drops a key early: full, it refuses a new one (`KeysFull`) until the oldest key's hour ends. Like the runs,
-keys are this process's alone: a process restart, or a repeat routed to the other task during a deploy's overlap,
-forgets them.
+Each send carries the client's idempotency key (one per click, required) and claims it in the copy before the kernel
+mints the agent (`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the
+process one takes it): a repeat answers the run the first started and starts nothing; one for another task, or from
+another session or to another Desk than the key's, is `KeyReused`. A run whose agent the kernel refused to mint (a
+4xx) ends `failed` and frees its key, since nothing was made, so the same request can be sent again; a mint that went
+unanswered may have happened, so that failed run keeps its key, as does a run that started, however it ends. Keys
+live in memory beside the runs, in a map of their own that keeps each for its run's hour, so a key outlives a run
+record the 50-run bound dropped: its repeat answers the same run ID, whose poll is then 404, and never starts a second
+run. The map holds at most 1000 and never drops a key early: full, it refuses a new one (`KeysFull`) until the oldest
+key's hour ends. Like the runs, keys are this process's alone: a process restart, or a repeat routed to the other task
+during a deploy's overlap, forgets them.
 """
 
 import asyncio
@@ -316,12 +316,9 @@ class DemoAgents:
         if held is not None and held.run_id == run.run_id:
             del self._keys[(copy_id, key)]
 
-    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids,
-               run: DemoAgentRun | None = None) -> str:
-        """Start a run of the issued agent on `task` for the launcher's session, in `run`'s record when a claim made
-        it, else a new one; its run ID. The issued key goes to the run's coroutine alone."""
-        if run is None:
-            run = self._new_run(task, slug, launcher)
+    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids, *, run: DemoAgentRun) -> str:
+        """Start a run of the issued agent on `task` for the launcher's session, in the record its key's claim made;
+        its run ID. The issued key goes to the run's coroutine alone."""
 
         async def record(response: ModelResponse) -> None:
             async with self._engine.connect() as conn:

@@ -63,6 +63,7 @@ export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
 export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
 export {
+  NAV_LABELS,
   Sidebar,
   type NavCount,
   type NavKey,

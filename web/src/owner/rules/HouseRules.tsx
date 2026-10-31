@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
 import type { PeopleOut, RulesView } from '../../api/views.ts';
@@ -14,34 +14,31 @@ import {
   PageHeader,
   ToolRulesCard,
   type RuleRowProps,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { DEFAULT_SIDE } from './changeRows.ts';
 import { hubSections, toolFallback, toolRuleRows, type HubSection } from './hub.ts';
 import { peopleQuery, rulesQuery } from './RuleDraftReview.tsx';
+import { RULES_TITLE } from './RulesPage.tsx';
 
 import './HouseRules.css';
 
-const deskPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}`;
-
-/** A link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
+const TITLE = 'All rules';
 
 /** A tool no rule of the owner's covers: the default ask, in the house rules' words. */
 function defaultRow(tool: string): RuleRowProps {
   return { rule: { card_id: `default:${tool}`, mode: DEFAULT_SIDE.mode, reason: DEFAULT_SIDE.reason }, words: [...DEFAULT_SIDE.words] };
 }
 
-/** One connector's tools, each with every rule that governs it, read-only. */
+/**
+ * One connector's tools, each with every rule that governs it, read-only; each tool's name and line
+ * link to its page once the Connectors pages are built (`connectorPageHref`).
+ */
 function ConnectorRules({ deskId, section, view, people }: { deskId: string; section: HubSection; view: RulesView; people: PeopleOut | null }) {
   return (
     <section className="cd-house-rules__connector" aria-label={section.connector.name}>
@@ -54,7 +51,7 @@ function ConnectorRules({ deskId, section, view, people }: { deskId: string; sec
           <ToolRulesCard
             key={tool.key}
             label={tool.name}
-            tool={{ name: tool.name, description: tool.description, href: `${deskPath(deskId)}/${tool.href}` }}
+            tool={{ name: tool.name, description: tool.description, href: connectorPageHref(deskId, tool.href) }}
             rules={rules.length > 0 ? rules : [defaultRow(tool.key)]}
             fallback={rules.length > 0 && toolFallback(row, view.active)}
             linkComponent={RouterLink}
@@ -72,6 +69,7 @@ function ConnectorRules({ deskId, section, view, people }: { deskId: string; sec
  */
 export function HouseRules() {
   const { desk } = useOwnerDesk();
+  useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
@@ -120,8 +118,8 @@ export function HouseRules() {
   return (
     <div className="cd-house-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-house-rules__header">
-        <Breadcrumb items={[{ label: 'Rules', href: `${deskPath(deskId)}/rules` }, { label: 'All rules' }]} linkComponent={RouterLink} />
-        <PageHeader title="All rules" subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." />
+        <Breadcrumb items={[{ label: RULES_TITLE, href: `${deskPath(deskId)}/rules` }, { label: TITLE }]} linkComponent={RouterLink} />
+        <PageHeader title={TITLE} subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." />
       </div>
       {body}
       <AlwaysOnList />

@@ -1,8 +1,8 @@
 /**
  * Renders the whole app at `path`, as a screen test sees it: a memory router over the app's
  * routes (or a test's own copy of them), a fresh query client (the app makes one per mount),
- * polling at a twentieth of real time unless the test asks for another pace, the desktop or phone
- * viewport, and the mock API (a fresh copy of `seed` when one is named). One app at a time: a
+ * polling at a twentieth of real time unless the test asks for another pace, the Connectors pages
+ * as the app has them unless the test asks otherwise, the desktop or phone viewport, and the mock API (a fresh copy of `seed` when one is named). One app at a time: a
  * second call unmounts the first.
  */
 import { StrictMode } from 'react';
@@ -15,6 +15,7 @@ import { setPollScale, setRetryScale } from '../app/poll.ts';
 import { routes } from '../app/routes.tsx';
 import type { MockSeed } from '../mocks/seed.ts';
 import { mockStore, type ResetOptions } from '../mocks/store.ts';
+import { CONNECTOR_PAGES_BUILT, setConnectorPagesBuilt } from '../owner/connectors/pages.ts';
 
 export const VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
@@ -54,6 +55,11 @@ export interface RenderRouteOptions {
   strict?: boolean;
   /** Called with the router before the app renders, so a test can watch it from the first navigation. */
   beforeRender?: (router: DataRouter) => void;
+  /**
+   * Draws the owner app as if the Connectors pages were built (true) or not, so their rows link to
+   * them or don't; the app's own `CONNECTOR_PAGES_BUILT` by default.
+   */
+  connectorPages?: boolean;
 }
 
 export interface RenderedRoute {
@@ -82,6 +88,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
   if (opts.language !== undefined) setBrowserLanguage(opts.language);
   setPollScale(opts.pollScale ?? 0.05);
   setRetryScale(opts.retryScale ?? 1);
+  setConnectorPagesBuilt(opts.connectorPages ?? CONNECTOR_PAGES_BUILT);
   if (opts.seed !== undefined) {
     const { name, signedIn = true } = typeof opts.seed === 'string' ? { name: opts.seed } : opts.seed;
     mockStore.nextEpoch();

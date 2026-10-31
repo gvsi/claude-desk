@@ -1,0 +1,440 @@
+{
+  "tools": [
+    {
+      "profile": {
+        "adapter": "desk.kernel_service.adapters.book",
+        "definition_sha256": null,
+        "description_confirmed": "Books one open appointment time by the slot_id that find_slots gave. The time comes from the business's records and the visitor sees the confirmed booking in a card, never in your own words.",
+        "effects": [
+          "change"
+        ],
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "slot_id": {
+              "pattern": "^S-[0-9]{8}-[0-9]{4}$",
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slot_id"
+          ],
+          "title": "BookArgs",
+          "type": "object"
+        },
+        "pending_definition_text": null,
+        "pending_sha256": null,
+        "resource_kind": "slot",
+        "reversible": true,
+        "source": "native",
+        "status": "enabled",
+        "tool": "native.book"
+      },
+      "profile_sha256": "eeb10de9b6fe8879003b5d5b124da69fcda47a1868b5ba96505ddd75fa791827"
+    },
+    {
+      "profile": {
+        "adapter": "desk.kernel_service.adapters.find_slots",
+        "definition_sha256": null,
+        "description_confirmed": "Finds open appointment times on the business's calendar, from from_date (today if left out) for the number of days given. The times come from the business's records and the visitor sees them in a card to pick from, never in your own words. Book a time with its slot_id.",
+        "effects": [
+          "read"
+        ],
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "default": 7,
+              "maximum": 14,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            },
+            "from_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "From Date"
+            }
+          },
+          "title": "FindSlotsArgs",
+          "type": "object"
+        },
+        "pending_definition_text": null,
+        "pending_sha256": null,
+        "resource_kind": "desk",
+        "reversible": true,
+        "source": "native",
+        "status": "enabled",
+        "tool": "native.find_slots"
+      },
+      "profile_sha256": "5aaac0ceca9a08b923c9271acf3c310ef604e48fbaee3cfed6d200686d7017ff"
+    },
+    {
+      "profile": {
+        "adapter": "tests.kernel.fakes.FakeAdapter",
+        "definition_sha256": null,
+        "description_confirmed": "A test stand-in for native.payment_link.",
+        "effects": [
+          "charge"
+        ],
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "note": {
+              "default": "",
+              "title": "Note",
+              "type": "string"
+            },
+            "qty": {
+              "default": 1,
+              "title": "Qty",
+              "type": "integer"
+            }
+          },
+          "title": "FakeArgs",
+          "type": "object"
+        },
+        "pending_definition_text": null,
+        "pending_sha256": null,
+        "resource_kind": "quote",
+        "reversible": true,
+        "source": "native",
+        "status": "enabled",
+        "tool": "native.payment_link"
+      },
+      "profile_sha256": "81f112ebd16afe2708c0875f948505b6cefbab38b41ed7ba18a0c84a7724f2a3"
+    },
+    {
+      "profile": {
+        "adapter": "desk.kernel_service.adapters.quote",
+        "definition_sha256": null,
+        "description_confirmed": "Quotes a job from the business's price list. Name the price-list items and how many of each. The price comes from the business's records and the visitor sees it in a quote card, never in your own words. If the visitor asks for a discount, pass it as requested_discount_bp (hundredths of a percent); the owner's rules decide whether it applies.",
+        "effects": [
+          "change"
+        ],
+        "input_schema": {
+          "$defs": {
+            "QuoteItem": {
+              "additionalProperties": false,
+              "properties": {
+                "item_id": {
+                  "pattern": "^[a-z0-9-]{1,40}$",
+                  "title": "Item Id",
+                  "type": "string"
+                },
+                "qty": {
+                  "maximum": 10,
+                  "minimum": 1,
+                  "title": "Qty",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "item_id",
+                "qty"
+              ],
+              "title": "QuoteItem",
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/QuoteItem"
+              },
+              "maxItems": 5,
+              "minItems": 1,
+              "title": "Items",
+              "type": "array"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "requested_discount_bp": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "title": "Requested Discount Bp",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "title": "QuoteArgs",
+          "type": "object"
+        },
+        "pending_definition_text": null,
+        "pending_sha256": null,
+        "resource_kind": "desk",
+        "reversible": true,
+        "source": "native",
+        "status": "enabled",
+        "tool": "native.quote"
+      },
+      "profile_sha256": "481901ec65380b3fb85f68b745b60f552cb5f29b29c1a4d8c9705f1858cbfab7"
+    }
+  ],
+  "version": {
+    "baseline_sha256": "581210756d4345c31324f64c84e7008b1609ae2bbb5bc85bd727bd644dffe991",
+    "cards": [
+      {
+        "agent_key_id": null,
+        "applies_to": "native.capture_lead",
+        "card_id": "preset-capture-lead",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Anyone can leave their name and how to reach them.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.fetch_website",
+        "card_id": "preset-fetch-website",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Claude can read your website to learn about your business.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.find_slots",
+        "card_id": "preset-find-slots",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Anyone can see the times you have open.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.read_memory",
+        "card_id": "preset-read-memory",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Claude can read the notes you brought in to learn about your business.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.request_callback",
+        "card_id": "preset-request-callback",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Anyone can ask you to call them back.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.start_verification",
+        "card_id": "preset-start-verification",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Anyone can ask for a code, which goes only to the contact you have on record.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.book",
+        "card_id": "rv-book-sat",
+        "hours": {
+          "days": [
+            "sat"
+          ],
+          "end": "13:00:00",
+          "start": "09:00:00"
+        },
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Saturday morning bookings, checked by the reviewer.",
+        "review": true,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.book",
+        "card_id": "rv-book-wk",
+        "hours": {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "end": "18:00:00",
+          "start": "08:00:00"
+        },
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Weekday bookings in opening hours, checked by the reviewer.",
+        "review": true,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.release_document",
+        "card_id": "rv-docs",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Customers get their own documents after confirming it's them.",
+        "review": false,
+        "who": "record_owner"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.payment_link",
+        "card_id": "rv-links",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": 10000,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Payment links up to $100.",
+        "review": false,
+        "who": "anyone"
+      },
+      {
+        "agent_key_id": null,
+        "applies_to": "native.quote",
+        "card_id": "rv-quote",
+        "hours": null,
+        "is_default": false,
+        "max_amount_cents": null,
+        "max_discount_bp": 0,
+        "mode": "auto",
+        "person_id": null,
+        "reason": "Quotes from your price list, at list price.",
+        "review": false,
+        "who": "anyone"
+      }
+    ],
+    "cards_sha256": "a71db26ef0bdb781e9ac39493d6b3d236bc10b88672c2e2a8845904b101b0319",
+    "cedar": {
+      "A": "@id(\"auto.preset-find-slots\") @card(\"preset-find-slots\") @tier(\"auto\") @applies_to(\"native.find_slots\")\npermit (principal, action == Action::\"native.find_slots\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) };\n\n@id(\"auto.rv-book-sat\") @card(\"rv-book-sat\") @tier(\"auto\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && [5].contains(context.local_dow) && context.local_minute >= 540 && context.local_minute < 780 }\nwhen { context has review && context.review.within_charter_bp >= 7500 && context.review.manipulation_bp <= 2500 };\n\n@id(\"auto.rv-book-wk\") @card(\"rv-book-wk\") @tier(\"auto\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && [0, 1, 2, 3, 4].contains(context.local_dow) && context.local_minute >= 480 && context.local_minute < 1080 }\nwhen { context has review && context.review.within_charter_bp >= 7500 && context.review.manipulation_bp <= 2500 };\n\n@id(\"auto.rv-links\") @card(\"rv-links\") @tier(\"auto\") @applies_to(\"native.payment_link\")\npermit (principal, action == Action::\"native.payment_link\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && context has amount_cents && context.amount_cents <= 10000 };\n\n@id(\"auto.rv-quote\") @card(\"rv-quote\") @tier(\"auto\") @applies_to(\"native.quote\")\npermit (principal, action == Action::\"native.quote\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) };",
+      "A0": "@id(\"auto.preset-find-slots\") @card(\"preset-find-slots\") @tier(\"auto\") @applies_to(\"native.find_slots\")\npermit (principal, action == Action::\"native.find_slots\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) };\n\n@id(\"auto.rv-book-sat\") @card(\"rv-book-sat\") @tier(\"auto\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && [5].contains(context.local_dow) && context.local_minute >= 540 && context.local_minute < 780 };\n\n@id(\"auto.rv-book-wk\") @card(\"rv-book-wk\") @tier(\"auto\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && [0, 1, 2, 3, 4].contains(context.local_dow) && context.local_minute >= 480 && context.local_minute < 1080 };\n\n@id(\"auto.rv-links\") @card(\"rv-links\") @tier(\"auto\") @applies_to(\"native.payment_link\")\npermit (principal, action == Action::\"native.payment_link\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) && context has amount_cents && context.amount_cents <= 10000 };\n\n@id(\"auto.rv-quote\") @card(\"rv-quote\") @tier(\"auto\") @applies_to(\"native.quote\")\npermit (principal, action == Action::\"native.quote\", resource)\nwhen { (if context has discount_bp then context.discount_bp <= 0 else true) };",
+      "F": "",
+      "H": "@id(\"twin.preset-find-slots\") @card(\"preset-find-slots\") @tier(\"hold\") @applies_to(\"native.find_slots\")\npermit (principal, action == Action::\"native.find_slots\", resource);\n\n@id(\"twin.rv-book-sat\") @card(\"rv-book-sat\") @tier(\"hold\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource);\n\n@id(\"twin.rv-book-wk\") @card(\"rv-book-wk\") @tier(\"hold\") @applies_to(\"native.book\")\npermit (principal, action == Action::\"native.book\", resource);\n\n@id(\"twin.rv-links\") @card(\"rv-links\") @tier(\"hold\") @applies_to(\"native.payment_link\")\npermit (principal, action == Action::\"native.payment_link\", resource);\n\n@id(\"twin.rv-quote\") @card(\"rv-quote\") @tier(\"hold\") @applies_to(\"native.quote\")\npermit (principal, action == Action::\"native.quote\", resource);"
+    },
+    "cedar_sha256": "9eb5aa0dc6dbb69042e672f185aafef9415e9d6ebed8f908221b4b4393c7c3dc",
+    "draft_key_sha256": "0fd8f3d8650b6abd8b04d5d246dae99c2793b743b8c1db32c5935b964c2f88da",
+    "invariants_sha256": "05f672b80818db0b2e3a520c60370c2ab05c0527e368cec20de83acf0f6be4a2",
+    "parent_version": 1,
+    "profiles_sha256": "7f5a764d392ea24bdfbc4b13aaadd337564d781c16df1f75c6485de275e8b517",
+    "proof": {
+      "cases": null,
+      "checks": [
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "never_errors",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "baseline_auto",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "baseline_approvable",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "auto_within_cards",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "review_only_narrows",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "hold_within_cards",
+          "ok": true
+        },
+        {
+          "counterexample_plain": null,
+          "counterexample_raw": null,
+          "name": "money_needs_card",
+          "ok": true
+        }
+      ],
+      "method": "symcc",
+      "ok": true,
+      "timed_out": false
+    },
+    "review_thresholds_version": 1,
+    "schema_json": "{\"\": {\"commonTypes\": {\"Ctx\": {\"type\": \"Record\", \"attributes\": {\"owner_approved\": {\"type\": \"Boolean\"}, \"amount_cents\": {\"type\": \"Long\", \"required\": false}, \"list_cents\": {\"type\": \"Long\", \"required\": false}, \"discount_bp\": {\"type\": \"Long\", \"required\": false}, \"recipient\": {\"type\": \"String\", \"required\": false}, \"record_owner_match\": {\"type\": \"Boolean\"}, \"local_dow\": {\"type\": \"Long\"}, \"local_minute\": {\"type\": \"Long\"}, \"review\": {\"type\": \"Record\", \"attributes\": {\"within_charter_bp\": {\"type\": \"Long\"}, \"manipulation_bp\": {\"type\": \"Long\"}}, \"required\": false}}}}, \"entityTypes\": {\"Visitor\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"verified\": {\"type\": \"Boolean\"}, \"person_id\": {\"type\": \"String\", \"required\": false}, \"assurance\": {\"type\": \"String\"}, \"copy\": {\"type\": \"String\"}}}}, \"Agent\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"verified\": {\"type\": \"Boolean\"}, \"person_id\": {\"type\": \"String\", \"required\": false}, \"assurance\": {\"type\": \"String\"}, \"copy\": {\"type\": \"String\"}, \"agent_key_id\": {\"type\": \"String\"}, \"mandate_remaining_cents\": {\"type\": \"Long\", \"required\": false}}}}, \"Owner\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"verified\": {\"type\": \"Boolean\"}, \"person_id\": {\"type\": \"String\", \"required\": false}, \"assurance\": {\"type\": \"String\"}, \"copy\": {\"type\": \"String\"}}}}, \"Quote\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}, \"Slot\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}, \"Booking\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}, \"Document\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}, \"Charge\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}, \"Desk\": {\"shape\": {\"type\": \"Record\", \"attributes\": {\"copy\": {\"type\": \"String\"}, \"owner_person_id\": {\"type\": \"String\", \"required\": false}}}}}, \"actions\": {\"effect:read\": {}, \"effect:private_data\": {}, \"effect:change\": {}, \"effect:charge\": {}, \"effect:pay_out\": {}, \"effect:send_message\": {}, \"native.quote\": {\"memberOf\": [{\"id\": \"effect:change\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.find_slots\": {\"memberOf\": [{\"id\": \"effect:read\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.book\": {\"memberOf\": [{\"id\": \"effect:change\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Slot\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.release_document\": {\"memberOf\": [{\"id\": \"effect:private_data\"}, {\"id\": \"effect:send_message\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Document\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.payment_link\": {\"memberOf\": [{\"id\": \"effect:charge\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Quote\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.charge_mandate\": {\"memberOf\": [{\"id\": \"effect:charge\"}], \"appliesTo\": {\"principalTypes\": [\"Agent\"], \"resourceTypes\": [\"Quote\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.capture_lead\": {\"memberOf\": [{\"id\": \"effect:change\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.request_callback\": {\"memberOf\": [{\"id\": \"effect:change\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.start_verification\": {\"memberOf\": [{\"id\": \"effect:send_message\"}], \"appliesTo\": {\"principalTypes\": [\"Visitor\", \"Agent\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.fetch_website\": {\"memberOf\": [{\"id\": \"effect:read\"}], \"appliesTo\": {\"principalTypes\": [\"Owner\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}, \"native.read_memory\": {\"memberOf\": [{\"id\": \"effect:read\"}], \"appliesTo\": {\"principalTypes\": [\"Owner\"], \"resourceTypes\": [\"Desk\"], \"context\": {\"type\": \"Ctx\"}}}}}}",
+    "schema_sha256": "31808fdb19b2090e39429efc26c7e5b07e331b459e97d8dbccbe5de3d56ab407",
+    "status": "active",
+    "version": 2
+  }
+}

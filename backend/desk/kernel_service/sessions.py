@@ -46,35 +46,44 @@ def principal_for(row: SessionRow, *, desk_id: str | None = None) -> Principal:
 
 @router.post("/sessions", response_model=SessionCreated)
 async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request) -> SessionCreated:
+    """A visitor session on the Desk the slug names. A preview (`preview: true`) is the owner trying
+    the Desk as a customer, so it needs `X-Owner-Session` of the slug's copy (else 401 `auth`,
+    ledgered on the Desk); it gets a visitor's tools even while Answering is off. The owner's token
+    is resolved with the slug, before the transaction reads the Desk (`repo.py`), and refused only
+    where an owner check always is, after the agent check."""
     copy_id = await repo.copy_of_desk_slug(ctx, body.desk_slug)
     if copy_id is None:
         raise KernelFailure(404, "not_found", "unknown_desk")
+    owner = await auth.owner_session(ctx, request, copy_id) if body.preview else None
     copy = ctx.bind(copy_id)
     desk = (await ctx.db.scalars(copy.scoped(select(Desk).where(Desk.slug == body.desk_slug)))).one()
     named = Named(copy_id=copy_id, desk_id=desk.desk_id)
     if body.kind == "agent":
         raise AuthError(401, "auth", "agent_auth_unavailable", route=route_template(request), named=named)
-    if body.preview:
+    if body.preview and owner is None:
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
-    row, token = await open_visitor(ctx, copy_id, desk.desk_id)
+    row, token = await open_visitor(ctx, copy_id, desk.desk_id, preview=body.preview)
     return SessionCreated(state=session_state(row), session_token=token)
 
 
-async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str) -> tuple[SessionRow, str]:
+async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str, *, preview: bool = False
+                       ) -> tuple[SessionRow, str]:
     """A new, unverified visitor session on the Desk and its token (stored only as its hash), with
-    its `session` ledger entry, in the caller's transaction."""
+    its `session` ledger entry, in the caller's transaction; the owner's preview is marked
+    `preview` in its row and its entry."""
     now = ctx.clock.now()
     token = auth.new_token()
     row = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=desk_id, kind="visitor",
                      secret_hash=auth.hash_token(token), verified=False, assurance="none", mode="ai", generation=0,
-                     strikes=0, preview=False, created_at=now, last_seen_at=now)
+                     strikes=0, preview=preview, created_at=now, last_seen_at=now)
     ctx.db.add(row)
     await ctx.db.flush()
+    summary = {"session_id": row.session_id, "kind": row.kind} | ({"preview": True} if preview else {})
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
                         event=LedgerEvent(kind="session", origin="kernel", session_id=row.session_id,
-                                          summary={"session_id": row.session_id, "kind": row.kind}))
+                                          summary=summary))
     return row, token
 
 

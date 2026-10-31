@@ -14,6 +14,8 @@ export interface ChipProps {
    * one tab stop, the chosen chip (or the first while none is), and the arrows move and choose.
    */
   asRadio?: boolean;
+  /** Off while what it would change can't change: dimmed, out of the tab order, and a press does nothing. */
+  disabled?: boolean;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -44,7 +46,7 @@ function onRadioKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
   if (target.getAttribute('aria-checked') !== 'true') target.click();
 }
 
-export function Chip({ children, selected, asRadio = false, onClick }: ChipProps) {
+export function Chip({ children, selected, asRadio = false, disabled = false, onClick }: ChipProps) {
   const isSelected = selected === true;
   const ref = useRef<HTMLButtonElement>(null);
   // While no chip in its group is chosen, the first one is the group's tab stop.
@@ -66,6 +68,7 @@ export function Chip({ children, selected, asRadio = false, onClick }: ChipProps
       ref={ref}
       type="button"
       className={`cd-chip cd-type-pill${isSelected ? ' cd-chip--selected' : ''}`}
+      disabled={disabled}
       onClick={onClick}
       {...state}
     >

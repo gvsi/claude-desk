@@ -20,6 +20,7 @@ import {
 } from '../ds/index.ts';
 import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
+import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY } from './copy.ts';
 import { aroundBusiness } from './shared.ts';
@@ -56,23 +57,12 @@ function toolsToTurnOn(connector: CatalogConnector, rows: readonly ToolRow[]): T
 }
 
 /**
- * The outcome a tool starts at: the rule that decides it for anyone at any time, as the change
- * review's turned-on row reads it (a never rule wins; else at the most specific level present an
- * ask, else an automatic rule, a shared one only where every effect of the tool has one), else Ask
- * me first.
+ * The outcome a tool starts at: the one Rules shows for the same rules once it is on, and the
+ * change review's turned-on row reads (`toolOutcome`: the most that runs on its own for some
+ * visitor), else Ask me first.
  */
 function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
-  const isShared = (card: RuleCard) => card.applies_to.startsWith('effect:');
-  const forAnyone = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.who === 'anyone' && card.hours == null && card.is_default !== true);
-  if (forAnyone.some((card) => card.mode === 'never')) return 'never';
-  const [first] = forAnyone;
-  if (first === undefined) return 'ask';
-  const level = forAnyone.filter((card) => isShared(card) === isShared(first));
-  if (level.some((card) => card.mode === 'ask')) return 'ask';
-  const auto = level.filter((card) => card.mode === 'auto');
-  if (auto.length === 0) return 'ask';
-  if (!isShared(first)) return 'auto';
-  return row.effects.every((effect) => auto.some((card) => card.applies_to === `effect:${effect}`)) ? 'auto' : 'ask';
+  return toolOutcome({ tool: row.tool, effects: row.effects }, cards).mode;
 }
 
 /** A tool as its review shows it: its name, what it does and touches, its outcome and the rules of yours that cover it. */

@@ -16,7 +16,7 @@
 - On owner screens only, for the receipt that reports what the kernel decided (a decision's first receipt when its state is in `OWNER_REASON_STATES`: `held`, `refused`, `executed` or `allowed`):
   - `reason`: the decision's `reason_plain`. It is written once, at decide time, so it explains only that receipt.
   - `cardBelow`: the request's `ApprovalCard` is drawn right under this receipt's row.
-- `drawCheck` for an executed booking or a paid link. The sage check draws once, and only when the receipt is handled.
+- `drawCheck` for an executed booking or a paid link. The sage check draws once, short arm first as a hand writes one, and only when the receipt is handled.
 - Nothing for a reply that arrives live: under a `TranscriptRow` with `live`, the receipt lands on its own `motion-stagger` beat, its dot growing from half size with it and its check drawing as it lands. Its words, order and dot color don't change. One attached after the row has landed, and any under reduced motion, shows at once.
 - `shownBefore` for a receipt the reader has already seen, now attached under a reply that arrives live (shown under the question while the reply was on its way): it shows at once while the reply and its new lines land. Read when the receipt is first drawn.
 

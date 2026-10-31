@@ -4,13 +4,15 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import { observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, ConversationSummary, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -19,7 +21,15 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import {
+  aPollPasses,
+  closedInboxReads,
+  expectNoHorizontalScroll,
+  expectNoWindowScroll,
+  expectScreenBasics,
+  focusIsOn,
+  nextFrames,
+} from '../../test/screen.ts';
 import { watchFor, watchPages } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
@@ -396,7 +406,8 @@ describe('Today', () => {
       const name = [...(row?.querySelectorAll('[data-copy="user"]') ?? [])].map((el) => el.textContent);
       expect(name).toContain('Dana Whitfield');
     }
-    await expect.element(since.getByRole('link', { name: 'See all 3' })).toBeVisible();
+    // All three are on the card already, so there is no "See all" to open.
+    expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
 
     // A blocked reply has no line of its own, and a night with no booking leaves its row out.
     mockStore.reset('rivera');
@@ -411,6 +422,16 @@ describe('Today', () => {
     expect(kinds).toEqual(['Blocked', 'Answered']);
     expect(night.getByText('Booked').elements()).toHaveLength(0);
     await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
+    expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+
+    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
+    mockStore.reset('rivera');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
+    const third = await renderRoute(TODAY);
+    const two = region(third.screen, 'Since last night');
+    await expect.element(two.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+    expect(two.getByRole('listitem').elements()).toHaveLength(2);
+    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
@@ -560,6 +581,23 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
+  it('attempts_count_refused_requests_only', async () => {
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried:
+    // "Since last night" shows it as blocked, and the last 7 days have no attempt to talk Claude around.
+    const { screen } = await renderRoute(TODAY);
+    const block = region(screen, 'Last 7 days');
+    const night = region(screen, 'Since last night');
+    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+
+    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one counts.
+    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
+    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
+    await expect.element(block.getByText('1 stopped', { exact: true })).toBeVisible();
+  });
+
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
@@ -665,6 +703,48 @@ describe('Today', () => {
     await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m$/);
     expect(row.getByText('Visitor', { exact: true }).elements()).toHaveLength(1);
     expect(row.element().querySelector('.cd-status-dot')).toBeNull();
+  });
+
+  it('live_now_says_when_it_shows', async () => {
+    // The signed board's caption in Live now's header: the section is there only while someone chats.
+    const { screen } = await renderRoute(TODAY);
+    const live = region(screen, 'Live now');
+    const caption = live.getByText('Shows while someone is chatting', { exact: true });
+    await expect.element(caption).toBeVisible();
+    // After the title, before the rows, in the quiet caption style the other Today sections use.
+    const heading = live.getByRole('heading', { level: 2, name: 'Live now' }).element();
+    const firstRow = live.getByRole('listitem').first().element();
+    expect(heading.compareDocumentPosition(caption.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(caption.element().compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(caption).toHaveClass('cd-type-meta');
+  });
+
+  it('live_now_fits_a_phone', async () => {
+    // Three chats live at once on a phone: the caption stays in the header, beside the title or
+    // under it, never over it or past the column, and nothing on the page scrolls sideways.
+    await injectToday((t) => {
+      const [dana] = t.live;
+      if (!dana) throw new Error("the seed has Dana's live chat");
+      const alex: ConversationSummary = { ...dana, session_id: 'ses-live-alex', display_name: 'Alex Kim', verified: true };
+      const sam: ConversationSummary = { ...dana, session_id: 'ses-live-sam', display_name: 'Sam Ortiz-Delacroix' };
+      return { ...t, live: [dana, alex, sam] };
+    });
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    const live = region(screen, 'Live now');
+    const caption = live.getByText('Shows while someone is chatting', { exact: true });
+    await expect.element(caption).toBeVisible();
+    expect(live.getByRole('listitem').elements()).toHaveLength(3);
+    const column = live.element().getBoundingClientRect();
+    const title = live.getByRole('heading', { level: 2, name: 'Live now' }).element().getBoundingClientRect();
+    const line = caption.element().getBoundingClientRect();
+    const firstRow = live.getByRole('listitem').first().element().getBoundingClientRect();
+    expect(line.left).toBeGreaterThanOrEqual(column.left);
+    expect(line.right).toBeLessThanOrEqual(column.right);
+    expect(line.left >= title.right || line.top >= title.bottom, 'beside the title or under it').toBe(true);
+    expect(line.bottom).toBeLessThanOrEqual(firstRow.top);
+    const main = screen.getByRole('main').element();
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expectNoHorizontalScroll();
   });
 
   it('allow_once_executes_and_updates', async () => {
@@ -1033,9 +1113,6 @@ describe("Today's Demo inbox", () => {
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
 
-  /** Two animation frames: long enough for a navigation's transition to be drawn. */
-  const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
   /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
   function failReads(path: string): { count: () => number; stop: () => void } {
     let failing = true;
@@ -1060,6 +1137,70 @@ describe("Today's Demo inbox", () => {
     const box = el.getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.top).toBeLessThan(window.innerHeight);
+  }
+
+  /** Settles once the app has an answer to its next Demo inbox read and has taken it in. */
+  function nextInboxAnswer(): Promise<void> {
+    const answered = new Promise<void>((resolve) => {
+      const stop = observeRequests((outcome) => {
+        if (outcome.key !== 'ownerInbox') return;
+        stop();
+        resolve();
+      });
+      onTestFinished(stop);
+    });
+    return answered.then(nextFrames);
+  }
+
+  /**
+   * Every timer the page starts from now on at the Demo inbox's poll interval, for as long as the
+   * page keeps it: `started()` lists them, oldest first, `kept()` the ones it keeps now, and
+   * `due()` runs each one still kept (or each of `only` still kept) at once, as if all came due at
+   * that moment, and returns the ones it ran.
+   */
+  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[] } {
+    // The page's timers as the browser has them (the Node typings say otherwise).
+    const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
+    const started: number[] = [];
+    const running = new Map<number, () => void>();
+    const start = timers.setInterval.bind(window);
+    const stop = timers.clearInterval.bind(window);
+    const starting = vi.spyOn(timers, 'setInterval').mockImplementation((run, ms) => {
+      const id = start(run, ms);
+      if (typeof run === 'function' && ms === pollMs('inbox')) {
+        started.push(id);
+        running.set(id, run);
+      }
+      return id;
+    });
+    const stopping = vi.spyOn(timers, 'clearInterval').mockImplementation((id) => {
+      if (id !== undefined) running.delete(id);
+      stop(id);
+    });
+    onTestFinished(() => {
+      starting.mockRestore();
+      stopping.mockRestore();
+    });
+    return {
+      started: () => [...started],
+      kept: () => [...running.keys()],
+      due: (only) => {
+        const due = [...running].filter(([id]) => only === undefined || only.includes(id));
+        for (const [, run] of due) run();
+        return due.map(([id]) => id);
+      },
+    };
+  }
+
+  /** Runs `then` once `el` has left the page, before the page's next task. */
+  function onceGone(el: Element, then: () => void): void {
+    const watch = new MutationObserver(() => {
+      if (el.isConnected) return;
+      watch.disconnect();
+      then();
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => watch.disconnect());
   }
 
   it.each(['desktop', 'phone'] as const)('inbox_alert_opens_the_held_request_%s', async (viewport) => {
@@ -1107,17 +1248,17 @@ describe("Today's Demo inbox", () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // Following it closes the sheet and lands on the held request's card, in view.
+    const closedReads = closedInboxReads(sheet);
     await link.click();
     await expect.element(sheet).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
-    // Focus stays there, and the closed sheet reads no more.
-    const reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Focus stays there, and the closed sheet reads no more, a whole poll on.
+    await aPollPasses();
     expect(focusIsOn(card.element())).toBe(true);
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    expect(closedReads()).toBe(0);
   });
 
   it('inbox_alert_links_to_its_own_desk', async () => {
@@ -1402,14 +1543,15 @@ describe("Today's Demo inbox", () => {
     const { screen } = await renderRoute(TODAY);
     const open = inboxButton(screen);
     await expect.element(open).toBeVisible();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const closedReads = closedInboxReads(sheet);
     // Read once as Today opens, and not again while the sheet is closed.
     expect(requests('ownerInbox')).toHaveLength(1);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(1);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
 
     // Read as it opens, and every few seconds while it is open.
     await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
     await expect.element(sheet).toBeVisible();
     await readsMore('ownerInbox', 3);
 
@@ -1417,9 +1559,8 @@ describe("Today's Demo inbox", () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await expect.element(sheet).not.toBeInTheDocument();
     await expect.element(open).toHaveFocus();
-    let reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
 
     // Opened again, it reads again at once, and stops again once Escape closes it.
     await open.click();
@@ -1427,8 +1568,121 @@ describe("Today's Demo inbox", () => {
     await readsMore('ownerInbox', 2);
     await userEvent.keyboard('{Escape}');
     await expect.element(sheet).not.toBeInTheDocument();
-    reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
+  });
+
+  it.each(['read', 'failed'] as const)('inbox_polls_a_whole_poll_after_each_answer_%s', async (answer) => {
+    // As React Query's own polls do, the open sheet's poll counts again from each read's answer, read
+    // or failed, so a read that answers late isn't followed by another at once. A failed read is
+    // tried once more at once, and the answer that counts is that try's.
+    const tries = answer === 'read' ? 1 : 2;
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    if (answer === 'failed') mockStore.inject({ route: 'ownerInbox', status: 503, times: 2 });
+    // When each try of the read as it opens answers, from here on.
+    const answeredAt: number[] = [];
+    const stop = observeRequests((outcome) => {
+      if (outcome.key === 'ownerInbox') answeredAt.push(performance.now());
+    });
+    onTestFinished(stop);
+
+    // The read as it opens answers a poll and a half late.
+    const opening = holdReads(ROUTES.ownerInbox.path);
+    await open.click();
+    await vi.waitFor(() => expect(opening.held()).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, pollMs('inbox') * 1.5));
+    const sent: number[] = [];
+    const send = window.fetch;
+    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === ROUTES.ownerInbox.path) sent.push(performance.now());
+      return send(input, init);
+    });
+    onTestFinished(() => sending.mockRestore());
+    opening.release();
+
+    // The next read, the poll's, goes a whole poll after the last try's answer. A failed read's own
+    // try once more is sent before it.
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(tries));
+    expect(answeredAt.length).toBeGreaterThanOrEqual(tries);
+    expect((sent[tries - 1] ?? 0) - (answeredAt[tries - 1] ?? 0)).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
+  });
+
+  it('inbox_poll_counts_from_an_answer_as_it_comes', async () => {
+    // A read that answers just as the poll comes due, here one on the owner's return to the tab,
+    // starts the count again as it answers, before Today has drawn it: the poll that was running
+    // then sends nothing. No poll lands by itself here, so the test brings it due.
+    const polls = inboxPacedPolls();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    const answered = nextInboxAnswer();
+    await open.click();
+    await expect.element(screen.getByRole('dialog', { name: 'Demo inbox' })).toBeVisible();
+    await answered;
+
+    // The reads sent from the moment the poll comes due.
+    let counting = false;
+    let sentSince = 0;
+    const send = window.fetch;
+    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (counting && url.pathname === ROUTES.ownerInbox.path) sentSince += 1;
+      return send(input, init);
+    });
+    onTestFinished(() => sending.mockRestore());
+    // As the read on her return answers, the polls running before it come due: after the answer
+    // reaches the inbox's read, before Today hears of it.
+    let cameDue = false;
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== 'ownerInbox' || cameDue) return;
+      cameDue = true;
+      const running = polls.kept();
+      setTimeout(() => {
+        counting = true;
+        polls.due(running);
+      }, 0);
+    });
+    onTestFinished(stop);
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    await vi.waitFor(() => expect(counting).toBe(true));
+    await nextFrames();
+    expect(sentSince, 'Demo inbox reads sent as the poll came due, just after an answer').toBe(0);
+  });
+
+  it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
+    // The sheet is closed from the moment it closes, before Today has drawn it closed: a poll that
+    // comes due then, or the owner coming back to the tab or to the network then, reads nothing. No
+    // poll lands by itself here, so the test brings them due.
+    const polls = inboxPacedPolls();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // The read as it opens is answered, so none is still out as it closes. The polls started from
+    // the click until then are the sheet's own, started as it opened and again at that answer.
+    const answered = nextInboxAnswer();
+    const before = polls.started().length;
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await answered;
+    const sheetsOwn = polls.started().slice(before);
+
+    const closedReads = closedInboxReads(sheet);
+    let ran: number[] = [];
+    onceGone(sheet.element(), () => {
+      ran = polls.due();
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+      window.dispatchEvent(new Event('offline'));
+      window.dispatchEvent(new Event('online'));
+    });
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(open).toHaveFocus();
+    await nextFrames();
+    expect(ran.filter((id) => sheetsOwn.includes(id)), "the sheet's own poll came due as it closed").not.toEqual([]);
+    expect(closedReads(), 'Demo inbox reads sent once its sheet had closed').toBe(0);
   });
 });

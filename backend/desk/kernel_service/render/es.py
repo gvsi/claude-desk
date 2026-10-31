@@ -1,14 +1,17 @@
-"""Spanish: the visitor's status lines, key for key with `en.STATUS`, and the clause cards.
+"""Spanish: the visitor's status lines, executed receipts and other texts, key for key with
+`en.STATUS`, `en.EXECUTED` and `en.MESSAGES`, the owner-only lines (`en.OWNER_STATUS`), and the
+clause cards.
 
 Cards read datetimes in the business's time zone ("martes 3 de noviembre, 14:00"), money as
 `$1,234.56`, as in English, and percentages as "10 %".
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from desk.contracts import Fact, HoursWindow
-from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, claims, day_groups, hours_windows, local,
-                                              money, percent_text, slot_claims, text_claim)
+from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
+                                              hours_windows, local, money, percent_text, slot_claims, text_claim,
+                                              title_claim)
 
 STATUS: dict[str, str] = {
     "allowed": "Revisado con las reglas de {owner}",
@@ -24,6 +27,35 @@ STATUS: dict[str, str] = {
     "refused_at_execution": "Las reglas cambiaron, así que no se hizo",
     "reply_checked": "Respuesta revisada con las reglas de {owner}",
     "reply_handed_off": "Pasado a {owner} para responder",
+    "owner_said": "Escrito por {owner}",
+    "owner_say_blocked": "No se envió: incluía texto de un documento privado",
+}
+
+# Owner-only (`en.OWNER_STATUS`): unused until an owner-facing field carries it, and kept out of
+# `STATUS`, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+OWNER_STATUS: dict[str, str] = {
+    "refused_contact_changed": "No se compartió: su sesión terminó cuando cambió su contacto",
+    "refused_person_removed": "No se compartió: se quitó a esta persona de tus registros",
+    "refused_session_closed": "No se compartió: su sesión terminó antes de tu respuesta",
+}
+
+EXECUTED: dict[str, str] = {
+    "native.quote": "Cotizado con la lista de precios de {owner}",
+    "native.find_slots": "Horarios tomados del calendario de {owner}",
+    "native.book": "Reservado en el calendario de {owner}",
+    "native.capture_lead": "Datos guardados para {owner}",
+    "native.request_callback": "Solicitud de llamada guardada para {owner}",
+    "native.start_verification": "Verificación iniciada",
+    "native.release_document": "Documento compartido desde los registros de {owner}",
+}
+
+MESSAGES: dict[str, str] = {
+    "verify_started": ("Si ese contacto está registrado, te enviamos un código. Escríbelo abajo para confirmar "
+                       "que eres tú."),
+    "verify_already": "Ya confirmaste quién eres en este chat.",
+    "inbox_code_preview": "Nuevo código de verificación",
+    "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
+                        "Si no lo pediste, ignora este mensaje."),
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -112,3 +144,66 @@ def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
 
 def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title="Enviaré un código al contacto registrado.")
+
+
+def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{owner} te llamará el {day}, entre las {start} y las {end}`; sin horario `{owner} te llamará`.
+    El hecho guarda solo el horario, nunca el texto del visitante."""
+    owner = desk.owner_display_name
+    window = callback_window(fact, desk)
+    if window is None:
+        return Card(title=f"{owner} te llamará")
+    start, end = window
+    return Card(title=f"{owner} te llamará el {date(start)}, entre las {clock(start)} y las {clock(end)}")
+
+
+def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
+    """Las palabras del dueño, tal como las escribió."""
+    return Card(title=text_claim(fact))
+
+
+def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
+    """El título del documento; el enlace va en el `href` de la tarjeta, que llena la revisión."""
+    return Card(title=title_claim(fact))
+
+
+# ---- La línea de abierto ahora de la cabecera pública ("Open status") --------------------------------
+
+def _day(moment: datetime, as_of: datetime) -> str:
+    """La fecha de `moment` vista desde `as_of`: "hoy", "mañana", "el próximo lunes" para el mismo
+    día de la semana dentro de siete días, si no "el lunes". Una fecha a más de una semana, o ya
+    pasada, no tiene palabra y lanza ValueError."""
+    ahead = (moment.date() - as_of.date()).days
+    if ahead == 0:
+        return "hoy"
+    if ahead == 1:
+        return "mañana"
+    if 2 <= ahead <= 7:
+        return f"el {'próximo ' if ahead == 7 else ''}{WEEKDAYS[moment.weekday()]}"
+    raise ValueError("an open-now day is within the week ahead")
+
+
+def _at(moment: datetime) -> str:
+    """"las 18:00", "la 1:00": la hora con su artículo, "la" para la una."""
+    return f"{'la' if moment.hour == 1 else 'las'} {clock(moment)}"
+
+
+def _until(moment: datetime, as_of: datetime) -> str:
+    """Hasta cuándo abre: "las 18:00", "mañana a las 2:00", "el sábado a las 2:00". Un cierre a las
+    0:00 es la medianoche del día anterior, que lleva la palabra del día: "la medianoche", "mañana a
+    medianoche", "el viernes a medianoche"."""
+    if (moment.hour, moment.minute) == (0, 0):
+        day = _day(moment - timedelta(days=1), as_of)
+        return "la medianoche" if day == "hoy" else f"{day} a medianoche"
+    day = _day(moment, as_of)
+    return _at(moment) if day == "hoy" else f"{day} a {_at(moment)}"
+
+
+def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> str:
+    """"Abierto ahora, hasta las 18:00", "Abierto ahora", "Cerrado ahora. Abre el lunes a las 8:00":
+    `boundary` y `as_of` en la zona horaria del negocio."""
+    if is_open:
+        return "Abierto ahora" if boundary is None else f"Abierto ahora, hasta {_until(boundary, as_of)}"
+    if boundary is None:
+        raise ValueError("a closed business names when it opens")
+    return f"Cerrado ahora. Abre {_day(boundary, as_of)} a {_at(boundary)}"

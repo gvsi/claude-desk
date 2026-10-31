@@ -6,7 +6,7 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -22,6 +22,8 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { idempotencyKeyOf } from './keys.ts';
+import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
   attempts,
   briefingList,
@@ -90,7 +92,7 @@ export interface Req {
 /** The statuses a route answers its model with; a 204 has no body. */
 type OkStatus = 200 | 201 | 202 | 204;
 /** The statuses a route refuses with. */
-type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503;
+type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503 | 504;
 
 /** A refusal's body, as the API writes it: `error`, with a kernel failure's `code` or a conflict's `decision`. */
 export interface ErrorBody {
@@ -105,6 +107,8 @@ export interface ErrorBody {
   cancel_reason?: CancelReason | null;
   /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
   draft?: RulesDraft;
+  /** Seconds to wait before sending again: a setup start's 409 `in_progress`. */
+  retry_after?: number;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -150,9 +154,6 @@ const CARD_WHO: ReadonlySet<unknown> = new Set<RuleCard['who']>(['anyone', 'veri
 /** The platform ceiling on the payment limit, $10,000 (master "Money cap"): no limit is drafted above it. */
 const PLATFORM_CEILING_CENTS = 1_000_000;
 
-/** The effects that move money. */
-const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
-
 /** Whether `card` is a rule that moves money: on a tool that charges or pays out, or on every tool that does. */
 function movesMoney(desk: DeskRecord, card: RuleCard): boolean {
   return card.applies_to.startsWith('effect:')
@@ -173,17 +174,20 @@ function aboveMoneyCap(desk: DeskRecord, cards: readonly RuleCard[]): Failure | 
 }
 
 /**
- * `cards` with each active automatic money rule above `cap` brought down to it, as plan 01b's
- * `desk.money_cap.lower_to_cap` drafts a lower limit: its own limit becomes `cap`, or at 0 it asks
- * first, with what only an automatic rule has dropped. A card no active card has, and every other
- * card, is unchanged, so the draft shows each one the new limit changes.
+ * `cards` with each active automatic money rule above `cap` brought down to it, as
+ * `desk.money_cap.lower_to_cap` drafts a new limit: its own limit becomes `cap`, or at 0 it asks
+ * first, with what only an automatic rule has dropped, and either way its reason is replaced whole
+ * by the sentence for the new limit, in the language the API's route writes it in. A card no active
+ * card has, and every other card, is unchanged, reason included, so the draft shows each one the
+ * new limit changes.
  */
 function lowerToCap(desk: DeskRecord, cards: readonly RuleCard[], cap: number): RuleCard[] {
   const carried = new Set(desk.policy.cards.map((card) => card.card_id));
+  const reason = loweredReason(cap, OWNER_LANGUAGE);
   return cards.map((card) => {
     if (!carried.has(card.card_id) || !autoMoneyAbove(desk, card, cap)) return card;
-    if (cap > 0) return { ...card, max_amount_cents: cap };
-    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false };
+    if (cap > 0) return { ...card, max_amount_cents: cap, reason };
+    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false, reason };
   });
 }
 
@@ -605,14 +609,16 @@ const SERVED: ServedRoutes = {
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
-    const cap = isRecord(req.body) ? req.body.auto_money_cap_cents : undefined;
+    // The body is the limit alone: the API's model forbids any other field.
+    const body = isRecord(req.body) && Object.keys(req.body).every((key) => key === 'auto_money_cap_cents') ? req.body : undefined;
+    const cap = body?.auto_money_cap_cents;
     if (req.malformed || typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < 0) return INVALID;
     if (cap > PLATFORM_CEILING_CENTS) return failWith(422, 'above_platform_ceiling');
-    // The active rules at the new limit. A lower one first brings each automatic money rule above it
-    // down to it, so the draft holds together on its own and its diff shows each one; a higher one
-    // keeps the rules as they are. Nothing changes until the owner confirms the draft.
-    const lower = cap < (desk.policy.auto_money_cap_cents ?? 0);
-    return ok(sv.world.draftCards(desk, lower ? lowerToCap(desk, desk.policy.cards, cap) : desk.policy.cards, { cap }));
+    // The active rules at the new limit, as the API drafts them: each automatic money rule above it
+    // comes down to it, so the draft holds together on its own and its diff shows each one; a higher
+    // limit leaves none above it, so the rules stay as they are. Nothing changes until the owner
+    // confirms the draft.
+    return ok(sv.world.draftCards(desk, lowerToCap(desk, desk.policy.cards, cap), { cap }));
   },
   ruleDraft(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -730,8 +736,13 @@ const SERVED: ServedRoutes = {
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
     const task = isRecord(req.body) ? req.body.task : undefined;
-    if (req.malformed || !isDemoAgentTask(task)) return INVALID;
-    const runId = sv.agents.start(sv.world, visitor.desk, visitor.session, task);
+    const key = idempotencyKeyOf(req.body);
+    if (req.malformed || !isDemoAgentTask(task) || key === false) return INVALID;
+    // A repeat with the client's key answers the run the first started and starts nothing; the key
+    // with another task, session or Desk is a conflict (plan 02b).
+    const held = sv.agents.keyed(key, task, visitor.session, visitor.desk.summary.slug);
+    if (held === 'conflict') return failWith(409, 'conflict');
+    const runId = held ?? sv.agents.start(sv.world, visitor.desk, visitor.session, task, key);
     return ok({ run_id: runId } satisfies AgentRunStarted, 202);
   },
   agentRun(sv, req) {

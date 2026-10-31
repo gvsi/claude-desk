@@ -1924,7 +1924,7 @@
     "/api/owner/handoffs/{handoff_id}/done": {
       "post": {
         "summary": "Handoff Done",
-        "description": "Mark a callback request done, through the kernel with the owner's credential. A handoff that isn't on one of\nthe copy's Desks is 404 and never sent; one already done is the kernel's 409 `conflict`.",
+        "description": "Mark a callback request done, through the kernel with the owner's credential. A handoff that isn't on one of\nthe copy's Desks is 404 and never sent. The kernel answers 409 `conflict` for one already done, and 409 `closed`\nfor one whose Desk was deleted after the copy's Desks were read; the route passes either on.",
         "operationId": "owner_handoff_done",
         "parameters": [
           {
@@ -2623,7 +2623,7 @@
     "/api/owner/setup": {
       "post": {
         "summary": "Start Setup",
-        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nWith an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands\nnow, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409\n`conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again\nafter `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees\nthe key once it is older than the longest a start can take. A start is admitted (looked up, counted and claimed)\nunder its key's lock in this process, so a repeat sent meanwhile waits for that admission and is never counted;\nanother process admits on its own, so during a deploy's overlap a repeat routed to the other task can be counted\ntwice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nOne rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by\nthe limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request\ncan be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed\nthen answers 409 `key_spent`. Without a key, each start makes its own interview and Desk.",
+        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nEach start carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy answers the interview the first made, as it stands now, and makes nothing: no model call, no Desk, no\ncount on the limits. A repeat with another body is 409 `conflict`, and one sent while the first is still starting\nanswers 409 `in_progress` at once, to be sent again after `retry_after`. A first that stopped before the kernel\nwas asked for the Desk (its process did, say) frees the key once it is older than the longest a start can take. A\nstart is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent\nmeanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's\noverlap a repeat routed to the other task can be counted twice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nA start that fails before the kernel is asked for the Desk (refused by the limits, or Claude couldn't answer)\nfrees its key, so the same request can be sent again. Once the Desk was asked for, the key keeps the outcome\nwhatever the kernel answered, a refusal too, and a repeat of a start that failed answers 409 `key_spent`.",
         "operationId": "owner_start_setup",
         "requestBody": {
           "content": {
@@ -4065,7 +4065,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nWith an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started\n(its ID; poll it for its state) and starts nothing, and a repeat that finds the key never counts on the limit. One\nwith another task, or from another session or to another Desk than the key's, is 409 `conflict`. The key is\nclaimed once the limit and the budget let the request through, before the kernel mints the agent. A request is\nadmitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits\nfor that admission, then answers the run; another process admits on its own, so during a deploy's overlap a repeat\nrouted to the other task can be counted twice. Keys live in this process's memory, like the runs, each for its\nrun's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour ends.\n\nOne rule for failures, as when starting setup: a request that fails before anything is made (refused by the limit\nor the budget, or the kernel refused to mint the agent with a 4xx) frees its key, so the same request can be sent\nagain. Once the kernel may have minted the agent (no answer came back, or a 5xx) or the run started, the key keeps\nthe run however it ends, a failed one too, and a new click sends a new key. Without a key, each request starts\nits own run.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -4816,7 +4816,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Rules"
                 }
               }
             },
@@ -5131,7 +5139,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Confirm"
                 }
               }
             },
@@ -6072,6 +6088,9 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
@@ -6199,6 +6218,9 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
@@ -6316,6 +6338,9 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/AboveMoneyCap"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
                     },
                     {
                       "$ref": "#/components/schemas/ApiError"
@@ -6437,10 +6462,132 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
                   "title": "Response 422 Owner Draft Suggestion"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/policy/{desk_id}/money_cap": {
+      "post": {
+        "summary": "Draft Money Cap",
+        "description": "Draft the active rules at a new money cap, the most Claude takes or pays out in one action without asking:\nlowering it brings each rule that takes or pays out more on its own down to it (asking instead at $0), each saying\nits new limit, and the draft's diff lists them; raising it changes no rule. The draft is at the new cap, which\nbecomes the Desk's only when the owner confirms it. 422 `above_platform_ceiling` above the $10,000 ceiling, with\nnothing drafted.",
+        "operationId": "owner_draft_money_cap",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoneyCapIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesDraft"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Draft Money Cap"
                 }
               }
             },
@@ -7378,6 +7525,29 @@
         ],
         "title": "CardOption"
       },
+      "ChangesAlwaysOn": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "changes_always_on",
+            "title": "Error",
+            "default": "changes_always_on"
+          },
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Card Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_ids"
+        ],
+        "title": "ChangesAlwaysOn",
+        "description": "422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a\nverification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing\nwas drafted."
+      },
       "CheckedDraft": {
         "properties": {
           "prose": {
@@ -8099,6 +8269,13 @@
             },
             "type": "array",
             "title": "Charter"
+          },
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Auto Money Cap Cents",
+            "default": 0
           },
           "hours": {
             "items": {
@@ -9148,6 +9325,23 @@
         ],
         "title": "MessageIn"
       },
+      "MoneyCapIn": {
+        "properties": {
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Auto Money Cap Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "auto_money_cap_cents"
+        ],
+        "title": "MoneyCapIn",
+        "description": "`POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule\nmay take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform\nceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422\n`invalid`."
+      },
       "NeedsYouItem": {
         "properties": {
           "decision": {
@@ -9973,6 +10167,13 @@
           "review_thresholds_version": {
             "type": "integer",
             "title": "Review Thresholds Version"
+          },
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Auto Money Cap Cents",
+            "default": 0
           },
           "status": {
             "type": "string",
@@ -11091,24 +11292,18 @@
             "title": "Task"
           },
           "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Idempotency Key"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "task"
+          "task",
+          "idempotency_key"
         ],
         "title": "SendAgentIn"
       },
@@ -11262,17 +11457,10 @@
             "title": "Owner Display Name"
           },
           "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Idempotency Key"
           }
         },
@@ -11280,10 +11468,11 @@
         "type": "object",
         "required": [
           "description",
-          "timezone"
+          "timezone",
+          "idempotency_key"
         ],
         "title": "SetupStartIn",
-        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one\nper click, makes a repeat answer the interview the first made instead of making another."
+        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. The `idempotency_key`, one per click\nand required (422 without one), makes a repeat answer the interview the first made instead of making another."
       },
       "SetupState": {
         "properties": {
@@ -11593,7 +11782,7 @@
           "days"
         ],
         "title": "ThisWeek",
-        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`."
+        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the\nreply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the\ndrafts."
       },
       "Today": {
         "properties": {
@@ -12292,7 +12481,8 @@
           "bookings",
           "stopped"
         ],
-        "title": "WeekDay"
+        "title": "WeekDay",
+        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,\nnot Claude's own drafts the reply check stopped."
       },
       "WentLive": {
         "properties": {

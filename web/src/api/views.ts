@@ -617,14 +617,8 @@ export interface PresetBody {
   preset: RulesPreset;
 }
 
-/**
- * `draftMoneyCap`'s body (plan 02b; typed here until the regenerated types have it): the payment
- * limit a draft changes to, in cents, from 0 to the $10,000 platform ceiling. The draft keeps the
- * active rules, and nothing changes until the owner confirms it.
- */
-export interface MoneyCapBody {
-  auto_money_cap_cents: number;
-}
+/** `draftMoneyCap`'s body, the payment limit a draft changes to: the API's own model, from its document. */
+export type { MoneyCapIn } from './openapi.gen.ts';
 
 export interface ConfirmRulesBody {
   version: number;
@@ -660,6 +654,11 @@ export interface StartSetupBody {
   description: string;
   timezone: string;
   owner_display_name?: string;
+  /**
+   * One per "Start" click (1 to 128 characters, no control characters): a repeat with the same key
+   * and body answers the interview the first made instead of making another (plan 02b).
+   */
+  idempotency_key: string;
 }
 
 /**
@@ -686,4 +685,9 @@ export interface VerifyCodeBody {
 
 export interface AgentTaskBody {
   task: string;
+  /**
+   * One per task click (1 to 128 characters, no control characters): a repeat with the same key,
+   * task, session and Desk answers the run the first started and starts nothing (plan 02b).
+   */
+  idempotency_key: string;
 }

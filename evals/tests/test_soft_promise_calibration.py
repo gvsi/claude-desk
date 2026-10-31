@@ -23,6 +23,9 @@ import yaml
 
 from desk.kernel_service import decisions, reply_check
 from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput
+from desk.kernel_service.render import en as render_en
+from desk.kernel_service.render import es as render_es
+from desk.kernel_service.render.cards import DeskInfo
 from evals.calibration.soft_promise import (
     CASES_FILE,
     DECISIONS_PATH,
@@ -136,19 +139,40 @@ def test_the_case_file_holds_every_group():
     cases = load_cases(CASES_FILE)
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
-        "drafts": 20, "offers": 6, "unlisted_offers": 3, "offer_plus_promise": 5, "past_tense_claims": 5,
-        "follow_up": 6, "self_labelled": 2, "plain_promises": 4, "human_claims": 3}
+        "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
+        "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "human_claims": 3}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
-        "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 6}, "unlisted_offers": {"flag": 3},
-        "offer_plus_promise": {"flag": 5}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 1},
-        "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "human_claims": {"flag_ai": 3}}
+        "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
+        "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
+        "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
+        "human_claims": {"flag_ai": 3}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases}
-    # the follow-up the handoff card states passes beside that card, and only there: the same words
-    # with no card are a promise
-    [here] = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]
-    assert here.cards == ["Let me check with Maria Rivera.\nMaria Rivera will reply here."]
-    assert [c.cards for c in cases if c.prose == here.prose and c.expected == "flag"] == [[]]
+    # the follow-up the handoff card states passes beside that card, as the kernel renders it in the
+    # case's language, and only there: the same words with no card are a promise
+    rivera = DeskInfo(owner_display_name="Maria Rivera", timezone="America/Los_Angeles")
+    handoff = {language: "\n".join([card.title, *card.lines])
+               for language, card in (("en", render_en.handoff(None, rivera)), ("es", render_es.handoff(None, rivera)))}
+    here = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]
+    assert sorted(c.language for c in here) == ["en", "es"]
+    for case_ in here:
+        assert case_.cards == [handoff[case_.language]]
+        assert [c.cards for c in cases if c.prose == case_.prose and c.expected == "flag"] == [[]]
+    assert handoff["es"] == "Déjame consultarlo con Maria Rivera.\nMaria Rivera te responderá aquí."
+    # the offers that commit the business past the five next steps (Maria calling back, holding a
+    # time) or add a promise inside the offer (going ahead of others, an area the card leaves out)
+    added = {c.id: (c.group, c.language, c.expected) for c in cases if c.id in {
+        "unlisted-offer-call-back", "unlisted-offer-es-call-back", "unlisted-offer-hold-time",
+        "unlisted-offer-es-hold-time", "offer-squeeze-in", "offer-outside-area"}}
+    assert added == {
+        "unlisted-offer-call-back": ("unlisted_offers", "en", "flag"),
+        "unlisted-offer-es-call-back": ("unlisted_offers", "es", "flag"),
+        "unlisted-offer-hold-time": ("unlisted_offers", "en", "flag"),
+        "unlisted-offer-es-hold-time": ("unlisted_offers", "es", "flag"),
+        "offer-squeeze-in": ("offer_plus_promise", "en", "flag"),
+        "offer-outside-area": ("offer_plus_promise", "en", "flag")}
+    [outside] = [c for c in cases if c.id == "offer-outside-area"]
+    assert "We work in Oakland, Berkeley, Alameda and Emeryville." in outside.cards
     # the drafts flagged by the prompt's text: a step claimed as done or under way (05, 11), an offer
     # that adds a time (08, 09) and a follow-up no card states (18, 20)
     flagged = {c.id: c.prose for c in cases if c.group == "drafts" and c.expected == "flag"}
@@ -164,20 +188,24 @@ def test_the_case_file_holds_every_group():
     assert not re.search(r"/(?:Users|private|tmp|home|var)/|session_id", text)
 
 
-def uncovered(cases: list[Case]) -> set[tuple[str, str]]:
-    """Each (group, language) of a group with a flag case that has no flag case in that language
-    the code check passes, so that only the model decides it."""
-    flagging = {c.group for c in cases if c.expected in ("flag", "flag_ai")}
-    covered = {(c.group, c.language) for c in cases if c.expected in ("flag", "flag_ai") and not code_blocked(c)}
-    return {(group, language) for group in flagging for language in ("en", "es")} - covered
+def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")) -> set[tuple[str, str]]:
+    """Each (group, language) of a group with a case expecting one of `expected` (a flag, by
+    default) that has no such case in that language the code check passes, so that only the model
+    decides it."""
+    groups = {c.group for c in cases if c.expected in expected}
+    covered = {(c.group, c.language) for c in cases if c.expected in expected and not code_blocked(c)}
+    return {(group, language) for group in groups for language in ("en", "es")} - covered
 
 
-def test_every_flag_group_has_a_case_in_each_language_the_model_alone_decides():
+def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_alone_decides():
     cases = load_cases(CASES_FILE)
     assert uncovered(cases) == set()
+    assert uncovered(cases, ("pass",)) == set()
     # Spanish past-tense claims would be uncovered without the one with no date word: the code
     # check blocks "Ya le reservé la primera hora." first
     assert uncovered([c for c in cases if c.id != "claim-es-message-passed"]) == {("past_tense_claims", "es")}
+    # and the Spanish follow-ups the model passes without the one the Spanish handoff card states
+    assert uncovered([c for c in cases if c.id != "follow-up-es-reply-here"], ("pass",)) == {("follow_up", "es")}
 
 
 def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path: Path):
@@ -186,7 +214,10 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose)}
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
-    assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises")}
+    assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
+    # nor any other case but the Spanish booking claimed with "primera hora": every case added since,
+    # such as an offer of Maria's call back or a Spanish follow-up beside its card, reaches the model
+    assert blocked == {c.id for c in cases if c.expected == "code"} | {"claim-es-booked"}
     # a case can't state it, nor anything else the runner doesn't read
     with pytest.raises(Refused, match="code_blocked"):
         load_cases(write_cases(tmp_path / "c.yaml", {**case("a", "Hello."), "code_blocked": False}))

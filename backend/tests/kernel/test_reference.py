@@ -19,6 +19,7 @@ from desk.contracts import HoursWindow, RuleCard, ToolProfile
 from desk.kernel_service import activation, compiler, reference
 from desk.kernel_service.seed import RIVERA_CARDS
 
+from .helpers import TEST_CAP, compile_at, context
 from .test_compiler import A_MIX_OF_CARDS, DANA, NATIVE_TOOLS, REFUND, WEEKDAYS, card, native_profile, schema_for
 
 REFERENCE_PY = Path(reference.__file__)
@@ -38,12 +39,12 @@ def check(cards: list[RuleCard], profiles: list[ToolProfile] | None = None, *, k
     the reference sets, on a fresh engine with the real baseline."""
     profiles = profiles if profiles is not None else native_profiles()
     schema = schema_for(profiles)
-    compiled = compiler.compile_cards(cards, profiles)
-    a0 = compiler.compile_cards(cards, profiles, review=False).A
+    compiled = compile_at(cards, profiles)
+    a0 = compile_at(cards, profiles, review=False).A
     refs = reference.reference_sets(cards, schema)
     engine = engine or desk_kernel.PolicyEngine(compiler.BASELINE)
     return activation.bounded_check(engine, key_prefix=key_prefix, schema_json=json.dumps(schema), compiled=compiled,
-                                    a0=a0, refs=refs, cards=cards, profiles=profiles)
+                                    a0=a0, refs=refs, cards=cards, profiles=profiles, auto_money_cap_cents=TEST_CAP)
 
 
 def auto_allows(verdict: dict) -> bool:
@@ -59,14 +60,14 @@ def same_decisions(cards: list[RuleCard], profiles: list[ToolProfile] | None = N
     would weaken every proof) fails too. Returns the number of cases compared."""
     profiles = profiles if profiles is not None else native_profiles()
     schema = schema_for(profiles)
-    compiled = compiler.compile_cards(cards, profiles, review=False)
+    compiled = compile_at(cards, profiles, review=False)
     refs = reference.reference_sets(cards, schema)
     engine = desk_kernel.PolicyEngine(compiler.BASELINE)
     loads = {"a0": (compiled.F, compiled.A, ""), "R": (refs.never, refs.R, ""),
              "approvable": (compiled.F, "", compiled.H), "R_hold": (refs.never, "", refs.R_hold)}
     for key, (f, a, h) in loads.items():
         assert engine.load(key, json.dumps(schema), json.dumps({"F": f, "A": a, "H": h})) == [], key
-    cases = activation.bounded_cases(cards, profiles, schema)
+    cases = activation.bounded_cases(cards, profiles, schema, auto_money_cap_cents=TEST_CAP)
     for case in cases:
         verdict = {key: json.loads(engine.decide(key, json.dumps(case), "final")) for key in loads}
         assert not any(v["errors"] for v in verdict.values()), (case, verdict)
@@ -197,7 +198,7 @@ def test_reference_agrees_on_joint_coverage_and_default_asks():
     # the reference derives the same default asks as the compiler, from the schema alone
     schema = schema_for(profiles)
     for name, cards in JOINT_SETS.items():
-        compiled = {c.card_id for c in compiler.compile_cards(cards, profiles).cards if c.is_default}
+        compiled = {c.card_id for c in compile_at(cards, profiles).cards if c.is_default}
         derived = set(re.findall(r'@id\("ask\.(default:[^"]+)"\)', reference.reference_sets(cards, schema).R_hold))
         assert derived == compiled, name
     verified_changes = reference.reference_sets(JOINT_SETS["a verified change card beside the booking default"], schema)
@@ -205,7 +206,8 @@ def test_reference_agrees_on_joint_coverage_and_default_asks():
     assert '@id("auto.verified-changes")' in verified_changes.R
     # one joint permit, listing both cards, and no permit of either card's own for the refund tool
     joint = reference.reference_sets(JOINT_SETS["joint autos take the tightest limits"], schema)
-    assert re.findall(r'@id\("([^"]+)"\)', joint.R) == ["auto.private-verified+refunds"]
+    assert re.findall(r'@id\("([^"]+)"\)', joint.R) == ["auto.preset-start-verification",   # always on
+                                                         "auto.private-verified+refunds"]
     assert '@card("private-verified,refunds")' in joint.R and "context.amount_cents <= 5000" in joint.R
 
 
@@ -218,7 +220,7 @@ def decide_raw(sets: dict[str, str], schema: dict, request: dict) -> dict:
 def test_a_missing_exclusion_is_caught(monkeypatch):
     monkeypatch.setattr(compiler, "_exclusions", lambda *args: "")      # no `unless`: every auto card decides alone
     cards = OVERLAP_SETS["more specific auto decides"]                   # charges <= 10000; Dana's link <= 2000
-    assert "unless" not in compiler.compile_cards(cards, native_profiles()).A
+    assert "unless" not in compile_at(cards, native_profiles()).A
     report = check(cards)
     assert not report.ok
     failed = {c.name: c for c in report.checks if not c.ok}
@@ -229,7 +231,7 @@ def test_a_missing_exclusion_is_caught(monkeypatch):
     principal = next(e for e in raw["entities"] if e["uid"] == raw["principal"])
     assert principal["attrs"]["person_id"] == "dana" and raw["context"]["amount_cents"] > 2000
     schema = schema_for(native_profiles())
-    assert decide_raw(compiler.compile_cards(cards, native_profiles()).sets(), schema, raw)["outcome"] == "allow"
+    assert decide_raw(compile_at(cards, native_profiles()).sets(), schema, raw)["outcome"] == "allow"
     refs = reference.reference_sets(cards, schema)
     assert decide_raw({"F": refs.never, "A": refs.R, "H": ""}, schema, raw)["outcome"] != "allow"
 
@@ -244,7 +246,7 @@ def test_an_or_gate_is_rejected(monkeypatch):
     cards = OVERLAP_SETS["hours, reviews and overlap"]
     gate = compiler._review_gate
     monkeypatch.setattr(compiler, "_review_gate", lambda *args: gate(*args).replace(" && ", " || "))
-    assert "context has review || context.review" in compiler.compile_cards(cards, native_profiles()).A
+    assert "context has review || context.review" in compile_at(cards, native_profiles()).A
     report = check(cards)
     assert not report.ok
     assert [c.name for c in report.checks if not c.ok] in (["lint"], ["review_only_narrows"]), report.checks
@@ -254,11 +256,11 @@ def test_an_or_gate_is_rejected(monkeypatch):
     # here A0 is compiled without the gated weekday booking card, as if its gate had added the access
     profiles = native_profiles()
     schema = schema_for(profiles)
-    narrower = compiler.compile_cards([c for c in cards if c.card_id != "book-weekdays"], profiles, review=False).A
+    narrower = compile_at([c for c in cards if c.card_id != "book-weekdays"], profiles, review=False).A
     report = activation.bounded_check(desk_kernel.PolicyEngine(compiler.BASELINE), key_prefix="desk-test:2",
-                                      schema_json=json.dumps(schema), compiled=compiler.compile_cards(cards, profiles),
+                                      schema_json=json.dumps(schema), compiled=compile_at(cards, profiles),
                                       a0=narrower, refs=reference.reference_sets(cards, schema), cards=cards,
-                                      profiles=profiles)
+                                      profiles=profiles, auto_money_cap_cents=TEST_CAP)
     failed = {c.name: c for c in report.checks if not c.ok}
     assert set(failed) == {"review_only_narrows"}, failed
     raw = failed["review_only_narrows"].counterexample_raw
@@ -291,7 +293,7 @@ def test_cases_cover_every_card_boundary():
     cards = [weekdays_8_to_5, link, card("agent-charge", "native.charge_mandate", who="agent", max_amount_cents=5000,
                                          **AGENT)]
     profiles = native_profiles()
-    cases = activation.bounded_cases(cards, profiles, schema_for(profiles))
+    cases = activation.bounded_cases(cards, profiles, schema_for(profiles), auto_money_cap_cents=TEST_CAP)
     assert len(cases) <= activation.MAX_BOUNDED_CASES
     assert len({json.dumps(case, sort_keys=True) for case in cases}) == len(cases)          # deduplicated
 
@@ -304,8 +306,12 @@ def test_cases_cover_every_card_boundary():
     # the change row (7500, 2500), each threshold one either side, none, and the extremes
     assert {(7500, 2500), (7499, 2500), (7501, 2500), (7500, 2499), (7500, 2501), None, (10_000, 0),
             (0, 10_000)} <= reviews
-    # money: each limit and one over, none, zero, the hard cap and one over, and the baseline's ceiling
+    # money: each limit and one over, none, zero, the version's money cap and one over, and the ceiling
     assert {2000, 2001, None, 0, 50_000, 50_001, 1_000_000} <= values(cases, "native.payment_link", "amount_cents")
+    assert values(cases, "native.payment_link", "auto_money_cap_cents") == {TEST_CAP}           # every case, its cap
+    at_zero = activation.bounded_cases(cards, profiles, schema_for(profiles), auto_money_cap_cents=0)
+    assert {0, 1, 1_000_000} <= values(at_zero, "native.payment_link", "amount_cents")
+    assert values(at_zero, "native.payment_link", "auto_money_cap_cents") == {0}
     assert {5000, 5001} <= values(cases, "native.charge_mandate", "amount_cents")
 
     # who: every principal kind the tool applies to, each standing, Dana and someone else, the agent key and another
@@ -344,7 +350,7 @@ def thirty_cards() -> list[RuleCard]:
 
 def test_case_count_is_bounded():
     cards, profiles = thirty_cards(), native_profiles()
-    cases = activation.bounded_cases(cards, profiles, schema_for(profiles))
+    cases = activation.bounded_cases(cards, profiles, schema_for(profiles), auto_money_cap_cents=TEST_CAP)
     assert len(cases) <= activation.MAX_BOUNDED_CASES
     assert {case["action"] for case in cases} == {p.tool for p in profiles}            # every tool gets its turn
 
@@ -371,13 +377,13 @@ def test_bounded_reports_say_checked_not_proved():
     engine = desk_kernel.PolicyEngine(compiler.BASELINE)
     report = check(cards, profiles, key_prefix="desk-7:3", engine=engine)
     assert report.ok and report.method == "bounded" and not report.timed_out
-    assert report.cases == len(activation.bounded_cases(cards, profiles, schema_for(profiles))) > 0
+    assert report.cases == len(activation.bounded_cases(cards, profiles, schema_for(profiles), auto_money_cap_cents=TEST_CAP)) > 0
     assert [c.name for c in report.checks] == list(activation.BOUNDED_CHECKS)
 
     # its five keys are dropped afterwards, and never collide with a loaded version's keys
     keys = activation.bounded_keys("desk-7:3")
     assert len(keys) == 5 and not {"desk-7:3", "desk-7:3:approvable"} & set(keys)
-    request = json.dumps(activation.bounded_cases(cards, profiles, schema_for(profiles))[0])
+    request = json.dumps(activation.bounded_cases(cards, profiles, schema_for(profiles), auto_money_cap_cents=TEST_CAP)[0])
     for key in keys:
         verdict = json.loads(engine.decide(key, request, "final"))
         assert verdict["outcome"] == "refuse" and any("not loaded" in e for e in verdict["errors"]), key
@@ -385,8 +391,8 @@ def test_bounded_reports_say_checked_not_proved():
     # a check that can't load reports a failed lint and still drops its keys
     empty = reference.RefSets(never="", R="", R_hold="")
     report = activation.bounded_check(engine, key_prefix="desk-7:4", schema_json="{}",
-                                      compiled=compiler.compile_cards(cards, profiles), a0="", refs=empty, cards=cards,
-                                      profiles=profiles)
+                                      compiled=compile_at(cards, profiles), a0="", refs=empty, cards=cards,
+                                      profiles=profiles, auto_money_cap_cents=TEST_CAP)
     assert not report.ok and [(c.name, c.ok) for c in report.checks] == [("lint", False)]
     for key in activation.bounded_keys("desk-7:4"):
         assert "not loaded" in json.loads(engine.decide(key, request, "final"))["errors"][0]
@@ -395,10 +401,10 @@ def test_bounded_reports_say_checked_not_proved():
 def test_failed_load_drops_the_key():
     profiles = native_profiles()
     schema = json.dumps(schema_for(profiles))
-    sets = compiler.compile_cards([card("book", "native.book")], profiles).sets()
+    sets = compile_at([card("book", "native.book")], profiles).sets()
     visitor, slot = {"type": "Visitor", "id": "session-1"}, {"type": "Slot", "id": "slot-1"}
     booking = json.dumps({"principal": visitor, "action": "native.book", "resource": slot,
-                          "context": {"record_owner_match": False, "local_dow": 1, "local_minute": 600},
+                          "context": context(record_owner_match=False, local_dow=1, local_minute=600),
                           "entities": [{"uid": visitor, "attrs": {"verified": False, "assurance": "none", "copy": "c"},
                                         "parents": []},
                                        {"uid": slot, "attrs": {"copy": "c"}, "parents": []}]})

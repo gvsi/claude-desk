@@ -11,10 +11,13 @@ ERROR = {"$ref": "#/components/schemas/ApiError"}
 OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                     ("owner_answer_approval", "409"): ("AlreadyResolved", "ApiError"),
                     ("owner_setup_confirm", "409"): ("RulesChanged", "ApiError"),
-                    # a rule change above the money cap names the cap the owner must raise first
-                    **{(operation, "422"): ("AboveMoneyCap", "ApiError")
+                    # a rule change above the money cap names the cap the owner must raise first, and one that
+                    # would change starting a verification names the cards
+                    **{(operation, "422"): ("AboveMoneyCap", "ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_rule_chat", "owner_draft_rules", "owner_draft_preset",
                                          "owner_draft_suggestion")},
+                    **{(operation, "422"): ("ChangesAlwaysOn", "ApiError")
+                       for operation in ("owner_draft_money_cap", "owner_setup_rules", "owner_setup_confirm")},
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included
@@ -119,15 +122,22 @@ def test_path_parameters_are_named_after_their_resource():
 
 
 def test_the_keyed_starts_document_their_answers():
-    # The web reads these: the answers a keyed start or send can give, the one failure rule both follow, and that
-    # setup's messages open at Claude's consent question, the owner's description not shown back.
+    # The web reads these: the answers a keyed start or send can give, each one's own rule for when its key is freed or
+    # kept, and that setup's messages open at Claude's consent question, the owner's description not shown back.
     document = export_openapi()
     start = document["paths"]["/api/owner/setup"]["post"]
     send = document["paths"]["/api/public/desks/{slug}/send_agent"]["post"]
     assert {"404", "409", "422", "429", "503"} <= set(start["responses"])
     assert {"409", "422", "429", "503"} <= set(send["responses"])
-    for operation in (start, send):
-        assert "One rule for failures" in operation["description"]
-    assert "a repeat that finds the key never counts" in send["description"]
-    described = " ".join(document["components"]["schemas"]["SetupState"]["description"].split())
+    starting, sending = (" ".join(operation["description"].split()) for operation in (start, send))
+    assert "a repeat that finds the key never counts" in sending
+    # The rules differ, so neither claims the other's: a kernel 4xx frees the send's key, while the start's key keeps
+    # its outcome once the Desk was asked for, whatever the kernel answered. Only the start answers `key_spent`.
+    for described in (starting, sending):
+        assert not any(claim in described for claim in ("One rule for failures", "as when sending", "as when starting",
+                                                         "as sending the agent"))
+    assert "the kernel refused to mint the agent with a 4xx) frees its key" in sending
+    assert "the key keeps the outcome whatever the kernel answered, a refusal too" in starting
+    assert "key_spent" in starting and "key_spent" not in sending
+    described =" ".join(document["components"]["schemas"]["SetupState"]["description"].split())
     assert "start at Claude's consent question" in described and "isn't shown back" in described

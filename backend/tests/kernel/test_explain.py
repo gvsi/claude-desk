@@ -7,6 +7,8 @@ reads on the rules page.
 
 from desk.kernel_service.explain import explain_counterexample
 
+from .helpers import context as cedar_context
+
 PEOPLE = {"person-dana": "Dana", "person-bob": "Bob Okafor"}
 RESOURCES = {"native.quote": "Desk", "native.find_slots": "Desk", "native.book": "Slot",
              "native.release_document": "Document", "native.payment_link": "Quote",
@@ -22,7 +24,7 @@ def raw(action: str, *, kind: str = "Visitor", verified: bool = False, person_id
         attrs["person_id"] = person_id
     if kind == "Agent":
         attrs["agent_key_id"] = ""
-    context: dict = {"owner_approved": False, "record_owner_match": False, "local_dow": 1, "local_minute": 600}
+    context: dict = cedar_context(owner_approved=False, record_owner_match=False, local_dow=1, local_minute=600)
     if amount_cents is not None:
         context["amount_cents"] = amount_cents
     return {"principal": principal, "action": action, "resource": resource, "context": context,

@@ -81,15 +81,29 @@ export interface SidebarProps {
   about?: SidebarAbout;
 }
 
+/**
+ * Each page's row label, the words a page can name itself by (a tab's title: "Today · Claude Desk").
+ * People's row is the consumer's `peopleLabel`.
+ */
+export const NAV_LABELS = {
+  today: 'Today',
+  conversations: 'Conversations',
+  rules: 'Rules',
+  connectors: 'Connectors',
+  safety: 'Safety',
+  share: 'Share',
+  settings: 'Settings',
+} as const satisfies Record<Exclude<NavKey, 'people'>, string>;
+
 const NAV_ROWS = [
-  { key: 'today', icon: 'today', label: 'Today' },
-  { key: 'conversations', icon: 'conversations', label: 'Conversations' },
+  { key: 'today', icon: 'today', label: NAV_LABELS.today },
+  { key: 'conversations', icon: 'conversations', label: NAV_LABELS.conversations },
   { key: 'people', icon: 'people', label: null },
-  { key: 'rules', icon: 'rules', label: 'Rules' },
-  { key: 'connectors', icon: 'connectors', label: 'Connectors' },
-  { key: 'safety', icon: 'safety', label: 'Safety' },
-  { key: 'share', icon: 'share', label: 'Share' },
-  { key: 'settings', icon: 'settings', label: 'Settings' },
+  { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
+  { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
+  { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
+  { key: 'share', icon: 'share', label: NAV_LABELS.share },
+  { key: 'settings', icon: 'settings', label: NAV_LABELS.settings },
 ] as const satisfies readonly { key: NavKey; icon: IconName; label: string | null }[];
 
 function PlainLink({ children, ...props }: SidebarLinkProps) {

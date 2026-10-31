@@ -5,7 +5,7 @@
  * the payment limit's field (`parseLimit`). It reads the rules and decides nothing: the kernel
  * decides every request.
  */
-import type { PolicyVersion, RuleCard, ToolName } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
@@ -19,7 +19,8 @@ import {
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, connectorOn, toolState, type ConnectorKey } from '../connectors/catalog.ts';
 import { coveredTools } from './changeRows.ts';
-import { PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
+import { toolOutcome } from './outcome.ts';
+import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
 /** The rules a tool is read against: the active version's cards. */
 type ActiveCards = Pick<PolicyVersion, 'cards'>;
@@ -44,26 +45,6 @@ const MONEY_CONNECTORS: ReadonlySet<ConnectorKey> = new Set<ConnectorKey>(['paym
  */
 export function governingRules(row: Pick<ToolRow, 'tool' | 'effects'>, active: ActiveCards): RuleCard[] {
   return rulesForTool({ tool: row.tool, effects: row.effects }, active.cards);
-}
-
-/** A rule for one person or one agent, which never says what happens for everyone else. */
-const personScoped = (card: RuleCard) => card.who === 'person' || card.who === 'agent';
-
-/** How wide a group a card that isn't for one person or agent is for. */
-const GROUP_WIDTH: Readonly<Record<string, number>> = { anyone: 3, verified: 2, record_owner: 1 };
-
-/**
- * The rule whose outcome the hub shows for a tool: the most general one that governs it, for the
- * widest group (anyone, then verified customers, then the record's owner), the first among equals.
- * None when only rules for one person or agent govern it: everyone else gets the default ask.
- */
-function mostGeneral(rules: readonly RuleCard[]): RuleCard | undefined {
-  let best: RuleCard | undefined;
-  for (const card of rules) {
-    if (personScoped(card)) continue;
-    if (best === undefined || (GROUP_WIDTH[card.who] ?? 0) > (GROUP_WIDTH[best.who] ?? 0)) best = card;
-  }
-  return best;
 }
 
 /** A shared rule: one on an effect group (`effect:charge`), which every tool with that effect shares. */
@@ -110,8 +91,8 @@ function onConnectors(tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): Pick
 /**
  * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk
  * (`coveredTools`, among the Desk's tools on its connectors), "Applies to every tool that charges
- * money: Payment link and Charge within a signed limit.", or its group alone when the caller lists
- * no tools it covers.
+ * money: Payment link and Charge within a signed limit.", or its group alone when it covers none
+ * of them.
  */
 function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): string {
   const group = targetWords(card.applies_to);
@@ -124,14 +105,14 @@ function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly
  * A row per rule that governs `row` (`governingRules`), most specific first, for the connector and
  * tool pages and the house rules: its words (`ruleWords`), its limit for an automatic rule with an
  * amount, and for a shared rule the line that names its group and the tools it covers among
- * `tools` (the Desk's tool rows; without them, its group alone). Read-only: a page that offers an
- * outcome menu adds `onChangeOutcome`. What happens to anything else is `toolFallback`'s.
+ * `tools` (the Desk's tool rows, required so no caller drops those names). Read-only: a page that
+ * offers an outcome menu adds `onChangeOutcome`. What happens to anything else is `toolFallback`'s.
  */
 export function toolRuleRows(
   row: Pick<ToolRow, 'tool' | 'effects'>,
   active: ActiveCards,
   people: PeopleOut | null | undefined,
-  tools: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [],
+  tools: readonly Pick<ToolRow, 'tool' | 'effects'>[],
 ): RuleRowProps[] {
   return governingRules(row, active).map((card): RuleRowProps => {
     const limit = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
@@ -152,10 +133,7 @@ export function toolFallback(row: Pick<ToolRow, 'tool' | 'effects'>, active: Act
   return !governingRules(row, active).some((card) => card.mode === 'never' && card.who === 'anyone');
 }
 
-/** The effects that move money, so an automatic rule on them takes a limit. */
-const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
-
-/** The rule moves money: it is on a tool that charges or pays out, or on every tool that does. */
+/** The rule moves money, so an automatic one takes a limit: it is on a tool that charges or pays out, or on every tool that does. */
 function movesMoney(card: RuleCard, row: Pick<ToolRow, 'effects'>): boolean {
   if (isShared(card)) return MONEY_EFFECTS.has(card.applies_to.slice('effect:'.length));
   return row.effects.some((effect) => MONEY_EFFECTS.has(effect));
@@ -201,12 +179,11 @@ function summaryOf(tool: ToolName, rules: readonly RuleCard[], people: PeopleOut
   return shared > 0 ? `${rules.length} rules · ${shared} shared` : `${rules.length} rules`;
 }
 
-/** A tool on the hub: its words, its rules' words, its outcome and its page. */
+/** A tool on the hub: its words, its rules' words, its outcome (`toolOutcome`: the most that runs on its own for some visitor) and its page. */
 function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, people: PeopleOut | null | undefined): ToolSummaryView {
   const rules = governingRules(row, active);
-  const general = mostGeneral(rules);
-  const mode: RuleMode = general?.mode ?? 'ask';
-  const limit = general !== undefined && general.mode === 'auto' && general.max_amount_cents != null ? formatCents(general.max_amount_cents) : undefined;
+  const { mode, limitCents } = toolOutcome(row, active.cards);
+  const limit = mode === 'auto' && limitCents !== null ? formatCents(limitCents) : undefined;
   return {
     key: row.tool,
     name: TOOL_NAMES[row.tool].name,
@@ -222,7 +199,8 @@ function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, peopl
 /**
  * The Rules page's sections: one per connector that is on (`connectorOn`), in the catalog's order,
  * never Google Calendar or the setup interview's own tools. Each lists the tools of that connector
- * the Desk has, with their outcome, and links to the connector's page under Connectors; the
+ * the Desk has, with their outcome, and names the connector's page under Connectors, which the
+ * screens link to once it's built (`connectorPageHref`); the
  * payment limit leads Payments and Stripe. A connector turned off leaves the list and comes back
  * through the picker.
  */
@@ -241,8 +219,6 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
   });
 }
 
-/** The payment limit's field, when it holds more than a single payment may be. */
-const ABOVE_CEILING = 'No single payment can be above $10,000.';
 /** The payment limit's field, when it holds anything but whole dollars. */
 const WHOLE_DOLLARS = 'Enter whole dollars, from 0 to 10,000.';
 

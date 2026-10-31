@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
@@ -21,19 +21,24 @@ import {
   SuggestionChips,
   TextLink,
   type NoticeTone,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
-import { moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
+import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
+
+/** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
+export const RULES_TITLE = 'Rules';
 
 /** What the owner can ask Claude for on Rules, in her words (the presets board's, with the owner's later words). */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"] as const;
@@ -41,20 +46,7 @@ const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
 
-/** The payment limit's field, when the API says the amount is above the platform's ceiling. */
-const ABOVE_CEILING = 'No single payment can be above $10,000.';
-
-const deskPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}`;
 const draftPath = (deskId: string, version: number) => `${deskPath(deskId)}/rules/drafts/${version}`;
-
-/** A section's or tool's link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /** The Desk's suggested rules, read with the rules. */
 function suggestionsQuery(deskId: string) {
@@ -77,12 +69,14 @@ interface LimitField {
 
 /**
  * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
- * connector, each group and tool linking to its page under Connectors; Ask Claude under the
+ * connector, each group and tool linking to its page under Connectors once those pages are built
+ * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
  * header; "Start from a preset", which drafts a preset as one change; the payment limit atop
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
 export function RulesPage() {
   const { desk } = useOwnerDesk();
+  useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const { ask } = useAskClaude();
@@ -180,8 +174,8 @@ export function RulesPage() {
               <ConnectorSection
                 key={section.connector.id}
                 connector={section.connector}
-                href={`${deskPath(deskId)}/${section.href}`}
-                tools={section.tools.map((tool) => ({ ...tool, href: `${deskPath(deskId)}/${tool.href}` }))}
+                href={connectorPageHref(deskId, section.href)}
+                tools={section.tools.map((tool) => ({ ...tool, href: connectorPageHref(deskId, tool.href) }))}
                 linkComponent={RouterLink}
                 {...(section.moneyLimit
                   ? {
@@ -216,7 +210,7 @@ export function RulesPage() {
     <div className="cd-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-rules__header">
         <PageHeader
-          title="Rules"
+          title={RULES_TITLE}
           subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
           actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
           actionsBelowOnPhone

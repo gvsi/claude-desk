@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import type { CardBlock } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { ReplyCard } from './ReplyCard.tsx';
 
@@ -87,11 +88,25 @@ export const BookingConfirmed: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByRole('article', { name: 'Booked' })).toBeVisible();
-    await expect(canvas.getByText('Tuesday, November 3, 2:00 pm')).toBeVisible();
+    // The kernel's booking card: the date, the arrival window and who comes, with no booking ID.
+    await expect(canvas.getByText('Tuesday, November 3')).toBeVisible();
+    await expect(canvas.getByText('Arriving 2:00 pm to 4:00 pm')).toBeVisible();
+    await expect(canvas.getByText('With Maria Rivera')).toBeVisible();
+    await expect(canvas.queryByText(/B-77/)).toBeNull();
     // The outcome's check is sage, beside the word that says the same, and hidden from screen readers.
     const check = canvasElement.querySelector('.cd-reply-card__check');
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check as Element, { color: SAGE });
+    const stroke = check?.querySelector('path');
+    if (!stroke) throw new Error('no check stroke');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
+    // It draws once, in motion-base, short arm first.
+    expectComputed(stroke, { animationName: 'cd-reply-card-draw', animationDuration: '0.2s', animationIterationCount: '1' });
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 
@@ -243,6 +258,9 @@ export const BookingConfirmedEs: Story = {
   parameters: { canvasNote: 'The board is in English and adds a date tile and a price column, which card data does not carry.' },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('article', { name: 'Reservado' })).toBeVisible();
+    await expect(canvas.getByText('martes 3 de noviembre')).toBeVisible();
+    await expect(canvas.getByText('Llegada de 14:00 a 16:00')).toBeVisible();
+    await expect(canvas.getByText('Con Maria Rivera')).toBeVisible();
   },
 };
 
@@ -326,7 +344,7 @@ export const UnsafeHref: Story = {
     await expect(canvasElement.querySelectorAll('a')).toHaveLength(0);
     await expect(canvas.queryByRole('link')).toBeNull();
     await expect(canvas.queryByRole('button')).toBeNull();
-    await expect(canvas.getByText('Service call deposit, $20')).toBeVisible();
+    await expect(canvas.getByText('Service call deposit, $20.00')).toBeVisible();
     await expect(canvas.getByText(TEST_PAYMENT.en)).toBeVisible();
   },
 };

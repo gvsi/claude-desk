@@ -6,16 +6,17 @@
  * copy: the not-found screen.
  */
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut } from '../../api/views.ts';
 import { OutsideTheCopy } from '../../app/NotFound.tsx';
 import { pollMs } from '../../app/poll.ts';
-import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView, type RulesLinkProps } from '../../ds/index.ts';
+import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
 import { ruleWords, targetWords } from '../rules/ruleWords.ts';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -24,15 +25,6 @@ import { PEOPLE_LABEL, ReadFailed, peoplePath, usePeople } from './PeoplePage.ts
 import './People.css';
 
 const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`;
-
-/** The breadcrumb's and the rules' links through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /**
  * The active cards just for `personId`, in card order, as the person's page lists them: what each
@@ -75,6 +67,9 @@ export function PersonDetail() {
   const navigate = useNavigate();
   const people = usePeople(deskId);
   const failure = useReadFailure(people);
+  const person = people.data?.people.find((p) => p.person_id === personId);
+  // The tab names them as the page's title does, and the page they are under until the list says who they are.
+  useDocumentTitle(inApp(person?.display_name ?? PEOPLE_LABEL));
 
   if (people.data === undefined) {
     return <div className="cd-person">{failure === null ? <LoadingLine>Loading this customer</LoadingLine> : <ReadFailed failure={failure} />}</div>;
@@ -83,7 +78,6 @@ export function PersonDetail() {
   // Someone the copy's list doesn't hold: the not-found screen, never anyone else's page. Only a
   // read made since the page opened decides that, since a list read earlier may not have them yet;
   // until it lands, the page is loading, and if it fails, it says so with Try again.
-  const person = people.data.people.find((p) => p.person_id === personId);
   if (person === undefined) {
     const fresh = people.isFetchedAfterMount && !people.isFetching && failure === null;
     if (fresh) throw new OutsideTheCopy();

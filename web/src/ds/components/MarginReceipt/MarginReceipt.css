@@ -54,9 +54,12 @@
   color: var(--status-handled);
 }
 
+/* Drawn short arm first, as a hand writes a check. The dash (24) covers the whole path (about
+   22.6), and the offset starts negative, so the stroke shows from the path's end (the short arm's
+   tip) back to its start (the long arm's tip). */
 .cd-margin-line__check path {
   stroke-dasharray: 24;
-  stroke-dashoffset: 24;
+  stroke-dashoffset: -24;
   animation: cd-margin-line-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
 }
 

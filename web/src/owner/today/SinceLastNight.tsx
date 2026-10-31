@@ -62,8 +62,8 @@ function shortForm(briefing: Today['briefing']): BriefingItem[] {
 }
 
 /**
- * Today's "Since last night", always shown: one row of each kind and "See all {n}", or a quiet
- * night. Read with Today and polled with it.
+ * Today's "Since last night", always shown: one row of each kind, and "See all {n}" when the night
+ * has more than those rows, or a quiet night. Read with Today and polled with it.
  */
 export function SinceLastNight() {
   const { desk } = useOwnerDesk();
@@ -98,9 +98,11 @@ export function SinceLastNight() {
     body = (
       <>
         {rows.length > 0 ? <BriefingRows items={rows} /> : null}
-        <div className="cd-since__all cd-type-meta">
-          <TextLink href={briefingPath(deskId)}>See all {briefing.total}</TextLink>
-        </div>
+        {briefing.total > rows.length ? (
+          <div className="cd-since__all cd-type-meta">
+            <TextLink href={briefingPath(deskId)}>See all {briefing.total}</TextLink>
+          </div>
+        ) : null}
       </>
     );
   }

@@ -1,12 +1,13 @@
 """Rules by chat, presets, card diffs, tools and knowledge (Plan 02b, Task 9).
 
-The owner changes a Desk's rules in four ways, each a draft the kernel compiles and proves and the owner confirms:
-asking Claude in plain words (route `rules_chat`), adding the cards an approval drafted, applying a preset, or taking
-a suggestion drawn from their own approvals. Every draft answers with its owner cards and how they differ from the
-active rules, by card ID, default asks left out; a new or changed money card above the Desk's money cap is refused
-before the kernel is asked, and nothing changes until the owner confirms. The Rules page lists each tool with the
-cards that cover it, and each tool's page its recent decisions. Documents, knowledge and the demo's tool change go to
-the kernel as the owner.
+The owner changes a Desk's rules in five ways, each a draft the kernel compiles and proves and the owner confirms:
+asking Claude in plain words (route `rules_chat`), adding the cards an approval drafted, applying a preset, taking a
+suggestion drawn from their own approvals, or setting a new money cap (the active money cards above a lower one come
+down to it in the draft, each saying its new limit). Every draft answers with its owner cards and how they differ from
+the active rules, by card ID, default asks left out; a new or changed money card above the Desk's money cap, or a card
+that would change starting a verification, is refused before the kernel is asked, and nothing changes until the owner
+confirms. The Rules page lists each tool with the cards that cover it, and each tool's page its recent decisions.
+Documents, knowledge and the demo's tool change go to the kernel as the owner.
 
 The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it.
 """
@@ -598,7 +599,7 @@ async def test_drafting_counts_on_the_copys_drafts_limit(app, browser, fake, ker
     drafts, confirms = len(fake.called("POST /policy/draft")), len(fake.called("POST /policy/confirm"))
     for path, body in (("draft", {"add": [card("added-1", "native.capture_lead").model_dump(mode="json")]}),
                        ("preset", {"preset": "ask_first"}), ("suggestions/native.quote", None),
-                       ("confirm", {"version": auto.version + 1})):
+                       ("money_cap", {"auto_money_cap_cents": 10_000}), ("confirm", {"version": auto.version + 1})):
         limited = await owner.browser.post(rules_path(owner, path), json=body)
         assert (limited.status_code, limited.json()["error"]) == (429, "rate_limited"), path
     assert (len(fake.called("POST /policy/draft")), len(fake.called("POST /policy/confirm"))) == (drafts, confirms)
@@ -628,6 +629,130 @@ async def test_card_above_the_money_cap_is_refused_with_the_limit(app, browser, 
     above = {**rule_card(at_cap).model_dump(mode="json"), "max_amount_cents": 50_001}
     reply = await owner.browser.post(rules_path(owner, "draft"), json={"add": [above]})
     assert reply.status_code == 422 and len(fake.called("POST /policy/draft")) == drafts
+
+
+async def test_money_cap_change_drafts_through_the_kernel(app, browser, fake, kernel_http):
+    # Rivera's money cap is $500, with an auto payment link card up to $300 (`rv-link`) and agent payments up to $20.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk, path = fake.desks[owner.desk_id], rules_path(owner, "money_cap")
+    active, rivera = desk.policy_version, owner_cards(fake, owner.desk_id)
+    by_id = {each.card_id: each for each in rivera}
+    link, mandate = by_id["rv-link"], by_id["rv-mandate"]
+    assert (desk.auto_money_cap_cents, link.max_amount_cents, mandate.max_amount_cents) == (50_000, 30_000, 2_000)
+
+    # Lowering it to $100: one draft of the active owner cards, on the active version, at the new cap. The $300 card
+    # comes down to $100, its reason replaced by the new limit in the owner's words (the Rules page is in English),
+    # and the $20 card stays as it is.
+    lowered = await drafted(owner, path, {"auto_money_cap_cents": 10_000})
+    (posted,) = fake.called("POST /policy/draft")
+    assert posted.headers["x-owner-session"] == owner.token
+    down = link.model_copy(update={"max_amount_cents": 10_000, "reason": "Up to $100, your payment limit."})
+    assert PolicyDraftRequest.model_validate(posted.body) == PolicyDraftRequest(
+        desk_id=owner.desk_id, cards=[down if each == link else each for each in rivera], expected_parent=active,
+        auto_money_cap_cents=10_000)
+    assert lowered.cards == [down if each == link else each for each in rivera]
+    assert lowered.diff == CardDiff(added=[], removed=[], changed=[(link, down)])
+    assert lowered.auto_money_cap_cents == 10_000 == desk.versions[lowered.version].auto_money_cap_cents
+    # Nothing changes until the owner confirms: the Rules page still shows the $500 version.
+    view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
+    assert (view.active.version, view.active.auto_money_cap_cents) == (active, 50_000)
+
+    # At $0 each auto money card asks instead, and says so.
+    zero = await drafted(owner, path, {"auto_money_cap_cents": 0})
+    assert zero.auto_money_cap_cents == 0
+    assert [after.model_dump(include={"card_id", "mode", "max_amount_cents", "reason"})
+            for _, after in zero.diff.changed] == [
+        {"card_id": card_id, "mode": "ask", "max_amount_cents": None, "reason": "Your payment limit is $0."}
+        for card_id in ("rv-link", "rv-mandate")]
+
+    # Confirming the $100 draft makes its cap the Desk's.
+    confirmed = await owner.browser.post(rules_path(owner, "confirm"), json={"version": lowered.version})
+    assert confirmed.status_code == 200, confirmed.text
+    view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
+    assert (view.active.version, view.active.auto_money_cap_cents) == (lowered.version, 10_000)
+    assert down in view.active.cards
+
+    # Raising it to $800 changes no card: the same cards, at the new cap.
+    raised = await drafted(owner, path, {"auto_money_cap_cents": 80_000})
+    request = PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body)
+    assert (request.cards, request.expected_parent, request.auto_money_cap_cents) == (
+        owner_cards(fake, owner.desk_id), lowered.version, 80_000)
+    assert raised.diff == CardDiff(added=[], removed=[], changed=[]) and raised.auto_money_cap_cents == 80_000
+
+    # A cap above the $10,000 platform ceiling, or one that isn't a whole number of cents from 0, never reaches the
+    # kernel.
+    drafts = len(fake.called("POST /policy/draft"))
+    for body, error in (({"auto_money_cap_cents": 1_000_001}, "above_platform_ceiling"),
+                        ({"auto_money_cap_cents": -1}, "invalid"), ({"auto_money_cap_cents": 500.0}, "invalid"),
+                        ({"auto_money_cap_cents": "500"}, "invalid"), ({"auto_money_cap_cents": True}, "invalid"),
+                        ({}, "invalid"), ({"auto_money_cap_cents": 500, "cards": []}, "invalid")):
+        reply = await owner.browser.post(path, json=body)
+        assert (reply.status_code, reply.json()) == (422, {"error": error}), body
+    assert (await owner.browser.post(path, json={"auto_money_cap_cents": 1_000_000})).status_code == 200
+    drafts += 1
+
+    # Another copy's Desk is not found, whatever the cap.
+    other = await new_owner(app, browser, fake, kernel_http)
+    for cap in (10_000, 1_000_001):
+        reply = await other.browser.post(path, json={"auto_money_cap_cents": cap})
+        assert (reply.status_code, reply.json()) == (404, {"error": "not_found"}), cap
+    assert len(fake.called("POST /policy/draft")) == drafts
+
+
+async def test_the_money_limit_drafts_however_many_cards_the_desk_holds(app, browser, fake, kernel_http):
+    # The owner-card bound keeps a draft from growing a Desk past what a rules chat can carry. The money limit adds no
+    # card, so a Desk already holding more (an active version of 61 owner cards) can still change its cap.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    rivera = owner_cards(fake, owner.desk_id)
+    planted(fake, owner.desk_id, *(card(f"extra-{n}", mode="ask", reason="Quotes ask you first.")
+                                   for n in range(OWNER_CARDS_MAX + 1 - len(rivera))))
+    assert len(owner_cards(fake, owner.desk_id)) == OWNER_CARDS_MAX + 1
+
+    lowered = await drafted(owner, rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})
+    assert (len(lowered.cards), lowered.auto_money_cap_cents) == (OWNER_CARDS_MAX + 1, 10_000)
+    assert [after.card_id for _, after in lowered.diff.changed] == ["rv-link"]
+    # A draft that adds a card is still held to the bound.
+    reply = await owner.browser.post(rules_path(owner, "draft"), json=adding(card("one-more", "native.capture_lead")))
+    assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
+
+
+async def test_the_money_cap_shown_is_the_drafted_versions(db, fake, api_settings, clock, model, browser,
+                                                           kernel_http):
+    # The cap a money-limit draft shows is read back from the version the kernel drafted, never the API's copy of
+    # the cap it asked for: a kernel answering another cap is what the owner reads.
+    drafting = fake.policy_draft
+
+    def another_cap(request, body: PolicyDraftRequest) -> PolicyVersion:
+        return drafting(request, body).model_copy(update={"auto_money_cap_cents": 12_345})
+
+    fake.policy_draft = another_cap
+    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), model=model,
+                     clock=clock, jobs_connector=InMemoryConnector())
+    async with app.router.lifespan_context(app):
+        owner = await new_owner(app, browser, fake, kernel_http)
+        draft = await drafted(owner, rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})
+    (posted,) = fake.called("POST /policy/draft")
+    assert PolicyDraftRequest.model_validate(posted.body).auto_money_cap_cents == 10_000
+    assert draft.auto_money_cap_cents == 12_345
+
+
+async def test_a_money_cap_lowering_that_fails_sends_nothing(app, browser, fake, kernel_http, monkeypatch):
+    # The lowering is the API's convenience, never the guard: if it fails, the route refuses, and nothing is drafted
+    # or sent to the kernel.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    active, versions = desk.policy_version, set(desk.versions)
+
+    def failing(cards, active, cap, language):
+        raise ValueError("the lowering failed")
+
+    monkeypatch.setattr("desk.api.rules.lower_to_cap", failing)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                 base_url="https://desk.test", cookies=owner.browser.cookies) as client:
+        reply = await client.post(rules_path(owner, "money_cap"), json={"auto_money_cap_cents": 10_000})
+    assert (reply.status_code, reply.json()) == (500, {"error": "internal"})
+    assert fake.called("POST /policy/draft") == []
+    assert (desk.policy_version, set(desk.versions), desk.auto_money_cap_cents) == (active, versions, 50_000)
 
 
 async def test_preset_drafts_the_shared_preset_cards(app, browser, fake, kernel_http, model):
@@ -743,13 +868,12 @@ async def test_suggestion_after_three_approvals(app, browser, fake, kernel_http,
 
 
 async def test_a_draft_the_kernel_refuses_reaches_the_owner_unchanged(app, browser, fake, kernel_http, model, clock):
-    # A card that would change starting a verification: the kernel refuses the whole draft (422 `invalid`, naming no
-    # card). Whichever way the owner drafts, they get the kernel's error as it is, and nothing is drafted.
+    # The kernel refuses a whole draft (422 `invalid`, naming no card) for a reason the API doesn't check first.
+    # Whichever way the owner drafts, they get the kernel's error as it is, with no retry, and nothing is drafted.
     owner = await new_owner(app, browser, fake, kernel_http)
     fake.now = clock.now
     desk = fake.desks[owner.desk_id]
     rivera = owner_cards(fake, owner.desk_id)
-    (verification,) = [each for each in rivera if each.applies_to == "native.start_verification"]
     refused = (422, {"error": "kernel", "code": "invalid"})
 
     # The owner takes away the card that let payment links go out on their own, and approves three of them: a
@@ -762,37 +886,91 @@ async def test_a_draft_the_kernel_refuses_reaches_the_owner_unchanged(app, brows
         await approved_link(kernel_http, owner, items(drain=1), n)
     active, versions, drafts = desk.policy_version, set(desk.versions), len(fake.called("POST /policy/draft"))
 
-    # Rules by chat: Claude makes verification ask the owner. Code can't tell (the tool is the Desk's); the kernel
-    # refuses it, and the owner hears that, with no retry and nothing drafted.
-    model.add(chatted("Codes will wait for you.", *(
-        chat_card(each, mode="ask", reason="Codes ask you first.") if each == verification else chat_card(each)
-        for each in without_link)))
-    reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Ask me before sending any code"})
-    assert (reply.status_code, reply.json()) == refused
-    assert len(model.requests) == 1
-
-    # Cards to add, or cards as they should stand: a never card on verification's effect, or the presets' card for
-    # verified people only.
-    send_never = card("send-never", "effect:send_message", mode="never", reason="Nothing is sent to customers.")
-    narrower = verification.model_copy(update={"who": "verified"})
-    for body in (adding(send_never), {"cards": dumped(*(narrower if each == verification else each
-                                                         for each in without_link)), "expected_parent": active}):
-        reply = await owner.browser.post(rules_path(owner, "draft"), json=body)
-        assert (reply.status_code, reply.json()) == refused, body
-
-    # Presets and suggestions carry only the presets' own card for it, so the kernel's refusal is made to happen: it
-    # reaches the owner the same way.
-    for path, body in ((rules_path(owner, "preset"), {"preset": "auto"}),
-                       (rules_path(owner, "suggestions/native.payment_link"), None)):
+    extra = card("chat-1", "native.capture_lead", reason="Leads are saved on their own.")
+    model.add(chatted("Leads will be saved on their own.", *(chat_card(each) for each in [*without_link, extra])))
+    for path, body in ((rules_path(owner, "chat"), {"text": "Save leads on your own"}),
+                       (rules_path(owner, "draft"), adding(extra)),
+                       (rules_path(owner, "draft"), {"cards": dumped(*without_link, extra), "expected_parent": active}),
+                       (rules_path(owner, "preset"), {"preset": "auto"}),
+                       (rules_path(owner, "suggestions/native.payment_link"), None),
+                       (rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})):
         fake.fail("POST /policy/draft", "422", times=1)
         reply = await owner.browser.post(path, json=body)
         assert (reply.status_code, reply.json()) == refused, path
+    assert len(model.requests) == 1
 
-    assert len(fake.called("POST /policy/draft")) == drafts + 5
+    assert len(fake.called("POST /policy/draft")) == drafts + 6
     assert (desk.policy_version, set(desk.versions)) == (active, versions)
     view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
     assert view.active.version == active
     assert [each for each in view.active.cards if not each.is_default] == without_link
+
+
+def planted(fake, desk_id: str, *cards: RuleCard) -> None:
+    """The Desk's active rules with `cards` added, confirmed straight in the fake kernel: a version the kernel's
+    draft checks never saw, as one confirmed before it refused such cards could be."""
+    desk = fake.desks[desk_id]
+    parent = desk.policy_version
+    fake._supersede_active(desk)
+    desk.cards = [*desk.cards, *cards]
+    desk.policy_version = fake._next_version(desk)
+    fake._put_policy(desk, parent_version=parent)
+    fake.flush()
+
+
+async def test_a_card_that_would_change_verification_is_named_before_the_kernel(app, browser, fake, kernel_http,
+                                                                                model, monkeypatch):
+    # Verification is always on (`desk.always_on`): a card on starting one other than the presets' own, an ask or
+    # never card on its effect, or an auto one on its effect for one person or agent would change it. Whichever way
+    # the owner drafts, the API names each such card (422 `changes_always_on`) before the kernel is asked, with no
+    # retry, and nothing is drafted. The kernel refuses the same cards whatever the API sends (its contract tests).
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    rivera = owner_cards(fake, owner.desk_id)
+    (verification,) = [each for each in rivera if each.applies_to == "native.start_verification"]
+    active, versions = desk.policy_version, set(desk.versions)
+
+    def named(*card_ids: str) -> tuple[int, dict]:
+        return 422, {"error": "changes_always_on", "card_ids": list(card_ids)}
+
+    # Rules by chat: Claude makes verification ask the owner. The owner hears which card, with no retry.
+    model.add(chatted("Codes will wait for you.", *(
+        chat_card(each, mode="ask", reason="Codes ask you first.") if each == verification else chat_card(each)
+        for each in rivera)))
+    reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Ask me before sending any code"})
+    assert (reply.status_code, reply.json()) == named(verification.card_id)
+    assert len(model.requests) == 1
+
+    # Cards to add, or cards as they should stand: each card that would change it is named, in the cards' order.
+    send_never = card("send-never", "effect:send_message", mode="never", reason="Nothing is sent to customers.")
+    send_dana = card("send-dana", "effect:send_message", who="person", person_id=desk.person("dana").person_id,
+                     reason="Dana's messages go out on their own.")
+    narrower = verification.model_copy(update={"who": "verified"})
+    for body, card_ids in ((adding(send_never), ["send-never"]), (adding(send_dana, send_never), ["send-dana",
+                                                                                                "send-never"]),
+                           ({"cards": dumped(*(narrower if each == verification else each for each in rivera)),
+                             "expected_parent": active}, [verification.card_id])):
+        reply = await owner.browser.post(rules_path(owner, "draft"), json=body)
+        assert (reply.status_code, reply.json()) == named(*card_ids), body
+
+    # A preset, made to carry one here (the shipped presets carry only the presets' own card for it).
+    monkeypatch.setitem(PRESETS, "auto", [*PRESETS["auto"], send_never])
+    reply = await owner.browser.post(rules_path(owner, "preset"), json={"preset": "auto"})
+    assert (reply.status_code, reply.json()) == named("send-never")
+    assert fake.called("POST /policy/draft") == []
+
+    # An auto card on its effect for anyone ranks below the presets' card and changes no start: it is drafted.
+    send_anyone = card("send-anyone", "effect:send_message", reason="Messages to customers go out on their own.")
+    assert (await drafted(owner, rules_path(owner, "draft"), adding(send_anyone))).diff.added == [send_anyone]
+    assert len(fake.called("POST /policy/draft")) == 1
+
+    # The money limit drafts the active cards: one that would change verification, as an active version confirmed
+    # before the kernel refused such cards could hold, is named too, and the cap draft waits for the owner to fix it.
+    planted(fake, owner.desk_id, send_never)
+    reply = await owner.browser.post(rules_path(owner, "money_cap"), json={"auto_money_cap_cents": 10_000})
+    assert (reply.status_code, reply.json()) == named("send-never")
+    assert len(fake.called("POST /policy/draft")) == 1
+    assert len(set(desk.versions) - versions) == 1                         # the one draft for anyone
 
 
 async def test_simulate_tool_change_proxies(app, browser, fake, kernel_http):

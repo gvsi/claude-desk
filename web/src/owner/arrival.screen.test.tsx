@@ -564,10 +564,11 @@ describe('Arrival', () => {
     // it opens. That read answers slowly here, as on a slow machine, and is in before the session
     // ends, so the 401 that ends it is Today's own poll and not that read.
     delayNextRead(ROUTES.ownerInbox.path, 60);
-    const inboxRead = nextAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
-    await inboxRead.settled;
+    // In on this page, which counts its entries on the button. Not `nextAnswerTo`: the last test's
+    // page can still have an inbox read out, and its late answer would pass for this one.
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
 
     // The demo session ends: the browser's owner cookie no longer opens a copy, so Today's next poll is a 401.
     mockStore.reset('rivera', { signedIn: false });
@@ -575,7 +576,9 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     await expect.element(dialog.getByText(`${ENDED} ${INTRO}`, { exact: true })).toBeVisible();
-    expect(requests('today').length + requests('needsYou').length + requests('desks').length).toBeGreaterThan(0);
+    // The ended copy heard Today's poll, and never the inbox read.
+    expect(requests('today').length + requests('needsYou').length).toBeGreaterThan(0);
+    expect(requests('ownerInbox')).toEqual([]);
     expect(requests('me')).toHaveLength(1);
 
     // A fresh copy from the passcode, and Today again.
@@ -787,6 +790,47 @@ describe('OwnerLayout', () => {
     expect(one.screen.getByRole('button', { name: /^Switch Desk/ }).elements()).toHaveLength(0);
   });
 
+  it('owner_pages_name_the_tab', async () => {
+    // Each page names the tab with its own heading, or the sidebar's row where its heading is a
+    // greeting, then the app's name; Settings' sections share their page's heading.
+    document.title = 'Claude Desk';
+    const base = `/app/${RIVERA.deskId}`;
+    const pages: [path: string, heading: string | RegExp, title: string][] = [
+      ['today', /, Maria$/, 'Today'],
+      ['today/briefing', 'Since last night', 'Since last night'],
+      ['conversations', 'Conversations', 'Conversations'],
+      ['people', 'Customers', 'Customers'],
+      ['rules', 'Rules', 'Rules'],
+      ['rules/all', 'All rules', 'All rules'],
+      ['safety', 'Safety', 'Safety'],
+      ['share', 'Share', 'Share'],
+      ['settings/general', 'Settings', 'Settings'],
+      ['settings/notifications', 'Settings', 'Settings'],
+      ['settings/billing', 'Settings', 'Settings'],
+    ];
+    for (const [path, heading, title] of pages) {
+      const { screen } = await renderRoute(`${base}/${path}`);
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading }), { message: path }).toBeVisible();
+      expect(document.title, path).toBe(`${title} · Claude Desk`);
+    }
+
+    // Moving between pages, the tab follows, Back included.
+    const { screen, router } = await renderRoute(`${base}/today`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(document.title).toBe('Today · Claude Desk');
+    await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(document.title).toBe('Rules · Claude Desk');
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(document.title).toBe('Today · Claude Desk');
+
+    // A page that names nothing, such as the not-found screen, shows the app's own name.
+    await router.navigate('/no/such/page');
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('owner_shell_links_the_about_pages', async () => {
     const ABOUT = [
       ['Capability prediction', '/about/prediction'],
@@ -992,7 +1036,13 @@ describe('OwnerLayout', () => {
     // top that the page has scrolled past, or that sits at the column's top edge, is in sight below
     // the bar when the keyboard reaches it (WCAG 2.2, 2.4.11 Focus Not Obscured), on Today and on
     // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
-    // a control, or below it, while the column is being scrolled.
+    // a control, or below it, while the column is being scrolled. The built-in agent's charge over
+    // its signed limit is refused first, so Safety's count of refused requests loads in above the
+    // record too.
+    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
+    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
     const pages = [
       {
         path: TODAY,
@@ -1203,7 +1253,11 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
   return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
 }
 
-/** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
+/**
+ * The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when
+ * it does. It hears every request on the page, so a late answer to one the last test's page sent
+ * counts too: ask for it once nothing from that page can still be out.
+ */
 function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<void> } {
   let came = false;
   let stop = () => {};

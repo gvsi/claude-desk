@@ -87,6 +87,13 @@ function visitorFormatSources(scanned: Source[]): Source[] {
     .map((s) => (s.file.startsWith('public/checkout/') ? { ...s, text: s.text.replace(CHECKOUT_MONEY_IMPORT, '') } : s));
 }
 
+// The tab's title set by hand, in any form: assigned or compound-assigned (`+=`, `||=`, `??=`), by
+// name or by string key, or copied onto the document with `Object.assign`. Every page names the tab
+// through one hook, which keeps the pages naming it in order, so no page leaves its name on the next.
+const SETS_THE_TITLE =
+  /\bdocument\s*(?:\.\s*title|\[\s*(['"`])title\1\s*\])\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=(?!=)|\bObject\s*\.\s*assign\s*\(\s*document\b/;
+const TITLE_HOOK_FILE = 'lib/useDocumentTitle.ts';
+
 // A card that holds cards: the design system's one exception to "never a card in a card", for the
 // agents page's "Send an agent" card, which holds the agent's run and the Desk's reply cards.
 const HOLDS_CARDS = /\bholdsCards\b/;
@@ -409,6 +416,36 @@ describe('app source guards', () => {
     const visitor = visitorFormatSources(sources);
     expect(visitor.map((s) => s.file)).toContain('public/checkout/CheckoutPage.tsx');
     expect(hits(FORMATS, visitor)).toEqual([]);
+  });
+
+  it('only_the_title_hook_names_the_tab', () => {
+    const bad = [
+      "document.title = 'Today · Claude Desk';",
+      'document . title=name;',
+      "document['title'] = name;",
+      'document["title"] += " · Claude Desk";',
+      'document[`title`] = name;',
+      'document.title ||= name;',
+      'document.title ??= name;',
+      'Object.assign(document, { title: name });',
+    ];
+    for (const text of bad) expect(hits(SETS_THE_TITLE, sample(text)), text).toHaveLength(1);
+    const fine =
+      "const before = document.title; if (document.title === x || document['title'] !== y) useDocumentTitle('Today'); Object.assign(target, document); title = 'x';";
+    expect(hits(SETS_THE_TITLE, sample(fine))).toEqual([]);
+
+    // Every file under src/ that runs, the design system's, the mock's and the test helpers' included.
+    // Tests are left out: they set the title to check what a page does with it.
+    const running = everyFileButThisOne()
+      .filter((file) => /\.(tsx?|m?js)$/.test(file) && !/\.test\.tsx?$/.test(file))
+      .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
+    const files = running.map((s) => s.file);
+    for (const file of [TITLE_HOOK_FILE, 'ds/components/Sidebar/Sidebar.tsx', 'ds/boards/parts.tsx', 'mocks/store.ts', 'test/renderRoute.tsx']) {
+      expect(files, file).toContain(file);
+    }
+    // The matcher finds the hook's own writes, and none anywhere else.
+    expect(hits(SETS_THE_TITLE, running.filter(({ file }) => file === TITLE_HOOK_FILE)).length).toBeGreaterThan(0);
+    expect(hits(SETS_THE_TITLE, running.filter(({ file }) => file !== TITLE_HOOK_FILE))).toEqual([]);
   });
 
   it('only_the_send_agent_panel_holds_cards', () => {

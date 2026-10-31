@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { MockCheckout } from './MockCheckout.tsx';
 
 const BOARD = 'N-Checkout-Run2';
@@ -37,7 +38,7 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'none',
-    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws the checkout in every state; the checkout stays outside the reference boards, checked against that board by its own stories. The title is the link's own (PaymentLinkView.title), where the board writes "Service call deposit, $20". Pay and Cancel are the design system's main buttons, 40 px tall, where the board draws 44 px.`,
+    canvasNote: `From the owner-signed canvas board ${BOARD}, which draws the checkout in every state; the checkout stays outside the reference boards, checked against that board by its own stories. The heading is the link's own title (PaymentLinkView.title, "Service call deposit") and the amount its own line ("$20.00", with cents as the kernel prints amounts), where the board writes "Service call deposit, $20". Pay and Cancel are the design system's main buttons, 40 px tall, where the board draws 44 px.`,
   },
 } satisfies Meta<typeof MockCheckout>;
 
@@ -414,7 +415,14 @@ export const Paid: Story = {
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check, { color: 'rgba(250, 249, 245, 0.92)', width: '14px' });
     const stroke = check.querySelector('path') as SVGPathElement;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
     expectComputed(stroke, { animationName: /draw/, animationIterationCount: '1' });
+    // It draws short arm first, as a hand writes a check.
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 

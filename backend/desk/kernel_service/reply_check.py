@@ -12,15 +12,19 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
-   as "you're booked" among them, unless the reply carries a booking card that step 4 passed),
-   and the Desk's document canaries. Since the owner's decisions of 2026-10-30, a booking claim
-   passes beside the booking's card, which says the same, a policy's words are left to the
-   soft-promise check, which reads the prose with the cards, and Claude may write links and
-   email addresses, which its prompt keeps to the business's own.
+   as "you're booked" among them, unless the reply carries a booking card that step 4 passed), and
+   the copy's document canaries, even split by spaces or accented letters, in another case or
+   width, accented, or with letters or digits of other scripts drawn like its own, or all of these
+   at once (`labels.canary_spans`, which reads the same lookalike table, its letters and its
+   digits). Since the owner's decisions of 2026-10-30, a booking claim passes beside the booking's
+   card, which says the same, a policy's words are left to the soft-promise check, which reads the
+   prose with the cards, and Claude may write links and email addresses, which its prompt keeps to
+   the business's own.
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
-   with no canary in what it renders. The Desk's catalog (`context.catalog_fact`) is cited like a
-   stored fact, and no template renders it, so it backs no card. The clauses are checked before
-   the prose is scanned, so the scan knows which cards pass; their refusals follow the scan's.
+   with no canary in any field it renders or in the fact ID it names. The Desk's catalog
+   (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
+   no card. The clauses are checked before the prose is scanned, so the scan knows which cards
+   pass; their refusals follow the scan's.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
@@ -32,41 +36,48 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    lines (its row written only now, so no lock on it is held while the model reads the draft),
    and the verdict is ledgered (`reply`) and signed in the same transaction.
 
+The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
+alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.
+
 What is shown is exactly what was checked: the prose block holds the prose as the scan read it
 (`shown`: NFKC, without the characters no font draws, such as zero-width spaces, soft hyphens,
 variation selectors and control characters, and with Hangul fillers as the blank they are drawn
 as), so a number can't hide behind an invisible character and come back in the visitor's view.
 
 Spans quote what a rule matched, at most 40 characters, and never a canary: canaries are blanked
-out before anything else is scanned, and a canary violation's span is empty. The ledger holds
-kinds, rule IDs and the cited fact IDs (through `ledger.safe_ref`), never prose.
+out before anything else is scanned, and a canary violation (`labels.canary`) spans only the words
+"document text" and names the facts of the documents it came from. The ledger holds kinds, rule
+IDs and the cited fact IDs (through `ledger.safe_ref`; one holding a canary only as a hash),
+never prose.
 """
 
 import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 import desk_kernel
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 
-from desk.contracts import Clause, Fact, LedgerEvent, RenderedBlock, ReplyDraft, ReplyVerdict, Violation
-from desk.db.models import Booking, Business, CalendarSlot, Desk, Document
+from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
+                            ReplyVerdict, Violation)
+from desk.db.models import Booking, Business, CalendarSlot, Desk
 from desk.db.models import Fact as FactRow
-from desk.kernel_api import CheckReplyRequest
+from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import auth, context, labels, lang, ledger, render
-from desk.kernel_service.auth import AuthError, Named, SessionRow
+from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
-from desk.kernel_service.repo import Ctx, KernelCtx, new_id, route_template
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed"})   # only the kernel issues these clauses
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
+NO_CANARIES = labels.NO_CANARIES
 
 # ---- Prose ----------------------------------------------------------------------------------------
 
@@ -117,27 +128,8 @@ def shown(text: str) -> str:
     return _drawn(unicodedata.normalize("NFKC", _drawn(text)))
 
 
-def _load_lookalikes() -> tuple[dict[str, str], dict[str, str]]:
-    """`lexicon/lookalikes.txt` (made by `scripts/lookalikes.py` from Unicode's confusables.txt):
-    the letters of other scripts, and the rarer Latin ones, that look like one ASCII letter, and
-    the characters drawn as one ASCII digit, one `<code point>\\t<letter or digit>` per line: the
-    letters and the digit lookalikes apart, each with what it looks like. A malformed line stops
-    the kernel from starting."""
-    path = LEXICON_DIR / "lookalikes.txt"
-    letters, digits = {}, {}
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip() or line.startswith("#"):
-            continue
-        code, tab, rest = line.partition("\t")
-        looks_like = rest.split("#", 1)[0].strip()
-        if (not tab or not re.fullmatch(r"[0-9A-F]{4,6}", code) or int(code, 16) < 0x80
-                or not re.fullmatch(r"[A-Za-z0-9]", looks_like)):
-            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter or digit> line")
-        (digits if looks_like.isdigit() else letters)[chr(int(code, 16))] = looks_like
-    return letters, digits
-
-
-LOOKALIKES, DIGIT_LOOKALIKES = _load_lookalikes()
+LOOKALIKES = labels.LOOKALIKES              # `lexicon/lookalikes.txt`, which the canary reading reads too
+DIGIT_LOOKALIKES = labels.DIGIT_LOOKALIKES  # the same table's characters drawn as a digit
 STROKES = frozenset(ch for ch, letter in LOOKALIKES.items() if letter == "l")   # drawn as a bare stroke: l or I
 STROKES_AND_I = STROKES | {"I"}                          # with the ASCII capital I, read as l ("tweIve")
 # Shaped like 0 or 1, the prototype of 0 being O and of 1 being l: read as digits next to a digit
@@ -268,14 +260,15 @@ def _span(text: str) -> str:
     return text[:SPAN_CHARS]
 
 
-def _blank_canaries(text: str, canaries: Iterable[str]) -> tuple[str, list[str]]:
-    """`text` with every canary in it blanked out (same length), and the canaries found."""
-    found = []
-    for canary in canaries:
-        if canary and canary in text:
-            found.append(canary)
-            text = text.replace(canary, " " * len(canary))
-    return text, found
+def _blank_canaries(text: str, canaries: Mapping[str, str]) -> tuple[str, list[str]]:
+    """`text` with every canary in it blanked out (same length), and the IDs of the documents
+    whose canaries it held (`labels.find_canaries`)."""
+    spans = labels.canary_spans(text, canaries)
+    chars = list(text)
+    for _, start, end in spans:
+        chars[start:end] = " " * (end - start)
+    found = {document_id for document_id, _, _ in spans}
+    return "".join(chars), [document_id for document_id in canaries if document_id in found]
 
 
 def _readings(text: str) -> dict[str, list[int]]:
@@ -331,7 +324,14 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
     return hits
 
 
-def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (), *,
+def canary_violation(document_ids: Sequence[str]) -> Violation:
+    """Text from private documents: the facts of the documents whose canaries it held, never the
+    canary."""
+    return Violation(kind="canary", span="document text", fact_ids=[f"document:{document_id}" for document_id
+                                                                    in document_ids], rule_id="labels.canary")
+
+
+def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
                booking_card: bool = False) -> list[Violation]:
     """Every number, currency sign, lexicon word and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
@@ -344,16 +344,16 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
     for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
     clause checks passed, which says the same: the owner's decision of 2026-10-30); a word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
-    inside one of `names` (the Desk's own names) as it is written there; a canary verbatim is
-    `canary`. Links and email addresses are none of these (the owner's decision of 2026-10-30:
-    Claude may write them, and its prompt keeps them to the business's own). The lexicons read
-    lookalike letters as the Latin ones, a bare stroke both as l and as I, an ASCII capital I as l
-    too, every dash and hyphen as "-" and every apostrophe as "’", an acute accent (a space and a
-    combining acute after NFKC) both as that space and as "’". Canaries come first, then the rest
-    in the order they appear."""
+    inside one of `names` (the Desk's own names) as it is written there; the canaries of
+    `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
+    their documents, and blanked out before the rest is scanned. Links and email addresses are
+    none of these (the owner's decision of 2026-10-30: Claude may write them, and its prompt keeps
+    them to the business's own). The lexicons read lookalike letters as the Latin ones, a bare
+    stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
+    apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
+    space and as "’". The canary comes first, then the rest in the order they appear."""
     text, found = _blank_canaries(shown(text), canaries)
-    hits: list[tuple[int, str, Violation]] = [
-        (-1, "canary", Violation(kind="canary", span="", rule_id="canary")) for _ in found]
+    hits: list[tuple[int, str, Violation]] = [(-1, "canary", canary_violation(found))] if found else []
     i = 0
     while i < len(text):
         category = unicodedata.category(text[i])
@@ -397,26 +397,22 @@ def scan_prose(text: str, canaries: Iterable[str] = (), names: Iterable[str] = (
 
 # ---- Clauses --------------------------------------------------------------------------------------
 
-def _storable(text: str) -> bool:
-    """A fact ID the database could hold: valid UTF-8 without NUL. Any other can't name a fact."""
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return "\0" not in text
-
-
 def _clause_violation(clause: Clause, kind: str, rule_id: str) -> Violation:
     """A refused clause, naming its template and the fact ID it cited; an ID no text could hold
     (a NUL, a lone surrogate) names no fact, so the verdict can always be sent."""
-    cited = clause.fact_id is not None and _storable(clause.fact_id)
+    cited = clause.fact_id is not None and storable(clause.fact_id)
     return Violation(kind=kind, span=clause.template, rule_id=rule_id, fact_ids=[clause.fact_id] if cited else [])
 
 
-def carries(block: RenderedBlock, canaries: Sequence[str]) -> bool:
-    """Whether any canary appears verbatim in what the block shows."""
-    texts = [block.text, block.title or "", *block.lines, *(option.label for option in block.options)]
-    return any(canary and canary in text for canary in canaries for text in texts)
+def block_canaries(block: RenderedBlock, canaries: Mapping[str, str]) -> list[str]:
+    """The documents whose canaries any field of the block holds: its text, title, lines, link and
+    options."""
+    return labels.find_canaries_in(block.model_dump(mode="json"), canaries)
+
+
+def carries(block: RenderedBlock, canaries: Mapping[str, str]) -> bool:
+    """Whether any canary appears in what the block shows."""
+    return bool(block_canaries(block, canaries))
 
 
 async def _free_slots(ctx: KernelCtx, desk_id: str, fact: Fact) -> Fact | None:
@@ -440,15 +436,17 @@ async def _free_slots(ctx: KernelCtx, desk_id: str, fact: Fact) -> Fact | None:
 
 async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, desk: DeskInfo,
                         clauses: Sequence[Clause], language: render.Language,
-                        canaries: Sequence[str]) -> tuple[list[RenderedBlock], list[Violation]]:
+                        canaries: Mapping[str, str]) -> tuple[list[RenderedBlock], list[Violation]]:
     """Step 4: each clause's card, or why it can't be shown. A clause must name a registered
     template Claude may draft (`template_unavailable`, `kernel_only_template`); a handoff or
     verify prompt names no fact; any other names a fact of this copy and Desk (`unknown_fact`)
     that the session may read (`unentitled_fact`; a session learns nothing more about a fact it
-    can't read), of the template's kind and ID (`template_mismatch`), current (`stale_fact`), and
-    with no canary in what it renders (`canary`). The catalog, which the kernel builds on each
-    read rather than stores, is looked up with the stored facts and checked the same way."""
-    wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and _storable(clause.fact_id)}
+    can't read), of the template's kind and ID (`template_mismatch`), current (`stale_fact`), with
+    a link to follow when its card links (`href_for`; else `stale_fact`), and with no canary in any
+    field it renders (`canary`, naming the documents, as is a canary given as the fact ID). The
+    catalog, which the kernel builds on each read rather than stores, is looked up with the stored
+    facts and checked the same way."""
+    wanted = {clause.fact_id for clause in clauses if clause.fact_id is not None and storable(clause.fact_id)}
     rows: dict[str, FactRow | Fact] = {}
     if wanted:
         rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
@@ -461,6 +459,9 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     violations: list[Violation] = []
     for clause in clauses:
         template = render.TEMPLATES.get(clause.template)
+        if clause.fact_id is not None and (named := labels.find_canaries(clause.fact_id, canaries)):
+            violations.append(canary_violation(named))      # a canary as the fact to cite, never echoed
+            continue
         if clause.template in KERNEL_ONLY:
             violations.append(_clause_violation(clause, "unknown_fact", "kernel_only_template"))
             continue
@@ -492,12 +493,13 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
                 violations.append(_clause_violation(clause, "stale_fact", "not_current"))
                 continue
         try:
-            block = render.render_clause(clause, fact, language, desk)
+            href = await template.href_for(ctx, fact) if template.href_for is not None and fact is not None else None
+            block = render.render_clause(clause, fact, language, desk, href=href)
         except render.NothingToShow:
             violations.append(_clause_violation(clause, "stale_fact", "nothing_to_show"))
             continue
-        if carries(block, canaries):
-            violations.append(_clause_violation(clause, "canary", "canary"))
+        if found := block_canaries(block, canaries):
+            violations.append(canary_violation(found))
             continue
         blocks.append(block)
     return blocks, violations
@@ -519,10 +521,6 @@ async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
     return list(names)
 
 
-async def desk_canaries(ctx: KernelCtx, desk_id: str) -> list[str]:
-    """The canaries of the Desk's documents."""
-    return list(await ctx.db.scalars(ctx.repo.scoped(
-        select(Document.canary).where(Document.desk_id == desk_id).order_by(Document.document_id))))
 
 
 def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
@@ -536,11 +534,11 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     desk = await _desk_info(ctx, desk_id)
     fallback = render.language(session_row.last_language)
     fact_ids = [clause.fact_id for clause in draft.clauses if clause.fact_id is not None]
+    canaries = await labels.copy_canaries(ctx)
     if session_row.mode == "paused":
         return await finalize(ctx, session_row, blocks=[handoff(fallback, desk)], language=fallback, author="claude",
                               violations=[Violation(kind="session_paused", span="", rule_id="session_paused")],
-                              fact_ids=fact_ids, seen=True)
-    canaries = await desk_canaries(ctx, desk_id)
+                              fact_ids=fact_ids, seen=True, canaries=canaries)
     prose = shown(draft.prose)
     detected = lang.detect(prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
@@ -563,7 +561,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
-                          detected=detected if detected in ("en", "es") else None)
+                          detected=detected if detected in ("en", "es") else None, canaries=canaries)
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
@@ -598,11 +596,15 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
                    fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
-                   detected: render.Language | None = None) -> ReplyVerdict:
+                   detected: render.Language | None = None, visitor_plain_key: str | None = None,
+                   message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. Plan 01b's owner say ends here too.
+    violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
+    when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
+    and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
+    holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
     now (`last_seen_at`) and, when its prose was English or Spanish, `detected` kept as its
@@ -617,21 +619,85 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
             session_row.last_language = detected
         await ctx.db.flush()
     ok = not violations
-    message_id = new_id("msg")
+    message_id = message_id if message_id is not None else new_id("msg")
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
                "violations": [violation.kind for violation in violations],
                "rule_ids": [violation.rule_id for violation in violations],
-               "fact_ids": [ledger.safe_ref(fact_id) for fact_id in fact_ids],
+               "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
+                            else ledger.safe_ref(fact_id) for fact_id in fact_ids],
                "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
-    visitor_plain = render.status("reply_checked" if ok else "reply_handed_off", language, owner=owner)
+    if visitor_plain_key is None:
+        visitor_plain_key = "reply_checked" if ok else "reply_handed_off"
+    visitor_plain = render.status(visitor_plain_key, language, owner=owner)
     signature = sign_verdict(ctx.signer, session_id=session_row.session_id, generation=session_row.generation,
                              message_id=message_id, blocks=blocks, visitor_plain=visitor_plain, ledger_seq=entry.seq)
     return ReplyVerdict(ok=ok, language=language, blocks=list(blocks), violations=list(violations),
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
+
+
+# ---- The owner's messages -------------------------------------------------------------------------
+
+OWNER_TEXT_CHARS = 2000
+
+
+async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow,
+                        req: OwnerMessageRequest) -> OwnerMessageResult:
+    """The owner's message in a conversation the route has checked (`POST /owner/messages`): a
+    visitor's or agent's session of the owner's copy, open, on a Desk not deleted, in any mode. The
+    text holds 1 to 2000 characters and something to show, else 422 `invalid`.
+
+    A `say` is shown to the visitor as the owner typed it, in one `owner_said` card: only the
+    characters no font draws are left out (`_drawn`), so an ellipsis, a fraction or a ligature
+    stays as typed. Every check reads it as Claude's prose is read (`shown`, which also applies
+    NFKC): the blank check above and the canaries of the Desk's documents. Those are all a say is
+    checked for; the number rule is for Claude's prose, and no model reads the owner's words.
+    Clean, the words become the `owner_statement` fact `owner:<message_id>` (one text claim, read by the
+    owner and this session; only the kernel's `owner_said` card renders it, so it backs no
+    price), and `finalize` ledgers and signs the verdict with the `owner_said` receipt, in the
+    session's last language. With a canary, even split by spaces, in another case or width,
+    accented or in lookalike letters (`labels.find_canaries`, on the text as checked and as
+    shown), there is no fact and no card: `ok: false`, one `canary` violation naming the
+    documents, and the `owner_say_blocked` receipt, which the API shows the owner and never
+    delivers.
+
+    A `whisper` is a note for Claude, which the API adds to its context as untrusted text. The
+    kernel ledgers it (`whisper` `{message_id, chars}`, never the text) and keeps nothing else."""
+    if session_row.copy_id != owner.copy_id or session_row.kind == "owner":
+        raise ValueError("the owner writes only in the conversations of its own copy")
+    if len(req.text) > OWNER_TEXT_CHARS:                # measured before any of it is normalized
+        raise KernelFailure(422, "invalid", "owner_message_text")
+    text = shown(req.text)
+    if not text.strip():
+        raise KernelFailure(422, "invalid", "owner_message_text")
+    copy_id, desk_id, session_id = session_row.copy_id, session_row.desk_id, session_row.session_id
+    message_id = new_id("msg")
+    if req.kind == "whisper":
+        entry = await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+            kind="whisper", origin="kernel", session_id=session_id, ref_id=message_id,
+            summary={"message_id": message_id, "chars": len(req.text)}))
+        return OwnerMessageResult(message_id=message_id, verdict=None, ledger_seq=entry.seq)
+    language = render.language(session_row.last_language)
+    typed, canaries = _drawn(req.text), await labels.copy_canaries(ctx)
+    held = {*labels.find_canaries(text, canaries), *labels.find_canaries(typed, canaries)}
+    found = [document_id for document_id in canaries if document_id in held]
+    if found:
+        verdict = await finalize(ctx, session_row, blocks=[], language=language, author="owner",
+                                 violations=[canary_violation(found)],
+                                 visitor_plain_key="owner_say_blocked", message_id=message_id)
+        return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
+    fact = Fact(fact_id=f"owner:{message_id}", kind="owner_statement", status="available", source="owner",
+                claims=[Claim(key="text", kind="text", value=typed)],
+                label=Label(readers=["owner", f"session:{session_id}"]))
+    ctx.db.add(labels.fact_row(copy_id, desk_id, fact, ctx.clock.now(), session_id=session_id))
+    block = render.render_clause(Clause(template="owner_said", fact_id=fact.fact_id), fact, language,
+                                 await _desk_info(ctx, desk_id))
+    verdict = await finalize(ctx, session_row, blocks=[block], violations=[], language=language, author="owner",
+                             fact_ids=[fact.fact_id], visitor_plain_key="owner_said", message_id=message_id)
+    return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
 
 
 # ---- Route ----------------------------------------------------------------------------------------
