@@ -73,12 +73,15 @@ function checkLines(screen: { container: HTMLElement }): string[] {
   return [...panel.querySelectorAll('li')].map((li) => li.textContent?.trim() ?? '');
 }
 
-/** The payment limit's review trail, as N-Conn-20 draws it: "Rules" alone, a link back. */
-async function expectRulesCrumbAlone(screen: Awaited<ReturnType<typeof openDraft>>['screen']) {
+/**
+ * The payment limit's review trail, "Rules / Change your payment limit", as "Rules / Ask me first"
+ * reads: the owner's choice (2026-10-30), where N-Conn-20 draws "Rules" alone.
+ */
+async function expectLimitTrail(screen: Awaited<ReturnType<typeof openDraft>>['screen']) {
   const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
   await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-  expect(trail.element().textContent).toBe('Rules');
-  expect(trail.element().querySelector('[aria-current]')).toBeNull();
+  await expect.element(trail.getByText('Change your payment limit', { exact: true })).toHaveAttribute('aria-current', 'page');
+  expect(trail.element().textContent).toBe('Rules/Change your payment limit');
 }
 
 /** True when `first` comes before `second` in the page. */
@@ -303,7 +306,7 @@ describe('rule draft review', () => {
       expect(screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
       // The check alone (N-Conn-20): no preset, so nothing about what runs on its own.
       expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.']);
-      await expectRulesCrumbAlone(screen);
+      await expectLimitTrail(screen);
     }
     expect(requests('ruleDraft')).toHaveLength(1);
 
@@ -324,7 +327,7 @@ describe('rule draft review', () => {
     await expect.element(screen.getByText('Your rules stay the same.', { exact: true })).toBeVisible();
     expect(rowTexts(screen)).toEqual([]);
     await expect.element(screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
-    await expectRulesCrumbAlone(screen);
+    await expectLimitTrail(screen);
 
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
