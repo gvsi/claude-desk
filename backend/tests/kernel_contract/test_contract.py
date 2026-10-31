@@ -148,9 +148,10 @@ async def answer(owner: CredentialView, decision_id: str, choice: str) -> Approv
                             path={"decision_id": decision_id})
 
 
-async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str) -> ReplyVerdict:
+async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str, *,
+                      final: bool = True) -> ReplyVerdict:
     draft = ReplyDraft(session_id=session_id, generation=generation, prose=prose)
-    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft))
+    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft, final=final))
 
 
 async def context(view: CredentialView, session_id: str, desk_id: str | None = None) -> SessionContext:
@@ -1846,8 +1847,8 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
     async def turn(message: str, *drafts: str) -> CredentialView:
         view = turn_view(http, issued, slug, session_id, message)
         assert (await view.whoami(session_id)).session.session_id == session_id
-        for draft in drafts:
-            await check_reply(view, session_id, 0, draft)
+        for draft in drafts:                    # a first attempt, as the API sends one a rewrite may follow
+            await check_reply(view, session_id, 0, draft, final=False)
         return view
 
     passed = await turn("When are you open?", "We're open on weekdays.")
