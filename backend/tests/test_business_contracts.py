@@ -9,7 +9,8 @@ from desk import contracts
 from desk.kernel_service import adapters
 
 MAIN_PROFILE_HASHES = {
-    'native.book': 'eeb10de9b6fe8879003b5d5b124da69fcda47a1868b5ba96505ddd75fa791827',
+    # The optional owner-only booking note deliberately changes native.book's input schema and pin.
+    'native.book': '166dcb8219b263c6339a9b85af427f7ed15bf8acbe47c23394c864313260925f',
     'native.capture_lead': '66c63000c5faecd60ab73ab6778097085ce248360a261ff0770183caa4fb1b13',
     'native.charge_mandate': '6ee1189c8d00aad5eac9fa882ec6395bec3c449508e93ef809fd468b0020e1d1',
     'native.fetch_website': '247265c3628112de0713def8c4f04b4213574c38f32216310eb4458dec6a94fd',

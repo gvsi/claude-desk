@@ -7,7 +7,8 @@ a booking card are checked against the slot, not against the time of asking.
 `execute` books it through `commit_booking`, the one side effect, then writes a `booking:<id>`
 fact labelled for the session (the booking confirmed card) and alerts the owner per the Desk's
 notification defaults. The alert is read only from the owner's Demo inbox, so the result's `inbox`
-stays empty.
+stays empty. An optional untrusted note is saved separately as an owner-only knowledge fact,
+quoted in the owner's alert, and never returned with the session's booking fact.
 """
 
 from datetime import datetime, timedelta
@@ -18,13 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from desk.contracts import SLOT_ID_PATTERN, Claim, Fact, NormalizedAction, Principal, ResourceRef, ToolProfile
+from desk.contracts import SLOT_ID_PATTERN, Claim, Fact, Label, NormalizedAction, Principal, ResourceRef, ToolProfile
 from desk.db.models import Booking, CalendarSlot, Person
 from desk.db.models import Fact as FactRow
 from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
-                                               NormalizeCtx, business_timezone, quoted)
+                                               NormalizeCtx, business_timezone, claudes_note, quoted)
 from desk.kernel_service.repo import KernelCtx, new_id
 
 ONE_BOOKING_PER_SLOT = "bookings_one_confirmed_per_slot"    # the database's unique index on confirmed bookings
@@ -34,6 +35,7 @@ class BookArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     slot_id: str = Field(pattern=SLOT_ID_PATTERN)
+    note: str | None = Field(None, max_length=500)
 
 
 PROFILE = ToolProfile(
@@ -105,7 +107,7 @@ def model_view(fact_id: str, booking_id: str) -> dict[str, Any]:
 class BookAdapter:
     profile = PROFILE
     Args = BookArgs
-    free_text_fields: frozenset[str] = frozenset()
+    free_text_fields = frozenset({"note"})
     model_view_keys = frozenset({"fact_id", "booking_id", "status"})
     releases_private_data = False         # the booking the session made, labelled for the session too
 
@@ -114,6 +116,8 @@ class BookAdapter:
         return None
 
     async def normalize(self, nctx: NormalizeCtx, args: BookArgs) -> Normalized:
+        if args.note and labels.find_canaries(args.note, await labels.copy_canaries(nctx.ctx)):
+            raise AdapterRefusal("note_canary")
         slot = await find_slot(nctx.ctx, nctx.desk_row.desk_id, args.slot_id)
         if slot is None or slot.starts_at <= nctx.ctx.clock.now():
             raise AdapterRefusal("no_such_slot")
@@ -143,11 +147,19 @@ class BookAdapter:
                                 Claim(key="appointment_minutes", kind="text", value=str(minutes))])
         ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=xctx.session_row.session_id,
                                    action_id=action.action_id))
+        if args.note:
+            note = Fact(fact_id=f"booking_note:{booking.booking_id}", kind="knowledge", status="committed",
+                        source="kernel", claims=[Claim(key="booking", kind="ref", value=booking.booking_id),
+                                                  Claim(key="note", kind="text", value=args.note)],
+                        label=Label(readers=["owner"]))
+            ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, note, now,
+                                       session_id=xctx.session_row.session_id, action_id=action.action_id))
         await ctx.db.flush()
         who = await _who(ctx, xctx.principal, label.record_owner)
         booked_type = f"{quoted(appointment[0])} " if appointment is not None else ""
+        note_text = f" {claudes_note((args.note,))}" if args.note else ""
         await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
-                                     f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.")
+                                     f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.{note_text}")
         return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
@@ -158,7 +170,8 @@ class BookAdapter:
         if booking is None:
             return None
         fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-            FactRow.desk_id == action.desk_id, FactRow.action_id == action.action_id)))).one()
+            FactRow.desk_id == action.desk_id, FactRow.action_id == action.action_id,
+            FactRow.fact_id == f"booking:{booking.booking_id}")))).one()
         return AdapterResult(facts=[labels.fact_of(fact)], model_view=model_view(fact.fact_id, booking.booking_id))
 
 

@@ -109,7 +109,8 @@ async def test_visitor_cannot_override_the_config_in_args(app, client, extra):
         ctx.bind(copy.copy_id)
         from desk.kernel_service import adapters
         adapter = await adapters.resolve(ctx, copy.desk_id, TOOL)
-        assert set(adapter.Args.model_fields) == {'slot_id'}
+        # The optional owner-only note is shared with native.book; appointment config stays row-only.
+        assert set(adapter.Args.model_fields) == {'slot_id', 'note'}
 
 
 async def test_typed_booking_uses_the_slot_time_for_weekday_hours(app, client, reviewer):
