@@ -556,7 +556,7 @@ function consultantProposals(): ProposalCard[] {
   ];
   const connectors: ConnectorProposal[] = [
     { app: 'stripe', label: 'Stripe', why: 'Take card payments for retainers. Test mode in this preview, so no money moves.', connectable: true },
-    { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: false },
+    { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: true },
   ];
   const fields = [
     ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
@@ -575,7 +575,7 @@ export const CPA_COPY = {
   ],
   first: 'Who do you work with most?',
   clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
-  consult: 'Got it. First, intro calls. To book one I need to know when you’re free, so I’ll use your opening hours from your website, Monday to Friday, 9 to 6. Google Calendar can take over once it’s available.',
+  consult: 'Got it. First, intro calls. To book one I need to know when you’re free, so I’ll use your opening hours from your website, Monday to Friday, 9 to 6.',
   intake: 'Great, I’ll set it up this way. Next: the questions new clients answer before their call.',
   updated: 'Sure. Here’s the updated version.',
   retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
@@ -592,7 +592,7 @@ export const CPA_COPY = {
   rest: 'Here’s the rest, as I’d set it up.',
   closing: [
     'That’s everything I need, Linda. Here’s how your Desk will work.',
-    'It books free 20-minute intro consults and asks new clients three questions first. Once you’ve priced the work, it sends the retainer link, and it asks you before every payment. Questions about where a return stands come to you for now, and Google Calendar can join once it’s in this demo.',
+    'It books free 20-minute intro consults and asks new clients three questions first. Once you’ve priced the work, it sends the retainer link, and it asks you before every payment. Questions about where a return stands come to you for now.',
     'A few conversations it’s ready for:',
     'Someone asks if you can do their 2025 return and their LLC’s books. The Desk explains the free consult, asks its three questions and books a time.',
     'A client you’ve priced asks how to pay. The Desk asks you first, then sends them the retainer link.',
@@ -622,7 +622,8 @@ function nextConsultant(interview: Interview): void {
       return;
     }
     const job = next.job;
-    const intro = job?.job === 'schedule' ? null
+    const intro = next.connector?.app === 'google_calendar' ? CPA_COPY.consult
+      : job?.job === 'schedule' ? null
       : job?.job === 'intake' ? CPA_COPY.intake
       : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe') ? CPA_COPY.stripeConnected : CPA_COPY.retainer
       : next.connector?.app === 'stripe' ? CPA_COPY.stripe

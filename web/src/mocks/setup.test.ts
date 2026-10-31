@@ -103,6 +103,25 @@ async function cpaAt(kind: string): Promise<SetupState> {
 }
 
 describe('setup consultant run and decisions', () => {
+  it('connects_google_calendar_in_chat_without_adding_unsupported_tools', async () => {
+    let state = await startState();
+    const id = state.interview_id;
+    state = await setupState('setupConsent', id, { allow: true });
+    state = await setupState('setupAnswer', id, { question: state.question, text: 'Both, about evenly' });
+    const calendar = state.messages.at(-1)!.card!;
+    expect(calendar).toMatchObject({ kind: 'connector', state: 'proposed', connector: { app: 'google_calendar', connectable: true } });
+    expect(state.pending_card).toBe(calendar.proposal_id);
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    state = await setupState('setupProposal', id, { accept: true }, calendar.proposal_id);
+    expect(state.messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
+    expect(state.messages.at(-1)!.card?.job?.job).toBe('schedule');
+    expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+    state = await setupState('setupSuggestions', id, {});
+    expect(state.messages.flatMap(({ card }) => card?.connector ? [card.connector.connectable] : [])).toEqual([true, true]);
+    expect(state.messages.filter(({ role }) => role === 'claude').map(({ text }) => text).join('\n')).not.toMatch(/once it’s available|once it’s in this demo/i);
+    expect((await setupState('setup', id)).messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
+  });
+
   it('reproposes_a_typed_change_with_a_new_id_and_preserves_the_changed_card_on_finish', async () => {
     let state = await cpaAt('schedule');
     const id = state.interview_id;
@@ -171,7 +190,7 @@ describe('setup consultant run and decisions', () => {
       const answered = await mockStore.dispatch('setupAnswer', { params: { id }, query, body: { question: state.question, text: 'Both, about evenly' } });
       if ('network' in answered) throw new Error('answer failed');
       state = answered.body as SetupState;
-      expect(state.messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 2 : 0);
+      expect(state.messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 1 : 0);
       if (cards !== '1') expect(state.pending_card).toBeNull();
       for (const message of state.messages) { expect(message).toHaveProperty('choices'); expect(message).toHaveProperty('card'); }
       const finished = await mockStore.dispatch('setupSuggestions', { params: { id }, query, body: {} });
@@ -311,9 +330,9 @@ describe('setup consultant run and decisions', () => {
     expect(state).toMatchObject({ pending_card: null, question: 'what_you_do' });
     state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Both, about evenly' });
     const calendar = state.messages.find(({ card }) => card?.connector?.app === 'google_calendar')!.card!;
-    expect(calendar.connector?.connectable).toBe(false);
-    const ids = [calendar.proposal_id];
-    for (const kind of ['schedule', 'intake', 'stripe', 'payment', 'status']) {
+    expect(calendar.connector?.connectable).toBe(true);
+    const ids = [];
+    for (const kind of ['google_calendar', 'schedule', 'intake', 'stripe', 'payment', 'status']) {
       const pending = state.messages.at(-1)!.card!;
       expect(pending.job?.job ?? pending.connector?.app).toBe(kind);
       expect(pending.proposal_id).toMatch(/^p-[0-9a-f]{12}$/);

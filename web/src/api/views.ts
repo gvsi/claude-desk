@@ -534,7 +534,7 @@ export type BlockConfig =
 /** Setup's closed connector catalog. */
 export type ConnectorKey = 'google_calendar' | 'gmail' | 'google_drive' | 'quickbooks' | 'stripe' | 'square' | 'calendly';
 
-/** Why ≤ 200; only Stripe (the mock payments server) is connectable today. */
+/** Why ≤ 200; catalog apps connect in simulation. False remains an unavailable-app fallback. */
 export type ConnectorProposal = {
   app: ConnectorKey;
   label: string;

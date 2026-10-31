@@ -2937,6 +2937,47 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it.each(['Connect', 'Not now'] as const)('answers_google_calendar_with_%s_in_chat', async (action) => {
+    const state = await consultantAt('google_calendar');
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Google Calendar', exact: true });
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: action, exact: true }).click();
+    await expect.element(screen.getByRole('article', { name: 'Book a free intro call', exact: true })).toBeVisible();
+    await expect.element(card.getByText(action === 'Connect' ? 'Connected' : 'Not now', { exact: true })).toBeVisible();
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: action === 'Connect' });
+    expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+  });
+
+  it('keeps_unavailable_app_cards_read_only_with_coming_later', async () => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.connector!.connectable = false;
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('unavailable app must not decide'); }} />);
+    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(proposal.connector!.why, { exact: true })).toBeVisible();
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it.each(['google_calendar', 'gmail', 'google_drive', 'quickbooks', 'stripe', 'square', 'calendly'] as const)('uses_the_same_connect_action_for_catalog_app_%s', async (app) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.connector!.app = app;
+    const decisions: unknown[] = [];
+    const props = { proposal, live: true, disabled: false, busyAction: null, failed: false, amountRequired: false, onRetry: () => {}, onDecision: (decision: unknown) => { decisions.push(decision); } };
+    const screen = await render(<ProposalCard {...props} />);
+    await screen.getByRole('button', { name: 'Connect', exact: true }).click();
+    expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true } }]);
+    await screen.rerender(<ProposalCard {...props} proposal={{ ...proposal, state: 'accepted' }} live={false} />);
+    await expect.element(screen.getByText('Connected', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
   it('renders_named_arrow_key_icons_without_arrow_characters_and_passes_screen_basics', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -3262,14 +3303,15 @@ describe('consultant setup', () => {
     expect(live.getByRole('list').getByRole('button').elements()).toHaveLength(4);
   });
 
-  it('shows_coming_later_jobs_and_connectors_without_claiming_they_work', async () => {
-    const state = await consultantAt('google_calendar');
+  it('shows_coming_later_jobs_and_simulated_connected_apps', async () => {
+    const state = await consultantAt('money');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const status = screen.getByRole('article', { name: 'Answer “Where’s my return?”' });
     await expect.element(status.getByText('Coming later', { exact: true })).toBeVisible();
-    expect(status.element().querySelector('.cd-setup-job__autonomy')).toBeNull();
+    expect(status.getByRole('button').elements()).toHaveLength(0);
     const calendar = screen.getByRole('article', { name: 'Google Calendar' });
-    await expect.element(calendar.getByText('Coming later', { exact: true })).toBeVisible();
+    await expect.element(calendar.getByText('Connected', { exact: true })).toBeVisible();
+    await expect.element(calendar.getByText('Mock', { exact: true })).toBeVisible();
     expect(calendar.getByRole('button').elements()).toHaveLength(0);
     const stripe = screen.getByRole('article', { name: 'Stripe' });
     await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
@@ -3415,6 +3457,10 @@ describe('consultant setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const choice = screen.getByRole('button', { name: 'Both, about evenly' });
     await choice.click();
+    const calendar = screen.getByRole('article', { name: 'Google Calendar', exact: true });
+    await calendar.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.element(calendar.getByText('Connected', { exact: true })).toBeVisible();
+    expect(calendar.getByRole('button').elements()).toHaveLength(0);
     const consult = screen.getByRole('article', { name: 'Book a free intro call' });
     await expect.element(consult).toBeVisible();
     expect(choice.elements()).toHaveLength(0);
