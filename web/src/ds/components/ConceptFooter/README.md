@@ -10,6 +10,7 @@
 ## What the consumer provides
 
 - Nothing but `poweredBy`: the text is fixed. The copy check reads `[data-ds="concept-footer"]` against its own copy of the line, so a stray edit fails every story that shows it.
+- Nothing for the language either: both lines are English on every page, a Spanish visitor's too, and the footer says so with `lang="en"`, so a screen reader doesn't read it with the page's Spanish voice.
 
 ## Props
 

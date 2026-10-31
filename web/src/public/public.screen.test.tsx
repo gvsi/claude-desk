@@ -133,6 +133,8 @@ describe('public chat page', () => {
     const es = await renderRoute(PAGE, { language: 'es-MX' });
     await ready(es.screen);
     expect(document.documentElement.lang).toBe('es');
+    // The concept footer's line is English on every page, and says so.
+    expect(es.screen.container.querySelector('[data-ds="concept-footer"]')?.closest('[lang]')?.getAttribute('lang')).toBe('en');
     // Leaving the page hands the document its language back.
     await es.router.navigate('/no/such/page');
     await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
