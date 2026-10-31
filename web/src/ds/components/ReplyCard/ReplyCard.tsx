@@ -1,8 +1,11 @@
+import { useState } from 'react';
+
 import type { CardBlock, ClauseTemplate } from '../../../api/contracts.ts';
 import { Icon, type IconName } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { cardView } from './cardView.ts';
 import { cardChrome, withOwner } from './chrome.ts';
 
@@ -65,6 +68,8 @@ export function ReplyCard({ block, language, ownerName, inertDownload = false }:
   const action = href !== null ? chrome?.action : undefined;
   // A vision page's document card: the same Download, going nowhere.
   const inertAction = inertDownload && block.template === 'document_link' ? chrome?.action : undefined;
+  // On a vision page: whether Download has been pressed, so its line shows from then on.
+  const [inertPressed, setInertPressed] = useState(false);
 
   return (
     <div className="cd-reply-card" lang={language}>
@@ -92,9 +97,14 @@ export function ReplyCard({ block, language, ownerName, inertDownload = false }:
         </div>
         {chrome?.note === undefined ? null : <p className="cd-reply-card__note cd-type-caption">{chrome.note}</p>}
         {inertAction !== undefined ? (
-          <div className="cd-reply-card__action">
-            <Button variant="primary">{inertAction}</Button>
-          </div>
+          <>
+            <div className="cd-reply-card__action">
+              <Button variant="primary" onClick={() => setInertPressed(true)}>
+                {inertAction}
+              </Button>
+            </div>
+            <VisionInertLine shown={inertPressed} />
+          </>
         ) : href === null || action === undefined ? null : (
           <div className="cd-reply-card__action">
             <Button variant={block.template === 'document_link' ? 'primary' : 'secondary'} href={href}>

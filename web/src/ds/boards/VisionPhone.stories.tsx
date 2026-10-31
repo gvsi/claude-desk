@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { VISION_INERT_LINE } from '../components/VisionBar/visionInert.tsx';
 import { expectComputed } from '../test/expectComputed.ts';
 import { SPEC, expectConversationType, expectFooter, expectNoFactsInProse, expectReceiptsUnderMessages, expectTabOrder, expectVisionBar, one } from './spec.ts';
-import { rivera } from '../fixtures/index.ts';
 import { PHONE_REPLY, PhoneApps, VISION_BACK_HREF } from './vision.tsx';
 
 const meta = {
@@ -16,8 +16,8 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30. The owner’s Today and a visitor’s chat as phone apps, each in a PhoneFrame; the owner’s with the five-tab PhoneTabBar.',
       'The held quote is Today’s ApprovalCard: a limit hold for a visitor not on record, so its answers are the two plain buttons of the signed answer board (N-Answers-TwoButtons), and it says where and when it was held; the board draws two menu buttons and no waiting line.',
-      'The visitor’s composer is the real Composer with its send button, where the board draws a plain field.',
-      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Maria will text you when she’s on her way.” promised what no card backs, and its booking was drawn as a plain fact card. Claude now says “You’re all set. Here’s your visit.” beside the kernel’s booking card (booking_confirmed), which carries the day and time; the board is to be redrawn to match.',
+      'The visitor’s composer is the real Composer with its send button, where the board draws a plain field. Nothing on a vision page is sent: once Send is pressed, “This is a vision page, so nothing is sent.” shows 8 px under the composer (owner’s ruling, 2026-10-30), and the held quote’s answers say the same under them when pressed.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Maria will text you when she’s on her way.” promised what no card backs, and its booking was drawn as a plain fact card. Claude now says “You’re all set. Here’s your visit.” beside the kernel’s booking card (booking_confirmed) in its rendered shape: “Tuesday, November 3”, “Arriving 2:00 pm to 4:00 pm”, “With Maria Rivera”, with no booking number; the board is to be redrawn to match.',
       'The board is cut at the window’s foot; the page runs on to the footer under the phones.',
     ].join(' '),
   },
@@ -66,11 +66,12 @@ export const Board: Story = {
     expectConversationType(log);
     // The booking is confirmed only by its card: Claude's words state no date, time or booking, and
     // promise nothing the card doesn't back.
-    await expect(await expectNoFactsInProse(log)).toBe(1);
+    await expect(await expectNoFactsInProse(log)).toEqual({ prose: 1, receipts: 1 });
     await expect(await expectReceiptsUnderMessages(log)).toBe(1);
     // The booking is the kernel's booking card, in the same message as Claude's words.
     const booked = within(log).getByRole('article', { name: 'Booked' });
-    await expect(booked).toHaveTextContent(`Booked${rivera.blocks.booking_confirmed.en.title}${(rivera.blocks.booking_confirmed.en.lines ?? []).join('')}`);
+    // The kernel's booking card, as it renders one: the day, when Maria arrives, and who.
+    await expect(booked.textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Maria Rivera');
     const reply = one(log, '.cd-claude-message__prose');
     await expect(reply.textContent).toBe(PHONE_REPLY);
     await expect(booked.closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));
@@ -102,9 +103,16 @@ export const Board: Story = {
     await expect(within(held).getByText('Waiting for your answer')).toBeVisible();
     await userEvent.click(within(visitor).getByRole('button', { name: 'Send' }));
     await expect(composer).toHaveValue('Thanks');
+    // The first press says why nothing was sent: one quiet line, announced, 8 px under the composer.
+    const line = within(visitor).getByText(VISION_INERT_LINE);
+    await expect(line).toHaveAttribute('role', 'status');
+    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const box = composer.closest('.cd-composer__box') as HTMLElement;
+    await expect(Math.round(line.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(composer);
     await userEvent.keyboard('{Enter}');
     await expect(composer).toHaveValue('Thanks');
+    await expect(within(visitor).getAllByText(VISION_INERT_LINE)).toHaveLength(1);
 
     // Nothing scrolls sideways, and the footer follows the phones.
     await expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);

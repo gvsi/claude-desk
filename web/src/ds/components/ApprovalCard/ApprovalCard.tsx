@@ -13,6 +13,7 @@ import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contr
 import { Icon } from '../../icons/index.tsx';
 import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
@@ -195,6 +196,8 @@ export function ApprovalCard({
   // an error (`error` on and `pending` off, after either of them changed since the click), or the
   // promise `onAnswer` returned rejects.
   const [lock, setLock] = useState<AnswerLock | null>(null);
+  // On a vision page: whether an answer has been chosen, so its line shows from then on.
+  const [inertPressed, setInertPressed] = useState(false);
   const clicks = useRef(0);
   let locked = false;
   // The side whose answer is being sent, while this card knows it; null when the screen reports
@@ -228,8 +231,12 @@ export function ApprovalCard({
   }, [showAnswers]);
 
   const answer = (value: ApprovalAnswer) => {
-    // A vision page's card: the answer goes nowhere, so nothing waits for it.
-    if (inertAnswers || waitingForResult) return;
+    // A vision page's card: the answer goes nowhere, so nothing waits for it, and the line says why.
+    if (inertAnswers) {
+      setInertPressed(true);
+      return;
+    }
+    if (waitingForResult) return;
     answeredHere.current = true;
     clicks.current += 1;
     const click = clicks.current;
@@ -376,6 +383,7 @@ export function ApprovalCard({
           <p role="status" className="cd-approval-card__progress cd-type-caption">
             {pending ? SENDING_LINE : null}
           </p>
+          {inertAnswers ? <VisionInertLine shown={inertPressed} /> : null}
           {failed && !pending ? (
             <div className="cd-approval-card__error">
               <Notice tone="error">{error === true ? ERROR_LINE : error}</Notice>

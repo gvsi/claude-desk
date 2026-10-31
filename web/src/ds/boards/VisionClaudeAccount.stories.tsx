@@ -20,15 +20,16 @@ const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plum
 const meta = {
   title: 'Boards/Vision, Claude account',
   render: () => <ClaudeAccountChat />,
-  globals: { viewport: { value: 'laptop', isRotated: false } },
+  // Drawn at a 14-inch laptop's width and the page's own height, with Dana's last visit in it.
+  globals: { viewport: { value: 'laptop-994', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Vision-ClaudeAccount',
     canvasNote: [
       'Signed on 2026-10-30. Dana returns to Rivera Plumbing’s public page signed in with her Claude account.',
       'Owner decision, 2026-10-30: a vision Claude account counts as verified when its verified email matches the contact on record, and her consent is asked on each visit; the receipts say both, word for word as the board writes them.',
-      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?” stated a booking in Claude’s words. Her last visit is now the kernel’s booking card under “Welcome back, Dana. How did the drain clearing go?”, and the board is to be redrawn to match.',
-      'The vision bar is PublicShell’s banner, so the page keeps the window’s height under it, as the board draws it.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?” stated a booking in Claude’s words. Her last visit is now the kernel’s booking card in its rendered shape (“Tuesday, October 20”, “Arriving 10:00 am to 12:00 pm”, “With Maria Rivera”) under “Welcome back, Dana. How did the drain clearing go?”, and the board is to be redrawn to match.',
+      'The vision bar is PublicShell’s banner, inside the page’s height. With Dana’s last visit, the page is 994 px tall at 1512 px, as the components measure it (the redrawn canvas board is 1013 px); the story runs at that height, so the page fits its window exactly.',
       'The about column’s service-area card keeps Rivera’s real service area, as the board draws it: the rule that no vision page names a real city office covers only the city office page (coordinator’s ruling, 2026-10-30).',
     ].join(' '),
   },
@@ -40,17 +41,16 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 994]);
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
 
     // The public page right under the bar, the window's height: the brand header, the chat and the about column.
     const header = canvas.getByRole('banner');
     await expect(header.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
     expectComputed(header, { height: '76px' });
-    // The bar is inside the shell: the page is the shell, at least the window's height, nothing added outside it.
-    const shellHeight = Math.round(one(canvasElement, '.cd-public-shell').getBoundingClientRect().height);
-    await expect(shellHeight).toBeGreaterThanOrEqual(982);
-    await expect(document.documentElement.scrollHeight).toBe(shellHeight);
+    // The bar is inside the shell: the page is the shell, exactly its window's height, nothing added outside it.
+    await expect(Math.round(one(canvasElement, '.cd-public-shell').getBoundingClientRect().height)).toBe(994);
+    await expect(document.documentElement.scrollHeight).toBe(994);
 
     // The AI disclosure under the chat's title, as on every public page.
     const main = canvas.getByRole('main');
@@ -62,7 +62,7 @@ export const Board: Story = {
     await expect(within(log).getByText('Signed in with your Claude account.')).toBeVisible();
     expectConversationType(log);
     // Claude's words state no booking, date or promise: a past booking would need its card beside them.
-    await expect(await expectNoFactsInProse(log)).toBe(3);
+    await expect(await expectNoFactsInProse(log)).toEqual({ prose: 3, receipts: 5 });
     const prose = some(log, '.cd-claude-message__prose').map((line) => line.textContent);
     await expect(prose).toEqual([CLAUDE_ACCOUNT_TURNS.ask, CLAUDE_ACCOUNT_TURNS.matched, CLAUDE_ACCOUNT_TURNS.sent]);
     await expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual([
@@ -84,7 +84,7 @@ export const Board: Story = {
 
     // Her last visit is the kernel's booking card under the welcome, in her message: the date, the job and who.
     const lastVisit = within(log).getByRole('article', { name: 'Booked' });
-    await expect(lastVisit).toHaveTextContent(`Booked${DANA_LAST_VISIT.title}${(DANA_LAST_VISIT.lines ?? []).join('')}`);
+    await expect(lastVisit.textContent).toBe('BookedTuesday, October 20Arriving 10:00 am to 12:00 pmWith Maria Rivera');
     await expect(lastVisit.closest('.cd-claude-message')?.textContent).toContain(CLAUDE_ACCOUNT_TURNS.matched);
 
     // The invoice is a document card, only for her, with its download.

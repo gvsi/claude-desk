@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 
 import { IconButton } from '../IconButton/IconButton.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 
 import './Composer.css';
 
@@ -70,6 +71,8 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const [value, setValue] = useState('');
+  // On a vision page: whether Send has been pressed, so its line shows from then on.
+  const [inertPressed, setInertPressed] = useState(false);
 
   const text = value.trim();
   const canSend = !disabled && text !== '';
@@ -88,8 +91,12 @@ export function Composer({
   }, [value]);
 
   const send = () => {
-    // A vision page's composer: the words go nowhere, so they stay.
-    if (!canSend || inertSend) return;
+    if (!canSend) return;
+    // A vision page's composer: the words go nowhere, so they stay, and the line says why.
+    if (inertSend) {
+      setInertPressed(true);
+      return;
+    }
     onSend(text);
     setValue('');
   };
@@ -137,8 +144,9 @@ export function Composer({
       shape="round"
       disabled={!canSend}
       onClick={() => {
-        if (inertSend) return;
         send();
+        // On a vision page nothing was sent, so Send keeps the focus.
+        if (inertSend) return;
         // The button is disabled once the text clears, so the next message starts in the text box.
         inputRef.current?.focus();
       }}
@@ -154,6 +162,7 @@ export function Composer({
       {value.length} / {maxLength}
     </span>
   ) : null;
+  const inertLine = inertSend ? <VisionInertLine shown={inertPressed} /> : null;
   const labelElement = (
     <label htmlFor={inputId} className="cd-sr-only">
       {label}
@@ -174,6 +183,7 @@ export function Composer({
             {sendButton}
           </div>
         </div>
+        {inertLine}
       </div>
     );
   }
@@ -193,6 +203,7 @@ export function Composer({
           {counter}
         </div>
       ) : null}
+      {inertLine}
     </div>
   );
 }

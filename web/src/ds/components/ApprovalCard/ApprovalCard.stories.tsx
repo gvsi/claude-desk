@@ -5,6 +5,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard.tsx';
 
 /** Words that only an offered answer shows: its button, its menu items and their lines. */
@@ -330,8 +331,16 @@ export const InertAnswers: Story = {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
     expectComputed(allow, SECONDARY);
     expectComputed(deny, DANGER);
+    await expect(canvas.queryByText(VISION_INERT_LINE)).toBeNull();
     await userEvent.click(allow);
     await expect(allow).toHaveFocus();
+    // vision_inert_line_on_first_press: the first press shows the line in a polite live region, a
+    // secondary caption 8 px under the answers' row.
+    const line = canvas.getByText(VISION_INERT_LINE);
+    await expect(line).toHaveAttribute('role', 'status');
+    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const row = canvasElement.querySelector<HTMLElement>('.cd-approval-card__row')!;
+    await expect(Math.round(line.getBoundingClientRect().top - row.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.tab();
     await expect(deny).toHaveFocus();
     await userEvent.keyboard('{Enter}');
@@ -346,6 +355,45 @@ export const InertAnswers: Story = {
     await expect(canvas.queryByText('Sending your answer')).toBeNull();
     await expect(canvas.getByText('Waiting for your answer')).toBeVisible();
     await expect(answerButtons(canvasElement).map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time']);
+    // The second press, Enter on Deny, changed nothing: still the one line.
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
+  },
+};
+
+/** The same on a menu: the menu opens, and choosing in it does nothing but close it. */
+export const InertAnswersMenu: Story = {
+  args: {
+    ...consultationArgs,
+    decision: { ...heldConsultation, answers: ['allow_once', 'allow_person', 'deny_once', 'deny_always'] },
+    inertAnswers: true,
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No vision board draws a held request with menus; this is Chen’s consultation with all four answers, as a vision page would draw it, so choosing in a menu goes nowhere.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // inert_menu_choice_sends_nothing: Allow opens its menu, "This time" closes it, and nothing is sent.
+    const group = canvas.getByRole('group', { name: 'Your answer' });
+    const [allow] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
+    await expect(allow).toHaveAttribute('aria-haspopup', 'menu');
+    await userEvent.click(allow);
+    const menu = canvas.getByRole('menu', { name: 'Allow' });
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'This time' }));
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+    // A choice in a menu is a press too: the line shows, once.
+    await expect(canvas.getByText(VISION_INERT_LINE)).toHaveAttribute('role', 'status');
+    await userEvent.click(allow);
+    await userEvent.click(within(canvas.getByRole('menu', { name: 'Allow' })).getByRole('menuitem', { name: 'This time' }));
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
+    await expect(canvas.queryByRole('menu')).toBeNull();
+    await expect(allow).toHaveFocus();
+    await expect(group).not.toHaveAttribute('aria-busy');
+    for (const button of answerButtons(canvasElement)) {
+      await expect(button).not.toHaveAttribute('aria-disabled');
+      await expect(button).not.toHaveAttribute('aria-busy');
+    }
+    await expect(canvasElement.querySelector('.cd-button__spinner')).toBeNull();
   },
 };
 

@@ -36,7 +36,7 @@ export const Board: Story = {
     await expect(sidebar.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
     await expectChannelsContent(content, CHANNELS_LEAD);
     // A Settings page: Claude says nothing on it.
-    await expect(await expectNoFactsInProse(canvasElement)).toBe(0);
+    await expect(await expectNoFactsInProse(canvasElement)).toEqual({ prose: 0, receipts: 0 });
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 

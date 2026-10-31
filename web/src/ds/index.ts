@@ -76,6 +76,7 @@ export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Vision pages
 export { VISION_LINE, VisionBar, type VisionBarProps } from './components/VisionBar/VisionBar.tsx';
+export { VISION_INERT_LINE } from './components/VisionBar/visionInert.tsx';
 export {
   PhoneFrame,
   PhoneTabBar,

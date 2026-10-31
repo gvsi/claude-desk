@@ -112,3 +112,8 @@
 .cd-composer__meta > .cd-composer__counter {
   margin-left: auto;
 }
+
+/* On a vision page, the line an inert Send shows: the column's gap puts it 8 px under the box. */
+.cd-composer > .cd-vision-inert-line {
+  margin-top: 0;
+}

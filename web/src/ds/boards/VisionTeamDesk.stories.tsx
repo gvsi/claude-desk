@@ -19,14 +19,15 @@ import { LUIS_ACCESS, TEAMMATES, TEAM_REPLIES, TEAM_TODAY, TeamDeskConversations
 const meta = {
   title: 'Boards/Vision, team desk',
   render: () => <TeamDeskConversations />,
-  globals: { viewport: { value: 'laptop', isRotated: false } },
+  // Drawn at a 14-inch laptop's width and the page's own height, with its job and hours cards.
+  globals: { viewport: { value: 'laptop-1061', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Vision-TeamDesk',
     canvasNote: [
       'Signed on 2026-10-30. Rivera Plumbing’s team asks its own Desk, the “Team” Desk in the sidebar’s Desk picker, with “Teammates” as its people’s word and the team’s Answering line.',
-      'Luis’s messages are VisitorMessage bubbles and Claude’s words ClaudeMessage prose, each fact in a FactCard; his access is the AccessPanel.',
-      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “The gate code is on today’s job card.” and “I can show your own logged hours for last week if that helps.” put dates in Claude’s words. They read “The gate code is on her job card.” beside a Job card with the visit’s date and time, and “Here are your own logged hours.” beside an hours card with the week’s dates; the payroll receipt says “No pay was shared.” and a second receipt says the hours are Luis’s own. The page now runs past the window; the board is to be redrawn to match.',
+      'Luis’s messages are VisitorMessage bubbles and Claude’s words ClaudeMessage prose, each fact in a vision fact card; his access is the AccessPanel.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “The gate code is on today’s job card.” and “I can show your own logged hours for last week if that helps.” put dates in Claude’s words. They read “The gate code is on her job card.” beside a Job card with the visit’s date and time, and “Here are your own logged hours.” beside an hours card with the week’s dates; the payroll receipt says “No pay was shared.” and a second receipt says the hours are Luis’s own. The kernel’s prose check runs on receipts too, so the first receipt names no time (“assigned to her visit”, the time being on the Job card) and the warranty’s receipt says “Document released…”, as “warranty” is a promise word to it. The page is 1061 px tall at 1512 px, as the components measure it (the redrawn canvas board is 1022 px); the board is to be redrawn to match.',
       'Receipts sit 8 px under what they explain, the system’s spacing, where the board leaves 6 px; the transcript’s rows are 14 px apart, the Transcript’s gap, where the board leaves 12 px.',
     ].join(' '),
   },
@@ -38,7 +39,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1061]);
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
     await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
@@ -72,7 +73,7 @@ export const Board: Story = {
     expectConversationType(log);
     // Claude's words state no date, not even a relative one ("today", "last week"), and nothing else
     // only a card may say; the cards carry the dates.
-    await expect(await expectNoFactsInProse(log)).toBe(3);
+    await expect(await expectNoFactsInProse(log)).toEqual({ prose: 3, receipts: 4 });
     await expect(await expectReceiptsUnderMessages(log)).toBe(3);
     // Claude's words, as the owner ruled them: helpful, with every date in a card.
     await expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual(TEAM_REPLIES);
@@ -112,9 +113,9 @@ export const Board: Story = {
     await expectFooter(canvasElement);
     const footer = one(canvasElement, '[data-ds="concept-footer"]');
     await expect(Math.round(footer.getBoundingClientRect().top - today.getBoundingClientRect().bottom)).toBe(16);
-    // With the job and hours cards the page runs past the window; the footer ends it, 20 px from its foot.
-    const page = main.getBoundingClientRect();
-    await expect(Math.round(main.scrollHeight - (footer.getBoundingClientRect().bottom - page.top + main.scrollTop))).toBe(20);
+    // The page fits its window exactly: nothing scrolls, and the footer sits 20 px over the window's foot.
+    await expect(main.scrollHeight).toBe(main.clientHeight);
+    await expect(Math.round(window.innerHeight - footer.getBoundingClientRect().bottom)).toBe(20);
 
     // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
     await expectTabOrder(userEvent, [

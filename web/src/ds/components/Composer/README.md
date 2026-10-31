@@ -23,7 +23,7 @@
 - `maxLength` to cap the text (2000 for a chat message). From 90% of it a counter shows ("1800 / 2000"), in numbers only so it reads the same in English and Spanish, and joins the description.
 - `onAttach` and `onSpeak` only when they do something: without a handler there is no button, so no control is dead.
 - `onSend` gets the trimmed text, never empty. The composer clears itself; to keep a message that failed, show it in the transcript with a way to try again.
-- `inertSend` is for the vision pages only (the phone and Claude account vision pages), which make no requests: typing works and Send keeps its look (disabled while the box is empty), but Send and Enter do nothing, `onSend` is never called, and the text stays. Never on a real chat.
+- `inertSend` is for the vision pages only (the phone and Claude account vision pages), which make no requests: typing works and Send keeps its look (disabled while the box is empty), but Send and Enter do nothing, `onSend` is never called, and the text stays. Never on a real chat. The first press shows `VISION_INERT_LINE`, "This is a vision page, so nothing is sent.", once, in a secondary caption 8 px under the composer, in a polite live region (`role="status"`) that is there from the start and takes no room until then; later presses change nothing and announce nothing.
 
 ## Props
 

@@ -237,8 +237,8 @@ export function TeamDeskConversations() {
                 receipts={[
                   {
                     source: CHECKED,
-                    plain:
-                      'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
+                    // A receipt states no time: the visit's time is on the Job card.
+                    plain: 'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
                   },
                 ]}
               />
@@ -246,7 +246,8 @@ export function TeamDeskConversations() {
                 asked="Send me the warranty in case it’s the tank."
                 reply={TEAM_REPLIES[1]}
                 facts={[{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }]}
-                receipts={[{ source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' }]}
+                // "Warranty" is a promise word to the kernel's prose check; the card names the document.
+                receipts={[{ source: decided('executed'), plain: 'Document released to the assigned plumber. Logged on Ana’s file.' }]}
               />
               <TeamTurn
                 asked="Also, what did Ben make on the Harbor Street job last week?"
@@ -295,11 +296,21 @@ export const CLAUDE_ACCOUNT_TURNS = {
   checked: 'Reply checked against Maria Rivera’s rules',
 } as const;
 
-/** Dana's last visit, as the kernel renders a booking card: its start, then the job, who and the booking. */
+/**
+ * Dana's last visit, the drain clearing, as the kernel renders a booking card (`render/en.py`): the
+ * day, then "Arriving {start} to {end}" and "With {owner}", with no booking number.
+ */
 export const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
-  title: 'Tuesday, October 20, 10:00 am',
-  lines: ['Drain clearing', 'With Maria Rivera', 'Booking B-61'],
+  title: 'Tuesday, October 20',
+  lines: ['Arriving 10:00 am to 12:00 pm', 'With Maria Rivera'],
+});
+
+/** The visitor's booking on the phone, as the kernel renders a booking card. */
+export const PHONE_BOOKING = cardBlock('booking_confirmed', {
+  fact_id: 'booking:B-77',
+  title: 'Tuesday, November 3',
+  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
 });
 
 /** Rivera Plumbing's public page, under the vision bar, for a returning visitor signed in with a Claude account. */
@@ -431,7 +442,7 @@ function VisitorPhone() {
           <TranscriptRow margin={<MarginReceipt source={decided('executed')} plain="Booked on Maria Rivera’s calendar" ledgerSeq={0} />}>
             {/* Owner's copy ruling, 2026-10-30: the booking is the kernel's booking card, and Claude's
                 words promise nothing it doesn't back (the board's "Maria will text you when she’s on her way."). */}
-            <ClaudeMessage blocks={[proseBlock(PHONE_REPLY), rivera.blocks.booking_confirmed.en]} language="en" ownerName={rivera.business.ownerName} />
+            <ClaudeMessage blocks={[proseBlock(PHONE_REPLY), PHONE_BOOKING]} language="en" ownerName={rivera.business.ownerName} />
           </TranscriptRow>
         </Transcript>
       </div>

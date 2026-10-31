@@ -7,7 +7,7 @@ import { expect, within } from 'storybook/test';
 
 import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
 
-import { FACT_IN_PROSE } from './factInProse.ts';
+import { factsInProse } from './factInProse.ts';
 
 const SERIF = /^"Source Serif 4"/;
 const SANS = /^"Hanken Grotesk"/;
@@ -456,17 +456,30 @@ export async function expectChannelsContent(content: HTMLElement, lead: string):
   await expect(within(content).queryByRole('switch')).toBeNull();
 }
 
-export { FACT_IN_PROSE } from './factInProse.ts';
+export { factsInProse } from './factInProse.ts';
+
+/** A booking card (the kernel's `booking_confirmed`, labelled "Booked" or "Reservado") inside `root`. */
+function carriesBookingCard(root: Element | null): boolean {
+  return root?.querySelector('.cd-reply-card [aria-label="Booked"], .cd-reply-card [aria-label="Reservado"]') != null;
+}
 
 /**
- * vision_prose_states_no_facts: Claude's words under `root` state nothing only a card may say
- * (`FACT_IN_PROSE`). Returns how many lines of Claude's words it checked.
+ * vision_prose_states_no_facts: Claude's words under `root`, and every receipt line under them, pass
+ * the kernel's prose check as `factsInProse` mirrors it. A booking claim passes in a message that
+ * carries its booking card, as the kernel decides; a receipt goes with its message's card. Returns
+ * how many lines of Claude's words and how many receipt lines it checked.
  */
-export async function expectNoFactsInProse(root: HTMLElement): Promise<number> {
+export async function expectNoFactsInProse(root: HTMLElement): Promise<{ prose: number; receipts: number }> {
+  const check = async (lines: HTMLElement[], what: string, message: (line: HTMLElement) => Element | null) => {
+    for (const line of lines) {
+      const text = line.textContent ?? '';
+      const hits = factsInProse(text, { bookingCard: carriesBookingCard(message(line)) });
+      await expect(hits, `${what} the kernel would block: "${text}"`).toEqual([]);
+    }
+  };
   const prose = [...root.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
-  for (const line of prose) {
-    const text = line.textContent ?? '';
-    await expect(text, `Claude’s words state something only a card may say: "${text}"`).not.toMatch(FACT_IN_PROSE);
-  }
-  return prose.length;
+  await check(prose, 'Claude’s words state something', (line) => line.closest('.cd-claude-message'));
+  const receipts = [...root.querySelectorAll<HTMLElement>('.cd-margin-line')];
+  await check(receipts, 'A receipt states something', (line) => line.closest('.cd-transcript-row'));
+  return { prose: prose.length, receipts: receipts.length };
 }

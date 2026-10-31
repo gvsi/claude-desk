@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fireEvent, fn } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { Composer } from './Composer.tsx';
 
 /** The composer's raised box: the element that holds the text box. */
@@ -166,17 +167,30 @@ export const InertSend: Story = {
     // inert_send_keeps_the_text: Send keeps its look, empty and not, but neither it nor Enter sends.
     const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
+    // A polite live region waits under the composer, empty and taking no room until the first press.
+    const status = canvas.getByRole('status');
+    await expect(status).toHaveTextContent(/^$/);
+    await expect(status.getBoundingClientRect().height).toBeLessThanOrEqual(1);
     await expect(send).toBeDisabled();
     await userEvent.click(input);
     await userEvent.keyboard('Thanks');
     await expect(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect(input).toHaveValue('Thanks');
+    // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
+    // caption 8 px under the composer's box.
+    await expect(status).toHaveTextContent(VISION_INERT_LINE);
+    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const box = input.closest('.cd-composer__box') as HTMLElement;
+    await expect(Math.round(status.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(send);
     await expect(input).toHaveValue('Thanks');
     await expect(send).toBeEnabled();
     await expect(send).toHaveFocus();
     await expect(args.onSend).not.toHaveBeenCalled();
+    // A second press changes nothing: still the one line, in the one region.
+    await expect(canvas.getAllByRole('status')).toEqual([status]);
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
     // Clearing the words disables Send again, as on a real page.
     await userEvent.clear(input);
     await expect(send).toBeDisabled();
