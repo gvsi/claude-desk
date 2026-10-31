@@ -26,6 +26,28 @@ async def test_consent_answers_200_with_the_first_question_when_the_reads_finish
         "claude", "owner", "tool_label", "tool_label", "claude"]
 
 
+async def test_an_empty_answer_reply_is_not_busy_or_recovered_as_consent(
+        app, browser, fake, kernel_http, model, db):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    assert (await owner.browser.post(path + "/consent", json={"allow": False})).status_code == 200
+    reply = await answer(owner, model, interview_id, "We repair water heaters.",
+                         turn(reply="", step_done=False, summary="Water heater repairs."))
+    assert reply.status_code == 200, reply.text
+    answered = reply.json()
+    assert answered["messages"][-1] == {"role": "owner", "text": "We repair water heaters."}
+    assert answered["busy"] is False
+    db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, interview_id))
+    before = db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
+    assert (await owner.browser.get(path)).json() == answered
+    assert db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone() == before
+
+
 async def test_a_failed_run_rolls_consent_back(app, browser, fake, kernel_http, model, monkeypatch, caplog):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
@@ -335,6 +357,118 @@ async def test_a_cancelled_request_leaves_the_run_on_its_own_connection(
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
 
 
+async def test_cancelling_the_request_right_after_admission_still_finishes_consent(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    from desk.api.routes import setup as routes
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    moving_on, after = routes._moving_on, setup._after_consent
+    entered, release = asyncio.Event(), asyncio.Event()
+    runs = app.state.runtime.consent_runs
+
+    async def cancel_after_admission(*args):
+        await moving_on(*args)
+        asyncio.current_task().cancel()
+
+    async def waiting(*args):
+        entered.set()
+        await release.wait()
+        await after(*args)
+
+    monkeypatch.setattr(routes, "_moving_on", cancel_after_admission)
+    monkeypatch.setattr(setup, "_after_consent", waiting)
+    request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert runs.holds(interview_id)
+        assert interview_id in setup._RUNNING
+        await asyncio.wait_for(entered.wait(), 5)
+        assert (await owner.browser.get(path)).json()["busy"] is True
+    finally:
+        release.set()
+        await runs.wait(interview_id)
+    landed = (await owner.browser.get(path)).json()
+    assert landed["busy"] is False and landed["consent"] is False
+    assert landed["question"] == setup.QUESTION_KEYS[0]
+    assert interview_id not in setup._RUNNING
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_cancelling_the_request_during_the_busy_commit_cannot_strand_consent(
+        app, browser, fake, kernel_http, model, monkeypatch, fail):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    commit, after = setup._commit, setup._after_consent
+    committed, release = asyncio.Event(), asyncio.Event()
+    runs = app.state.runtime.consent_runs
+
+    async def finishing_commit(engine, ctx, interview, seen):
+        await commit(engine, ctx, interview, seen)
+        if interview.busy:
+            committed.set()
+            await release.wait()
+
+    async def finishing(*args):
+        if fail:
+            raise ApiProblem(503, "model_unavailable")
+        await after(*args)
+
+    monkeypatch.setattr(setup, "_commit", finishing_commit)
+    monkeypatch.setattr(setup, "_after_consent", finishing)
+    request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
+    try:
+        await asyncio.wait_for(committed.wait(), 5)
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert runs.holds(interview_id)
+        task = runs._tasks[interview_id]
+        assert (await owner.browser.get(path)).json()["busy"] is True
+    finally:
+        release.set()
+        await asyncio.gather(request, runs.wait(interview_id), return_exceptions=True)
+    if fail:
+        with pytest.raises(ApiProblem):
+            task.result()
+        assert (await owner.browser.get(path)).json() == state
+    else:
+        landed = (await owner.browser.get(path)).json()
+        assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
+    assert interview_id not in setup._RUNNING and not runs.holds(interview_id)
+
+
+async def test_a_rejected_busy_commit_answers_its_error_without_running_or_rolling_back(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    commits = []
+
+    async def conflicting(engine, ctx, interview, seen):
+        assert interview.busy
+        commits.append(interview_id)
+        raise ApiProblem(409, "conflict")
+
+    async def unexpected(*args, **kwargs):
+        pytest.fail("a rejected busy commit must neither run the seam nor roll back another run")
+
+    monkeypatch.setattr(setup, "_commit", conflicting)
+    monkeypatch.setattr(setup, "_after_consent", unexpected)
+    monkeypatch.setattr(setup, "_rollback_consent", unexpected)
+    reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": True}), 5)
+    assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
+    assert commits == [interview_id] and fake.called("POST /execute") == []
+    assert (await owner.browser.get(path)).json() == state
+    assert interview_id not in setup._RUNNING and not app.state.runtime.consent_runs.holds(interview_id)
+
+
 async def test_two_fresh_consents_store_only_one_owner_answer(
         app, browser, fake, kernel_http, model, monkeypatch):
     from tests.api.test_setup_questions import until
@@ -355,6 +489,55 @@ async def test_two_fresh_consents_store_only_one_owner_answer(
     assert asked.count("setup_turn") == 1 and len(fake.called("POST /execute")) == 1
     assert [message for message in reply.json()["messages"] if message["role"] == "owner"] == [
         {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}]
+
+
+async def test_a_competing_consent_cannot_take_the_guard_during_handoff(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    runs = app.state.runtime.consent_runs
+    recover, start, after = setup._recover_consent, runs.start, setup._after_consent
+    loaded, handoff = asyncio.Event(), asyncio.Event()
+    asked, (first_admission, second_admission) = held_limits(app, monkeypatch, hold=2)
+    first_admission.set()
+    executions = []
+
+    async def stale_snapshot(*args, **kwargs):
+        interview = await recover(*args, **kwargs)
+        if asyncio.current_task() is competing:
+            loaded.set()
+            await handoff.wait()
+        return interview
+
+    def handing_off(key, work):
+        # Queue the request with the old snapshot before the background coroutine can start.
+        handoff.set()
+        return start(key, work)
+
+    async def counted(*args):
+        executions.append(interview_id)
+        await after(*args)
+
+    monkeypatch.setattr(setup, "_recover_consent", stale_snapshot)
+    monkeypatch.setattr(runs, "start", handing_off)
+    monkeypatch.setattr(setup, "_after_consent", counted)
+    competing = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
+    try:
+        await asyncio.wait_for(loaded.wait(), 5)
+        reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
+        assert reply.status_code == 200, reply.text
+        second = await asyncio.wait_for(asyncio.shield(competing), 5)
+        assert second.status_code in (202, 409), second.text
+        assert asked.count("setup_turn") == 1
+        assert executions == [interview_id]
+        assert (await owner.browser.get(path)).json()["busy"] is False
+    finally:
+        handoff.set()
+        second_admission.set()
+        await asyncio.gather(competing, runs.wait(interview_id), return_exceptions=True)
+    assert interview_id not in setup._RUNNING
 
 
 async def test_a_stalled_rollback_does_not_outlive_the_abandonment_window(

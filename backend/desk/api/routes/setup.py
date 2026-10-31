@@ -108,9 +108,10 @@ async def setup_interview(interview_id: InterviewId, request: Request,
              responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request: Request,
                         ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
-    """Store the owner's consent, then read their Claude memory and named website through the kernel on yes, or
-    skip both on no. Claude's first question and the read labels land together. Answers 200 when finished within
-    the wait, otherwise 202 with the stored busy interview. A repeat while busy answers 202 without starting or
+    """Start a background run that stores consent, then reads Claude memory and the named website through the
+    kernel on yes, or skips both on no. Claude's first question and the read labels land together. Wait for the
+    busy commit; answers 200 when finished within the following wait, otherwise 202 with consent still pending.
+    Cancelling the request leaves the run working. A repeat while busy answers 202 without starting or
     counting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent."""
     state = runtime(request).started()
 

@@ -24,10 +24,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
-- **Consent** (`consent`): the owner's answer is stored at once, then a held background task searches their Claude
-  memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it skips both.
+- **Consent** (`consent`): after admission, a held background task stores the owner's answer at once, then searches
+  their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
+  skips both. Busy means a pending consent run: the owner's answer immediately follows Claude's consent question.
   `_after_consent` appends Claude's first question; the labels and reply are saved together. The request waits up to
-  `CONSENT_WAIT_S`, then answers 202 with the stored busy interview. A repeat while busy returns that state without
+  `CONSENT_WAIT_S` after the busy commit, then answers 202 with the stored busy interview. Cancelling the request
+  leaves the run working on its own connections. A repeat while busy returns that state without
   another run or count on the limits. Failure, timeout or shutdown reopens consent if its busy snapshot is unchanged.
   GET and consent also recover a run older than `CONSENT_ABANDONED_S` when this process holds no run for it; a live
   run has the shorter `CONSENT_RUN_TIMEOUT_S` deadline, so deploy overlap doesn't reopen another process's live run.
@@ -356,8 +358,10 @@ class Interview:
 
     @property
     def busy(self) -> bool:
-        """Claude still owes a reply to an owner entry after the opening description."""
-        return self.step == "questions" and len(self.transcript) > 1 and self.transcript[-1].role == "owner"
+        """A consent run is pending: the owner's answer immediately follows Claude's consent question."""
+        return (self.step == "questions" and self.consent is not None and len(self.transcript) > 1
+                and self.transcript[-1].role == "owner" and self.transcript[-2].role == "claude"
+                and self.transcript[-2].question == "consent")
 
     @property
     def question(self) -> QuestionKey | None:
@@ -836,10 +840,10 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
 
 async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, busy: dict, *,
                              abandoned: bool = False) -> None:
-    """Reopen consent only while the row still holds this run's busy snapshot."""
+    """Remove a pending consent answer only while the row still holds this run's busy snapshot."""
     async with engine.connect() as conn, conn.begin():
         current = await _load(conn, owner.copy_id, interview_id, lock=True)
-        if _stored(current) != busy or (abandoned and not _consent_abandoned(current)):
+        if not current.busy or _stored(current) != busy or (abandoned and not _consent_abandoned(current)):
             return
         current.consent = None
         current.transcript.pop()
@@ -848,8 +852,9 @@ async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: 
 
 async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
                   runs: ConsentRuns, ro_schema: str, admit: Callable[[], Awaitable[None]]) -> SetupState:
-    """Store consent at once, then run its reads and Claude's first question in the background. Wait up to
-    `CONSENT_WAIT_S` for the final interview; while still running, return its stored busy state."""
+    """Hand the turn guard to a background task immediately after admission. It stores consent, then runs the
+    reads and Claude's first question. Wait for the busy commit without cancelling the run if the request ends,
+    then up to `CONSENT_WAIT_S` for the final interview; while still running, return its stored busy state."""
     interview = await _recover_consent(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
     if interview.busy:
@@ -857,43 +862,69 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
     if interview.consent is not None or interview.step != "questions":
         raise ApiProblem(409, "conflict")
     seen = _stored(interview)
-    with _turn(interview_id):
-        await admit()
-        async with detached(owner, engine, ro_schema) as ctx:
-            slug = await _slug(ctx, desk_id)
-        interview.consent = allow
-        interview.transcript.append(Entry(role="owner", text=CONSENT_ANSWERS[allow]))
-        await _commit(engine, owner, interview, seen)
-        busy = _stored(interview)
-        pending = setup_state(interview, slug)
+    guard = contextlib.ExitStack()
+    guard.enter_context(_turn(interview_id))
+    busy_stored = asyncio.Event()
+    pending: SetupState | None = None
 
-        async def run() -> SetupState:
-            with _turn(interview_id):
-                try:
-                    async with asyncio.timeout(CONSENT_RUN_TIMEOUT_S):
-                        async with detached(owner, engine, ro_schema) as ctx:
-                            entries = []
-                            if allow:
-                                entries.append(await _read_memory(ctx, desk_id))
-                                site = website_url(interview.transcript[0].website)
-                                if site is not None:
-                                    entries.append(await _read_website(ctx, desk_id, *site))
-                            interview.transcript += entries
-                            await _after_consent(ctx, engine, model, interview, entries)
-                            await _commit(engine, ctx, interview, busy)
-                            return setup_state(interview, slug)
-                except BaseException as failed:
-                    logger.warning("setup consent failed (%s)", type(failed).__name__)
+    async def run() -> SetupState:
+        nonlocal pending
+        busy = None
+        try:
+            async with asyncio.timeout(CONSENT_RUN_TIMEOUT_S):
+                async with detached(owner, engine, ro_schema) as ctx:
+                    slug = await _slug(ctx, desk_id)
+                    interview.consent = allow
+                    interview.transcript.append(Entry(role="owner", text=CONSENT_ANSWERS[allow]))
+                    busy = _stored(interview)
                     try:
-                        async with asyncio.timeout(CONSENT_ROLLBACK_TIMEOUT_S):
-                            await _rollback_consent(owner, engine, interview_id, busy)
-                    except Exception as rollback_failed:
-                        logger.warning("setup consent couldn't be reopened (%s)", type(rollback_failed).__name__)
-                    if isinstance(failed, TimeoutError):
-                        raise ApiProblem(503, "model_unavailable") from None
-                    raise
+                        await _commit(engine, ctx, interview, seen)
+                    except ApiProblem:
+                        busy = None          # rejected before storing; another run's snapshot is never ours
+                        raise
+                    pending = setup_state(interview, slug)
+                    busy_stored.set()
+                    entries = []
+                    if allow:
+                        entries.append(await _read_memory(ctx, desk_id))
+                        site = website_url(interview.transcript[0].website)
+                        if site is not None:
+                            entries.append(await _read_website(ctx, desk_id, *site))
+                    interview.transcript += entries
+                    await _after_consent(ctx, engine, model, interview, entries)
+                    await _commit(engine, ctx, interview, busy)
+                    return setup_state(interview, slug)
+        except BaseException as failed:
+            logger.warning("setup consent failed (%s)", type(failed).__name__)
+            if busy is not None:
+                try:
+                    async with asyncio.timeout(CONSENT_ROLLBACK_TIMEOUT_S):
+                        await _rollback_consent(owner, engine, interview_id, busy)
+                except Exception as rollback_failed:
+                    logger.warning("setup consent couldn't be reopened (%s)", type(rollback_failed).__name__)
+            if isinstance(failed, TimeoutError):
+                raise ApiProblem(503, "model_unavailable") from None
+            raise
+        finally:
+            guard.close()
+            busy_stored.set()                 # a failed busy commit wakes the request to receive its error
 
+    try:
+        await admit()
         task = runs.start(interview_id, run())
+    except BaseException:
+        guard.close()
+        raise
+
+    def settled(_: asyncio.Task) -> None:
+        # Cancellation before the coroutine starts must also release the guard and wake the request.
+        guard.close()
+        busy_stored.set()
+
+    task.add_done_callback(settled)
+    await asyncio.shield(busy_stored.wait())
+    if pending is None:
+        return await asyncio.shield(task)
     done, _ = await asyncio.wait({task}, timeout=CONSENT_WAIT_S)
     if done:
         return task.result()
