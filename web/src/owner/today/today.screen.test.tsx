@@ -501,6 +501,27 @@ describe('Today', () => {
     expect(pages().slice(1)).toEqual(['today opening', 'today']);
   });
 
+  it('today_from_another_page_opens_with_its_inbox_read', async () => {
+    // Opened from another page, Today keeps its column on the loading line until the copy's Demo
+    // inbox is in too, here slowly, so its button never opens as a line saying it is opening, one
+    // line shorter, with Last 7 days under it then pushed down.
+    const { screen } = await renderRoute(CONVERSATIONS);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    const inbox = holdReads(ROUTES.ownerInbox.path);
+    const lastSevenDays = watchTop(() => [...document.querySelectorAll('.cd-today h2')].find((h) => h.textContent === 'Last 7 days') ?? null);
+    const sawItOpening = watchFor('Opening your Demo inbox');
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await vi.waitFor(() => expect(inbox.held()).toBe(1));
+    // Time for Today to be drawn, had it opened without its inbox.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectTodayOpening();
+
+    inbox.release();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    expect(lastSevenDays()).toHaveLength(1);
+    expect(sawItOpening()).toBe(false);
+  });
+
   it('today_later_in_a_reloaded_visit_holds_on_its_own', { timeout: 15_000 }, async () => {
     // The reload's read ahead is spent once Today first opens: opened again later in the visit, from
     // another page, with Needs you no longer in the app's memory, Today waits for it on its own

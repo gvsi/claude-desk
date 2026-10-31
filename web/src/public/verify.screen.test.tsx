@@ -18,6 +18,7 @@ import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { aPollPasses, closedInboxReads, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { watchFor } from '../test/watch.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -397,18 +398,20 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_says_so', async () => {
-    // Today opened from another of the Desk's pages reads its inbox itself (only a Today opened from
-    // the loading page is read ahead). While it reads, the inbox's place says so; when the read and
-    // its retry fail, it says the Demo inbox couldn't be opened, with "Try again", never a sheet
-    // that would say it's empty.
-    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`);
+    // Opened from another page, Today keeps its column on the loading line while it reads what it
+    // first shows, the Demo inbox included. When the inbox's read and its retry fail, Today opens on
+    // that: the inbox's place says it couldn't be opened, with "Try again", never a sheet that would
+    // say it's empty, and never a line saying it is still opening.
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(requests('ownerInbox')).toEqual([]);
-    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    const sawItOpening = watchFor('Opening your Demo inbox');
     await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).click();
-    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
-    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(line).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(2);
+    expect(sawItOpening()).toBe(false);
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
     // The place names itself over the line, as the visitor's does.
     const place = screen.getByRole('region', { name: 'Demo inbox' });
@@ -424,26 +427,43 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_on_a_reload_says_so', async () => {
-    // Opened from the loading page, Today is read ahead, its inbox with it. When that read and its
-    // retry fail, Today still opens; it reads the inbox again, saying so, and when that read and its
-    // retry fail too, it says the Demo inbox couldn't be opened, with "Try again". Retries go at once,
-    // so the read ahead's two failures are in long before its cap; Today's own read waits until the
-    // line saying it is opening has been seen.
-    mockStore.inject({ route: 'ownerInbox', status: 500, times: 4 });
-    const todays = holdInboxReadsAfter(2);
+    // Reloaded, the owner's loading page stays while what Today first shows is read, the inbox
+    // included. When the inbox's read and its retry fail, Today opens on that, without sending it
+    // again: one loading step, then the line saying it couldn't be opened, with "Try again".
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
-    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
-    await vi.waitFor(() => expect(todays.held()).toBe(1));
-    expect(requests('ownerInbox')).toHaveLength(2);
-    todays.release();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line).toBeVisible();
-    expect(requests('ownerInbox')).toHaveLength(4);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    // Time for a read on mount to go out, had Today sent the failed one again.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
+    expect(sawItOpening()).toBe(false);
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
+  });
+
+  it('owner_inbox_still_out_as_today_opens_says_so', { timeout: 15_000 }, async () => {
+    // A read of the inbox that runs past Today's wait: Today opens without it, and the inbox's place
+    // says it is opening until the read comes back; here it and its retry fail, so it then says the
+    // inbox couldn't be opened, with "Try again".
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    const slow = holdInboxReadsAfter(0);
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ }), { timeout: 6_000 }).toBeVisible();
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
+    expect(slow.held()).toBe(1);
+
+    slow.release();
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(2);
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
   });
 
   it('owner_inbox_refresh_that_fails_says_so', async () => {

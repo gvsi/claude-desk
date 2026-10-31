@@ -156,8 +156,8 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
 
 /**
  * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
- * you), so it keeps its sections back and they open together rather than one by one, each pushing
- * the next down, when the owner comes from another Desk or another page. A first visit's page and a
+ * you, and the copy's Demo inbox), so it keeps its sections back and they open together rather than
+ * one by one, each pushing the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
  * or failed, open it at once; else it waits no later than the read ahead that opened it gives up,
  * or `READ_AHEAD_MS` from when it opened. Once open, it stays open.
@@ -166,7 +166,10 @@ export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
-  const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
+  // Read here only as Today opens, unless it was just read: the inbox itself reads it again while its
+  // sheet is open, and never while it is closed.
+  const inbox = useQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS, retryOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
+  const read = [today, needsYou, inbox].every((query) => query.data !== undefined || query.isError);
   const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
   const [open, setOpen] = useState(() => read || Date.now() >= deadline);
   if (read && !open) setOpen(true);
