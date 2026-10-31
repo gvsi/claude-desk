@@ -318,6 +318,11 @@ async def test_a_thinking_binding_400_is_told_apart_from_any_other_400():
     assert isinstance(failed.value, ModelUnavailable) and str(failed.value) == "model unavailable: BadRequestError"
     assert (failed.value.response.stop_reason, failed.value.response.usage) == ("error", None)
     assert failed.value.__cause__ is None
+    assert failed.value.path == "messages.7.content.0"             # the refused block, for the log: no content
+    with pytest.raises(ThinkingBoundElsewhere) as failed:
+        await claude(FakeMessagesApi(bad_request("The block is bound to a different conversation."))).call(
+            conversation())
+    assert failed.value.path is None
 
     for name, answer in (
             ("another 400", bad_request("prompt is too long: 230000 tokens > 200000 maximum")),

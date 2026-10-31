@@ -82,6 +82,8 @@ TOOL_CHANGES_BETA = "mid-conversation-tool-changes-2026-07-01"
 # earlier message) is known: its message says the block "is bound to a different conversation"
 # (`ThinkingBoundElsewhere`).
 THINKING_BINDING_400 = "bound to a different conversation"
+# Where that 400 says the refused block is: a path into the request, never its content.
+_BINDING_PATH = re.compile(r"\bmessages\.\d+(?:\.content\.\d+)?")
 EPHEMERAL = {"type": "ephemeral"}
 # Tool fields no model call sends (see the module docstring).
 REFUSED_TOOL_FIELDS = frozenset({"eager_input_streaming", "strict"})
@@ -234,11 +236,22 @@ class ModelUnavailable(Exception):
 class ThinkingBoundElsewhere(ModelUnavailable):
     """A 400 saying a replayed thinking block is bound to a different conversation (`THINKING_BINDING_400`): the
     history sent isn't the one the block was made in. Still a `ModelUnavailable` wherever that is caught; the loop
-    starts a fresh model context and calls once more."""
+    starts a fresh model context and calls once more. `path` is the refused block's place in the request, such as
+    `messages.7.content.0`, as the 400 names it (None when it names none): it holds no content, so it can be logged."""
+
+    def __init__(self, response: ModelResponse, reason: str, *, path: str | None = None):
+        super().__init__(response, reason)
+        self.path = path
 
 
 def _thinking_bound_elsewhere(error: Exception) -> bool:
     return isinstance(error, anthropic.BadRequestError) and THINKING_BINDING_400 in error.message
+
+
+def _binding_path(error: Exception) -> str | None:
+    """The refused block's path in a thinking-binding 400's message, as `messages.7.content.0`."""
+    found = _BINDING_PATH.search(str(getattr(error, "message", "")))
+    return found.group(0) if found else None
 
 
 class ModelClient(Protocol):
@@ -282,8 +295,10 @@ class _SdkModel:
             else:
                 message = await self._client.messages.create(**kwargs)
         except (anthropic.AnthropicError, httpx2.HTTPError) as error:   # a stream cut halfway raises httpx2's own
-            unavailable = ThinkingBoundElsewhere if _thinking_bound_elsewhere(error) else ModelUnavailable
-            raise unavailable(self._failed(request, started), type(error).__name__) from None
+            if _thinking_bound_elsewhere(error):
+                raise ThinkingBoundElsewhere(self._failed(request, started), type(error).__name__,
+                                             path=_binding_path(error)) from None
+            raise ModelUnavailable(self._failed(request, started), type(error).__name__) from None
         usage = message.usage
         response = ModelResponse(
             content=[block.model_dump(mode="json", exclude_none=True) for block in message.content],

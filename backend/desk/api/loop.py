@@ -293,18 +293,22 @@ class _Turn:
             self.returned_at = time.monotonic()
             await record_model_call(conn, caller.copy_id, caller.session_id, "conversation", response)
             await conn.commit()
-            if not (isinstance(failed, ThinkingBoundElsewhere) and await self._rebind()):
+            if not (isinstance(failed, ThinkingBoundElsewhere) and await self._rebind(failed)):
                 return None if failed else response
 
-    async def _rebind(self) -> bool:
+    async def _rebind(self, failed: ThinkingBoundElsewhere) -> bool:
         """After a 400 saying a replayed thinking block is bound to a different conversation, start a fresh context
         through the summary path, as a changed prompt does, so the next call replays no thinking: once a turn, and
-        only while the turn has a model call left. Whether it did."""
-        if self.rebound or self.model_calls >= MAX_MODEL_CALLS or self.context is None:
+        only while the turn has a model call left. Whether it did; either way the log names the session and the
+        refused block's path (no content)."""
+        context = None if self.rebound or self.model_calls >= MAX_MODEL_CALLS else self.context
+        logger.warning("session %s: a replayed thinking block (%s) was bound to a different conversation: %s",
+                       self.caller.session_id, failed.path or "no path given",
+                       "the turn hands off" if context is None else "a fresh context starts")
+        if context is None:
             return False
         self.rebound = True
-        logger.warning("a replayed thinking block was bound to a different conversation: a fresh context starts")
-        await start_fresh_context(self.conn, self.caller.ids, model_tools(self.context), system=self.system)
+        await start_fresh_context(self.conn, self.caller.ids, model_tools(context), system=self.system)
         await self.conn.commit()
         return True
 
@@ -502,7 +506,8 @@ class _Turn:
             await append_metric(conn, ids, reveal)
         await append_metric(conn, ids, TurnMetric(
             turn_id="turn-" + secrets.token_hex(8), model_calls=self.model_calls, tool_calls=self.tool_calls,
-            decide_ms=self.decide_ms, execute_ms=self.execute_ms, total_ms=_ms(self.started), outcome=outcome))
+            decide_ms=self.decide_ms, execute_ms=self.execute_ms, total_ms=_ms(self.started), outcome=outcome,
+            rebound=self.rebound))
         if self.visitor:
             await emit(conn, ids, EvTurnEnd(type="turn_end"))
         await conn.commit()

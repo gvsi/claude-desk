@@ -88,12 +88,13 @@ def unavailable(finished_at: datetime = FINISHED_AT, model: str = CONVERSATION_M
     return ModelUnavailable(failed, "OverloadedError")
 
 
-def bound_elsewhere(finished_at: datetime = FINISHED_AT, model: str = CONVERSATION_MODEL) -> ThinkingBoundElsewhere:
+def bound_elsewhere(path: str | None = "messages.1.content.0", finished_at: datetime = FINISHED_AT,
+                    model: str = CONVERSATION_MODEL) -> ThinkingBoundElsewhere:
     """What `AnthropicModel` raises for the 400 saying a replayed thinking block is bound to a different
-    conversation."""
+    conversation, naming the refused block's `path`."""
     failed = ModelResponse(content=[], stop_reason="error", usage=None, latency_ms=400, finished_at=finished_at,
                            model=model)
-    return ThinkingBoundElsewhere(failed, "BadRequestError")
+    return ThinkingBoundElsewhere(failed, "BadRequestError", path=path)
 
 
 @dataclass

@@ -4,6 +4,7 @@ shows, and each stop reason handled (Plan 02a, Task 5)."""
 import asyncio
 import html
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import timedelta
@@ -842,25 +843,46 @@ async def test_a_second_binding_400_or_any_other_400_hands_off(api_conn, kernel_
         assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == contexts, name
 
 
-async def test_a_binding_400_on_the_turns_last_call_hands_off(api_conn, caller, fake):
+async def turn_metric(conn, session_id: str) -> dict:
+    (turn,) = [payload for type, payload in await metric_rows(conn, session_id) if type == "turn"]
+    return turn
+
+
+def binding_warnings(caplog) -> list[str]:
+    return [record.getMessage() for record in caplog.records
+            if record.name == "desk.api.loop" and "bound to a different conversation" in record.getMessage()]
+
+
+async def test_a_binding_400_on_the_turns_last_call_hands_off(api_conn, caller, fake, caplog):
     """The retry is a model call like any other: on the turn's last allowed call there is none left, so the turn
     hands off."""
+    caplog.set_level(logging.WARNING, logger="desk.api.loop")
     await said(api_conn, caller, "Keep checking for a free slot.")
     model = ScriptedModel([*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(MAX_MODEL_CALLS - 1)),
-                           bound_elsewhere()])
+                           bound_elsewhere("messages.9.content.0")])
     assert await run_turn(api_conn, caller, model) == "handoff"
     assert len(model.requests) == MAX_MODEL_CALLS == 6
     await assert_handed_off(api_conn, fake, caller)
     assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0]
+    assert (await turn_metric(api_conn, caller.session_id))["rebound"] is False
+    (warning,) = binding_warnings(caplog)
+    assert caller.session_id in warning and "messages.9.content.0" in warning and "hands off" in warning
 
 
-async def test_a_binding_400_after_a_call_retries_from_a_summary_that_carries_its_result(api_conn, caller, fake):
+async def test_a_binding_400_after_a_call_retries_from_a_summary_that_carries_its_result(api_conn, caller, fake,
+                                                                                         caplog):
     """A binding 400 after a call in the same turn: the fresh context's summary carries the call's result, which the
-    refused call was to read, so Claude goes on from it instead of calling again."""
+    refused call was to read, so Claude goes on from it instead of calling again. The turn's metric and the log record
+    the retry, the log naming the refused block by its path alone."""
+    caplog.set_level(logging.WARNING, logger="desk.api.loop")
     await said(api_conn, caller, "When can someone come?")
     model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
-                           bound_elsewhere(), response(reply("Here are the open times."))])
+                           bound_elsewhere("messages.2.content.0"), response(reply("Here are the open times."))])
     assert await run_turn(api_conn, caller, model) == "done"
+    assert (await turn_metric(api_conn, caller.session_id))["rebound"] is True
+    (warning,) = binding_warnings(caplog)
+    assert caller.session_id in warning and "messages.2.content.0" in warning and "fresh context" in warning
+    assert "When can someone come?" not in warning
 
     found, refused, again = model.requests
     (slots,) = [block for block in refused.messages[-1]["content"] if block["type"] == "tool_result"]
