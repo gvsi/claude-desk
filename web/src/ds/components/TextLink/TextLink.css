@@ -36,12 +36,14 @@
     --cd-touch-reach-block: calc(var(--space-8) / 2);
   }
 
-  /* In a reading page's running text a link's line sits a few px from the next, where another link
-     may be: the words alone take the tap, as they do in any sentence. */
+  /* In running text a link's line may sit a few px from another link. The explicit opt-out also
+     covers sentences outside article typography: only the words take the tap. */
+  .cd-text-link--running-text,
   :is(.cd-type-article-body, .cd-type-article-body-phone) .cd-text-link {
     position: static;
   }
 
+  .cd-text-link--running-text::after,
   :is(.cd-type-article-body, .cd-type-article-body-phone) .cd-text-link::after {
     content: none;
   }

@@ -101,6 +101,25 @@ it('touch_hit_areas_of_stacked_links_stay_apart', async () => {
   }
 });
 
+it('explicit_running_text_outside_article_typography_has_no_touch_hit_area', async () => {
+  const { host, unmount } = mount(
+    <p className="cd-type-body" style={{ width: 358, padding: 16 }}>
+      Check the link, or <TextLink href="/" runningText>start again from the home page</TextLink>.
+    </p>,
+  );
+  try {
+    const fine = lines(host);
+    const link = host.querySelector<HTMLElement>('.cd-text-link') as HTMLElement;
+    expect(link.closest('.cd-type-article-body, .cd-type-article-body-phone')).toBeNull();
+    await coarsePointer();
+    expect(lines(host), 'the words keep their places').toEqual(fine);
+    expect(getComputedStyle(link, '::after').content, 'a sentence link has no enlarged hit area').toBe('none');
+    expect(getComputedStyle(link).position, 'a sentence link stays unpositioned').toBe('static');
+  } finally {
+    unmount();
+  }
+});
+
 it('links_in_running_text_keep_no_hit_area_beyond_their_words', async () => {
   // A reading page's paragraph, where a link's line sits a few px from the next: a hit area there
   // would reach over the next line's link, so the words alone take the tap, as they always have.
