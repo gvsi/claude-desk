@@ -118,7 +118,7 @@ function rawColors(text: string, file: string): string[] {
   return [...matches(RAW_COLOR)(text), ...(file.endsWith('.css') ? namedColorsInCss(text) : [])];
 }
 
-// Clay, the field behind the intro illustration: its token, its hex and its RGB triplet. The mark's
+// Clay: its token, its hex and its RGB triplet. The mark's
 // own clay is guarded with its other fixed colors (MARK_COLOR).
 const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 
@@ -126,9 +126,11 @@ const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 // field of the About pages' app icon in the mark's folder, which counts as part of the mark (owner,
 // 2026-10-30).
 const CLAY_FOLDERS = ['components/IntroDialog/', 'components/Mark/'] as const;
+// Claude's writing dots use clay too, at the owner's request (2026-10-31).
+const CLAY_FILES = ['components/WritingIndicator/WritingIndicator.css'];
 
 function mayUseClay(file: string): boolean {
-  return CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+  return CLAY_FILES.includes(file) || CLAY_FOLDERS.some((folder) => file.startsWith(folder));
 }
 
 // The mark's fixed colors: its tokens by custom property, and its clay by hex or RGB triplet. Its
@@ -359,7 +361,7 @@ describe('design system source guards', () => {
     expect(findAll(sources, rawColors)).toEqual([]);
   });
 
-  it('clay_only_in_the_intro_dialog_and_the_mark', () => {
+  it('clay_only_in_the_intro_dialog_the_mark_and_claudes_writing_dots', () => {
     expect(matches(CLAY)('fill: var(--clay); color: #E08968; rgb(224, 137, 104)')).toHaveLength(3);
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
@@ -371,6 +373,9 @@ describe('design system source guards', () => {
     // guarded with the mark's other colors.
     expect(mayUseClay('components/Mark/Mark.css')).toBe(true);
     expect(mayUseClay('components/MarkBanner/MarkBanner.css')).toBe(false);
+    expect(mayUseClay('components/WritingIndicator/WritingIndicator.css')).toBe(true);
+    expect(mayUseClay('components/WritingIndicator/Other.css')).toBe(false);
+    expect(mayUseClay('components/WritingIndicatorBanner/WritingIndicator.css')).toBe(false);
     expect(mayUseClay('components/Sidebar/Sidebar.css')).toBe(false);
     const planted: Source[] = [
       { file: 'components/Sidebar/Sidebar.css', text: '.cd-sidebar__brand { background: var(--clay); }' },
@@ -386,6 +391,9 @@ describe('design system source guards', () => {
     // Each allowed folder does use it, so the matcher reads the code as it is written.
     for (const folder of CLAY_FOLDERS) {
       expect(findAll(scanned.filter(({ file }) => file.startsWith(folder)), matches(CLAY)).length, folder).toBeGreaterThan(0);
+    }
+    for (const allowed of CLAY_FILES) {
+      expect(findAll(scanned.filter(({ file }) => file === allowed), matches(CLAY)).length, allowed).toBeGreaterThan(0);
     }
     const outsideTheAllowlist = scanned.filter(({ file }) => !mayUseClay(file));
     expect(findAll(outsideTheAllowlist, matches(CLAY))).toEqual([]);

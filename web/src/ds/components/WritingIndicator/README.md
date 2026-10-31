@@ -1,6 +1,6 @@
 # WritingIndicator
 
-`WritingIndicator` shows Claude writing as three dots on Claude's side, with "Claude is writing" for screen readers only. It reads as a reply coming, not a status message. A person's typing can be a line of words, a bubble on a visitor's side, or their initials and name with three dots on theirs.
+`WritingIndicator` shows Claude writing as three clay dots that bounce gently on Claude's side, with "Claude is writing" for screen readers only. It reads as a reply coming, not a status message. A person's typing can be a line of words, a bubble on a visitor's side, or their initials and name with three dots on theirs.
 
 ## When to use
 
@@ -32,8 +32,9 @@ Claude's copy is for screen readers only (`.cd-sr-only`). A person's name is the
 
 Claude's line:
 
-- Three `size-dot` round dots, `space-4` apart, at the left where Claude's first line of words will start. No indent, bubble or fill.
+- Three `size-dot` round dots in `clay`, `space-4` apart, at the left where Claude's first line of words will start. No indent, bubble or fill.
 - The dots' box uses `cd-type-reply` and is one Claude reply line tall (`1lh`, 23 px), with the dots centered on it, so the reply takes their place without moving anything.
+- The dots bounce 4 px up and back over `motion-dots` (1.2 s), eased with `motion-ease-bounce`, `motion-stagger` apart. Only their transform changes: the box stays the same size and the color stays clay. Under reduced motion they stay still in clay.
 
 A person's line (`who` provided):
 
@@ -50,12 +51,12 @@ The person form:
 - `PersonMessage`'s own frame (`PersonFrame`): the 28 px initials circle (`size-avatar`, `bg-selected`) and the name in the meta type, `space-10` apart, at the left of the row. Under the name, `space-4` down, three `size-dot` dots, `space-4` apart, in one message line (21 px), starting where the name starts: where the first line of their words will start. No fill and no bubble: on the public page a bubble on that side could read as Claude typing.
 - Their message takes its place in place: the initials, the name and the first line of words sit exactly where the initials, the name and the dots were, so nothing jumps.
 
-The dots of all three forms pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`; 7.3:1 and 13.9:1 on `bg-app`).
+The dots of the bubble and person forms pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`; 7.3:1 and 13.9:1 on `bg-app`).
 
 All forms:
 
-- A `role="status"` line, so a screen reader announces "{who} is typing" (or "Claude is writing") once, politely, when it appears: the indicator itself for the line and the bubble, and the line that names the person in the person form. The dots and the initials are `aria-hidden`, and the pulse is drawn by the stylesheet alone, so nothing in the live region changes while it pulses and it is never announced again.
-- Under `prefers-reduced-motion: reduce` they stay still: the line in `text-secondary`, the dots in `text-secondary`.
+- A `role="status"` line, so a screen reader announces "{who} is typing" (or "Claude is writing") once, politely, when it appears: the indicator itself for the line and the bubble, and the line that names the person in the person form. The dots and the initials are `aria-hidden`, and motion is drawn by the stylesheet alone, so nothing in the live region changes while it moves and it is never announced again.
+- Under `prefers-reduced-motion: reduce` they stay still: Claude's dots in `clay`, a person's line and dots in `text-secondary`.
 
 ## Props
 

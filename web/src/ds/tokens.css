@@ -104,8 +104,10 @@
   --motion-stagger: 150ms;
   --motion-ease: ease-out;
   --motion-ease-emphasis: cubic-bezier(.165,.84,.44,1);
+  --motion-ease-bounce: cubic-bezier(0.37, 0, 0.63, 1);
   --motion-breathe: 5s;
   --motion-writing: 1600ms;
+  --motion-dots: 1200ms;
   --motion-spin: 800ms;
   --font-serif: "Source Serif 4", Georgia, serif;
   --font-sans: "Hanken Grotesk", system-ui, sans-serif;

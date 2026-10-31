@@ -1,7 +1,9 @@
 /* WritingIndicator: someone is writing.
 
    Claude's line: three dots where Claude's first line of words will start, one reply line tall,
-   centered on it, with no indent, fill or bubble. The words are for screen readers only.
+   centered on it, with no indent, fill or bubble. The clay dots bounce 4 px over motion-dots,
+   motion-stagger apart, and stay still in clay under reduced motion. The bounce uses only a
+   transform, so the reply's box never changes. The words are for screen readers only.
 
    A person's line: one quiet line that pulses while they type. The pulse moves the words between
    the secondary and primary text colors, keeping the contrast of the two tokens it moves between.
@@ -15,7 +17,7 @@
    own frame, their initials and name, with three dots where their first line of words will start,
    one message line tall, with no fill and no bubble, so their message takes its place in place.
 
-   In all three dot forms, the dots pulse one after another over the same writing loop,
+   In the person and bubble forms, the dots pulse one after another over the same writing loop,
    motion-stagger apart, between the secondary and primary text colors. */
 
 .cd-writing-indicator {
@@ -70,6 +72,11 @@
   animation: cd-typing-dot var(--motion-writing) var(--motion-ease) infinite;
 }
 
+.cd-writing-indicator--claude .cd-writing-indicator__dot {
+  background: var(--clay);
+  animation: cd-writing-bounce var(--motion-dots) var(--motion-ease-bounce) infinite;
+}
+
 .cd-writing-indicator__dot:nth-child(2) {
   animation-delay: var(--motion-stagger);
 }
@@ -84,10 +91,20 @@
   }
 }
 
-/* Reduced motion: the line stays still in the secondary color, and so do the dots. */
+@keyframes cd-writing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(calc(var(--space-4) * -1));
+  }
+}
+
+/* Reduced motion: Claude's dots stay still in clay; a person's line and dots in secondary. */
 @media (prefers-reduced-motion: reduce) {
   .cd-writing-indicator--line,
-  .cd-writing-indicator__dot {
+  .cd-writing-indicator__dot,
+  .cd-writing-indicator--claude .cd-writing-indicator__dot {
     animation: none;
   }
 }

@@ -522,10 +522,12 @@ describe('design tokens', () => {
   });
 
   test('motion_stays_in_range', () => {
-    const loops = ['motion-breathe', 'motion-writing', 'motion-spin'];
-    const easings = ['motion-ease', 'motion-ease-emphasis'];
+    const loops = ['motion-breathe', 'motion-writing', 'motion-dots', 'motion-spin'];
+    const easings = ['motion-ease', 'motion-ease-emphasis', 'motion-ease-bounce'];
     const names = tokens.motion.tokens.map((t) => t.name);
     for (const name of [...loops, ...easings]) expect(names).toContain(name);
+    expect(tokenValue('motion-dots')).toBe('1200ms');
+    expect(tokenValue('motion-ease-bounce')).toBe('cubic-bezier(0.37, 0, 0.63, 1)');
 
     for (const token of tokens.motion.tokens) {
       expect(token.name).toMatch(/^motion-/);

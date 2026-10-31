@@ -80,7 +80,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: 'Claude writing is three dots on Claude’s side, where its reply will appear, with the words for screen readers only. A person’s typing line stays in the meta type.',
+    canvasNote: 'Claude writing is three clay dots that bounce gently on Claude’s side, where its reply will appear, with the words for screen readers only. A person’s typing line stays in the meta type.',
   },
 } satisfies Meta<typeof WritingIndicator>;
 
@@ -158,16 +158,21 @@ async function expectOnVisitorSide(root: HTMLElement, status: HTMLElement) {
 export const Claude: Story = {
   name: 'Claude writing dots',
   parameters: {
-    docs: { description: { story: 'Three dots on Claude’s side read as a reply coming. “Claude is writing” is announced once, for screen readers only.' } },
+    docs: { description: { story: 'Three clay dots bounce gently on Claude’s side, 4 px over motion-dots, and stay still under reduced motion. “Claude is writing” is announced once, for screen readers only.' } },
   },
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Claude is writing');
     await expectClaudeDots(status, 'Claude is writing');
     const dots = [...status.querySelectorAll<HTMLElement>('.cd-writing-indicator__dot')];
-    // The existing dot pulse animates the drawing, never the live region's words.
+    // The bounce animates the drawing, never the live region's words.
     for (const [index, dot] of dots.entries()) {
-      expectComputed(dot, { animationName: 'cd-typing-dot', animationDuration: '1.6s', animationDelay: `${index * 0.15}s`, animationIterationCount: 'infinite' });
+      expectComputed(dot, { backgroundColor: 'rgb(224, 137, 104)' });
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        expectComputed(dot, { animationName: 'none' });
+      } else {
+        expectComputed(dot, { animationName: 'cd-writing-bounce', animationDuration: '1.2s', animationDelay: `${index * 0.15}s`, animationIterationCount: 'infinite' });
+      }
     }
     await expectAnnouncedOnce(status, dots);
   },
