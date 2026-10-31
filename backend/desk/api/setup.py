@@ -7,22 +7,23 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 - **Start** (`start`): one structured model call reads the owner's description (`SetupStart`), then the kernel makes
   the Desk (`POST /desks`, which activates the `ask_first` preset: its auto cards cover the setup tools) and turns
   Answering off, so nothing answers the public until setup takes the Desk live (tried twice; a Desk that stays
-  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. A start sent with
-  the client's `idempotency_key` writes the interview's row first, holding the key and its body's hash, with no Desk
-  yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
-  key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say) deletes its row, since
-  nothing was made, so the same request can be sent again. Before the kernel is asked for the Desk, the start records
-  it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a failure too
-  (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing
-  made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again, so a new
-  click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after` 2 s),
-  holding nothing while the client waits. A row still starting after the longest a start can take
+  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. Each start carries
+  the client's `idempotency_key` (required) and writes the interview's row first, holding the key and its body's
+  hash, with no Desk yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row
+  in a copy hold a key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say)
+  deletes its row, since nothing was made, so the same request can be sent again. Before the kernel is asked for the
+  Desk, the start records it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a
+  failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
+  nothing made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again,
+  so a new click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after`
+  2 s), holding nothing while the client waits. A row still starting after the longest a start can take
   (`START_ABANDONED_S`) has stopped. One that never recorded asking for its Desk is abandoned, and a repeat deletes
   it. One that did record it, with no Desk and no failure, stays uncertain (the Desk may exist, its answer lost): it
   is kept, and its key is spent (409 `key_spent`), so only a new key starts again.
   The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
-  instead. A start without a key writes its row last.
+  instead. A row written before the key was required may hold none (the column stays nullable); it is read and
+  moved on like any other.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
   memory or website read ever runs for the interview, and a website the owner names later is kept as text.
@@ -85,7 +86,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg.errors import LockNotAvailable
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import Interval, delete, func, insert, literal, select, update
+from sqlalchemy import Interval, delete, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
@@ -723,21 +724,10 @@ async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
                 admit: Callable[[], Awaitable[None]]) -> SetupState:
     """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
-    limits) lets the start through. With the client's key, a repeat is answered before `admit` counts it; otherwise
-    the interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
+    limits) lets the start through. A repeat of the client's key is answered before `admit` counts it; otherwise the
+    interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
     (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
-    if key is None:
-        await admit()
-        described, desk = await _read_description(owner, engine, model, body)
-        interview, slug = await _make_desk(owner, body, described, desk, "setup-" + secrets.token_hex(16))
-        async with engine.connect() as conn:
-            await conn.execute(insert(INTERVIEWS).values(interview_id=interview.interview_id,
-                                                         copy_id=interview.copy_id, desk_id=interview.desk_id,
-                                                         business_type=interview.business_type, **_stored(interview)))
-            await conn.commit()
-        return setup_state(interview, slug)
-
     async with ADMISSIONS.admitting(owner.copy_id, key):
         repeat = await repeated_start(owner, engine, body)
         if repeat is not None:

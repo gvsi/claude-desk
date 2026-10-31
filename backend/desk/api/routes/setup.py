@@ -69,14 +69,14 @@ async def start_setup(body: SetupStartIn, request: Request,
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
     couldn't answer, with nothing made.
 
-    With an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands
-    now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
-    `conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again
-    after `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees
-    the key once it is older than the longest a start can take. A start is admitted (looked up, counted and claimed)
-    under its key's lock in this process, so a repeat sent meanwhile waits for that admission and is never counted;
-    another process admits on its own, so during a deploy's overlap a repeat routed to the other task can be counted
-    twice.
+    Each start carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in
+    the copy answers the interview the first made, as it stands now, and makes nothing: no model call, no Desk, no
+    count on the limits. A repeat with another body is 409 `conflict`, and one sent while the first is still starting
+    answers 409 `in_progress` at once, to be sent again after `retry_after`. A first that stopped before the kernel
+    was asked for the Desk (its process did, say) frees the key once it is older than the longest a start can take. A
+    start is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent
+    meanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's
+    overlap a repeat routed to the other task can be counted twice.
 
     409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then
     failed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,
@@ -86,7 +86,7 @@ async def start_setup(body: SetupStartIn, request: Request,
     One rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by
     the limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request
     can be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed
-    then answers 409 `key_spent`. Without a key, each start makes its own interview and Desk."""
+    then answers 409 `key_spent`."""
     state = runtime(request).started()
 
     async def admit() -> None:

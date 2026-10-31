@@ -2623,7 +2623,7 @@
     "/api/owner/setup": {
       "post": {
         "summary": "Start Setup",
-        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nWith an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands\nnow, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409\n`conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again\nafter `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees\nthe key once it is older than the longest a start can take. A start is admitted (looked up, counted and claimed)\nunder its key's lock in this process, so a repeat sent meanwhile waits for that admission and is never counted;\nanother process admits on its own, so during a deploy's overlap a repeat routed to the other task can be counted\ntwice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nOne rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by\nthe limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request\ncan be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed\nthen answers 409 `key_spent`. Without a key, each start makes its own interview and Desk.",
+        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nEach start carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy answers the interview the first made, as it stands now, and makes nothing: no model call, no Desk, no\ncount on the limits. A repeat with another body is 409 `conflict`, and one sent while the first is still starting\nanswers 409 `in_progress` at once, to be sent again after `retry_after`. A first that stopped before the kernel\nwas asked for the Desk (its process did, say) frees the key once it is older than the longest a start can take. A\nstart is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent\nmeanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's\noverlap a repeat routed to the other task can be counted twice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nOne rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by\nthe limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request\ncan be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed\nthen answers 409 `key_spent`.",
         "operationId": "owner_start_setup",
         "requestBody": {
           "content": {
@@ -11270,17 +11270,10 @@
             "title": "Owner Display Name"
           },
           "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Idempotency Key"
           }
         },
@@ -11288,10 +11281,11 @@
         "type": "object",
         "required": [
           "description",
-          "timezone"
+          "timezone",
+          "idempotency_key"
         ],
         "title": "SetupStartIn",
-        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one\nper click, makes a repeat answer the interview the first made instead of making another."
+        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. The `idempotency_key`, one per click\nand required (422 without one), makes a repeat answer the interview the first made instead of making another."
       },
       "SetupState": {
         "properties": {

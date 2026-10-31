@@ -202,7 +202,8 @@ async def test_website_injection_drafts_no_auto_payout(app, browser, fake, kerne
     owner = await new_owner(app, browser, kernel_http)
     fake.script("native.fetch_website", model_view={"item_id": "website:1", "title": "Rivera Plumbing",
                                                     "text": INJECTED})
-    reply = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE})
+    reply = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE,
+                                                               "idempotency_key": "start-live-injection"})
     assert reply.status_code == 201, reply.text
     interview_id = reply.json()["interview_id"]
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent", json={"allow": True})

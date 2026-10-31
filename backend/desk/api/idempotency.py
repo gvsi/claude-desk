@@ -1,11 +1,11 @@
 """Client idempotency keys and request hashes.
 
-A route that starts something its client finds again only through the answer takes an optional `idempotency_key`, one
-per click: a repeat with the same key in the same copy answers what the first started and starts nothing. A repeat is
-compared with the first by the sha256 of its canonical body, the key left out, so the same key with another body is
-409 `conflict`. The proving routes key their kept work by the same hash.
+A route that starts something its client finds again only through the answer requires an `idempotency_key`, one per
+click (422 without one): a repeat with the same key in the same copy answers what the first started and starts
+nothing. A repeat is compared with the first by the sha256 of its canonical body, the key left out, so the same key
+with another body is 409 `conflict`. The proving routes key their kept work by the same hash.
 
-A keyed request is admitted (looked up, counted on its limits and claimed) under its key's lock in this process
+A request is admitted (looked up, counted on its limits and claimed) under its key's lock in this process
 (`Admissions`), so a concurrent repeat waits for the first's admission, then finds its claim and is never counted
 itself. Another process admits on its own: during a deploy's overlap, a repeat routed to the other task can be counted
 twice.

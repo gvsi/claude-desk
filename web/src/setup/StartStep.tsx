@@ -27,7 +27,7 @@ function browserTimeZone(): string {
 
 /** One press of "Start": its body and its idempotency key, sent again as they are by each retry. */
 interface Attempt {
-  body: StartSetupBody;
+  body: Omit<StartSetupBody, 'idempotency_key'>;
   key: string;
 }
 

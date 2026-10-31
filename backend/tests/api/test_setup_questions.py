@@ -16,6 +16,7 @@ import html
 import json
 import logging
 import re
+import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import get_origin
@@ -96,10 +97,16 @@ def started(**fields) -> object:
     return structured(SetupStart(**values))
 
 
+def start_body(description: str = DESCRIPTION, **fields) -> dict:
+    """A start's body: the description, the time zone, `fields` and a new idempotency key, as each click sends."""
+    return {"description": description, "timezone": TIMEZONE, "idempotency_key": f"start-{secrets.token_hex(8)}",
+            **fields}
+
+
 async def begin(owner: Owner, model: ScriptedModel, *, description: str = DESCRIPTION, **fields) -> dict:
     """Start setup with the description, the model answering `SetupStart` from `fields`."""
     model.add(started(**fields))
-    answer = await owner.browser.post("/api/owner/setup", json={"description": description, "timezone": TIMEZONE})
+    answer = await owner.browser.post("/api/owner/setup", json=start_body(description))
     assert answer.status_code == 201, answer.text
     return answer.json()
 
@@ -235,12 +242,12 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     assert not fake.desks[state["desk_id"]].answering
     assert len(fake.called("PUT /desks/{id}/answering")) == 2 and not fake.called("DELETE /desks/{id}")
 
-    # It fails again: the new Desk is deleted, so nothing answers the public at its address, no interview is kept, and
-    # the owner gets the kernel's error.
+    # It fails again: the new Desk is deleted, so nothing answers the public at its address, no interview is made (the
+    # start's row keeps its failure, with no Desk, so its key is spent), and the owner gets the kernel's error.
     fake.fail("PUT /desks/{id}/answering", "timeout")
     before = set(fake.desks)
     model.add(started())
-    failed = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE})
+    failed = await owner.browser.post("/api/owner/setup", json=start_body())
     assert (failed.status_code, failed.json()) == (503, {"error": "kernel", "code": "kernel_unavailable"})
     (made,) = set(fake.desks) - before
     (deleted,) = fake.called("DELETE /desks/{id}")
@@ -253,14 +260,15 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
         await kernel_http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))
     assert (refused.value.status, refused.value.code) == (409, "closed")
     async with engine.connect() as conn:
-        kept = (await conn.execute(sql("SELECT desk_id FROM app.setup_interviews"))).scalars().all()
-    assert kept == [state["desk_id"]]
+        kept = (await conn.execute(sql("SELECT desk_id, start_error IS NOT NULL FROM app.setup_interviews"
+                                       " ORDER BY created_at"))).all()
+    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (None, True)]
 
     # The delete is best effort: when it fails too, the owner still gets the kernel's error, and it is logged.
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
     fake.fail("DELETE /desks/{id}", "500")
     model.add(started())
-    failed = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE})
+    failed = await owner.browser.post("/api/owner/setup", json=start_body())
     assert (failed.status_code, failed.json()) == (503, {"error": "kernel", "code": "kernel_unavailable"})
     assert "couldn't be deleted" in caplog.text
 
@@ -498,7 +506,7 @@ async def test_an_answer_cut_short_is_unavailable_even_when_its_text_fits(app, b
     start = SetupStart(business_name="Rivera Plumbing", owner_display_name="Maria Rivera", business_type="trade",
                        summary="Rivera Plumbing fixes leaks.", website=None)
     model.add(cut_short(start))
-    failed = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE})
+    failed = await owner.browser.post("/api/owner/setup", json=start_body())
     assert (failed.status_code, failed.json()) == (503, {"error": "model_unavailable"})
     assert len(model.requests) == 1 and fake.called("POST /desks") == []
     async with engine.connect() as conn:
@@ -867,7 +875,7 @@ async def test_setup_needs_the_owner_cookie(app, browser, fake, kernel_http, mod
                                                                                      kind="visitor"))
     stranger = browser(app)                             # a visitor's token where the owner's belongs
     stranger.cookies.set("desk_owner", visitor.session_token, domain="desk.test", path="/api/owner")
-    requests = [("POST", "/api/owner/setup", {"description": "Plumbing.", "timezone": TIMEZONE}),
+    requests = [("POST", "/api/owner/setup", start_body("Plumbing.")),
                 ("GET", f"/api/owner/setup/{interview_id}", None),
                 ("POST", f"/api/owner/setup/{interview_id}/consent", {"allow": True}),
                 ("POST", f"/api/owner/setup/{interview_id}/answer", {"question": "what_you_do", "text": "Plumbing."})]
@@ -883,8 +891,8 @@ async def test_setup_needs_the_owner_cookie(app, browser, fake, kernel_http, mod
         assert refused.status_code == 404 and refused.json() == {"error": "not_found"}, path
     assert len(model.requests) == 1 and not any(call.route in SETUP_TOOL_ROUTES for call in fake.calls)
     # an unknown time zone or an empty description is refused before any model call
-    for body in ({"description": "Plumbing.", "timezone": "Mars/Olympus"}, {"description": " ", "timezone": TIMEZONE},
-                 {"description": "Plumbing.", "timezone": TIMEZONE, "owner": "Maria"}):
+    for body in (start_body("Plumbing.", timezone="Mars/Olympus"), start_body(" "),
+                 start_body("Plumbing.", owner="Maria")):
         refused = await owner.browser.post("/api/owner/setup", json=body)
         assert refused.status_code == 422 and refused.json() == {"error": "invalid"}
     assert len(model.requests) == 1
@@ -909,8 +917,7 @@ async def test_owner_name_fallback_makes_a_desk_the_kernel_takes(app, browser, f
     assert fake.desks[state["desk_id"]].owner_display_name == "A Plumbing Sons"
 
     model.add(started(owner_display_name="Someone Else"))
-    given = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE,
-                                                               "owner_display_name": "Maria Rivera"})
+    given = await owner.browser.post("/api/owner/setup", json=start_body(owner_display_name="Maria Rivera"))
     assert given.status_code == 201, given.text
     assert fake.desks[given.json()["desk_id"]].owner_display_name == "Maria Rivera"
 
@@ -954,14 +961,12 @@ async def test_a_typed_owner_name_must_fit_the_kernels_pattern(app, browser, fak
     # A name the owner types is the one customers see: one the kernel wouldn't take is refused, never changed, before
     # Claude is asked or a Desk is made.
     for name in ("Bob Okafor 2nd", "Bob <Okafor>", "Bob@Okafor", "B" * 41, "   "):
-        refused = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE,
-                                                                     "owner_display_name": name})
+        refused = await owner.browser.post("/api/owner/setup", json=start_body(owner_display_name=name))
         assert (refused.status_code, refused.json()) == (422, {"error": "invalid"}), name
     assert model.requests == [] and not fake.called("POST /desks")
 
     model.add(started(owner_display_name=None))
-    given = await owner.browser.post("/api/owner/setup", json={"description": DESCRIPTION, "timezone": TIMEZONE,
-                                                               "owner_display_name": " José O'Brien-Núñez "})
+    given = await owner.browser.post("/api/owner/setup", json=start_body(owner_display_name=" José O'Brien-Núñez "))
     assert given.status_code == 201, given.text
     assert fake.desks[given.json()["desk_id"]].owner_display_name == "José O'Brien-Núñez"
 
@@ -1163,18 +1168,29 @@ async def test_a_repeated_key_starts_one_interview_and_one_desk(app, browser, fa
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
 
 
-@pytest.mark.parametrize("keys", [("start-a", "start-b"), (None, None)], ids=["two keys", "no key"])
-async def test_two_keys_or_none_start_two_interviews(app, browser, fake, kernel_http, model, engine, keys):
-    # Two clicks send two keys, and each starts its own interview and Desk. Without a key, as before keys, every start
-    # makes its own: pinned, so making the key required later is a deliberate change.
+async def test_two_keys_start_two_interviews(app, browser, fake, kernel_http, model, engine):
+    # Two clicks send two keys, and each starts its own interview and Desk.
     owner = await new_owner(app, browser, kernel_http)
     model.add(started(), started())
-    first, second = [await start_keyed(owner, key) for key in keys]
+    first, second = [await start_keyed(owner, key) for key in ("start-a", "start-b")]
     assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
     assert first.json()["interview_id"] != second.json()["interview_id"]
     assert first.json()["desk_id"] != second.json()["desk_id"]
     assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
     assert len(await interviews(engine)) == 2
+
+
+async def test_a_start_without_a_key_is_refused_and_makes_nothing(app, browser, fake, kernel_http, model, engine,
+                                                                  monkeypatch):
+    # The key is required: a start without one is 422, as for any missing field, before the setup turn limit counts
+    # it, Claude is asked or the kernel makes a Desk, and no row is written. Sent twice, it is refused twice.
+    owner = await new_owner(app, browser, kernel_http)
+    asked, _ = held_limits(app, monkeypatch)
+    for _ in range(2):
+        refused = await start_keyed(owner, None)
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
+    assert asked == [] and model.requests == [] and fake.called("POST /desks") == []
+    assert await interviews(engine) == []
 
 
 async def test_the_same_key_in_another_copy_is_its_own_interview(app, browser, fake, kernel_http, model, engine):
@@ -1252,21 +1268,6 @@ async def test_a_start_that_failed_once_the_desk_was_asked_for_spends_its_key(ap
     fresh = await start_keyed(owner, "start-again")
     assert fresh.status_code == 201, fresh.text
     assert len(fake.called("POST /desks")) == 2
-
-
-async def test_a_start_without_a_key_has_none_to_spend(app, browser, fake, kernel_http, model, engine):
-    # Without a key, a start whose kernel call failed answers its failure and keeps no row, and the same request sent
-    # again starts afresh: never 409 `key_spent`.
-    owner = await new_owner(app, browser, kernel_http)
-    model.add(started(), started())
-    fake.fail("POST /desks", "500", times=1)
-    first = await start_keyed(owner, None)
-    assert (first.status_code, first.json()) == (503, {"error": "kernel", "code": "internal"})
-    assert await interviews(engine) == []
-    again = await start_keyed(owner, None)
-    assert again.status_code == 201, again.text
-    assert await interviews(engine) == [(again.json()["interview_id"], again.json()["desk_id"])]
-    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
 
 
 async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(app, browser, fake, kernel_http, model,
