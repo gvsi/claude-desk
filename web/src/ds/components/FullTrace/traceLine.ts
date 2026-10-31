@@ -2,7 +2,7 @@ import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
 import { handoffEntryOf, type HandoffEntry } from '../../../api/handoffEntry.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
-/** Known ledger entries in plain words; newer kinds keep the generic fallback below. */
+/** What each kind of ledger entry records, in plain words. A kind missing here is a compile error. */
 const KIND_LINES = {
   session: 'A chat started.',
   auth: 'A check of who sent a request.',
@@ -24,6 +24,7 @@ const KIND_LINES = {
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
   web_search: 'Web search.',
+  business_tools: 'Business tools changed.',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**

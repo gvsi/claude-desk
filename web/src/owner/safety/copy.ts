@@ -10,7 +10,7 @@ import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '..
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
 
-/** Known record entries, as a row names them; newer kinds keep the generic fallback below. */
+/** Each kind of record entry, as a row of the record names it. A kind missing here is a compile error. */
 export const LEDGER_KIND_COPY = {
   session: 'Chat started',
   auth: 'Credential check',
@@ -32,6 +32,7 @@ export const LEDGER_KIND_COPY = {
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
   web_search: 'Web search',
+  business_tools: 'Business tools changed',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
