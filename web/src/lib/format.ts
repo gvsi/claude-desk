@@ -95,6 +95,17 @@ export function formatClock(iso: string, timeZone: string): string {
 }
 
 /**
+ * The local date of `iso` on the business's clock, `YYYY-MM-DD` as the API writes a local date
+ * (`ThisWeek.start`), or null for a time that can't be read.
+ */
+export function localDate(iso: string, timeZone: string): string | null {
+  const at = readDate(iso);
+  if (at === null) return null;
+  const { year, month, day } = localTime(at, timeZone);
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
  * When something happened, on the business's clock: "Today, 9:52 am" on the business's current
  * date, else the date and the time, "Oct 26, 9:52 am". Never a bare date or a bare time.
  */

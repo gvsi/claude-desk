@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
-import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, entryFor } from './copy.ts';
+import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, anythingStoppedIn, entryFor } from './copy.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'contracts.schema.json');
@@ -86,5 +86,27 @@ describe('Safety copy', () => {
     // A page without that entry, or no page yet: nothing to show.
     expect(entryFor(attempt(4), record)).toBeNull();
     expect(entryFor(attempt(1), undefined)).toBeNull();
+  });
+
+  it('anything_stopped_in_the_week_takes_either_kind', () => {
+    // The last 7 days as Today reads them: Saturday, October 24, to Friday, October 30, in Los Angeles.
+    const week = { timezone: 'America/Los_Angeles', start: '2026-10-24', end: '2026-10-30' };
+    const one = (kind: Attempt['kind'], createdAt: string) => [{ kind, created_at: createdAt }];
+    expect(anythingStoppedIn([], week)).toBe(false);
+    // A refused request or a draft of Claude's the reply check stopped, from 00:00 on the first day
+    // to the end of the last, on the business's clock.
+    expect(anythingStoppedIn(one('refused', '2026-10-24T07:00:00.000000Z'), week)).toBe(true);
+    expect(anythingStoppedIn(one('reply_blocked', '2026-10-31T06:59:00.000000Z'), week)).toBe(true);
+    // Before the week began there, though already the 24th in UTC: not this week.
+    expect(anythingStoppedIn(one('reply_blocked', '2026-10-24T06:59:00.000000Z'), week)).toBe(false);
+    // After the week Today last read ended, just past midnight or with the clocks apart: newer than
+    // that read, so it counts, and the week isn't said to have stopped nothing.
+    expect(anythingStoppedIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(true);
+    // A hold is the owner's to answer, not stopped.
+    expect(anythingStoppedIn(one('held', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    // A kind this build doesn't know yet may be a stop, so it counts.
+    expect(anythingStoppedIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
+    // A time that can't be read may be this week's, so the week isn't said to have nothing.
+    expect(anythingStoppedIn(one('reply_blocked', 'not a time'), week)).toBe(true);
   });
 });

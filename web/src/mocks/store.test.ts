@@ -1698,11 +1698,12 @@ describe("Today's windows", () => {
 
     // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
     // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
-    // whispered and Claude booked her at the quoted list price.
+    // whispered and Claude booked her at the quoted list price. The stopped draft is no request the
+    // kernel refused, so the last 7 days count none stopped; the briefing still lists it as blocked.
     mockStore.reset('rivera');
     const seeded = await read();
-    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 1 });
-    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 1 });
+    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
+    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
     expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, blocked: 1, total: 3 });
     const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
     expect(seeded.briefing.newest.blocked).toMatchObject({
@@ -1774,6 +1775,27 @@ describe("Today's windows", () => {
     expect(full.items).toHaveLength(answered.briefing.total);
     expect(full.items).toContainEqual(answered.briefing.newest.blocked);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
+  });
+
+  it('week_counts_refused_requests_only', async () => {
+    // Rivera's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
+    // built-in agent tries to charge over its signed limit, which the kernel refuses. The last 7 days
+    // count the refusal alone, as the API does; the briefing and Safety keep both.
+    mockStore.reset('rivera');
+    await openChat();
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'key-1' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+    expect(((await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun).state).toBe('done');
+
+    const today = await read();
+    expect(today.this_week.stopped).toBe(1);
+    expect(today.this_week.days.map((d) => d.stopped)).toEqual([0, 0, 0, 0, 0, 0, 1]);
+    expect(today.briefing.blocked).toBe(2);
+    expect((await list()).items.filter((item) => item.kind === 'blocked')).toHaveLength(2);
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string }[];
+    expect(attempts.map((a) => a.kind).sort()).toEqual(['refused', 'reply_blocked']);
   });
 
   it('windows_follow_the_business_clock', async () => {
