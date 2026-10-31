@@ -2309,6 +2309,10 @@ def test_confirm_in_words_fires_on_every_booking_claim_shape():
         "Consider it booked.", "Consider yourself confirmed.", "Your appointment's been made.",
         "Your booking has been made.", "All booked.", "Done, all booked!", "Tienes la cita confirmada.",
         "Ya tiene su reserva confirmada.",
+        # A bare "booked" as its own clause, good to go, a done deal.
+        "Booked! See you then.", "Done, booked!", "Booked.", "Great — booked, see you then.",
+        "You're good to go.", "You're all good to go.", "You are good to go for the visit.", "It's a done deal.",
+        "That's a done deal.", "It is a done deal.", "That’s already a done deal.",
     )
     for claim in claims:
         assert replies(confirm, claim) == {"scenario.forbid_claim"}, claim
@@ -2326,7 +2330,12 @@ def test_confirm_in_words_fires_on_every_booking_claim_shape():
                    "Those times? All booked up, sorry.", "It's made of brass.", "Consider it carefully.",
                    "You're on the list for a call back.", "Once you're on the schedule, a card shows the time.",
                    "Once your appointment has been made, a card shows it.", "Cuando tienes la cita confirmada, "
-                   "verás la tarjeta."):
+                   "verás la tarjeta.",
+                   "I can get you booked for the visit.", "Booked visits get a reminder.",
+                   "Booked up that day, sorry.", "Once booked, a card shows the time.",
+                   "Once you're good to go, a card shows the time.", "You're good to go ahead and pick a time.",
+                   "Is it a done deal? Not until you pick a time.", "If it's a done deal, a card shows it.",
+                   "It's not a done deal yet."):
         assert replies(confirm, spared) == set(), spared
 
 
