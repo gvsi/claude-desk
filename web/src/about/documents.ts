@@ -13,8 +13,11 @@ export { documentText, inlineText, MarkdownError, readingMinutes } from './markd
 export type { Block, FigureName, Inline } from './markdown.ts';
 
 // The proposal's sentence that gives the hosted prototype's address, which reads oddly on the hosted page
-// itself. `$1` keeps the repository link, a placeholder until it is filled and a Markdown link after.
-const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\./g;
+// itself. `$1` keeps the whole repository link: the placeholder until it is given, the Markdown link after.
+// It ends at the period that ends the sentence, one followed by whitespace or the end of the text, so a dot
+// inside the link (github.com) doesn't end it. Exported for the tests, which read it with `matchAll` only,
+// leaving its `lastIndex` alone.
+export const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\.(?=\s|$)/g;
 const ON_THE_PAGE = 'You’re in it. The code is at $1.';
 
 /** The proposal's Markdown as its page shows it: the prototype sentence replaced, which must match exactly once. */
