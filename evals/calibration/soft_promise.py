@@ -45,7 +45,8 @@ plan's "Model cost and latency budget"), or its bound when its usage can't be pr
 (a timeout or an error) or another model answered. The run appends one row to the shared eval spend
 file, with tier 2's columns and `append_spend`: pass_id `calibration-soft-promise-<label>-<time>`,
 ending `-estimated` when any call was charged its bound; provider `anthropic`; runs, the calls made;
-and the spend as the Desk's and the Claude API's. A calibration's row counts against the monthly
+the spend as the Desk's and the Claude API's; and in `estimated_usd`, the bounds charged for want of
+usage (0 when every call was priced). A calibration's row counts against the monthly
 limit but never measures what a tier 2 run costs (`passes.CALIBRATION_PREFIX`).
 
 Results. `evals/out/soft-promise/<label>-<time>.json` (git-ignored; a run the records cite is copied
@@ -323,10 +324,12 @@ def call_bound(system: str, data: SoftPromiseInput) -> float:
 
 class _Meter:
     """The run's spend against its cap: a call reserves its bound before it starts and is charged
-    its priced usage, else that bound, when it ends."""
+    its priced usage, else that bound, when it ends. `estimated_usd` is the part of the spend
+    charged at a bound, an estimate rather than a price."""
 
     def __init__(self, cap: float):
         self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
+        self.estimated_usd = 0.0
 
     def start(self, bound: float) -> bool:
         """Whether a call with this bound may start: the spend so far, the bounds of the calls in
@@ -343,6 +346,7 @@ class _Meter:
         usd = priced(usage)
         if usd is None:
             usd, self.estimated = bound, self.estimated + 1
+            self.estimated_usd += bound
         self.spent += usd
 
     @property
@@ -548,6 +552,7 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
                 "pass_id": row_id + ("-estimated" if meter.estimated else ""),
                 "date": now.astimezone(UTC).date().isoformat(), "provider": "anthropic", "runs": meter.calls,
                 "desk_usd": usd, "simulator_usd": f"{0:.6f}", "claude_api_usd": usd, "total_usd": usd,
+                "estimated_usd": f"{meter.estimated_usd:.6f}",
             })
     try:
         git_sha: str | None = results.git(deps.root, "rev-parse", "--verify", "HEAD^{commit}").strip()

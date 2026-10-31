@@ -367,7 +367,7 @@ async def test_a_calibrations_spend_counts_against_the_month_but_measures_no_run
     spend_rows(spend, ("2026-10-02", "anthropic", 1497, 598.8, 598.8))
     append_spend(spend, {"pass_id": f"{CALIBRATION_PREFIX}soft-promise-tree-20261030-120000", "date": "2026-10-30",
                          "provider": "anthropic", "runs": 300, "desk_usd": 0.9, "simulator_usd": 0,
-                         "claude_api_usd": 0.9, "total_usd": 0.9})
+                         "claude_api_usd": 0.9, "total_usd": 0.9, "estimated_usd": 0})
     assert measured_per_run(read_spend(spend), "anthropic") == pytest.approx(0.40)   # not $0.33 a "run"
     # the calibration's $0.90 counts against the month: $0.30 remains, so two runs at $0.40 don't fit
     run_one = Scripted()
@@ -578,6 +578,17 @@ def test_a_spend_file_from_before_the_mark_gains_its_column(tmp_path):
     earlier, later = read_spend(spend)
     assert earlier["total_usd"] == "96.0" and earlier["estimated_usd"] is None
     assert later["total_usd"] == "0.8000" and later["estimated_usd"] == "0.8000"
+
+
+def test_a_spend_row_without_its_estimated_mark_is_refused_and_writes_nothing(tmp_path):
+    """A row missing a column fails closed: never read as zero, and the file is left as it was."""
+    from evals.tier2.passes import append_spend
+
+    spend = tmp_path / "desk-eval-spend.csv"
+    with pytest.raises(KeyError, match="estimated_usd"):
+        append_spend(spend, {"pass_id": "p", "date": "2026-10-30", "provider": "anthropic", "runs": 1,
+                             "desk_usd": 0.4, "simulator_usd": 0, "claude_api_usd": 0.4, "total_usd": 0.4})
+    assert not spend.exists()
 
 
 async def test_pending_scenarios_skipped_and_listed(tmp_path):

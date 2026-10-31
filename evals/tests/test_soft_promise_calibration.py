@@ -223,7 +223,7 @@ def test_it_refuses_a_run_past_the_months_eval_limit(deps: Deps, capsys: pytest.
     for date, usd in (("2026-10-02", 599.997), ("2026-09-30", 500.0)):
         append_spend(deps.spend_file, {"pass_id": f"earlier-{date}", "date": date, "provider": "anthropic",
                                        "runs": 1000, "desk_usd": usd, "simulator_usd": 0, "claude_api_usd": usd,
-                                       "total_usd": usd})
+                                       "total_usd": usd, "estimated_usd": 0})
     assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0050
     assert "remains" in capsys.readouterr().err and deps.client.keys == []
     assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0020, fit
@@ -298,6 +298,7 @@ def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_f
     meter.end(0.001, CallUsage(model=HAIKU, status="ok", input_tokens=2_000, latency_ms=1))
     assert meter.spent == pytest.approx(0.0012) and not meter.start(0.00081) and meter.start(0.0008)
     assert (meter.calls, meter.estimated, meter.over) == (4, 1, False)
+    assert meter.estimated_usd == pytest.approx(0.001)  # only the bound charged for want of usage
 
 
 def test_a_calls_bound_counts_its_prompt_its_request_and_the_longest_answer():
@@ -446,6 +447,9 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
                           abs=5e-7)                              # written to the millionth of a dollar
     assert float(row["desk_usd"]) == float(row["claude_api_usd"]) == float(row["total_usd"]) == total
     assert float(row["simulator_usd"]) == 0
+    # the timed-out call was charged its bound, an estimate, and the row says how much of it is estimated
+    assert float(row["estimated_usd"]) == pytest.approx(call_bound(decisions.SOFT_PROMISE_SYSTEM,
+                                                                   call_input(promise)), abs=5e-7)
     # a calibration's calls count against the month, but they are no tier 2 run, so they measure none
     assert measured_per_run(read_spend(deps.spend_file), "anthropic") is None
 
@@ -482,6 +486,19 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     deps.client = Factory(FakeClient())
     assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0
     assert spend_row(deps)["pass_id"] == "calibration-soft-promise-trial-20261030-210000"
+    assert float(spend_row(deps)["estimated_usd"]) == 0
+
+
+def test_a_run_appends_to_a_spend_file_from_before_the_estimated_column(deps: Deps):
+    """A spend file whose header predates `estimated_usd` gains the column, and the run's row lines up
+    with it; the earlier row's dollars still count against the month."""
+    deps.spend_file.write_text("pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\n"
+                               "earlier,2026-10-02,anthropic,1000,599.997,0,599.997,599.997\n")
+    assert main(["--samples", "5", "--max-usd", "1", "--label", "trial"], deps) == 1   # $0.0050 does not fit
+    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0   # $0.0010 fits
+    earlier, row = list(csv.DictReader(deps.spend_file.open()))
+    assert list(row) == list(SPEND_COLUMNS) and earlier["total_usd"] == "599.997"
+    assert row["pass_id"] == "calibration-soft-promise-trial-20261030-210000" and float(row["estimated_usd"]) == 0
 
 
 def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: Deps, tmp_path: Path,

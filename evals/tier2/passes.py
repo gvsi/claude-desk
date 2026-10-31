@@ -374,7 +374,9 @@ def read_spend(path: Path) -> list[dict[str, str]]:
 def append_spend(path: Path, row: Mapping[str, Any]) -> None:
     """Append one row under an exclusive lock, writing the header when the file is new. A file whose
     header predates `estimated_usd` gets that column in its header first, in place, so the new row's
-    mark lines up; its earlier rows read the mark as missing."""
+    mark lines up; its earlier rows read the mark as missing. A row missing a column is refused before
+    the file is touched (`KeyError`), never written as zero."""
+    line = {column: row[column] for column in SPEND_COLUMNS}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", newline="") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -386,7 +388,7 @@ def append_spend(path: Path, row: Mapping[str, Any]) -> None:
             writer = csv.DictWriter(handle, fieldnames=SPEND_COLUMNS)
             if handle.tell() == 0:
                 writer.writeheader()
-            writer.writerow({column: row[column] for column in SPEND_COLUMNS})
+            writer.writerow(line)
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
