@@ -236,7 +236,7 @@ Every string in Tasks 2 and 3 is owner-facing: no visitor reads these screens, s
   - `web/src/ds/index.ts`.
   - `web/src/ds/icons/index.tsx`: `chevron-right`, `shared` and `quote` join `ICON_NAMES`, drawn as the boards draw them.
   - `web/src/ds/tokens.json`, `web/src/ds/tokens.css` (`npm run tokens`), `web/src/ds/contrast.ts`: the connector tokens below.
-  - `web/src/ds/README.md`: the brand book says a connector's brand tile is the one light surface besides the intro illustration's cards.
+  - `web/src/ds/README.md`: the brand book says a connector's brand tile is a light surface besides the intro illustration's cards and the mark's own tile.
   - `web/src/ds/reference/boards.ts`: `REFERENCE_BOARDS` drops N-Rules-Rivera, N-Rules-ChatChange, N-Settings-Integrations and N-Settings-ToolChanged, which these boards replace (the Rules and Connectors pages supersede the two settings boards), and gains the eighteen `N-Conn-*` boards (N-Conn-01-Rules to N-Conn-16-Phone-Rules, with N-Conn-07b and N-Conn-11b), so the stories here can cite them before Task 6.
   - `web/src/ds/components/Card/Card.stories.tsx`: canvas N-Conn-01-Rules.
   - `web/src/ds/components/SegmentedControl/SegmentedControl.stories.tsx`: the Safety page's view switch ("Attempts", "Every entry"), citing N-Safety-Run1, since the Rules page's presets are a menu, not a switch (Task 6c).

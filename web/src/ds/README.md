@@ -27,7 +27,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Use `clay` only as the field behind the first-visit intro's illustration.
 - The Claude Desk mark has its own fixed colors, the same in every theme: `mark-tile`, `mark-clay`, `mark-ink` and `mark-hairline`. Nothing else uses them, and its white tile is part of the mark, not a light surface.
 - The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are one of the product's two light surfaces. They are decorative and hidden from assistive tech, and nothing else uses these colors.
-- A connector's brand tile is the one light surface besides the intro illustration's cards: a third-party connector (Stripe, Google Calendar) shows its own mark on `connector-tile-brand`, in its brand's colors (`connector-stripe`, `connector-google-blue`), always beside its name and its Mock badge. The tile is decorative and hidden from assistive tech, nothing is read on it, and nothing else uses these colors. Built-in connectors keep the line icons on `fill-secondary`.
+- A connector's brand tile is a light surface besides the intro illustration's cards and the mark's own tile: a third-party connector (Stripe, Google Calendar) shows its own mark on `connector-tile-brand`, in its brand's colors (`connector-stripe`, `connector-google-blue`), always beside its name and its Mock badge. The tile is decorative and hidden from assistive tech, nothing is read on it, and nothing else uses these colors. Built-in connectors keep the line icons on `fill-secondary`.
 
 ### Brand colors on the public page
 
