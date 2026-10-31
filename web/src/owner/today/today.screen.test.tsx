@@ -1076,17 +1076,22 @@ describe("Today's Demo inbox", () => {
 
   /**
    * Every timer the page starts from now on at the Demo inbox's poll interval, for as long as the
-   * page keeps it: `due()` runs each one at once, as if all came due at that moment.
+   * page keeps it: `started()` lists them, oldest first, and `due()` runs each one still kept at
+   * once, as if all came due at that moment, and returns the ones it ran.
    */
-  function inboxPacedPolls(): { due: () => void } {
+  function inboxPacedPolls(): { started: () => number[]; due: () => number[] } {
     // The page's timers as the browser has them (the Node typings say otherwise).
     const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
+    const started: number[] = [];
     const running = new Map<number, () => void>();
     const start = timers.setInterval.bind(window);
     const stop = timers.clearInterval.bind(window);
     const starting = vi.spyOn(timers, 'setInterval').mockImplementation((run, ms) => {
       const id = start(run, ms);
-      if (typeof run === 'function' && ms === pollMs('inbox')) running.set(id, run);
+      if (typeof run === 'function' && ms === pollMs('inbox')) {
+        started.push(id);
+        running.set(id, run);
+      }
       return id;
     });
     const stopping = vi.spyOn(timers, 'clearInterval').mockImplementation((id) => {
@@ -1098,8 +1103,11 @@ describe("Today's Demo inbox", () => {
       stopping.mockRestore();
     });
     return {
+      started: () => [...started],
       due: () => {
-        for (const run of [...running.values()]) run();
+        const due = [...running];
+        for (const [, run] of due) run();
+        return due.map(([id]) => id);
       },
     };
   }
@@ -1526,16 +1534,20 @@ describe("Today's Demo inbox", () => {
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
     const open = inboxButton(screen);
     await expect.element(open).toBeVisible();
-    // The read as it opens is answered, so none is still out as it closes.
+    // The read as it opens is answered, so none is still out as it closes. The polls started from
+    // the click until then are the sheet's own, started as it opened and again at that answer.
     const answered = nextInboxAnswer();
+    const before = polls.started().length;
     await open.click();
     const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
     await expect.element(sheet).toBeVisible();
     await answered;
+    const sheetsOwn = polls.started().slice(before);
 
     const closedReads = closedInboxReads(sheet);
+    let ran: number[] = [];
     onceGone(sheet.element(), () => {
-      polls.due();
+      ran = polls.due();
       document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
       window.dispatchEvent(new Event('offline'));
       window.dispatchEvent(new Event('online'));
@@ -1544,6 +1556,7 @@ describe("Today's Demo inbox", () => {
     await expect.element(sheet).not.toBeInTheDocument();
     await expect.element(open).toHaveFocus();
     await nextFrames();
+    expect(ran.filter((id) => sheetsOwn.includes(id)), "the sheet's own poll came due as it closed").not.toEqual([]);
     expect(closedReads(), 'Demo inbox reads sent once its sheet had closed').toBe(0);
   });
 });
