@@ -129,6 +129,7 @@ function importProblems(sources: Record<string, string>): string[] {
 const ONE_HOME: Record<string, { home: string; copy: RegExp }> = {
   'the month names': { home: 'about/months.ts', copy: /(['"])January\1\s*,\s*(['"])February\2/ },
   'the words of a run of inlines': { home: 'about/markdown.ts', copy: /(['"])children\1\s+in\s+[\w$]+\s*\?/ },
+  'the reduced-motion query': { home: 'about/motion.ts', copy: /prefers-reduced-motion:\s*reduce/ },
 };
 
 /** The shipped About sources that hold each helper. */
@@ -139,9 +140,98 @@ function helperHomes(sources: Record<string, string>): Record<string, string[]> 
   );
 }
 
+/**
+ * The one place a figure's play marks may take effect: on screen, for a reader who hasn't asked for reduced motion.
+ * A rule outside it would hide or move a figure's parts on paper or under reduced motion, where the figure must be
+ * drawn complete.
+ */
+const MOTION_BLOCK = '@media screen and (prefers-reduced-motion: no-preference)';
+
+interface PlayRule {
+  /** The rule's selector, its whitespace collapsed. */
+  selector: string;
+  /** Whether it sits inside `MOTION_BLOCK`, at any depth. */
+  inMotion: boolean;
+}
+
+/** Every rule in a stylesheet whose selector names `data-play`, and whether it sits inside `MOTION_BLOCK`. */
+function playRules(css: string): PlayRule[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const collapse = (prelude: string) => prelude.trim().replace(/\s+/g, ' ').replace(/:\s*/g, ': ');
+  const motion = collapse(MOTION_BLOCK);
+  // The preludes of the blocks around the current place, outermost first.
+  const around: string[] = [];
+  const found: PlayRule[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '{') {
+      const prelude = text.slice(start, i).trim().replace(/\s+/g, ' ');
+      if (!prelude.startsWith('@') && prelude.includes('data-play')) {
+        found.push({ selector: prelude, inMotion: around.some((outer) => collapse(outer) === motion) });
+      }
+      around.push(prelude);
+    } else if (char === '}') {
+      around.pop();
+    }
+    if (char === '{' || char === '}' || char === ';') start = i + 1;
+  }
+  return found;
+}
+
 describe('About page source guards', () => {
+  it('play_marks_apply_only_on_screen_with_motion', () => {
+    const outside = (css: string) => playRules(css).filter((rule) => !rule.inMotion).map((rule) => rule.selector);
+    const hide = "[data-play='ready'] .part { opacity: 0; }";
+    const hidden = "[data-play='ready'] .part";
+    // Each place a play rule would reach print or reduced motion, a comment that only looks like the block included.
+    const bad: [string, string][] = [
+      [hide, hidden],
+      [`@media (prefers-reduced-motion: no-preference) { ${hide} }`, hidden],
+      [`@media screen { ${hide} }`, hidden],
+      [`@media print { ${hide} }`, hidden],
+      [`@supports (clip-path: inset(0)) { ${hide} }`, hidden],
+      [`/* ${MOTION_BLOCK} { */ ${hide}`, hidden],
+      [
+        `${MOTION_BLOCK} { .chart { color: red; } }\n.chart:is(\n  [data-play='played']\n) .part { animation: none; }`,
+        ".chart:is( [data-play='played'] ) .part",
+      ],
+    ];
+    for (const [css, selector] of bad) expect(outside(css), css).toEqual([selector]);
+    // Inside the block, at any depth, a rule may name the marks; outside it, other rules may do as they like.
+    const good = [
+      `${MOTION_BLOCK} { ${hide} }`,
+      `${MOTION_BLOCK} {\n  .chart { --step: 1; }\n  @supports (clip-path: inset(0)) { ${hide} }\n  @keyframes fade { from { opacity: 0; } }\n}`,
+      `@media   screen and (prefers-reduced-motion:   no-preference) {\n${hide}\n}`,
+      '.chart { opacity: 1; } @media print { .chart { break-inside: avoid; } }',
+    ];
+    for (const css of good) expect(outside(css), css).toEqual([]);
+    expect(playRules(`${MOTION_BLOCK} { ${hide} }`)).toEqual([{ selector: "[data-play='ready'] .part", inMotion: true }]);
+
+    // The readers' stylesheet keys its figures on the marks, and only inside the block.
+    const reader = readFileSync(path.join(SRC, 'about/reader.css'), 'utf8');
+    expect(playRules(reader).length).toBeGreaterThan(0);
+    expect(outside(reader)).toEqual([]);
+  });
+
   const all = sources();
   const about = Object.entries(all).filter(([file]) => file.startsWith('about/') && !isTest(file));
+
+  it('about_styles_set_no_scroll_behavior', () => {
+    // Only a contents link's jump glides, through its own handler. A scroll-behavior in a stylesheet would glide every
+    // scroll that names no behavior: a focused link brought into view, the end-to-end test's own scrolls.
+    const setsScrollBehavior = (css: string) => /(?<![\w-])scroll-behavior\s*:/.test(css.replace(/\/\*[\s\S]*?\*\//g, ''));
+    for (const css of ['html { scroll-behavior: smooth; }', '.cd-about-page{scroll-behavior:auto}', '@media screen { :root { scroll-behavior : smooth } }']) {
+      expect(setsScrollBehavior(css), css).toBe(true);
+    }
+    for (const css of ['.fold { overscroll-behavior: contain; }', '/* no scroll-behavior: smooth here */ .x { color: red; }']) {
+      expect(setsScrollBehavior(css), css).toBe(false);
+    }
+
+    const sheets = readdirSync(path.join(SRC, 'about'), { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.css'));
+    expect(sheets).toContain('reader.css');
+    expect(sheets.filter((file) => setsScrollBehavior(readFileSync(path.join(SRC, 'about', file), 'utf8')))).toEqual([]);
+  });
 
   it('about_has_no_fetching', () => {
     const bad = [
@@ -243,10 +333,13 @@ describe('About page source guards', () => {
       'about/Inlines.tsx': "inlines.map((inline) => ('children' in inline ? words(inline.children) : inline.text))",
       'about/months.test.ts': "expect(MONTHS.slice(0, 2)).toEqual(['January', 'February']);",
       'owner/format.ts': "const MONTHS = ['January', 'February'];",
+      'about/figures/usePlayOnce.ts': "window.matchMedia('(prefers-reduced-motion: reduce)').matches",
+      'about/reader.motion.test.ts': "matchMedia('(prefers-reduced-motion:reduce)')",
     };
     expect(helperHomes(copies)).toEqual({
       'the month names': ['about/ReaderPage.tsx', 'about/figures/Chart.tsx'],
       'the words of a run of inlines': ['about/Inlines.tsx'],
+      'the reduced-motion query': ['about/figures/usePlayOnce.ts'],
     });
 
     expect(helperHomes(sources())).toEqual(

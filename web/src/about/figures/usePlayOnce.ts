@@ -1,0 +1,100 @@
+/**
+ * Plays a figure once: the first time it is at least a third in view, its root is marked played, and its
+ * stylesheet animates it from that mark. Until then it is marked ready, which hides the parts the animation
+ * brings in. Both marks only take effect on screen with motion (`reader.css` keys them inside
+ * `@media screen and (prefers-reduced-motion: no-preference)`), so the figure is complete by default. Once it has
+ * played through, the mark comes off again, so a part drawn later is drawn complete instead of playing on its own.
+ */
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+
+import type { FigureName } from '../documents.ts';
+import { prefersReducedMotion } from '../motion.ts';
+
+/** How much of a figure is in view when it plays. */
+const IN_VIEW = 0.33;
+
+/** How much of a window a figure taller than three windows fills when it plays instead. */
+const FILLS = 0.9;
+
+/**
+ * The ratios at which the observer reports: every hundredth, so a scroll a little at a time is heard both at a third
+ * in view and as a figure taller than three windows comes to fill one (between 90% and all of it).
+ */
+const STEPS = Array.from({ length: 101 }, (_, i) => i / 100);
+
+/** Whether a figure is in view enough to play: a third of it, or most of a window too short to show a third. */
+function inView(entry: IntersectionObserverEntry): boolean {
+  if (entry.intersectionRatio >= IN_VIEW) return true;
+  return entry.rootBounds !== null && entry.intersectionRect.height >= entry.rootBounds.height * FILLS;
+}
+
+export type Play = 'ready' | 'played';
+
+/**
+ * The figures that have played in this page load, by name. A figure draws afresh when the reader opens the other
+ * document and comes back; once played, it stays complete until the page reloads.
+ */
+const played = new Set<FigureName>();
+
+/**
+ * A ref for the figure's root, and the mark it sets as `data-play={play ?? undefined}`: `ready` until it is in
+ * view, then `played` until every animation under it has finished, then null; and null throughout for a figure that
+ * has already played in this page load.
+ */
+export function usePlayOnce<T extends Element>(name: FigureName): [ref: RefObject<T>, play: Play | null] {
+  const ref = useRef<T>(null);
+  const [play, setPlay] = useState<Play | null>(null);
+
+  // A layout effect, so the figure is marked ready before its first paint and never shows complete, then hides.
+  useLayoutEffect(() => {
+    const figure = ref.current;
+    if (!figure || played.has(name)) return;
+    // With no way to tell when it comes into view, or for a reader who asked for less motion (or a browser that
+    // can't say), the figure stays as drawn: complete.
+    if (typeof window.IntersectionObserver !== 'function' || prefersReducedMotion()) return;
+    setPlay('ready');
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some(inView)) return;
+        observer.disconnect();
+        played.add(name);
+        setPlay('played');
+      },
+      { threshold: STEPS },
+    );
+    observer.observe(figure);
+    return () => observer.disconnect();
+  }, [name]);
+
+  // Played through, the mark comes off and the figure is complete by default again. A layout switch redraws some
+  // parts (a phone moves the architecture figure's outcomes into their boxes, and keeps fewer of the chart's
+  // labels), and under a played mark a part drawn afresh would play on its own. The wait is on the animations
+  // themselves, so their timing lives only in the stylesheet: each one's `finished` settles whether it runs its
+  // course or is cancelled with its part, and any that started meanwhile, such as a redrawn part's, are waited for
+  // in turn.
+  useEffect(() => {
+    const figure = ref.current;
+    if (play !== 'played' || !figure) return;
+    let mounted = true;
+    void (async () => {
+      for (let running = figure.getAnimations({ subtree: true }); running.length > 0; running = figure.getAnimations({ subtree: true })) {
+        await Promise.allSettled(running.map((animation) => animation.finished));
+        if (!mounted) return;
+      }
+      setPlay(null);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [play]);
+
+  return [ref, play];
+}
+
+/**
+ * For tests only: forgets which figures have played, so the next one plays as in a fresh page load. Browser tests
+ * share modules within a file, so each file whose figures play calls this after every test.
+ */
+export function forgetPlayedFigures(): void {
+  played.clear();
+}

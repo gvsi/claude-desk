@@ -91,6 +91,8 @@ describe('About pages', () => {
           writeLocal('lastDesk', lastDesk);
           const { screen } = await renderRoute(path, { viewport });
           await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
+          // This project runs with motion, so the page is read once its figures rest, not part way through one.
+          await untilAtRest(where);
           // One concept footer, the copy check over the whole page, the documents' words included, and axe. Not
           // the owner's jargon check: the documents name the kernel and its proofs, which is what they are
           // about (the reader's own words are checked in reader.browser.test.tsx).
@@ -144,6 +146,20 @@ describe('About pages', () => {
     await expect.poll(() => document.title, { message: 'after leaving' }).toBe(before);
   });
 });
+
+/**
+ * Brings the page to rest: each figure that plays once and hasn't yet (`data-play="ready"`) is brought into view,
+ * as a reader scrolling to it would, and plays; then nothing on the page is still animating. A figure that has
+ * played, or never plays, has no `ready` mark. (A figure's `played` mark comes off once it has played through, so
+ * the wait is for `ready` to go.)
+ */
+async function untilAtRest(where: string): Promise<void> {
+  for (const figure of document.querySelectorAll<HTMLElement>('[data-play="ready"]')) {
+    figure.scrollIntoView({ block: 'center' });
+    await expect.poll(() => figure.dataset.play, { message: `${where}: the figure played in view` }).not.toBe('ready');
+  }
+  await expect.poll(() => document.getAnimations().length, { message: `${where}: nothing animates`, timeout: 5000 }).toBe(0);
+}
 
 /** Waits a quarter of a second: a request sent while the page drew has reached the mock API by then. */
 function settle(): Promise<void> {

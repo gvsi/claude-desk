@@ -6,10 +6,13 @@
  *
  * Its labels are the v1 diagram's, as the kernel and safety session checked them; a change to any of them goes
  * through that session first.
+ *
+ * The first time it is a third in view, it traces one request along that path, once (`usePlayOnce`, `reader.css`).
  */
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 
 import { Icon, Pill, StatusDot, type StatusTone } from '../../ds/index.ts';
+import { usePlayOnce } from './usePlayOnce.ts';
 
 import '../reader.css';
 
@@ -37,20 +40,37 @@ export const ARCHITECTURE_LABELS = {
 
 const L = ARCHITECTURE_LABELS;
 
-/** What can come of a check: its word, and the status color the rest of the product gives it. */
+/**
+ * The path the figure traces, in order: the visitor, the chat layer, the kernel's Decide and an action that runs,
+ * Check reply and a reply that is shown, then the signed ledger.
+ */
+const TRACE = ['visitor', 'chat', 'decide', 'runs', 'check', 'shown', 'ledger'] as const;
+
+type TraceStep = (typeof TRACE)[number];
+
+/** A step's place on the path, from which its turn to light is worked out. */
+type StepStyle = CSSProperties & { '--cd-arch-i': number };
+
+/** The hook that names a step of the trace, and its place on the path. */
+function traced(step: TraceStep): { 'data-arch-step': TraceStep; style: StepStyle } {
+  return { 'data-arch-step': step, style: { '--cd-arch-i': TRACE.indexOf(step) } };
+}
+
+/** What can come of a check: its word, the status color the rest of the product gives it, and its step if traced. */
 interface Outcome {
   word: string;
   tone: StatusTone;
+  step?: TraceStep;
 }
 
 const DECIDE: Outcome[] = [
-  { word: L.runs, tone: 'handled' },
+  { word: L.runs, tone: 'handled', step: 'runs' },
   { word: L.ownerDecides, tone: 'held' },
   { word: L.refused, tone: 'refused' },
 ];
 
 const CHECK: Outcome[] = [
-  { word: L.shown, tone: 'handled' },
+  { word: L.shown, tone: 'handled', step: 'shown' },
   { word: L.handedOff, tone: 'held' },
 ];
 
@@ -91,12 +111,27 @@ function Connector({ direction }: { direction: 'right' | 'both' | 'down' }) {
   );
 }
 
-/** One of the kernel's checks: its box, then what can come of it, each a pill with a status dot and its word. */
-function Check({ name, line, outcomes, compact }: { name: string; line: string; outcomes: Outcome[]; compact: boolean }) {
+/**
+ * One of the kernel's checks: its box, then what can come of it, each a pill with a status dot and its word. The
+ * box is a step of the trace, and so is one outcome's pill, through the hook on its list item.
+ */
+function Check({
+  name,
+  line,
+  step,
+  outcomes,
+  compact,
+}: {
+  name: string;
+  line: string;
+  step: TraceStep;
+  outcomes: Outcome[];
+  compact: boolean;
+}) {
   const list = (
     <ul className="cd-about-arch__outcomes">
-      {outcomes.map(({ word, tone }) => (
-        <li key={word}>
+      {outcomes.map(({ word, tone, step: outcome }) => (
+        <li key={word} {...(outcome ? traced(outcome) : {})}>
           <Pill>
             <StatusDot tone={tone} />
             {word}
@@ -107,7 +142,7 @@ function Check({ name, line, outcomes, compact }: { name: string; line: string; 
   );
   return (
     <div className="cd-about-arch__check">
-      <div className="cd-about-arch__box">
+      <div className="cd-about-arch__box" {...traced(step)}>
         <span className="cd-about-arch__name cd-type-section">{name}</span>
         <span className="cd-about-arch__line cd-type-caption">{line}</span>
         {compact ? list : null}
@@ -124,20 +159,23 @@ function Check({ name, line, outcomes, compact }: { name: string; line: string; 
 
 export function ArchitectureFigure({ compact = false }: ArchitectureFigureProps) {
   const nameId = `${useId()}-name`;
+  const [ref, play] = usePlayOnce<HTMLElement>('architecture');
   return (
     <figure
+      ref={ref}
       className={`cd-about-figure cd-about-arch${compact ? ' cd-about-figure--compact cd-about-arch--compact' : ''}`}
       aria-labelledby={nameId}
+      data-play={play ?? undefined}
     >
       <div className="cd-about-frame cd-about-arch__frame" data-diagram="">
         <div className="cd-about-arch__visitor">
-          <div className="cd-about-arch__box cd-about-arch__box--center">
+          <div className="cd-about-arch__box cd-about-arch__box--center" {...traced('visitor')}>
             <span className="cd-about-arch__name cd-type-section">{L.visitor}</span>
             <span className="cd-about-arch__line cd-type-caption">{L.visitorAgent}</span>
           </div>
         </div>
         <Connector direction={compact ? 'down' : 'both'} />
-        <div className="cd-about-arch__box cd-about-arch__chat">
+        <div className="cd-about-arch__box cd-about-arch__chat" {...traced('chat')}>
           <span>
             <span className="cd-about-arch__kicker cd-type-caption">{L.chat}</span>
             <span className="cd-about-arch__proposes cd-type-article-body-phone">{L.chatProposes}</span>
@@ -151,10 +189,10 @@ export function ArchitectureFigure({ compact = false }: ArchitectureFigureProps)
             <span className="cd-about-arch__line cd-type-caption">{L.kernelProcess}</span>
           </div>
           <div className="cd-about-arch__checks">
-            <Check name={L.decide} line={L.decideRules} outcomes={DECIDE} compact={compact} />
-            <Check name={L.check} line={L.checkCards} outcomes={CHECK} compact={compact} />
+            <Check name={L.decide} line={L.decideRules} step="decide" outcomes={DECIDE} compact={compact} />
+            <Check name={L.check} line={L.checkCards} step="check" outcomes={CHECK} compact={compact} />
           </div>
-          <div className={`cd-about-arch__ledger ${compact ? 'cd-type-caption' : 'cd-type-meta'}`}>
+          <div className={`cd-about-arch__ledger ${compact ? 'cd-type-caption' : 'cd-type-meta'}`} {...traced('ledger')}>
             {compact ? null : <Icon name="lock" size={14} />}
             <span>{L.ledger}</span>
           </div>
