@@ -85,28 +85,56 @@ export interface RuleChatProps {
   onSettled: (turnId: number, outcome: 'confirmed' | 'kept') => void;
 }
 
+/** A turn's scroll margin on one side: how far from the conversation's edge it is brought into view. */
+function scrollMargin(turn: Element, side: 'top' | 'bottom'): number {
+  const style = getComputedStyle(turn);
+  return Number.parseFloat(side === 'top' ? style.scrollMarginTop : style.scrollMarginBottom) || 0;
+}
+
 /**
- * Brings each new turn into view in the conversation as it is added, and, for a change Claude
- * drafted, the review's buttons too once they show (the review may read the rules first), so
- * "Confirm change" and "Keep my rules" are never left below the conversation's edge. Only a new
- * turn scrolls: the owner's own scrolling is left alone.
+ * Scrolls the conversation `log` the least that shows `end`, the end of the newest exchange in
+ * `turn`, without taking the exchange's start, the owner's words in `lead`, above the log's top:
+ * when both can't show, the owner's words win. Words too long to be whole give their place to the
+ * newest turn's start. Each keeps its turn's scroll margin from the log's edge.
+ */
+function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, end: Element): void {
+  const port = log.getBoundingClientRect();
+  const whole = (el: HTMLElement) => el.getBoundingClientRect().height + scrollMargin(el, 'top') + scrollMargin(el, 'bottom') <= port.height;
+  const start = whole(lead) ? lead : turn;
+  // How far down the log may go before the start passes its top, and how far it must go to show the end.
+  const room = start.getBoundingClientRect().top - scrollMargin(start, 'top') - port.top;
+  const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - port.bottom;
+  log.scrollTop += Math.min(Math.max(0, short), room);
+}
+
+/**
+ * Brings the newest exchange into view as each turn is added: from the owner's words that lead it
+ * to the newest turn, and, for a change Claude drafted, to the review's buttons once they show (the
+ * review may read the rules first). The owner's words come first, so a new turn opens with them
+ * whole, never cut under the panel's header: when the whole exchange doesn't fit, "Confirm change"
+ * and "Keep my rules" are a scroll away below them. Only a new turn scrolls, and only the
+ * conversation: the owner's own scrolling is left alone.
  */
 function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[]): void {
   const last = turns.at(-1);
   const lastId = last?.id;
+  const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
   const drafted = last?.kind === 'claude' && last.draft !== null;
   useEffect(() => {
-    const turn = lastId === undefined ? null : root.current?.querySelector<HTMLElement>(`[data-turn="${lastId}"]`);
-    if (!turn) return undefined;
-    turn.scrollIntoView({ block: 'nearest' });
+    const turnOf = (id: number | undefined) => (id === undefined ? null : (root.current?.querySelector<HTMLElement>(`[data-turn="${id}"]`) ?? null));
+    const turn = turnOf(lastId);
+    const log = turn?.closest<HTMLElement>('[role="log"]');
+    if (!turn || !log) return undefined;
+    const lead = turnOf(leadId) ?? turn;
+    revealExchange(log, lead, turn, turn);
     if (!drafted) return undefined;
     // The review's last button ("Keep my rules", or "Try again" when the rules couldn't be read)
-    // closes it: in view, the whole row of its buttons is.
+    // closes it, and the exchange.
     const revealActions = () => {
       const buttons = turn.querySelectorAll('.cd-rule-draft button');
       const end = buttons[buttons.length - 1];
       if (end === undefined) return false;
-      end.scrollIntoView({ block: 'nearest' });
+      revealExchange(log, lead, turn, end);
       return true;
     };
     if (revealActions()) return undefined;
@@ -115,7 +143,7 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
     });
     observer.observe(turn, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [root, lastId, drafted]);
+  }, [root, lastId, leadId, drafted]);
 }
 
 /**

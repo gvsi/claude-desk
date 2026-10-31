@@ -4,7 +4,7 @@
  * house rules.
  */
 import { describe, expect, it } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import type { Suggestion } from '../../api/views.ts';
@@ -43,6 +43,25 @@ function inView(el: Element, scroller: Element): boolean {
   const box = el.getBoundingClientRect();
   const port = scroller.getBoundingClientRect();
   return box.height > 0 && box.top >= port.top && box.bottom <= port.bottom;
+}
+
+/**
+ * Once the change Claude drafted shows in the Ask Claude conversation `log`, the owner's `words`
+ * that asked for it are whole, at the conversation's top or below it, never cut under the panel's
+ * header; and the review's "Confirm change" and "Keep my rules" are reachable by scrolling the
+ * conversation to its end. `at` names the case.
+ */
+async function expectTurnOpensAtTheOwnersWords(log: Locator, words: string, at: string): Promise<void> {
+  const confirm = log.getByRole('button', { name: 'Confirm change' });
+  await expect.element(confirm, { message: at }).toBeEnabled();
+  const port = log.element();
+  const bubble = log.getByText(words, { exact: true }).element();
+  expect(Math.round(bubble.getBoundingClientRect().top), at).toBeGreaterThanOrEqual(Math.round(port.getBoundingClientRect().top));
+  expect(inView(bubble, port), at).toBe(true);
+  port.scrollTop = port.scrollHeight;
+  for (const name of ['Confirm change', 'Keep my rules']) {
+    await expect.poll(() => inView(log.getByRole('button', { name }).element(), port), { message: `${at}: ${name}` }).toBe(true);
+  }
 }
 
 /** A rule Maria's answers suggest: Dana's refunds up to $50 without asking. */
@@ -198,11 +217,8 @@ describe('rules page', () => {
     await expect.element(changes.getByText('Quote', { exact: true })).toBeVisible();
     await expect.element(changes.getByRole('group', { name: 'After' }).getByText(/Weekdays, all day/)).toBeVisible();
     await expect.element(log.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
-    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
-    // The review's buttons are in view in the conversation, without scrolling it by hand.
-    for (const name of ['Confirm change', 'Keep my rules']) {
-      await expect.poll(() => inView(log.getByRole('button', { name }).element(), log.element()), { message: name }).toBe(true);
-    }
+    // The owner's words whole at the top, and the review's buttons reachable by scrolling.
+    await expectTurnOpensAtTheOwnersWords(log, 'Stop quoting on weekends', 'from the page');
     // The page beside it keeps its header: "Start from a preset" stays at the right of the title's line (N-Conn-12-Chat).
     const preset = screen.getByRole('button', { name: 'Start from a preset' }).element().getBoundingClientRect();
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element().getBoundingClientRect();
@@ -217,6 +233,23 @@ describe('rules page', () => {
     await expect.element(panel).not.toBeInTheDocument();
     await expect.element(composer).toHaveFocus();
     expect(desk().policy.version).toBe(7);
+  });
+
+  it('rule_chat_opens_each_turn_at_the_owners_words', async () => {
+    // From a suggestion beside the page: the owner's words open the turn, whole, and the review's
+    // buttons after Claude's answer are reachable by scrolling.
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' }).click();
+    const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
+    await expectTurnOpensAtTheOwnersWords(log, 'Stop quoting on weekends', 'from a suggestion');
+
+    // With the conversation at its end, the next change opens at the owner's new words too.
+    await log.getByRole('button', { name: 'Keep my rules' }).click();
+    await expect.element(log.getByText('Nothing changed. Your rules stay as they are.', { exact: true })).toBeVisible();
+    await screen.getByRole('textbox', { name: 'Ask Claude' }).fill('Quote water heater installs up to $600');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log.getByText(/^Here's a rule for that: I quote water heater installs/)).toBeVisible();
+    await expectTurnOpensAtTheOwnersWords(log, 'Quote water heater installs up to $600', 'the next change');
   });
 
   it('rules_header_keeps_its_title_whole_beside_ask_claude', async () => {
@@ -599,14 +632,11 @@ describe('rules page', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(phone.screen.container, { owner: true });
 
-    // Ask Claude as a sheet over the page: the drafted change's buttons are in view.
+    // Ask Claude as a sheet over the page: the owner's words whole, the drafted change's buttons reachable.
     await phone.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
     await userEvent.keyboard('{Enter}');
     const sheet = phone.screen.getByRole('dialog', { name: 'Ask Claude' }).getByRole('log');
-    await expect.element(sheet.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
-    for (const name of ['Confirm change', 'Keep my rules']) {
-      await expect.poll(() => inView(sheet.getByRole('button', { name }).element(), sheet.element()), { message: name }).toBe(true);
-    }
+    await expectTurnOpensAtTheOwnersWords(sheet, 'Stop quoting on weekends', 'as a sheet');
     expectNoHorizontalScroll();
   });
 });

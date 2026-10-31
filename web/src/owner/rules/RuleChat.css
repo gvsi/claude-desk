@@ -5,9 +5,12 @@
   display: contents;
 }
 
-/* Each turn is one of the conversation's rows, so a new one can be brought into view. */
+/* Each turn is one of the conversation's rows, so a new one can be brought into view. It stops
+   4 px from the conversation's edge, the room the conversation keeps at its own ends for focus
+   rings, so a turn brought into view sits where scrolling to an end would leave it. */
 .cd-rule-chat__turn {
   min-width: 0;
+  scroll-margin-block: var(--space-4);
 }
 
 .cd-rule-chat__answer {
