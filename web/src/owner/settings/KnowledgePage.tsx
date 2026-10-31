@@ -147,8 +147,8 @@ export function KnowledgePage() {
   // The item as the kernel last returned it: what the "Added" card and its switch show.
   const [added, setAdded] = useState<KnowledgeItem | null>(null);
   const [switchLine, setSwitchLine] = useState<string | undefined>(undefined);
-  // The last item posted, so adding the same thing again posts it under the same id and replaces
-  // it rather than adding a second copy, whether or not the first answer arrived.
+  // An unconfirmed item keeps its id for a retry. A confirmed add clears it, so deliberately
+  // adding the same words again creates a new item and cannot change the first item's readers.
   const [posted, setPosted] = useState<KnowledgeItem | null>(null);
   // A write is out, or being read back: one at a time, so no answer lands on another's card.
   const writing = useRef(false);
@@ -194,6 +194,7 @@ export function KnowledgePage() {
     setError(undefined);
     try {
       const stored = await post(item);
+      setPosted(null);
       setAdded(stored);
       if (kind === 'note') setNote((current) => (current.trim() === item.text ? '' : current));
       setSwitchLine(undefined);
@@ -210,6 +211,7 @@ export function KnowledgePage() {
       else if (now === 'missing') setError(KNOWLEDGE_COPY.notAdded);
       else {
         // The list may withhold its words; the card keeps the ones posted, with the label read back.
+        setPosted(null);
         setAdded({ ...item, label: { readers: now.readers } });
         if (kind === 'note') setNote((current) => (current.trim() === item.text ? '' : current));
         setSwitchLine(undefined);

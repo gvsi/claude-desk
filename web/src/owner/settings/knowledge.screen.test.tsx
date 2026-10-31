@@ -215,6 +215,20 @@ describe('knowledge', () => {
     expect(posts()[0]?.item_id).toMatch(/^note-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
+  it.each([false, true])('knowledge_repeated_confirmed_words_create_a_new_item_read_back_%s', async (lost) => {
+    if (lost) mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    const screen = await addNote(NOTE, { retryScale: 0 });
+    const first = posts()[0]!;
+    await switchOf(screen).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'true');
+    await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    expect(posts()[2]?.item_id).not.toBe(first.item_id);
+    expect(mockStore.world.knowledge.get(`${RIVERA.deskId}:${first.item_id}`)?.item.label.readers).toEqual(['public']);
+    await expect.poll(() => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').elements().length).toBe(4);
+  });
+
   it('knowledge_lost_publish_before_commit_says_the_change_failed', async () => {
     const screen = await addNote(NOTE, { retryScale: 0 });
     mockStore.inject({ route: 'addKnowledge', status: 'network' });
