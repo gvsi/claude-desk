@@ -307,6 +307,7 @@ cases:
     language: es
     prose: "¿Quiere que le tome un mensaje para María?"
     cards: []
+    # as offer-take-message: taking a message is one of the five
     expected: pass
   # unlisted_offers
   - id: unlisted-offer-reminder
@@ -468,6 +469,7 @@ cases:
     prose: "María le responderá por aquí."
     cards:
       - *handoff_es
+    # as follow-up-reply-here, beside the Spanish handoff card that states the follow-up
     expected: pass
   - id: follow-up-reply-here-no-card
     group: follow_up
