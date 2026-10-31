@@ -121,6 +121,13 @@ const CLAUDE_POINTS = [
 ];
 const TOP_POINT = 'Qwen 3.8 Max, Jul 19, 2026: 55.2%, the top score';
 
+describe('the about project', () => {
+  it('about_project_runs_with_reduced_motion', () => {
+    // How the figures play is checked in the about-motion project's files, which this project leaves out.
+    expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  });
+});
+
 describe('Tau3Chart', () => {
   it('chart_shows_the_leaderboard', async () => {
     const primary = tokenColor('--text-primary');

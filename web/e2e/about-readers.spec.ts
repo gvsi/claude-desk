@@ -2,7 +2,8 @@
  * The About this prototype reading pages end to end, on the dev server's shared mock (`npm run e2e:mock`): opened
  * from the owner sidebar of a fresh copy and left by the link back to Today; opened cold in a browser that has
  * stored nothing; reached by Back and Forward at the reader's place; and both pages at the desktop and phone
- * sizes, for a stranger with no cookie and for an owner signed in to a copy, fitting the window and passing axe.
+ * sizes, for a stranger with no cookie and for an owner signed in to a copy, fitting the window and passing axe
+ * once their figures rest.
  * Expected words are written out here, never read from the app's code.
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -36,8 +37,22 @@ function title(page: Page, name: string) {
 }
 
 /**
+ * Brings the page to rest: each figure that plays once and hasn't yet (`data-play="ready"`) is brought into view,
+ * as a reader scrolling to it would, and plays; then nothing on the page is still animating. The browser runs
+ * with motion, so a check reads the page as it rests, not part way through a figure's first play.
+ */
+async function untilAtRest(page: Page, where: string): Promise<void> {
+  const unplayed = page.locator('[data-play="ready"]');
+  for (let left = await unplayed.count(); left > 0; left = await unplayed.count()) {
+    await unplayed.first().evaluate((figure) => figure.scrollIntoView({ block: 'center' }));
+    await expect(unplayed, `${where}: a figure played in view`).toHaveCount(left - 1);
+  }
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length), { message: `${where}: nothing animates` }).toBe(0);
+}
+
+/**
  * Opens both reading pages at both sizes, first for a stranger with no cookie, then for an owner signed in to a
- * fresh copy, and runs `check` on each once it has drawn, with a name for where it is.
+ * fresh copy, and runs `check` on each once it has drawn and come to rest, with a name for where it is.
  */
 async function eachPage(page: Page, check: (where: string) => Promise<void>): Promise<void> {
   for (const signedIn of [false, true]) {
@@ -58,6 +73,7 @@ async function eachPage(page: Page, check: (where: string) => Promise<void>): Pr
         await page.evaluate(async () => {
           await document.fonts.ready;
         });
+        await untilAtRest(page, where);
         await check(where);
       }
     }
