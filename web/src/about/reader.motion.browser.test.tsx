@@ -6,7 +6,7 @@
  */
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
 import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
@@ -74,6 +74,14 @@ function linkTo(anchor: string): HTMLElement {
   return link;
 }
 
+/**
+ * Follows the contents list's link to `anchor`, clicked where it is, as a reader's click on the pinned list is. A
+ * driven click first brings its target into view, and for a link in the pinned column that can scroll the page.
+ */
+function followLink(anchor: string): void {
+  linkTo(anchor).click();
+}
+
 /** The contents list's links marked as the section being read, by their href. */
 function marked(): string[] {
   return [...document.querySelectorAll('nav[aria-label="On this page"] a[aria-current]')].map((link) => link.getAttribute('href') ?? '');
@@ -92,6 +100,23 @@ function tokenEasing(token: string): string {
   const easing = getComputedStyle(probe).transitionTimingFunction;
   probe.remove();
   return easing;
+}
+
+/**
+ * Waits until the window has gone still: no scroll for a moment. A test ends here before its page goes away; a glide
+ * still finishing its last fraction of a pixel when the page is removed would carry on into the next test's page.
+ */
+async function untilStill(): Promise<void> {
+  let last = performance.now();
+  const onScroll = () => {
+    last = performance.now();
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  try {
+    await expect.poll(() => performance.now() - last >= 200, { timeout: 3000, interval: 50 }).toBe(true);
+  } finally {
+    window.removeEventListener('scroll', onScroll);
+  }
 }
 
 /** Records, frame by frame, what `read` returns, until stopped. */
@@ -134,7 +159,7 @@ describe('ReaderPage with motion', () => {
     const tops = eachFrame(() => Math.round(heading.getBoundingClientRect().top));
     onTestFinished(tops.stop);
 
-    await userEvent.click(linkTo('limitations'));
+    followLink('limitations');
     // Right after the click the window hasn't reached the heading yet, though focus is already on it.
     expect(atClick).not.toBeNull();
     const { top, focused } = atClick as unknown as { top: number; focused: Element | null };
@@ -148,6 +173,7 @@ describe('ReaderPage with motion', () => {
     expect(between.size, 'frames part way there').toBeGreaterThan(2);
     expect(document.activeElement).toBe(heading);
     expect(at.path).toBe('/about/prediction#limitations');
+    await untilStill();
     await screen.unmount();
   });
 
@@ -177,7 +203,7 @@ describe('ReaderPage with motion', () => {
     const slides = eachFrame(() => bar()?.getAnimations().map((animation) => (animation as CSSTransition).transitionProperty) ?? []);
     onTestFinished(slides.stop);
 
-    await userEvent.click(linkTo('characteristics'));
+    followLink('characteristics');
     const heading = headingOf('characteristics');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 1000 }).toBeLessThanOrEqual(1);
     // Past the scroll's end: the page has looked again, and nothing moves.
@@ -197,6 +223,7 @@ describe('ReaderPage with motion', () => {
     expect(style.transitionDuration).toBe('0.2s, 0.2s');
     const emphasis = tokenEasing('--motion-ease-emphasis');
     expect(style.transitionTimingFunction).toBe(`${emphasis}, ${emphasis}`);
+    await untilStill();
     await screen.unmount();
   });
 
@@ -209,11 +236,12 @@ describe('ReaderPage with motion', () => {
     const grow = document.createElement('div');
     grow.style.height = '29px';
     onTestFinished(() => grow.remove());
-    await userEvent.click(linkTo('limitations'));
+    followLink('limitations');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(heading.getBoundingClientRect().top, 'the glide is under way').toBeGreaterThan(200);
     hero.append(grow);
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
+    await untilStill();
     await screen.unmount();
 
     // The same when the rest of a scroll just before the click arrives as the glide starts, as the window's nudge
@@ -221,7 +249,7 @@ describe('ReaderPage with motion', () => {
     const nudged = await renderReader('prediction');
     const restAtTheClick = () => window.dispatchEvent(new Event('scrollend'));
     document.addEventListener('click', restAtTheClick, { once: true });
-    await userEvent.click(linkTo('limitations'));
+    followLink('limitations');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const grown = document.createElement('div');
     grown.style.height = '29px';
@@ -230,17 +258,19 @@ describe('ReaderPage with motion', () => {
     await expect
       .poll(() => Math.abs(headingOf('limitations').getBoundingClientRect().top - 88), { timeout: 2000, message: 'after an earlier rest' })
       .toBeLessThanOrEqual(1);
+    await untilStill();
     await nudged.unmount();
 
     // A reader who takes over part way, scrolling the window themselves, is left where they stopped.
     const again = await renderReader('prediction');
-    await userEvent.click(linkTo('readiness'));
+    followLink('readiness');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const stopAt = Math.round(window.scrollY) + 200;
     window.dispatchEvent(new WheelEvent('wheel', { deltaY: 200 }));
     await jumpTo(stopAt);
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(Math.round(window.scrollY), 'where the reader stopped').toBe(stopAt);
+    await untilStill();
     await again.unmount();
   });
 
@@ -264,19 +294,20 @@ describe('ReaderPage with motion', () => {
     });
     onTestFinished(() => watch.disconnect());
     document.addEventListener('click', () => window.dispatchEvent(new Event('scrollend')), { once: true });
-    await userEvent.click(linkTo('characteristics'));
+    followLink('characteristics');
     const heading = headingOf('characteristics');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(marks, 'the sections marked on the way').toEqual(['#characteristics']);
 
     // A reader who takes over part way, with the wheel, is followed: the mark is where they stop.
-    await userEvent.click(linkTo('readiness'));
+    followLink('readiness');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
     await jumpTo(placeOf('why-its-coming') + 100);
     await expect.poll(marked, { timeout: 500, message: 'where the reader stopped' }).toEqual(['#why-its-coming']);
     watch.disconnect();
+    await untilStill();
     await screen.unmount();
   });
 
@@ -290,7 +321,7 @@ describe('ReaderPage with motion', () => {
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
     const heading = headingOf('limitations');
-    await userEvent.click(linkTo('limitations'));
+    followLink('limitations');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const grown = document.createElement('div');
@@ -303,6 +334,7 @@ describe('ReaderPage with motion', () => {
       .poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000, message: 'once the type has loaded' })
       .toBeLessThanOrEqual(1);
     expect(marked()).toEqual(['#limitations']);
+    await untilStill();
     await screen.unmount();
   });
 
@@ -357,6 +389,7 @@ describe('ReaderPage with motion', () => {
     seen.frames.length = 0;
     at.navigate?.(1);
     await landsAt('Product proposal', section, 'forward again');
+    await untilStill();
     await screen.unmount();
   });
 });

@@ -192,6 +192,16 @@ async function twoFrames(): Promise<void> {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
+/**
+ * Follows the laptop contents list's link to `anchor`, clicked where it is, as a reader's click on the pinned list is.
+ * A driven click first brings its target into view, and for a link in the pinned column that can scroll the page.
+ */
+function followContentsLink(anchor: string): void {
+  const link = document.querySelector<HTMLElement>(`nav.cd-about-contents--side a[href="#${anchor}"]`);
+  if (!link) throw new Error(`no contents link to #${anchor}`);
+  link.click();
+}
+
 describe('ReaderPage', () => {
   it('reader_renders_its_document', async () => {
     for (const id of IDS) {
@@ -760,7 +770,7 @@ describe('ReaderPage', () => {
     withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
-    await userEvent.click(screen.getByRole('link', { name: 'Limitations', exact: true }));
+    followContentsLink('limitations');
     await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
     await twoFrames();
     swapType();
@@ -1203,7 +1213,7 @@ describe('ReaderPage', () => {
     await jumpTo(placeOf('v1'));
     await expect.poll(marked).toEqual(['v1 (location)']);
 
-    await userEvent.click(screen.getByRole('link', { name: 'Business path', exact: true }));
+    followContentsLink('business-path');
     const end = document.documentElement.scrollHeight - window.innerHeight;
     await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(end));
     expect(placeOf('business-path'), 'the jump stops short of its place').toBeGreaterThan(end + 1);

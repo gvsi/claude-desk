@@ -286,7 +286,9 @@ test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) 
     const before = await settledScrollY(page);
 
     const contents = page.getByRole('navigation', { name: 'On this page' });
-    await contents.getByRole('link', { name: 'Limitations', exact: true }).click();
+    // Clicked where it is: Playwright's own click may scroll the pinned list's link into view first, which moves the
+    // reader's place.
+    await contents.getByRole('link', { name: 'Limitations', exact: true }).evaluate((link: HTMLElement) => link.click());
     await page.waitForURL('**/about/prediction#limitations');
     await expect.poll(atLimitations, `${reducedMotion}: followed`).toBe(true);
     await expect(page.locator('#limitations'), `${reducedMotion}: focus on the section`).toBeFocused();
