@@ -596,9 +596,12 @@ export const LeavingWithoutAnimationEnd: Story = {
     await settled(dialog);
     const exit = watchTheExit(dialog);
     // The exit's animationend never reaches the dialog, as when a page script swallows it or the
-    // browser drops it.
+    // browser drops it. Each one swallowed is counted, with whether the dialog was still open then.
+    const openAsSwallowed: boolean[] = [];
     const swallow = (event: AnimationEvent) => {
-      if (event.target === dialog) event.stopImmediatePropagation();
+      if (event.target !== dialog) return;
+      openAsSwallowed.push(dialog.open);
+      event.stopImmediatePropagation();
     };
     window.addEventListener('animationend', swallow, { capture: true });
     const timers = spyOn(window, 'setTimeout');
@@ -614,13 +617,16 @@ export const LeavingWithoutAnimationEnd: Story = {
       await expect(exit.at()?.open).toBe(true);
 
       // closes_by_the_fallback: it still closes, and says so once, by a timer set to the exit's
-      // length plus motion-instant, so it can never stay open over the page. It waited for the exit
-      // first rather than cutting it short.
+      // length plus motion-instant, so it can never stay open over the page. The exit's end came
+      // once and was swallowed while the dialog was still open, and the dialog closed no sooner than
+      // the timer's delay after it started to leave (less a millisecond for rounding), so the timer
+      // closed it, not an animationend.
       await waitFor(() => expect(dialog.open).toBe(false));
       await expect(args.onClosed).toHaveBeenCalledTimes(1);
       const [fast, instant] = [motion('fast'), motion('instant')];
       await expect(timers.mock.calls.map(([, delay]) => delay)).toContain(fast + instant);
-      await expect(closedAt - exit.startedAt()).toBeGreaterThanOrEqual(fast);
+      await expect(openAsSwallowed).toEqual([true]);
+      await expect(closedAt - exit.startedAt()).toBeGreaterThanOrEqual(fast + instant - 1);
     } finally {
       exit.stop();
       watchTheClose.disconnect();
@@ -633,7 +639,7 @@ export const LeavingWithoutAnimationEnd: Story = {
 export const WrongPasscode: Story = {
   args: { error: 'wrong_passcode' },
   render: (args) => <FailingPage {...args} />,
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     // error_is_an_alert_on_the_field: the line is an alert, and it describes the invalid field.
     await expectErrorOnTheField(canvas, 'wrong_passcode');
 
@@ -648,16 +654,7 @@ export const WrongPasscode: Story = {
     await expectErrorOnTheField(canvas, 'wrong_passcode');
     await expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'rivera'.length]);
     await expect(canvas.getByRole('button', { name: 'Start the demo' })).toBeEnabled();
-
-    // a_wrong_passcode_never_leaves: the dialog stays open and still, longer than an exit would
-    // take, and never says it has closed.
-    const dialog = canvas.getByRole('dialog', { name: args.title }) as HTMLDialogElement;
-    await new Promise((resolve) => setTimeout(resolve, (motion('fast') + motion('instant')) * 2));
-    await expect(dialog).not.toHaveClass('cd-intro--leaving');
-    await expect(dialog.open).toBe(true);
-    expectComputed(dialog, { animationName: 'none' });
-    expectComputed(the(dialog, '.cd-intro__panel'), { opacity: '1' });
-    await expect(args.onClosed).not.toHaveBeenCalled();
+    await atRest(canvasElement);
   },
 };
 
