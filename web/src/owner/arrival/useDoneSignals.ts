@@ -8,8 +8,8 @@
  * What the list remembers (the Desk the copy started with and the things seen done) lasts while the
  * app runs, across visits to Today, until a reload or a new copy.
  */
-import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useQueries, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 
 import type { Decision } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
@@ -47,7 +47,7 @@ export interface DoneSignals {
   done: Readonly<Partial<Record<Thing, Done>>>;
   /** How many of the four are done. */
   count: number;
-  /** How the latest answer given on this page ended, when "Answer a held request" doesn't count it. */
+  /** How the answer given on this page last ended, when "Answer a held request" doesn't count it. */
   uncounted: UncountedAnswer | null;
 }
 
@@ -58,6 +58,8 @@ export interface UseDoneSignalsOptions {
   deskId: string;
   /** The final decisions of the requests answered on this page, in this view. */
   answered: Iterable<Pick<Decision, 'state'>>;
+  /** The final decision of the request answered on this page last, kept when its card is dismissed. */
+  latest: Pick<Decision, 'state'> | null;
 }
 
 /** Each read follows Today's poll and is read again when the window regains focus: the owner comes back from the preview tab. */
@@ -68,31 +70,48 @@ function polled() {
 interface Read<T> {
   status: 'pending' | 'error' | 'success';
   data: T | undefined;
-  isFetchedAfterMount: boolean;
 }
 
 /**
  * What a read shows, only while its latest attempt worked. React Query keeps the data of an earlier
  * read through a failure; that copy may be from before this view, so a failing read ticks nothing new.
  */
-function worked<T>(read: Pick<Read<T>, 'status' | 'data'>): T | undefined {
+function worked<T>(read: Read<T>): T | undefined {
   return read.status === 'success' ? read.data : undefined;
 }
 
+/** How many fetches of a query have ended, with data or with an error. */
+function fetchesEnded(queryClient: QueryClient, queryKey: QueryKey): number {
+  const state = queryClient.getQueryState(queryKey);
+  return (state?.dataUpdateCount ?? 0) + (state?.errorUpdateCount ?? 0);
+}
+
 /**
- * Whether a read has settled for this list: one made since the list was drawn has worked. A copy
- * another screen read earlier isn't this list's first read, so what it shows waits for a fresh one,
- * and what was done before Today opened is never taken for something done in view.
+ * For each read, by its key, how many of its fetches must have ended before one this list asked for
+ * has: those ended when the list first saw the read, and one more if a fetch was still out then. A
+ * copy another screen read earlier, or a read it asked for that lands after the list is drawn, isn't
+ * this list's first read, so what it shows waits for a fresh one, and what was done before Today
+ * opened is never taken for something done in view.
  */
-function fresh<T>(read: Read<T>): boolean {
-  return read.status === 'success' && read.isFetchedAfterMount;
+function useFreshReads(queryClient: QueryClient) {
+  const before = useRef(new Map<string, number>());
+  return <T,>(queryKey: QueryKey, read: Read<T>): boolean => {
+    const hash = JSON.stringify(queryKey);
+    let wait = before.current.get(hash);
+    if (wait === undefined) {
+      wait = fetchesEnded(queryClient, queryKey) + (queryClient.getQueryState(queryKey)?.fetchStatus === 'fetching' ? 1 : 0);
+      before.current.set(hash, wait);
+    }
+    return read.status === 'success' && fetchesEnded(queryClient, queryKey) > wait;
+  };
 }
 
 /** Per app (its query client, so a reload starts afresh), what the list last kept of its copy. */
 const keptByApp = new WeakMap<QueryClient, Kept>();
 
-export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOptions): DoneSignals {
+export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSignalsOptions): DoneSignals {
   const queryClient = useQueryClient();
+  const fresh = useFreshReads(queryClient);
   const answeredHere = [...answered];
   // The copy's Desks as the owner's frame reads them, never read again here.
   const desks = useDesks(deskId, { passive: true });
@@ -152,15 +171,18 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
   const previewIds = new Set(previews);
   const now: Record<Thing, Reading> = {
     chat: {
-      settled: reading && fresh(conversations) && transcripts.every((t) => fresh(t)),
+      settled: reading && fresh(conversationsKey(seeded ?? ''), conversations) && transcripts.every((t, i) => fresh(conversationKey(previews[i] ?? ''), t)),
       done: reading && conversationsWorked && chattedAsCustomer(chats),
     },
     break: {
-      settled: reading && fresh(conversations) && (previews.length === 0 || (fresh(attempts) && fresh(ledger))),
+      settled:
+        reading &&
+        fresh(conversationsKey(seeded ?? ''), conversations) &&
+        (previews.length === 0 || (fresh(attemptsQuery(seeded ?? '').queryKey, attempts) && fresh(ledgerQuery(seeded ?? '').queryKey, ledger))),
       done: reading && conversationsWorked && stopped !== undefined && record !== undefined && stoppedInPreview(stopped, record, previewIds),
     },
     answer: {
-      settled: reading && fresh(ledger),
+      settled: reading && fresh(ledgerQuery(seeded ?? '').queryKey, ledger),
       done: reading && record !== undefined && answeredOnRecord(record),
       inView: reading && deskId === seeded && answeredInView(answeredHere),
     },
@@ -176,6 +198,6 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
   return {
     done: remembered.done,
     count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length,
-    uncounted: uncountedAnswer(answeredHere, reading && deskId === seeded),
+    uncounted: uncountedAnswer(latest, reading && deskId === seeded),
   };
 }

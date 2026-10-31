@@ -178,18 +178,36 @@ function approval(seq: number, summary: Record<string, unknown>): LedgerEntry {
 }
 
 describe('answer a held request, on the record', () => {
-  it('an answer the kernel took counts: allowed', () => {
-    const ledger = { entries: [approval(4, { decision_id: 'dec-1', action_id: 'act-1', answer: 'allow_once', state: 'approved' })] };
-    expect(answeredOnRecord(ledger)).toBe(true);
+  /** The run of `dec-1` the kernel records once an allow is taken: `executed`, `failed`, `unknown` or `refused_at_execution`. */
+  function ran(seq: number, state: string, extra: Record<string, unknown> = {}): LedgerEntry {
+    return entry(seq, { kind: 'execute', session_id: 'ses-visitor-web', ref_id: 'dec-1', summary: { decision_id: 'dec-1', action_id: 'act-1', state, ...extra } });
+  }
+  const allowed = approval(4, { decision_id: 'dec-1', action_id: 'act-1', answer: 'allow_once', state: 'approved' });
+
+  it('an allow counts once its run is done', () => {
+    expect(answeredOnRecord({ entries: [allowed, ran(5, 'executed')] })).toBe(true);
+    // Taken but not run yet: not known to have taken effect.
+    expect(answeredOnRecord({ entries: [allowed] })).toBe(false);
   });
 
-  it('denied, or allowed and refused at execution, counts too', () => {
-    for (const [answer, state] of [
-      ['deny_once', 'denied'],
-      ['allow_once', 'refused_at_execution'],
-    ]) {
-      expect(answeredOnRecord({ entries: [approval(4, { decision_id: 'dec-1', action_id: 'act-1', answer, state })] }), state).toBe(true);
+  it("an allow whose run failed, isn't confirmed, or was refused at execution doesn't count", () => {
+    for (const state of ['failed', 'unknown', 'refused_at_execution']) {
+      expect(answeredOnRecord({ entries: [allowed, ran(5, state)] }), state).toBe(false);
     }
+    const refused = approval(4, { decision_id: 'dec-1', action_id: 'act-1', answer: 'allow_once', state: 'refused_at_execution' });
+    expect(answeredOnRecord({ entries: [refused] })).toBe(false);
+  });
+
+  it('a run that was unknown, then reconciled as done, counts', () => {
+    expect(answeredOnRecord({ entries: [allowed, ran(5, 'unknown'), ran(6, 'executed', { reconciled: true })] })).toBe(true);
+  });
+
+  it('a deny counts as taken', () => {
+    expect(answeredOnRecord({ entries: [approval(4, { decision_id: 'dec-1', action_id: 'act-1', answer: 'deny_once', state: 'denied' })] })).toBe(true);
+  });
+
+  it("a replayed run doesn't make an allow count", () => {
+    expect(answeredOnRecord({ entries: [allowed, ran(5, 'executed', { replayed: { at: '2026-10-29T18:00:00.000000Z' } })] })).toBe(false);
   });
 
   it("a refusal note, the request still held, doesn't count", () => {
@@ -220,9 +238,14 @@ describe('answer a held request, on the record', () => {
 });
 
 describe('answer a held request, in this view', () => {
-  it('an answer that settled the request counts, whatever it then did', () => {
-    const answered: DecisionState[] = ['approved', 'executed', 'failed', 'unknown', 'denied', 'refused_at_execution'];
-    for (const state of answered) expect(answeredInView([{ state }]), state).toBe(true);
+  it('an answer that took effect counts: allowed, done, or denied', () => {
+    const tookEffect: DecisionState[] = ['approved', 'executed', 'denied'];
+    for (const state of tookEffect) expect(answeredInView([{ state }]), state).toBe(true);
+  });
+
+  it("an answer that failed, isn't confirmed yet, or was refused at execution doesn't count yet", () => {
+    const notYet: DecisionState[] = ['failed', 'unknown', 'refused_at_execution'];
+    for (const state of notYet) expect(answeredInView([{ state }]), state).toBe(false);
   });
 
   it("a late answer that found the request expired or cancelled isn't one", () => {
@@ -350,19 +373,26 @@ describe('what the list keeps across visits to Today', () => {
 
 describe('an answer given here that the list does not count', () => {
   it('a late answer is how the request ended: expired or cancelled', () => {
-    expect(uncountedAnswer([{ state: 'expired' }], true)).toBe('expired');
-    expect(uncountedAnswer([{ state: 'cancelled' }], false)).toBe('cancelled');
+    expect(uncountedAnswer({ state: 'expired' }, true)).toBe('expired');
+    expect(uncountedAnswer({ state: 'cancelled' }, false)).toBe('cancelled');
   });
 
   it('an answer that went through is uncounted only where the list does not count answers', () => {
-    expect(uncountedAnswer([{ state: 'executed' }], false)).toBe('answered');
-    expect(uncountedAnswer([{ state: 'denied' }], false)).toBe('answered');
-    expect(uncountedAnswer([{ state: 'executed' }], true)).toBeNull();
+    for (const state of ['approved', 'executed', 'denied'] as const) {
+      expect(uncountedAnswer({ state }, false), state).toBe('answered');
+      expect(uncountedAnswer({ state }, true), state).toBeNull();
+    }
   });
 
-  it('the latest answer given here says it, and none says nothing', () => {
-    expect(uncountedAnswer([{ state: 'expired' }, { state: 'cancelled' }], true)).toBe('cancelled');
-    expect(uncountedAnswer([], true)).toBeNull();
-    expect(uncountedAnswer([{ state: 'held' }], false)).toBeNull();
+  it("an answer that didn't go through, or isn't confirmed yet, keeps its own outcome, on any Desk", () => {
+    for (const state of ['failed', 'unknown', 'refused_at_execution'] as const) {
+      expect(uncountedAnswer({ state }, false), state).toBe(state);
+      expect(uncountedAnswer({ state }, true), state).toBe(state);
+    }
+  });
+
+  it('no answer, or a request still held, says nothing', () => {
+    expect(uncountedAnswer(null, true)).toBeNull();
+    expect(uncountedAnswer({ state: 'held' }, false)).toBeNull();
   });
 });

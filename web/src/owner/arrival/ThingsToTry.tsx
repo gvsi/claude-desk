@@ -21,6 +21,8 @@ export interface ThingsToTryProps {
   firstHeld: NeedsYouItem | null;
   /** The final decisions of the requests answered on Today in this view. */
   answered: Iterable<{ state: Decision['state'] }>;
+  /** The final decision of the request answered on Today last, kept when its card is dismissed. */
+  latestAnswer: { decision_id: string; state: Decision['state'] } | null;
   /** "Open the request": brings the held request's card into view and focus. */
   onFocusRequest: () => void;
 }
@@ -79,19 +81,21 @@ function routerClick(go: () => void) {
  * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
  * remembered in this browser when it can be, and a hidden list reads nothing.
  */
-export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTryProps) {
+export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest }: ThingsToTryProps) {
   const { business, desk } = useOwnerDesk();
   const today = useToday(desk.desk_id);
   const navigate = useNavigate();
   const titleId = useId();
   const [hidden, setHidden] = useState(() => readLocal('thingsToTryHidden') === 'true');
-  const signals = useDoneSignals({ enabled: !hidden, deskId: desk.desk_id, answered });
-  // How the last answer given here that the list doesn't count ended, kept while nothing is held, so
-  // the row stays settled with its line after the answered card is dismissed.
-  const [settledAs, setSettledAs] = useState<UncountedAnswer | null>(null);
+  const signals = useDoneSignals({ enabled: !hidden, deskId: desk.desk_id, answered, latest: latestAnswer });
+  // The row settles with how the latest answer given here ended, when the list doesn't count it, and
+  // keeps that line when its card is dismissed. A new request held clears it: the answer whose line it
+  // was is remembered here, so the line doesn't come back once that request is gone.
   const waiting = firstHeld?.decision != null;
-  if (waiting && settledAs !== null) setSettledAs(null);
-  else if (!waiting && signals.uncounted !== null && signals.uncounted !== settledAs) setSettledAs(signals.uncounted);
+  const latestId = latestAnswer?.decision_id ?? null;
+  const [clearedFor, setClearedFor] = useState<string | null>(null);
+  if (waiting && latestId !== null && latestId !== clearedFor) setClearedFor(latestId);
+  const settledAs: UncountedAnswer | null = !waiting && latestId !== null && latestId !== clearedFor ? signals.uncounted : null;
   // After hiding or showing, focus goes to the button that undoes it, rather than to the page.
   const toggleRef = useRef<HTMLDivElement>(null);
   const moveFocus = useRef(false);
@@ -321,7 +325,9 @@ function useTickInPlace(done: boolean, eases: boolean) {
  * shown again), is drawn still.
  */
 function Thing({ icon, title, held = false, detail, below, end = null, children }: ThingProps) {
-  const [drawnEnded] = useState(end !== null);
+  // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
+  const [drawnEnded, setDrawnEnded] = useState(end !== null);
+  if (end === null && drawnEnded) setDrawnEnded(false);
   const inView = end !== null && !end.atLoad && !drawnEnded;
   const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(end !== null, inView);
   return (
@@ -342,18 +348,22 @@ function Thing({ icon, title, held = false, detail, below, end = null, children 
           {end === null ? detail : end.line}
         </p>
       </div>
-      <div className="cd-things__action">
-        {end === null ? children : null}
-        {end?.ticks ? (
-          // The done line already says it in words, so the pill isn't read twice.
-          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
-            <Pill>
-              <StatusDot tone="handled" />
-              Done
-            </Pill>
-          </span>
-        ) : null}
-      </div>
+      {/* A settled row has no next step and no pill, so no place for one either. */}
+      {end === null || end.ticks ? (
+        <div className="cd-things__action">
+          {end === null ? (
+            children
+          ) : (
+            // The done line already says it in words, so the pill isn't read twice.
+            <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
+              <Pill>
+                <StatusDot tone="handled" />
+                Done
+              </Pill>
+            </span>
+          )}
+        </div>
+      ) : null}
       {below && end === null ? <div className="cd-things__below">{below}</div> : null}
     </li>
   );

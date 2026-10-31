@@ -25,12 +25,16 @@ export const THINGS_TO_TRY = [
 /**
  * What "Answer a held request" says once an answer given on Today settles a request the list doesn't
  * count, in the card's own words: the request had expired or been cancelled first, so nothing was
- * done; or the answer went through on a Desk besides the one the copy started with.
+ * done; or, on a Desk besides the one the copy started with, the answer went through (the row's
+ * done line), or it ended otherwise, said exactly as the card says it.
  */
 export const UNCOUNTED_ANSWER_LINES = {
   expired: 'Expired before you answered. Nothing was done.',
   cancelled: 'Cancelled before you answered. Nothing was done.',
-  answered: "Done. Your answer went to the visitor's chat.",
+  answered: THINGS_TO_TRY[2].done,
+  failed: "You allowed this, but it didn't go through. Nothing was done.",
+  unknown: 'You allowed this. Still confirming whether it went through.',
+  refused_at_execution: "Your rules changed before this ran, so it wasn't done.",
 } as const satisfies Record<UncountedAnswer, string>;
 
 /** Things a stranger might try to talk the Desk into, in their words: three, the most a chip row shows. */

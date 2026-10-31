@@ -187,7 +187,7 @@ export function TodayPage() {
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
-        <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} onFocusRequest={focusFirstHeld} />
+        <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou
             held={held}

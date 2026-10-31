@@ -4,7 +4,7 @@
  * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
  * with the public page always a new tab away and never opened on Today itself.
  */
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -1325,23 +1325,25 @@ describe('Things to try ticks off', () => {
   });
 
   it('a_record_read_before_today_opened_is_not_its_first_read', async () => {
-    // Two held requests, so "Answer a held request" is drawn waiting when Today opens. Safety reads the
-    // record, then the first request is answered elsewhere; nothing polls meanwhile.
+    // Two held requests, so "Answer a held request" is drawn waiting when Today opens.
     mockStore.world.addHeldRefund();
-    const { screen, router } = await renderRoute(SAFETY_ENTRIES, { pollScale: 100 });
-    await expect.poll(() => requests('ledger').length).toBeGreaterThan(0);
+    const { screen, router } = await renderRoute(SAFETY_ENTRIES);
+    // Safety asks for the record and gets it as it stands, before the answer; it lands late.
+    const late = holdNextReadAsItIs(ROUTES.ledger.path.replace('{desk_id}', RIVERA.deskId), RIVERA.deskId);
+    await expect.poll(() => late.asked(), { timeout: 5_000 }).toBe(true);
     const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
     if (!held) throw new Error('the seed holds the 15% quote');
     await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
 
-    // Today opens with Safety's copy of the record, from before the answer, and reads it again (that
-    // read held a moment, so the row shows waiting first): the answer was given before Today opened,
-    // so the row is done at load, drawn still.
-    delayNextRead(ROUTES.ledger.path.replace('{desk_id}', RIVERA.deskId), 1_000);
+    // Today opens while that read is still out, and the row waits.
     const animated = watchListAnimations();
     await router.navigate(TODAY);
-    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
-    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true }), { timeout: 3_000 }).toBeVisible();
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    // The late read lands, from before the answer: it was asked before Today opened, so it isn't
+    // Today's first read. Today's own reads, after the answer, are, and the row is done at load.
+    late.release();
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     expect(animated()).toEqual([]);
   });
@@ -1377,12 +1379,13 @@ describe('Things to try ticks off', () => {
   });
 
   it.each([
-    ['expired', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
-    ['cancelled', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
-  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s', async (state, cardLine, rowLine) => {
+    ['expired', 'desktop', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['expired', 'phone', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['cancelled', 'desktop', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
+  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, viewport, cardLine, rowLine) => {
     // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
     // ticks; the row stays in its slot and says how it ended.
-    const { screen } = await renderRoute(TODAY);
+    const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
     await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
@@ -1399,17 +1402,160 @@ describe('Things to try ticks off', () => {
     expectSettledInItsSlot(frames, item);
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
-    // No check, no pill and no button: the card right below has the request.
+    // No check, no pill and no button, nor an empty place for one: the card right below has the request.
     expect(row.getByRole('button').elements()).toHaveLength(0);
-    expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
+    expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot, .cd-things__action')).toBeNull();
     // Focus stays with the card that was answered.
     expect(card.element().contains(document.activeElement)).toBe(true);
-    // Nothing ticks, and the line still says how long it takes.
-    const reads = requests('needsYou').length;
-    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads + 6);
+    // Nothing ticks, and the line still says how long it takes, though the record was read again.
+    const reads = { needsYou: requests('needsYou').length, ledger: requests('ledger').length };
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads.needsYou + 6);
     expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
+    expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
+    expectNoHorizontalScroll();
+  });
+
+  it.each([
+    ['failed', "You allowed this, but it didn't go through. Nothing was done."],
+    ['refused_at_execution', "Your rules changed before this ran, so it wasn't done."],
+  ] as const)('an_answer_that_ended_%s_settles_without_a_tick', async (state, line) => {
+    // On the Desk the copy started with, an answer ticks only if it took effect.
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const held = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 200, body: { decision: { ...held, state, answers: [] }, execution_state: null, card_diff: null } });
+    const item = row.element() as HTMLElement;
+    const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), line);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    const frames = await watching;
+
+    // The row says what the card says, in its slot, with no check, no pill and no button.
+    await expect.element(heldCard(screen).getByText(line, { exact: true })).toBeVisible();
+    await expect.element(row.getByText(line, { exact: true })).toBeVisible();
+    expectSettledInItsSlot(frames, item);
+    expect(item.querySelector('.cd-things__check, .cd-pill, .cd-things__action')).toBeNull();
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    // Nothing ticks, though the record is read again meanwhile.
+    const reads = { needsYou: requests('needsYou').length, ledger: requests('ledger').length };
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads.needsYou + 6);
+    expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+    expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
+  });
+
+  it('an_answer_still_confirming_settles_then_ticks_once_it_is_done', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const held = seededHoldNow();
+    const confirming = 'You allowed this. Still confirming whether it went through.';
+    mockStore.inject({ route: 'answer', status: 200, body: { decision: { ...held, state: 'unknown', answers: [] }, execution_state: 'unknown', card_diff: null } });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(row.getByText(confirming, { exact: true })).toBeVisible();
+    expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+
+    // The run is reconciled as done, and the record says so: the row ticks then.
+    const desk = mockStore.world.desk(RIVERA.deskId);
+    if (!desk) throw new Error('the main line is in the copy');
+    mockStore.world.appendLedger(desk, { kind: 'approval', origin: 'kernel', session_id: held.session_id, ref_id: held.decision_id, summary: { decision_id: held.decision_id, action_id: held.action?.action_id ?? null, answer: 'allow_once', state: 'approved' } });
+    mockStore.world.appendLedger(desk, { kind: 'execute', origin: 'kernel', session_id: held.session_id, ref_id: held.decision_id, summary: { decision_id: held.decision_id, action_id: held.action?.action_id ?? null, state: 'executed', reconciled: true } });
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+  });
+
+  it('dismiss_and_a_new_hold_keep_the_settled_row_in_place', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const item = row.element() as HTMLElement;
+    const held = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'expired', answers: [] } } });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(row.getByText(EXPIRED_ROW_LINE, { exact: true })).toBeVisible();
+    endInTheMock(held.decision_id, 'expired');
+    await expect.poll(() => item.style.minHeight, { timeout: 2_000 }).toBe('');
+
+    // Dismissed, the card goes; the row keeps its line, and the list doesn't change height.
+    const watching = watchListHeight(things.element(), item);
+    await screen.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'Dismiss' }).click();
+    await expect.element(heldCard(screen)).not.toBeInTheDocument();
+    const heights = await watching;
+    expect(Math.max(...heights.list) - Math.min(...heights.list), 'the list kept its height').toBeLessThan(0.5);
+    expect(Math.max(...heights.rowTop) - Math.min(...heights.rowTop), 'the row kept its slot').toBeLessThan(0.5);
+    expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
+    await expect.element(row.getByText(EXPIRED_ROW_LINE, { exact: true })).toBeVisible();
+
+    // A new request is held: the same row waits for it again.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I get 50% off if I pay cash?' } });
+    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
+    expect(row.getByText(EXPIRED_ROW_LINE, { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('dismissing_the_latest_answer_keeps_its_line', async () => {
+    // Two held requests, both answered late: the first had expired, the second had been cancelled.
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(TODAY);
+    const row = thingRow(screen, 'Answer a held request');
+    const needs = screen.getByRole('region', { name: 'Needs you' });
+    const refund = screen.getByRole('article', { name: `Held for you: ${rivera.heldRefund.reason_plain}`, exact: true });
+    await expect.element(refund).toBeVisible();
+    const first = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...first, state: 'expired', answers: [] } } });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(heldCard(screen).getByText('This request expired before you answered. Nothing was done.', { exact: true })).toBeVisible();
+    endInTheMock(first.decision_id, 'expired');
+    const second = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.heldRefund.reason_plain)?.decision;
+    if (!second) throw new Error('the refund is held');
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...second, state: 'cancelled', answers: [] } } });
+    await refund.getByRole('button', { name: 'Deny', exact: true }).click();
+    await screen.getByRole('menuitem', { name: 'This time' }).click();
+    await expect.element(row.getByText(CANCELLED_ROW_LINE, { exact: true })).toBeVisible();
+    endInTheMock(second.decision_id, 'cancelled');
+
+    // The second card is dismissed: the row still says how the latest answer ended.
+    const refundItem = needs.getByRole('listitem').filter({ has: page.getByRole('article', { name: `Held for you: ${rivera.heldRefund.reason_plain}`, exact: true }) });
+    await refundItem.getByRole('button', { name: 'Dismiss' }).click();
+    await expect.element(refund).not.toBeInTheDocument();
+    const reads = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads + 2);
+    await expect.element(row.getByText(CANCELLED_ROW_LINE, { exact: true })).toBeVisible();
+    expect(row.getByText(EXPIRED_ROW_LINE, { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('a_settle_after_the_list_is_shown_again_still_eases', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const first = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...first, state: 'expired', answers: [] } } });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(EXPIRED_ROW_LINE, { exact: true })).toBeVisible();
+    endInTheMock(first.decision_id, 'expired');
+    await thingsToTry(screen).getByRole('button', { name: 'Hide this list' }).click();
+    await screen.getByRole('button', { name: 'Show things to try' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(EXPIRED_ROW_LINE, { exact: true })).toBeVisible();
+
+    // Another request is held, and its answer comes back late too: the row settles again, eased.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I get 50% off if I pay cash?' } });
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    const next = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'held' && d.decision.reason_plain !== rivera.decisions.held.reason_plain)?.decision;
+    if (!next) throw new Error('a new request is held');
+    const card = screen.getByRole('article', { name: `Held for you: ${next.reason_plain}`, exact: true });
+    await expect.element(card).toBeVisible();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...next, state: 'cancelled', answers: [] } } });
+    const item = row.element() as HTMLElement;
+    const watching = watchTheList(item, thingsToTry(screen).element(), screen.getByRole('region', { name: 'Needs you' }).element(), CANCELLED_ROW_LINE);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    expectSettledInItsSlot(await watching, item);
   });
 
   it('answer_on_a_second_desk_settles_the_row_in_its_slot', async () => {
@@ -1439,6 +1585,34 @@ describe('Things to try ticks off', () => {
     expect(card.element().contains(document.activeElement)).toBe(true);
     // It isn't counted: the count is the copy's second Desk alone.
     await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+  });
+
+  it.each([
+    ['failed', "You allowed this, but it didn't go through. Nothing was done."],
+    ['unknown', 'You allowed this. Still confirming whether it went through.'],
+    ['refused_at_execution', "Your rules changed before this ran, so it wasn't done."],
+  ] as const)('second_desk_answer_that_ended_%s_says_the_cards_own_line', async (state, line) => {
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    const things = thingsToTry(screen);
+    await expect.element(things).toBeVisible();
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.emergenciesSlug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.emergenciesSlug }, body: { text: 'Can I get 50% off if I pay cash?' } });
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.emergenciesDeskId && d.decision.state === 'held')?.decision;
+    if (!held) throw new Error('Emergencies holds a request');
+    const card = screen.getByRole('article', { name: `Held for you: ${held.reason_plain}`, exact: true });
+
+    // The answer comes back with an outcome that isn't done: the row says what the card says, word for word.
+    mockStore.inject({ route: 'answer', status: 200, body: { decision: { ...held, state, answers: [] }, execution_state: null, card_diff: null } });
+    const item = row.element() as HTMLElement;
+    const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), line);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    const frames = await watching;
+    await expect.element(card.getByText(line, { exact: true })).toBeVisible();
+    await expect.element(row.getByText(line, { exact: true })).toBeVisible();
+    expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    expectSettledInItsSlot(frames, item);
   });
 
   it('reload_after_answering_is_done_at_once', async () => {
@@ -1643,6 +1817,71 @@ function watchListAnimations(): () => string[] {
   frame = requestAnimationFrame(look);
   onTestFinished(() => cancelAnimationFrame(frame));
   return () => [...seen];
+}
+
+/**
+ * The next read of a Desk's record (`path`), answered by the mock as the record stands when it is
+ * asked, then held until the test lets it through: a read that lands after things have changed.
+ */
+function holdNextReadAsItIs(path: string, deskId: string): { asked: () => boolean; release: () => void } {
+  let asked = false;
+  let used = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  worker.use(
+    http.get(path, async () => {
+      if (used) return undefined;
+      used = true;
+      const answer = await mockStore.dispatch('ledger', { params: { desk_id: deskId }, query: { verify: 'true' } });
+      asked = true;
+      await released;
+      if ('network' in answer) return HttpResponse.error();
+      return HttpResponse.json(answer.body as object, { status: answer.status });
+    }),
+  );
+  return { asked: () => asked, release };
+}
+
+/** "Answer a held request" settled by an answer that found the request expired, or cancelled. */
+const EXPIRED_ROW_LINE = 'Expired before you answered. Nothing was done.';
+const CANCELLED_ROW_LINE = 'Cancelled before you answered. Nothing was done.';
+
+/** Rivera's seeded hold as the mock has it now. */
+function seededHoldNow() {
+  const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
+  if (!held) throw new Error('the seed holds the 15% quote');
+  return held;
+}
+
+/** How long a watch of the list's height looks, long enough for a change to land and settle. */
+const HEIGHT_WATCH_MS = 1_000;
+
+/** The list's height and the row's top below it, every frame for `HEIGHT_WATCH_MS` from now. */
+function watchListHeight(list: Element, row: Element): Promise<{ list: number[]; rowTop: number[] }> {
+  const seen = { list: [] as number[], rowTop: [] as number[] };
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const step = () => {
+      const box = list.getBoundingClientRect();
+      seen.list.push(box.height);
+      seen.rowTop.push(row.getBoundingClientRect().top - box.top);
+      if (performance.now() - started > HEIGHT_WATCH_MS) resolve(seen);
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+/**
+ * The mock's request, ended as a late answer found it (expired, or cancelled by the visitor), so
+ * Needs you no longer lists it as held: the 409 the test plants doesn't change the mock itself.
+ */
+function endInTheMock(decisionId: string, state: 'expired' | 'cancelled'): void {
+  const record = mockStore.world.decisions.get(decisionId);
+  if (!record) throw new Error(`the mock has no decision ${decisionId}`);
+  record.decision = { ...record.decision, state, answers: [] };
 }
 
 /** The line under "Things to try" until something on it is done. */

@@ -114,49 +114,70 @@ export function stoppedInPreview(attempts: readonly Attempt[], ledger: Pick<Ledg
   });
 }
 
-/** The states `approvals.py` records when it takes the owner's answer: allowed, denied, or allowed and then refused at execution. */
-const TAKEN: ReadonlySet<unknown> = new Set(['approved', 'denied', 'refused_at_execution']);
+/** The decision a signed entry is about: its `ref_id`, as the kernel sets it for approvals and runs. */
+function decisionOf(entry: LedgerEntry): string | null {
+  return entry.event.ref_id ?? null;
+}
 
 /**
- * "Answer a held request", from the record: an approval entry the kernel wrote as it took an answer
- * (the answer given, and a state it records then). Its notes for an answer it refused carry
- * `refused` and no such state, and a cancel or an expiry carries no answer, so neither counts.
+ * "Answer a held request", from the record: an answer the kernel took that took effect. The kernel
+ * writes an approval entry as it takes an answer (the answer given, and the state it records then);
+ * its notes for an answer it refused carry `refused` and no such state, and a cancel or an expiry
+ * carries no answer. A deny takes effect as it's taken (`denied`). An allow (`approved`) takes effect
+ * once its run is done: an `execute` entry for the same decision in state `executed`, which a run
+ * reconciled later records too. An allow refused at execution, or whose run failed or isn't
+ * confirmed, hasn't.
  */
 export function answeredOnRecord(ledger: Pick<LedgerPage, 'entries'>): boolean {
+  const done = new Set<string>();
+  for (const e of ledger.entries) {
+    const id = decisionOf(e);
+    if (e.event.kind === 'execute' && id !== null && !isReplayed(e) && e.event.summary.state === 'executed') done.add(id);
+  }
   return ledger.entries.some((e) => {
     if (e.event.kind !== 'approval' || isReplayed(e)) return false;
     const { summary } = e.event;
-    return summary.answer != null && summary.refused == null && TAKEN.has(summary.state);
+    if (summary.answer == null || summary.refused != null) return false;
+    if (summary.state === 'denied') return true;
+    const id = decisionOf(e);
+    return summary.state === 'approved' && id !== null && done.has(id);
   });
 }
 
 /**
- * The states an answer given here can leave a request in: it ran or is running, it failed or its
- * outcome is unknown, it was denied, or it was refused at execution. A 409 that found the request
- * already expired or cancelled lands among the answers too, and isn't one.
+ * The states that say an answer given here took effect: allowed (running or done) or denied. One
+ * that failed, isn't confirmed yet, or was refused at execution hasn't, and neither has a late
+ * answer that found the request already expired or cancelled.
  */
-const ANSWERED: ReadonlySet<DecisionState> = new Set<DecisionState>(['approved', 'executed', 'failed', 'unknown', 'denied', 'refused_at_execution']);
+const TOOK_EFFECT: ReadonlySet<DecisionState> = new Set<DecisionState>(['approved', 'executed', 'denied']);
 
-/** "Answer a held request", in this view: one of the decisions answered here settled in an answer's state. */
+/** "Answer a held request", in this view: one of the answers given here took effect. */
 export function answeredInView(decisions: Iterable<Pick<Decision, 'state'>>): boolean {
-  for (const decision of decisions) if (ANSWERED.has(decision.state)) return true;
+  for (const decision of decisions) if (TOOK_EFFECT.has(decision.state)) return true;
   return false;
 }
 
-/** How an answer given here ended when "Answer a held request" doesn't count it. */
-export type UncountedAnswer = 'expired' | 'cancelled' | 'answered';
+/**
+ * How an answer given here ended when "Answer a held request" doesn't count it: the request had
+ * expired or been cancelled first; the answer failed, isn't confirmed yet, or was refused at
+ * execution; or, where the list doesn't count answers, it took effect (`answered`).
+ */
+export type UncountedAnswer = 'expired' | 'cancelled' | 'answered' | 'failed' | 'unknown' | 'refused_at_execution';
 
 /**
- * How the latest answer given here ended, when "Answer a held request" doesn't count it: the request
- * had expired, or the visitor had cancelled it, before the answer reached it; or the answer went
- * through where the list doesn't count answers (`countsHere` false: a Desk besides the one the copy
- * started with). Null when there is none, or when the list counts it.
+ * How the latest answer given here ended, when "Answer a held request" doesn't count it. A late
+ * answer to a request already expired or cancelled never counts, and neither does one that didn't
+ * take effect (or isn't confirmed yet). One that took effect counts where the list counts answers
+ * (`countsHere`, the Desk the copy started with); elsewhere it is `answered`. Null when there is
+ * none, or when the list counts it.
  */
-export function uncountedAnswer(decisions: readonly Pick<Decision, 'state'>[], countsHere: boolean): UncountedAnswer | null {
-  const latest = decisions.at(-1);
-  if (latest === undefined) return null;
-  if (latest.state === 'expired' || latest.state === 'cancelled') return latest.state;
-  return ANSWERED.has(latest.state) && !countsHere ? 'answered' : null;
+export function uncountedAnswer(latest: Pick<Decision, 'state'> | null, countsHere: boolean): UncountedAnswer | null {
+  if (latest === null) return null;
+  const { state } = latest;
+  if (state === 'expired' || state === 'cancelled') return state;
+  if (state === 'failed' || state === 'unknown' || state === 'refused_at_execution') return state;
+  if (TOOK_EFFECT.has(state)) return countsHere ? null : 'answered';
+  return null;
 }
 
 /** The copy's Desks in the order the API lists them, the order they were made. */
