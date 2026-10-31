@@ -470,7 +470,7 @@ async def _free_slots(ctx: KernelCtx, desk_id: str, fact: Fact) -> Fact | None:
 
 async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, desk: DeskInfo,
                         clauses: Sequence[Clause], language: render.Language,
-                        canaries: Mapping[str, str]) -> tuple[list[RenderedBlock], list[Violation]]:
+                        canaries: Mapping[str, str]) -> tuple[list[RenderedBlock], list[Violation], dict[str, list[Claim]]]:
     """Step 4: each clause's card, or why it can't be shown. A clause must name a registered
     template Claude may draft (`template_unavailable`, `kernel_only_template`); a handoff or
     verify prompt names no fact; any other names a fact of this copy and Desk (`unknown_fact`)
@@ -491,6 +491,7 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     now = ctx.clock.now()
     blocks: list[RenderedBlock] = []
     violations: list[Violation] = []
+    rendered_claims: dict[str, list[Claim]] = {}
     for clause in clauses:
         template = render.TEMPLATES.get(clause.template)
         if clause.fact_id is not None and (named := labels.find_canaries(clause.fact_id, canaries)):
@@ -516,6 +517,8 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
                 violations.append(_clause_violation(clause, "unentitled_fact", "not_a_reader"))
                 continue
             fact = row if isinstance(row, Fact) else labels.fact_of(row)
+            # Preserve the source claims before slot filtering and before any locked ORM refresh.
+            rendered_claims[fact.fact_id] = [claim.model_copy(deep=True) for claim in fact.claims]
             if not template.reads(fact):
                 violations.append(_clause_violation(clause, "unknown_fact", "template_mismatch"))
                 continue
@@ -536,7 +539,7 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             violations.append(canary_violation(found))
             continue
         blocks.append(block)
-    return blocks, violations
+    return blocks, violations, rendered_claims
 
 
 # ---- The verdict ----------------------------------------------------------------------------------
@@ -573,7 +576,8 @@ def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violatio
 
 
 async def recheck_cards(ctx: KernelCtx, session_row: SessionRow,
-                        blocks: Sequence[RenderedBlock]) -> tuple[list[RenderedBlock], list[Violation]]:
+                        blocks: Sequence[RenderedBlock], *,
+                        rendered_claims: Mapping[str, list[Claim]]) -> tuple[list[RenderedBlock], list[Violation]]:
     """Re-read card entitlements and currency after holding the session row, before signing.
 
     The explicit lock also covers a repeated check whose frozen last-seen value caused no UPDATE.
@@ -608,6 +612,8 @@ async def recheck_cards(ctx: KernelCtx, session_row: SessionRow,
             refused.append(_clause_violation(clause, "unknown_fact", "no_such_fact"))
         elif not render.TEMPLATES[block.template].current(labels.fact_of(row), now):
             refused.append(_clause_violation(clause, "stale_fact", "not_current"))
+        elif row.claims != rendered_claims.get(block.fact_id):
+            refused.append(_clause_violation(clause, "stale_fact", "claims_changed"))
         else:
             kept.append(block)
     return kept, refused
@@ -637,7 +643,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
             kind="uncertain_language" if detected == "unmarked" else "unsupported_language",
             span=_span(excerpt), rule_id="language_uncertain" if detected == "unmarked" else "language"))
     # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
-    cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
+    cards, refused, rendered_claims = await check_clauses(
+        ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
@@ -658,7 +665,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
                           detected=detected if detected in ("en", "es") else None, canaries=canaries,
-                          handoff_backed=handoff_backed, final=final)
+                          handoff_backed=handoff_backed, final=final, rendered_claims=rendered_claims)
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
@@ -709,7 +716,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                    fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
-                   handoff_backed: bool = False, final: bool = True) -> ReplyVerdict:
+                   handoff_backed: bool = False, final: bool = True,
+                   rendered_claims: Mapping[str, list[Claim]] | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, final}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
@@ -738,7 +746,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
     closed_at, person and assurance are read afresh, then all cited facts' readers, status and
-    expiry in one ordered FOR SHARE query, held through the signature and commit. Open handoffs
+    expiry and claims in one ordered FOR SHARE query, held through the signature and commit. Claims
+    must match the snapshot used to render the cards, including facts replaced in place. Open handoffs
     are locked before facts so a last-card refusal can fall back without reversing the lock order.
     Currency is checked after taking the ledger head too, so expiry is current after every lock
     wait. A blocked draft drops cards that no longer pass. A passing draft whose backing card
@@ -765,7 +774,7 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
     if author == "claude":
-        blocks, refused = await recheck_cards(ctx, session_row, blocks)
+        blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
         if refused:
             # A passing draft may have relied on a card just withdrawn: none of its prose is safe
             # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
