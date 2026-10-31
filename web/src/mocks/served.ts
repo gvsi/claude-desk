@@ -612,7 +612,9 @@ const SERVED: ServedRoutes = {
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
-    const cap = isRecord(req.body) ? req.body.auto_money_cap_cents : undefined;
+    // The body is the limit alone: the API's model forbids any other field.
+    const body = isRecord(req.body) && Object.keys(req.body).every((key) => key === 'auto_money_cap_cents') ? req.body : undefined;
+    const cap = body?.auto_money_cap_cents;
     if (req.malformed || typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < 0) return INVALID;
     if (cap > PLATFORM_CEILING_CENTS) return failWith(422, 'above_platform_ceiling');
     // The active rules at the new limit, as the API drafts them: each automatic money rule above it

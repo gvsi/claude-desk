@@ -1275,8 +1275,9 @@ describe('rules and tools', () => {
     const raised = (await draftCap({ auto_money_cap_cents: 80_000 })).body as RulesDraft;
     expect(raised).toMatchObject({ auto_money_cap_cents: 80_000, diff: { added: [], removed: [], changed: [] } });
 
-    // The API's refusals, with its test's bodies: above the $10,000 ceiling, or anything but a whole
-    // number of cents from 0 (its 500.0 parses as 500 here, so 500.5 stands in for it).
+    // The API's refusals, with its test's bodies: above the $10,000 ceiling, anything but a whole
+    // number of cents from 0 (its 500.0 parses as 500 here, so 500.5 stands in for it), or a field
+    // the body doesn't have, which its model forbids.
     const refused: [unknown, string][] = [
       [{ auto_money_cap_cents: 1_000_001 }, 'above_platform_ceiling'],
       [{ auto_money_cap_cents: -1 }, 'invalid'],
@@ -1284,6 +1285,7 @@ describe('rules and tools', () => {
       [{ auto_money_cap_cents: '500' }, 'invalid'],
       [{ auto_money_cap_cents: true }, 'invalid'],
       [{}, 'invalid'],
+      [{ auto_money_cap_cents: 500, cards: [] }, 'invalid'],
     ];
     for (const [body, error] of refused) expect(await draftCap(body), JSON.stringify(body)).toEqual({ status: 422, body: { error } });
     expect((await draftCap({ auto_money_cap_cents: 1_000_000 })).status).toBe(200);
