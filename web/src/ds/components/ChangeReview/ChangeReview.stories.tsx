@@ -609,6 +609,34 @@ const ASK_FIRST_CHECKS = {
   lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
 } as const satisfies ChangeReviewProps['checks'];
 
+/** The default ask a rule falls to when nothing in the draft governs its tool. */
+const DEFAULT_ASK = 'Not covered by a rule you set, so I ask you.';
+
+const sharedCharge = rivera.sharedChargeCard;
+
+/**
+ * The board's shared rule: Alex Kim's assistant pays up to $20 on every tool that charges money.
+ * It is an illustrative card, not in Rivera's seed, so the story lists it after Payment link, where
+ * the board draws it. Ask me first drops it too, and both of its tools fall to the default ask.
+ */
+const sharedChargeRow: ChangeRowView = {
+  key: sharedCharge.card_id,
+  change: 'changed',
+  title: 'Payment link and Charge within a signed limit',
+  connector: rivera.connectors.views.payments,
+  shared: true,
+  before: {
+    mode: sharedCharge.mode,
+    limit: rivera.ruleLimits['rv-agent-charges'],
+    reason: sharedCharge.reason,
+    words: rivera.ruleWords['rv-agent-charges'],
+  },
+  after: { mode: 'ask', reason: DEFAULT_ASK, words: [{ field: 'who', text: 'Anyone' }] },
+  changed: ['mode'],
+};
+
+const askFirstRows = rivera.askFirstReview.flatMap((row) => (row.key === 'rv-link' ? [row, sharedChargeRow] : [row]));
+
 /** A row's After side, found by its title among the rows. */
 function afterSide(rows: HTMLElement[], index: number): HTMLElement {
   const row = rows[index];
@@ -617,14 +645,14 @@ function afterSide(rows: HTMLElement[], index: number): HTMLElement {
 }
 
 export const AskMeFirst: Story = {
-  args: { rows: rivera.askFirstReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
+  args: { rows: askFirstRows, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "Rivera's eight own rules and Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw; the board's shared rule for Alex Kim's assistant is the illustrative shared card, which isn't in Rivera's seed.",
+      "Rivera's eight own rules, Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw, and the board's shared rule for Alex Kim's assistant, an illustrative card that isn't in Rivera's seed.",
   },
   play: async ({ canvas, canvasElement }) => {
-    // Each of the owner's rules goes, personal ones included, and its tool falls to the default ask.
+    // Each of the owner's rules goes, personal and shared ones included, and its tool falls to the default ask.
     const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
     await expect(rows.map((row) => row.querySelector('.cd-change-review__title')?.textContent)).toEqual([
       'Quote',
@@ -633,11 +661,12 @@ export const AskMeFirst: Story = {
       'Book a visit',
       'Share a document',
       'Payment link',
+      'Payment link and Charge within a signed limit',
       'Charge within a signed limit',
       'See charges',
       'Refund',
     ]);
-    await expect(tags(canvasElement)).toEqual(Array(9).fill('Changed'));
+    await expect(tags(canvasElement)).toEqual(Array(10).fill('Changed'));
     for (const row of rows) {
       await expect(within(row).getByRole('group', { name: 'After' })).toHaveTextContent('Not covered by a rule you set, so I ask you.');
     }
@@ -649,7 +678,7 @@ export const AskMeFirst: Story = {
     await expect(quoteOutcome).toHaveTextContent('Ask me first');
     await expect(within(quoteOutcome).getByText('Changed')).toBeVisible();
     await expect(within(quote).getAllByText('Changed')).toHaveLength(1);
-    const refund = afterSide(rows, 8);
+    const refund = afterSide(rows, 9);
     await expect(refund).toHaveTextContent('Ask me first');
     await expect(within(refund).queryByText('Changed')).toBeNull();
     // An auto rule with an amount limit reads its limit before it goes.
@@ -659,7 +688,16 @@ export const AskMeFirst: Story = {
     // A built-in connector is named alone; a mock one is never named without "Mock".
     await expect(rows[0]?.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Quotes$/);
     await expect(canvasElement).not.toHaveTextContent('Built in');
-    await expect(rows[8]).toHaveTextContent('Stripe Mock');
+    await expect(rows[9]).toHaveTextContent('Stripe Mock');
+    // shared_rule_says_so: a rule shared by every tool that charges money reads "Shared rule" after
+    // its connector, as the board draws it; a tool's own rule names only its connector.
+    const shared = rows[6] as HTMLElement;
+    await expect(shared.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Payments · Shared rule$/);
+    await expect(rows[5]?.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Payments$/);
+    await expect(canvas.getAllByText('Shared rule')).toHaveLength(1);
+    await expect(within(shared).getByRole('group', { name: 'Before' })).toHaveTextContent(
+      "Alex Kim's assistant · Up to $20",
+    );
     // personal_rules_are_listed: a rule for one person goes too, and its row names her.
     const personal = rows[3] as HTMLElement;
     await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Dana Whitfield');
@@ -720,9 +758,6 @@ export const PersonalRuleReplaced: Story = {
     await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
 };
-
-/** The default ask a rule falls to when nothing in the draft governs its tool. */
-const DEFAULT_ASK = 'Not covered by a rule you set, so I ask you.';
 
 export const RecommendedRules: Story = {
   args: { rows: rivera.recommendedReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },

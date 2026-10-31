@@ -1,7 +1,7 @@
 /**
  * ChangeReview's confirm when the screen's `onConfirm` throws before it sends anything. The press
  * is released, as every send-once button's is, so the owner can confirm again rather than facing a
- * button that waits forever.
+ * button that waits forever. And a shared rule on a row with one side, which no story draws.
  */
 import { composeStories } from '@storybook/react-vite';
 import { act } from 'react';
@@ -9,6 +9,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { fn } from 'storybook/test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
+import { rivera } from '../../fixtures';
+import type { ChangeRowView } from './ChangeReview.tsx';
 import * as stories from './ChangeReview.stories.tsx';
 
 declare global {
@@ -69,4 +71,21 @@ it('a_confirm_that_throws_releases_the_button', () => {
   } finally {
     window.removeEventListener('error', onError);
   }
+});
+
+it('a_removed_shared_rule_says_so_after_its_connector', () => {
+  const card = rivera.sharedChargeCard;
+  const removed: ChangeRowView = {
+    key: card.card_id,
+    change: 'removed',
+    title: 'Payment link and Charge within a signed limit',
+    connector: rivera.connectors.views.payments,
+    shared: true,
+    before: { mode: card.mode, limit: rivera.ruleLimits['rv-agent-charges'], reason: card.reason, words: rivera.ruleWords['rv-agent-charges'] },
+    after: null,
+    changed: [],
+  };
+  act(() => root.render(<TurnOnPayments rows={[removed]} />));
+  const meta = container.querySelector('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta');
+  expect(meta?.textContent).toBe("Payments · Shared rule · Alex Kim's assistant · Up to $20");
 });

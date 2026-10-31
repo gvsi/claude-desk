@@ -30,6 +30,8 @@ export interface ChangeRowView {
   /** The tool the rule is about: "Payment link". */
   title: string;
   connector?: ConnectorView;
+  /** The rule is shared by several tools, such as every tool that charges money: the meta line says "Shared rule" after the connector. */
+  shared?: boolean;
   before: ChangeSide | null;
   after: ChangeSide | null;
   /** For a changed row, the fields that differ (`RuleDiffRow.fields`). */
@@ -107,19 +109,24 @@ function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean 
   );
 }
 
+/** What a row's meta line says after the connector when its rule is shared by several tools. */
+const SHARED_RULE = 'Shared rule';
+
 /**
- * The connector's name, then what the rule applies to, then the side's words, joined by " · ". A
- * built-in connector is named alone; an external one keeps its Mock badge (`ConnectorName`), so a
- * mock is never named without saying so.
+ * The connector's name, then "Shared rule" for a shared rule, then what the rule applies to, then
+ * the side's words, joined by " · ". A built-in connector is named alone; an external one keeps its
+ * Mock badge (`ConnectorName`), so a mock is never named without saying so.
  */
 function MetaLine({
   connector,
+  shared = false,
   appliesTo,
   words,
   tag,
   strong,
 }: {
   connector?: ConnectorView;
+  shared?: boolean;
   appliesTo?: string;
   words: readonly RuleWord[];
   tag?: boolean;
@@ -131,6 +138,7 @@ function MetaLine({
   const parts: ReactNode[] = [];
   // The review's rows name the connector without "Built in"; an app keeps its Mock badge.
   if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" hideBuiltIn />);
+  if (shared) parts.push(<span key="shared">{SHARED_RULE}</span>);
   if (target !== '') parts.push(<span key="target">{target}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
   if (parts.length === 0) return null;
@@ -217,7 +225,7 @@ function Row({ row }: { row: ChangeRowView }) {
         </p>
         {showsBoth && row.before && row.after ? (
           <>
-            <MetaLine connector={row.connector} words={[]} />
+            <MetaLine connector={row.connector} shared={row.shared} words={[]} />
             <div className="cd-change-review__sides">
               <Side label="Before" side={row.before} changed={null} />
               <Side label="After" side={row.after} changed={row.changed} />
@@ -225,7 +233,7 @@ function Row({ row }: { row: ChangeRowView }) {
           </>
         ) : single ? (
           <>
-            <MetaLine connector={row.connector} appliesTo={single.appliesTo} words={single.words} />
+            <MetaLine connector={row.connector} shared={row.shared} appliesTo={single.appliesTo} words={single.words} />
             <div className="cd-change-review__sides">
               {/* A removed rule is what goes; an added rule, or a tool turned on, is what applies. */}
               <Side label={row.after ? 'After' : 'Before'} side={single} changed={null} />
