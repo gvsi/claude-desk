@@ -795,7 +795,7 @@ def test_the_cap_edges_revision_runs_again_over_what_it_added(scratch):
     already has what it adds: its columns are added only if missing, and its check is dropped if
     there and added again, so it is never added twice and still holds."""
     before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
-    scratch.migrate(command.downgrade, MONEY_CAP_EDGES_REVISION)   # nothing to do while it is the head
+    scratch.migrate(command.downgrade, MONEY_CAP_EDGES_REVISION)   # the revisions after it go down first
     scratch.migrate(command.stamp, before)
     try:
         scratch.migrate(command.upgrade, MONEY_CAP_EDGES_REVISION)  # again, over its own columns
@@ -869,8 +869,10 @@ def test_only_an_owner_alert_names_a_decision(kernel_tx):
     # a held request's alert links to its decision; a code, a checkpoint or an alert to anyone but the owner never
     # names one, so no session's own Demo inbox can show a decision
     def entry(entry_id: str, kind: str, to: str, decision_id: str | None) -> DemoInboxRow:
+        challenge_id = "challenge-1" if kind == "verification_code" else None
         return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
-                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id)
+                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id,
+                            challenge_id=challenge_id)
 
     masked = "d•••@example.com"
     kernel_tx.add_all([entry("inbox-1", "alert", "owner", "decision-1"), entry("inbox-2", "alert", "owner", None),
@@ -884,6 +886,61 @@ def test_only_an_owner_alert_names_a_decision(kernel_tx):
             kernel_tx.flush()
         savepoint.rollback()
         kernel_tx.expunge_all()
+
+
+def test_a_code_entry_and_only_a_code_entry_names_its_challenge(kernel_tx):
+    # a session reads the codes of its own challenges, so every code names the challenge it was sent for
+    def entry(entry_id: str, kind: str, to: str, challenge_id: str | None) -> DemoInboxRow:
+        return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
+                            body="-", preview="-", created_at=SLOT_TIME, challenge_id=challenge_id)
+
+    masked = "d•••@example.com"
+    kernel_tx.add_all([entry("inbox-1", "verification_code", masked, "challenge-1"),
+                       entry("inbox-2", "alert", "owner", None), entry("inbox-3", "head_checkpoint", "owner", None)])
+    kernel_tx.flush()
+    for n, (kind, to, challenge_id) in enumerate((("verification_code", masked, None),
+                                                  ("alert", "owner", "challenge-1"),
+                                                  ("head_checkpoint", "owner", "challenge-1"))):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(entry(f"inbox-refused-{n}", kind, to, challenge_id))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+        kernel_tx.expunge_all()
+
+
+INBOX_CHALLENGE_REVISION = "01b_1b_inbox_challenge"
+
+
+def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratch):
+    """A code entry written before the revision names no challenge, so no session's read finds it:
+    the upgrade keeps it as it is, with its check holding every row written from then on."""
+    admin = scratch.conn
+
+    def insert(entry_id: str, *challenge: str | None) -> None:
+        names, values = (", challenge_id", ", %s") if challenge else ("", "")
+        admin.execute(f"INSERT INTO kernel.demo_inbox (entry_id, copy_id, desk_id, \"to\", person_id, kind, body,"
+                      f" preview, created_at{names}) VALUES (%s, 'copy-inbox', 'desk-inbox', 'd•••@example.com',"
+                      f" 'person-1', 'verification_code', '-', '-', now(){values})", (entry_id, *challenge))
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(INBOX_CHALLENGE_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert "challenge_id" not in columns(admin, "kernel", "demo_inbox")
+        insert("inbox-before")
+        scratch.migrate(command.upgrade, "head")
+        assert admin.execute("SELECT challenge_id FROM kernel.demo_inbox"
+                             " WHERE entry_id = 'inbox-before'").fetchone() == (None,)
+        insert("inbox-after", "challenge-1")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("inbox-unnamed", None)
+        scratch.migrate(command.stamp, before)              # the revision runs again over what it added
+        scratch.migrate(command.upgrade, INBOX_CHALLENGE_REVISION)
+        assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'demo_inbox_challenge_id_check'"
+                             " AND conrelid = 'kernel.demo_inbox'::regclass").fetchone() == (1,)
+    finally:
+        admin.execute("DELETE FROM kernel.demo_inbox WHERE copy_id = 'copy-inbox'")
+        scratch.migrate(command.upgrade, "head")
 
 
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:

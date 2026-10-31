@@ -537,6 +537,7 @@ class DemoInboxEntry(Base):
     preview: Mapped[str] = mapped_column(Text)               # code-free kernel template
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     decision_id: Mapped[str | None] = mapped_column(Text)    # only on an owner alert: the held decision's own id
+    challenge_id: Mapped[str | None] = mapped_column(Text)   # only on a code: the challenge it was sent for
 
 
 class LedgerHead(Base):

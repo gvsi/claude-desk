@@ -555,11 +555,9 @@ async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):
     assert await session_inbox(client, second) == []                  # nothing until it asks for a code itself
     [dana_second] = (await started(client, second, "510-555-0177")).inbox
     [bob] = (await started(client, second, "Bob@Example.com")).inbox
-    # the inbox stands in for Dana's own: whoever typed her contact reads her codes, and only hers
-    assert {entry.entry_id for entry in await session_inbox(client, first)} == {dana_first.entry_id,
-                                                                               dana_second.entry_id}
-    assert {entry.entry_id for entry in await session_inbox(client, second)} == {dana_first.entry_id,
-                                                                                dana_second.entry_id, bob.entry_id}
+    # each session reads the codes it asked for, and no other session's, though they went to Dana too
+    assert {entry.entry_id for entry in await session_inbox(client, first)} == {dana_first.entry_id}
+    assert {entry.entry_id for entry in await session_inbox(client, second)} == {dana_second.entry_id, bob.entry_id}
     assert {entry.to for entry in await session_inbox(client, second)} == {"•••• 0177", "b•••@example.com"}
     stranger = await open_visitor(client, other)                      # Dana in another copy is someone else
     await started(client, stranger, DANA_PHONE)
@@ -567,6 +565,23 @@ async def test_demo_inbox_is_scoped_to_the_sessions_challenges(app, client):
     assert dana_first.entry_id not in {entry.entry_id for entry in await owner_inbox(client, other)}
     owner_ids = {entry.entry_id for entry in await owner_inbox(client, copy)}
     assert {dana_first.entry_id, dana_second.entry_id, bob.entry_id} <= owner_ids
+
+
+async def test_a_session_never_reads_a_code_another_session_asked_for(app, client):
+    """A session that once typed Dana's contact doesn't read the codes later sent to her: once the
+    owner gives her another contact, the code another session asks for goes there, and neither it
+    nor her new contact, masked, reaches the first session."""
+    copy = await rivera_copy(app, client)
+    first, second = await open_visitor(client, copy), await open_visitor(client, copy)
+    [old] = (await started(client, first, DANA_PHONE)).inbox
+    moved = await client.put(f"/desks/{copy.rivera.desk_id}/people", headers=copy.owner, json={"upsert": [
+        {"ref": "dana", "display_name": "Dana Whitfield", "contact": "dana.w@example.net"}]})
+    assert moved.status_code == 200, moved.text
+    [new] = (await started(client, second, "dana.w@example.net")).inbox
+    assert new.to == mask_contact("dana.w@example.net")
+    assert [(entry.entry_id, entry.to) for entry in await session_inbox(client, first)] == [
+        (old.entry_id, mask_contact(DANA_PHONE))]
+    assert [entry.entry_id for entry in await session_inbox(client, second)] == [new.entry_id]
 
 
 async def test_sessions_never_see_alerts_or_checkpoints(app, client):
@@ -698,13 +713,13 @@ async def test_a_value_postgres_quotes_is_not_logged(app, client, monkeypatch, c
     visitor = await open_visitor(client, copy)
     deliver = demo_inbox.deliver
 
-    async def dated_by_its_body(ctx, *, copy_id, desk_id, to, person_id, kind, body, preview):
+    async def dated_by_its_body(ctx, *, copy_id, desk_id, to, person_id, kind, body, preview, challenge_id=None):
         if kind != "verification_code":
             return await deliver(ctx, copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind,
                                  body=body, preview=preview)
         await ctx.db.execute(insert(DemoInboxRow).values(
             entry_id="inbox-1", copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind, body=body,
-            preview=preview, created_at=body))                                  # not a time: Postgres quotes it
+            preview=preview, created_at=body, challenge_id=challenge_id))     # not a time: Postgres quotes it
 
     monkeypatch.setattr(demo_inbox, "deliver", dated_by_its_body)
     response = await start(client, visitor, DANA_PHONE)

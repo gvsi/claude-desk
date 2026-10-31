@@ -416,8 +416,7 @@ async def release_invoice(k: KernelHarness, desk: GoldenDesk, dana: Caller) -> t
 
 async def another_dana(k: KernelHarness, records: Any, desk: GoldenDesk) -> Caller:
     """One more session verified as Dana, with the code from the inbox entry its own start's notice
-    names: a session's Demo inbox holds every code sent to the people it asked about, so the one
-    entry `open_caller` expects is there only for a person's first session."""
+    names: a session's Demo inbox holds only the codes it asked for, so it is the one entry there."""
     caller = await open_caller(k, desk, "visitor")
     masked = (await masked_on_record(k, records, desk))[desk.people["dana"]]
     caller.state = await check(k, caller, await started_code(k, caller, masked), expect=verified_as(caller))

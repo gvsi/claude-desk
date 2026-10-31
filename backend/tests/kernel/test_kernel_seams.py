@@ -193,13 +193,14 @@ async def test_writers_share_the_callers_transaction(app):
         await ledger.append(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, event=written)
         notice = await demo_inbox.deliver(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, to="d•••@example.com",
                                           person_id="person-dana", kind="verification_code",
-                                          body="Your code is 482913", preview="Verification code sent")
+                                          body="Your code is 482913", preview="Verification code sent",
+                                          challenge_id="challenge-1")
     [entry] = await ledger_rows(app, rows)
     [inbox] = await rows_of(app, rows.copy_id, select(DemoInboxEntry))
     assert entry.event == written
-    assert (inbox.entry_id, inbox.desk_id, inbox.to, inbox.person_id, inbox.kind, inbox.body, inbox.preview) == (
-        notice.entry_id, rows.desk_id, "d•••@example.com", "person-dana", "verification_code", "Your code is 482913",
-        "Verification code sent")
+    assert (inbox.entry_id, inbox.desk_id, inbox.to, inbox.person_id, inbox.kind, inbox.body, inbox.preview,
+            inbox.challenge_id) == (notice.entry_id, rows.desk_id, "d•••@example.com", "person-dana",
+                                    "verification_code", "Your code is 482913", "Verification code sent", "challenge-1")
     assert inbox.created_at == app.state.kernel.clock.now()
     assert "482913" not in notice.model_dump_json()                       # the notice is code-free
     with pytest.raises(ValueError):
@@ -249,6 +250,21 @@ async def test_only_an_approval_alert_names_a_decision(app):
                                             decision_id=decision_id)
     [entry] = await rows_of(app, rows.copy_id, select(DemoInboxEntry))   # only the approval alert was written
     assert (entry.entry_id, entry.decision_id) == (held.entry_id, decision_id)
+
+
+async def test_only_a_code_entry_names_its_challenge(app):
+    # a session reads the codes of its own challenges, so the writer refuses a code without one, and an entry of
+    # another kind with one, before the table's check would
+    rows = await make_copy_rows(app)
+    async with kernel_ctx(app) as ctx:
+        for to, kind, challenge_id in (("d•••@example.com", "verification_code", None),
+                                       ("owner", "alert", "challenge-1"), ("owner", "head_checkpoint", "challenge-1")):
+            with pytest.raises(ValueError) as refused:
+                await demo_inbox.deliver(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, to=to, person_id=None,
+                                         kind=kind, body="...", preview="...", challenge_id=challenge_id)
+            assert str(refused.value) == ("a code entry names its challenge and no other entry names one, not a"
+                                          f" {kind!r} entry")
+    assert await rows_of(app, rows.copy_id, select(DemoInboxEntry)) == []
 
 
 def test_one_check_says_what_text_the_database_holds():

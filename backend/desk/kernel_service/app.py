@@ -274,8 +274,8 @@ inbox_router = APIRouter()
 
 @inbox_router.get("/demo_inbox", response_model=list[DemoInboxEntry])
 async def read_demo_inbox(ctx: Ctx, request: Request, session_id: str | None = None) -> list[DemoInboxEntry]:
-    """The Demo inbox: with `session_id` (`X-Session-Token`), the verification codes of the people
-    the session asked to verify as, including codes another session asked for them, and nothing
+    """The Demo inbox: with `session_id` (`X-Session-Token`), the verification codes of the
+    challenges the session started, never another session's code for the same person, and nothing
     else; without it, every entry of the owner's copy (`X-Owner-Session`)."""
     if session_id is None:
         await auth.require_owner(ctx, request)

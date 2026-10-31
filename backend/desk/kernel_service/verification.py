@@ -257,7 +257,7 @@ async def start(ctx: KernelCtx, session_row: SessionRow, contact: str) -> Verify
         ctx, copy_id=session.copy_id, desk_id=session.desk_id, to=mask_contact(person.contact),
         person_id=person.person_id, kind="verification_code",
         body=render.status("inbox_code_body", lang, business=business, code=code),
-        preview=render.status("inbox_code_preview", lang))
+        preview=render.status("inbox_code_preview", lang), challenge_id=challenge_id)
     await _ledger(ctx, session, "started", challenge_id)
     return VerifyStarted(message=message, inbox=[notice])
 

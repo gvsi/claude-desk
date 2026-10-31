@@ -6,11 +6,12 @@ routes. A writer returns an `InboxNotice` (entry, masked recipient, preview), wh
 and safe for SSE and `app.*`, never the body. Writers run in the caller's transaction and never
 commit, so an entry exists only if the record that caused it does.
 
-Two reads serve those routes. A session reads only the verification codes of the people whose
-challenges it started: the Demo inbox stands in for each person's own inbox, and in the demo
-whoever typed a person's contact is shown it. A session never reads an owner alert or a head
-checkpoint, and no entry it reads names a decision (`session_entry`). The owner reads every entry
-of the copy, a held request's alert with the decision it is about (`owner_entry`).
+Two reads serve those routes. A session reads only the verification codes of the challenges it
+started, each code entry naming its challenge: in the demo, whoever types a person's contact is
+shown the code sent to it, and never a code another session asked for, which may have gone to a
+contact the owner has since changed. A session never reads an owner alert or a head checkpoint,
+and no entry it reads names a decision (`session_entry`). The owner reads every entry of the copy,
+a held request's alert with the decision it is about (`owner_entry`).
 """
 
 from typing import get_args
@@ -26,21 +27,26 @@ KINDS = frozenset(get_args(DemoInboxEntry.model_fields["kind"].annotation))
 
 
 async def deliver(ctx: KernelCtx, *, copy_id: str, desk_id: str, to: str, person_id: str | None, kind: str,
-                  body: str, preview: str, decision_id: str | None = None) -> InboxNotice:
+                  body: str, preview: str, decision_id: str | None = None,
+                  challenge_id: str | None = None) -> InboxNotice:
     """Write one entry in the caller's transaction. `to` is "owner" or the masked contact on record;
     `body` may hold a code, `preview` never does. `decision_id` is only for an owner alert: anywhere
     else it raises ValueError here, before the table's check would refuse the row, saying whether the
-    entry went to the owner or to a contact, never which contact."""
+    entry went to the owner or to a contact, never which contact. `challenge_id`, the challenge a
+    code was sent for, is required on a `verification_code` entry and refused on any other, with a
+    ValueError too."""
     if kind not in KINDS:
         raise ValueError(f"{kind!r} is not a Demo inbox kind")
     if decision_id is not None and (kind != "alert" or to != "owner"):
         recipient = "the owner" if to == "owner" else "a contact"
         raise ValueError(f"only an alert to the owner names a decision, not a {kind!r} entry to {recipient}")
+    if (challenge_id is not None) != (kind == "verification_code"):
+        raise ValueError(f"a code entry names its challenge and no other entry names one, not a {kind!r} entry")
     ctx.bind(copy_id)
     notice = InboxNotice(entry_id=new_id("inbox"), to=to, preview=preview)
     await ctx.db.execute(insert(DemoInboxRow).values(
         entry_id=notice.entry_id, copy_id=copy_id, desk_id=desk_id, to=to, person_id=person_id, kind=kind,
-        body=body, preview=preview, created_at=ctx.clock.now(), decision_id=decision_id,
+        body=body, preview=preview, created_at=ctx.clock.now(), decision_id=decision_id, challenge_id=challenge_id,
     ))
     return notice
 
@@ -82,16 +88,12 @@ def _ordered(stmt):
 
 
 async def session_entries(ctx: KernelCtx, session_row: ActorSession) -> list[DemoInboxEntry]:
-    """The `verification_code` entries, on the session's Desk, of the people whose challenges the
-    session started; nothing else."""
-    people = await ctx.db.scalars(ctx.repo.scoped(select(VerificationChallenge.person_id).where(
-        VerificationChallenge.session_id == session_row.session_id)))
-    person_ids = sorted(set(people.all()))
-    if not person_ids:
-        return []
-    rows = await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow).where(
-        DemoInboxRow.desk_id == session_row.desk_id, DemoInboxRow.kind == "verification_code",
-        DemoInboxRow.person_id.in_(person_ids)))))
+    """The `verification_code` entries, on the session's Desk, of the challenges the session
+    started; nothing else, not even another session's code for the same person."""
+    rows = await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow).join(
+        VerificationChallenge, VerificationChallenge.challenge_id == DemoInboxRow.challenge_id).where(
+        VerificationChallenge.session_id == session_row.session_id, DemoInboxRow.desk_id == session_row.desk_id,
+        DemoInboxRow.kind == "verification_code"))))
     return [session_entry(row) for row in rows]
 
 

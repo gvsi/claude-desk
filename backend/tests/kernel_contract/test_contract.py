@@ -1321,9 +1321,9 @@ async def test_verify_start_is_uniform(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01b")
 async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
-    """A session reads only the code entries of people whose challenges it started: never another session's, never
-    an owner alert, and nothing for typing "owner" or the business's own number. It names only its own session; the
-    owner reads every entry of the copy."""
+    """A session reads only the code entries of the challenges it started: never another session's, even for the same
+    person, never an owner alert, and nothing for typing "owner" or the business's own number. It names only its own
+    session; the owner reads every entry of the copy."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1346,7 +1346,9 @@ async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
 
     again = await verify_start(b, b_id, DANA)
     theirs = await session_inbox(b, b_id)
-    assert {notice.entry_id for notice in again.inbox} <= {entry.entry_id for entry in theirs}
+    # each reads the code it asked for, though both went to Dana
+    assert [entry.entry_id for entry in theirs] == [notice.entry_id for notice in again.inbox]
+    assert [entry.entry_id for entry in await session_inbox(a, a_id)] == [entry.entry_id for entry in mine]
     assert {entry.kind for entry in theirs} == {"verification_code"}
     every = await http.owner(copy.owner_token).call("GET /demo_inbox")
     assert {entry.entry_id for entry in mine + theirs} | {notice.entry_id for notice in held.inbox} <= {

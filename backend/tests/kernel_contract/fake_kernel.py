@@ -31,8 +31,7 @@ contract test, before the task that first uses them.
 - Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
   and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
   challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
-  of the people whose challenges it, or a demo agent it minted (Plan 01c), started. Codes are kept in memory, never
-  mirrored.
+  of the challenges it, or a demo agent it minted (Plan 01c), started. Codes are kept in memory, never mirrored.
 - Single-use links (Plans 01b and 01c): `native.release_document` and `native.payment_link` mint a random token
   that only the link card's `href` carries (`/api/d/{token}`, `/pay/{token}`), never a fact, `model_view` or ledger
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
@@ -3333,16 +3332,15 @@ class FakeKernelState:
         return session.state()
 
     def session_inbox(self, request: Request, body: Any) -> list[DemoInboxEntry]:
-        """The session's Demo inbox: `verification_code` entries for the people whose challenges it started, or an
-        agent session opened with a demo agent's key it minted started (the kernel's `agents.minted_sessions`), oldest
-        first; never an alert or a head checkpoint, nor the codes of an agent another session or the owner minted."""
+        """The session's Demo inbox: the `verification_code` entries of the challenges it started, or an agent
+        session opened with a demo agent's key it minted started (the kernel's `agents.minted_sessions`), oldest
+        first; never another session's code for the same person, an alert or a head checkpoint, nor the codes of an
+        agent another session or the owner minted."""
         session, _ = self.session_call(request, self._query(request, "session_id"))
         minted = {key.agent_key_id for key in self.agent_keys.values() if key.minted_by == session.session_id}
         started_by = {session.session_id} | {agent.session_id for agent in self.sessions.values()
                                               if agent.kind == "agent" and agent.agent_key_id in minted}
-        people = {challenge.person_id for challenge in self.challenges.values()
-                  if challenge.session_id in started_by}
-        entries = {challenge.entry_id for challenge in self.challenges.values() if challenge.person_id in people}
+        entries = {challenge.entry_id for challenge in self.challenges.values() if challenge.session_id in started_by}
         return [entry for copy_id, entry in self.inbox
                 if copy_id == session.copy_id and entry.kind == "verification_code" and entry.entry_id in entries]
 
