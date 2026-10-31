@@ -36,10 +36,10 @@ import {
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
-import type { ChatRow, SendFailure } from './chatReducer.ts';
+import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
-import { useVisitorChat } from './PublicChatProvider.tsx';
+import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
 import { VerifyInline } from './verify/VerifyInline.tsx';
@@ -263,8 +263,18 @@ interface NewestInView {
  * taller, the browser's scroll anchoring moves the conversation down to keep the rows on screen
  * where they were. So while the visitor is at the end, only a move up counts as them leaving it;
  * once they have moved back, any move counts.
+ *
+ * Until the conversation has `started` there is no newest message to keep in view, so nothing is
+ * pinned and the conversation's scroll region stays at its start: on a phone, where the about
+ * column opens the region above the first message, a new chat opens with the column's heading in
+ * view, not scrolled to the empty end below it.
  */
-function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): NewestInView {
+function useNewestInView(
+  end: RefObject<HTMLElement | null>,
+  composer: RefObject<HTMLElement | null>,
+  shown: boolean,
+  started: boolean,
+): NewestInView {
   const atTheEnd = useRef(true);
   /** Where the conversation's scroller stood when the page last knew where the visitor was. */
   const seenAt = useRef<ScrollerAt | null>(null);
@@ -275,9 +285,9 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   }, [end]);
 
   // Brings the end of the conversation up to the composer, at once and never animated, while the
-  // visitor is at the end, and notes that they still are.
+  // visitor is at the end of a conversation that has started, and notes that they still are.
   const pin = useCallback(() => {
-    if (!atTheEnd.current || !end.current || !composer.current) return;
+    if (!started || !atTheEnd.current || !end.current || !composer.current) return;
     const hidden = hiddenUnderComposer(end.current, composer.current);
     if (hidden > 0) {
       const scroller = scrollerOf(end.current);
@@ -285,7 +295,7 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
       else scroller.scrollBy({ top: hidden, behavior: 'instant' });
     }
     noteSeen();
-  }, [end, composer, noteSeen]);
+  }, [started, end, composer, noteSeen]);
 
   // Whether the visitor is at the end, as the page stands now.
   const notePlace = useCallback(() => {
@@ -343,6 +353,15 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   return { follow, beforeChange };
 }
 
+/**
+ * Whether the conversation has anything in it yet: a row, receipts before the first message,
+ * "Claude is writing", the owner typing, or a notice under it.
+ */
+function conversationStarted(state: ChatState, status: ChatStatus): boolean {
+  if (state.rows.length > 0 || state.leading.length > 0 || state.writing || state.ownerTyping !== null) return true;
+  return state.error !== null || status === 'unavailable' || state.connection !== 'open';
+}
+
 /** The latest row whose message carries the kernel's verify card, by its key, or null. */
 function latestVerifyRow(rows: readonly ChatRow[]): string | null {
   const row = rows.findLast(
@@ -379,7 +398,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const newest = useNewestInView(endRef, composerRef, desk !== null);
+  const newest = useNewestInView(endRef, composerRef, desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.

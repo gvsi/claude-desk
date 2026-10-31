@@ -721,6 +721,29 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it('a_new_chat_on_a_phone_opens_at_its_start', async () => {
+    // A new chat on a phone, before anything is said: the about column opens the conversation's
+    // scroll region, taller than the region, and the page shows it from its start, its heading right
+    // under the chat's head, with the composer in view. From the first message on, the newest row
+    // sits above the composer.
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    await sleep(200);
+    const region = chatScroller();
+    const heading = screen.getByRole('heading', { name: 'About Rivera Plumbing' }).element();
+    const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element();
+    expect(region.scrollHeight, 'the about column is taller than the region').toBeGreaterThan(region.clientHeight);
+    expect({ scrollTop: region.scrollTop, heading: shownIn(heading, region), composer: inWindow(composer) }).toEqual({
+      scrollTop: 0,
+      heading: true,
+      composer: true,
+    });
+
+    await say(screen, 'How much is drain clearing?');
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    expect(region.scrollTop, 'the conversation followed its first message').toBeGreaterThan(0);
+  });
+
   it('disclosure_stays_in_view_through_a_long_chat', async () => {
     // The AI disclosure is part of the always-on baseline. However long the chat gets, and wherever
     // the visitor is in it, the business's header and the disclosure stay on screen: the page is the
