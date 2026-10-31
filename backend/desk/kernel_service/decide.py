@@ -511,6 +511,7 @@ REFUSED_PLAIN: dict[str, str] = {
     "evaluation_error": "Your rules couldn't be checked for it, so it was refused.",
 }
 BASELINE_PLAIN = "The always-on safety rules don't allow it."
+UNCOVERED_PLAIN = "None of your rules covers this yet, so it was refused."
 # How the deciding rules decided, said before their own text (the owner's wording, 2026-10-30).
 RULE_LEAD_INS: dict[str, str] = {
     "allow": "Your rule allows it",
@@ -523,10 +524,22 @@ RULE_LEAD_INS: dict[str, str] = {
 DEFAULT_ASK_PLAIN = compiler.DEFAULT_REASON
 REVIEW_PLAIN: dict[str, str] = {
     "absent": "The reviewer couldn't check it.",
-    "block": "The reviewer flagged it as an attempt to get around your rules.",
+    "block": "The reviewer flagged something in the request as a possible way around your rules.",
     "hold": "The reviewer suggested asking you.",
     "unsure": "The reviewer wasn't sure enough to let it through.",
     "allow": "The reviewer checked it.",
+}
+# Owner explanations keyed by the deciding baseline policy's @id, without its B. prefix.
+BASELINE_RULE_PLAIN: dict[str, str] = {
+    "same_copy": "It reached into another copy of the Desk, which is never allowed.",
+    "private_data_record_owner":
+        "Private records go only to the verified person they belong to, so it was refused.",
+    "recipient_owner_or_verified_contact":
+        "Messages go only to you or to a verified contact on record, so it was refused.",
+    "no_agent_pay_out": "An agent can never be paid money out, so it was refused.",
+    "agent_charge_within_mandate": "It was more than this agent's signed limit allows, so it was refused.",
+    "money_has_amount": "A payment needs an amount above zero and within the platform's limit, so it was refused.",
+    "auto_money_cap": "It was over your limit for payments that go through without you, so it was refused.",
 }
 
 
@@ -867,7 +880,12 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
             # a rule's text is the owner's own words: quoted whole, never cut as free text is
             parts.append(f"{lead_in}: " + ", ".join(quoted(card.reason) for card in deciding))
         elif outcome == "refuse":
-            parts.append(BASELINE_PLAIN)
+            baseline_ids = {policy_id.removeprefix("B.") for policy_id in evaluation.policy_ids
+                            if policy_id.startswith("B.")}
+            if len(baseline_ids) == 1:
+                parts.append(BASELINE_RULE_PLAIN.get(next(iter(baseline_ids)), BASELINE_PLAIN))
+            else:
+                parts.append(BASELINE_PLAIN if baseline_ids else UNCOVERED_PLAIN)
     if evaluation is not None and evaluation.needed_review:
         review = evaluation.review
         if review is None:
