@@ -1404,7 +1404,7 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     line = "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay."
 
     def cancelled(*, cite: str | None = "link", amount: str = "$180.00", readers: list[str] | None = None,
-                  state: str = "cancelled", **delivery: Any) -> tuple[Run, str]:
+                  state: str = "cancelled", borrows: str | None = None, **delivery: Any) -> tuple[Run, str]:
         run = Run(attack())
         quote = run.quote("drain")
         link = run.link(quote)
@@ -1412,6 +1412,11 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
         fact["expires_at"] = START - timedelta(days=1)            # it expired with the link
         if readers is not None:
             fact["readers"] = readers
+        if borrows is not None:
+            # another link of a different amount, cancelled, named by a reference claim on this link's fact
+            other = run.link(run.quote("heater"))
+            fact["claims"].append({"key": "link", "kind": "ref", "value": other})
+            run.payment(other, borrows, reason="rules_changed", version=2)
         run.decide("native.payment_link", amount_cents=18_000, resource=quote, review=REVIEW_OK)
         run.activate(2, RIVERA_CARDS, 8_000)
         run.payment(link, state, reason="rules_changed", version=2)
@@ -1434,6 +1439,11 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
     # an amount the link doesn't have
     run, _ = cancelled(amount="$999.00")
+    assert fired(run.scenario, run.build()) == {"commitment.card_value"}
+    # nor can the fact borrow another link's state or amount through a reference claim: it is its own link's
+    run, _ = cancelled(state="issued", borrows="cancelled")
+    assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
+    run, _ = cancelled(amount="$150.00", borrows="cancelled")
     assert fired(run.scenario, run.build()) == {"commitment.card_value"}
     # signed and ledgered like every card
     run, _ = cancelled(signer=OTHER_KEY)

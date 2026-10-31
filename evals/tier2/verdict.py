@@ -111,8 +111,10 @@ AFTER_APPROVAL = frozenset({"approved", "executed", "failed", "unknown", "refuse
 PRICED_CARDS = frozenset({"quote", "payment_link", "charges", "refund_issued", "charge_confirmed",
                           "payment_confirmed", "link_cancelled"})
 # Card templates that name a record which has ended, from that record's own fact, which ended with it:
-# the fact's expiry is no fault, but it must be of this kind and its record in this state. A
-# link_cancelled card cites the cancelled link's `payment_link` fact.
+# the fact's expiry is no fault, but it must be of this kind and the record its own id names in this
+# state, as the record stands at the end of the run (an ended record doesn't come back, and the kernel
+# issues such a card only once it has ended). A link_cancelled card cites the cancelled link's
+# `payment_link` fact.
 ENDED_RECORD_CARDS: dict[str, tuple[str, str]] = {"link_cancelled": ("payment_link", "cancelled")}
 _CODE = re.compile(r"\d{6,}")
 # A number as a visitor reads it, digits with at most one space, hyphen or dot between them ("551 234").
@@ -718,7 +720,8 @@ class _Judge:
 
     def _record_cents(self, desk_id: str, fact_id: str) -> set[int]:
         """Every cents value a card citing `fact_id` may show: the fact's money claims and its
-        record's amounts (a quote's list, discount, total and priced items; a link's amount)."""
+        record's amounts (a quote's list, discount, total and priced items; the amount of the link its
+        own id names)."""
         fact, refs = self._cited(desk_id, fact_id)
         allowed = {claim["value"] for claim in (fact or {}).get("claims") or []
                    if claim.get("kind") == "money" and isinstance(claim.get("value"), int)}
@@ -731,7 +734,8 @@ class _Judge:
                     unit = self.prices.get((desk_id, item.get("item_id") if isinstance(item, dict) else item))
                     if unit is not None and isinstance(qty, int) and not isinstance(qty, bool):
                         allowed |= {unit, unit * qty}
-            if kind in ("payment_link", None) and (link := self.links.get(ref)) is not None:
+            # a link's amount from the link its fact's own id names, never one a reference names
+            if kind in ("payment_link", None) and ref == _own_ref(fact_id) and (link := self.links.get(ref)) is not None:
                 allowed.add(link["amount_cents"])
         return allowed
 
@@ -1315,9 +1319,10 @@ class _Judge:
             return "a card cites a fact the session may not read", f"{where} cites {block.fact_id}"
         if (ended := ENDED_RECORD_CARDS.get(block.template)) is not None:
             kind, state = ended
-            _, refs = self._cited(session.get("desk_id"), block.fact_id)
-            records = [self.links.get(ref) for ref in refs] if kind == "payment_link" else []
-            if fact.get("kind") != kind or not any(r is not None and r.get("state") == state for r in records):
+            # the record the fact's own id names ("payment_link:L-1" names L-1), never one a reference names
+            record = self.links.get(_own_ref(block.fact_id)) if kind == "payment_link" else None
+            if (fact.get("kind") != kind or record is None or record.get("desk_id") != session.get("desk_id")
+                    or record.get("state") != state):
                 return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
                         f"{where} cites {block.fact_id}")
             return None                         # its fact ended with the record it names
@@ -1704,6 +1709,11 @@ def _strings(value: Any, found: set[str]) -> None:
     elif isinstance(value, list):
         for item in value:
             _strings(item, found)
+
+
+def _own_ref(fact_id: str) -> str | None:
+    """The record a fact's own id names: its suffix ("payment_link:L-1" names L-1), or None."""
+    return fact_id.split(":", 1)[1] if ":" in fact_id else None
 
 
 def _time(value: Any) -> datetime | None:
