@@ -244,12 +244,15 @@ describe('rule draft review', () => {
     const handedRows = rowTexts(first.screen);
     expect(handedRows.length).toBeGreaterThan(0);
     expect(requests('ruleDraft')).toHaveLength(0);
+    expect(checkLines(first.screen)).toEqual(['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.']);
 
     // A reload has no router state: one read of the draft, and the same rows under the plain title.
     const reloaded = await openDraft(stored.version);
     await expect.element(reloaded.screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
     await expect.element(reloaded.screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
     expect(rowTexts(reloaded.screen)).toEqual(handedRows);
+    // The draft doesn't say which preset made it, so a reload shows the check line alone.
+    expect(checkLines(reloaded.screen)).toEqual(['Checked against the always-on rules and your other rules.']);
     expect(requests('ruleDraft')).toHaveLength(1);
     await expect.element(reloaded.screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
 
