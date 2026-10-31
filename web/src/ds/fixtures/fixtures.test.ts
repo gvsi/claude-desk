@@ -433,16 +433,14 @@ describe('fixtures', () => {
 
   test('card_amounts_print_cents_as_the_kernel_does', () => {
     // The kernel formats every amount with cents ("$20.00", "$1,234.56": render/cards.py `money`), so
-    // a fixture card's title and lines never show a bare "$20".
+    // no fixture card's title or lines, in the catalog or in a conversation, shows a bare "$20".
     const bare: string[] = [];
-    for (const [template, pair] of Object.entries(rivera.blocks)) {
-      for (const [language, block] of Object.entries(pair as Record<string, { kind?: string; title?: string; lines?: readonly string[] }>)) {
-        // The owner's own words are shown as written, not formatted by the kernel.
-        if (block.kind !== 'card' || template === 'owner_said') continue;
-        for (const text of [block.title ?? '', ...(block.lines ?? [])]) {
-          for (const amount of text.match(/\$[\d,]+(?:\.\d+)?/g) ?? []) {
-            if (!/^\$\d{1,3}(?:,\d{3})*\.\d{2}$/.test(amount)) bare.push(`${template}.${language}: ${text}`);
-          }
+    for (const block of cardBlocks) {
+      // The owner's own words are shown as written, not formatted by the kernel.
+      if (block.template === 'owner_said') continue;
+      for (const text of [block.title ?? '', ...(block.lines ?? [])]) {
+        for (const amount of text.match(/\$[\d,]+(?:\.\d+)?/g) ?? []) {
+          if (!/^\$\d{1,3}(?:,\d{3})*\.\d{2}$/.test(amount)) bare.push(`${block.template}: ${text}`);
         }
       }
     }
