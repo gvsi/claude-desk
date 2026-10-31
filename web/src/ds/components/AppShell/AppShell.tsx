@@ -35,8 +35,9 @@ export interface AppShellProps {
   fill?: boolean;
   /**
    * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
-   * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone)
-   * says so through `AppShellPanelContext`, and the shell makes everything else inert meanwhile.
+   * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone
+   * or a tablet) says so through `AppShellPanelContext`, and the shell makes everything else inert
+   * meanwhile.
    */
   panel?: ReactNode;
   /** The page. */
@@ -149,8 +150,8 @@ function CompactNav({ sidebar, business, inert }: { sidebar: ReactNode; business
     if (dialog && open && !dialog.open) dialog.showModal();
   }, [open]);
 
-  // A panel that becomes a modal sheet (the window narrowed to a phone with the menu open) takes
-  // over: the menu's sheet closes, and the shell moves focus into the panel, not back to Menu.
+  // A panel that becomes a modal sheet (the window narrowed with the menu open) takes over: the
+  // menu's sheet closes, and the shell moves focus into the panel, not back to Menu.
   useLayoutEffect(() => {
     if (!inert || !open) return;
     sheet.current?.close();

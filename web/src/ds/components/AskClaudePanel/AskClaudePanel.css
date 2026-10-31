@@ -1,6 +1,7 @@
 /* AskClaudePanel: a side panel, size-side-panel wide on the panel ground, set off from the page by
    a hairline on its left. The conversation scrolls between the header and the composer. Under
-   640 px it is a modal sheet over the whole window, with no seam (the page behind is inert). */
+   1024 px, where the page beside it would be under 360 px wide (264 px of sidebar and 400 px of
+   panel), it is a modal sheet over the whole window, with no seam (the page behind is inert). */
 
 .cd-ask-claude {
   display: flex;
@@ -47,7 +48,7 @@
   flex: none;
 }
 
-@media (max-width: 639.98px) {
+@media (max-width: 1023.98px) {
   .cd-ask-claude {
     position: fixed;
     z-index: 1;
