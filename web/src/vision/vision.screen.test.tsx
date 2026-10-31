@@ -312,12 +312,17 @@ describe('Vision pages against their boards', () => {
     expect(lastVisit.element().textContent).toBe('BookedTuesday, October 20, 10:00 amDrain clearingWith Maria RiveraBooking B-61');
     expect(lastVisit.element().closest('.cd-claude-message')?.querySelector('.cd-claude-message__prose')?.textContent).toBe(ACCOUNT.matched);
 
-    // The invoice is a document card, only for her, with its download.
+    // The invoice is a document card, only for her, with its download. A vision page makes no
+    // requests: Download is drawn as the board draws it, a button going nowhere, and the page's data
+    // names no download path.
     const invoice = log.getByRole('article', { name: 'Document, only for you' });
     await expect.element(invoice).toBeVisible();
     expect(invoice.element().textContent).toContain('Invoice, drain clearing');
-    const download = invoice.getByRole('link', { name: 'Download' });
+    const download = invoice.getByRole('button', { name: 'Download' });
     expectComputed(download.element(), SPEC.primary);
+    expect(download.element().getAttribute('type')).toBe('button');
+    expect(invoice.element().querySelector('a')).toBeNull();
+    expect(root.innerHTML).not.toContain('/api/');
 
     // The about column: hours, Rivera's service area and the phone, Rivera's own facts.
     const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
@@ -334,9 +339,8 @@ describe('Vision pages against their boards', () => {
       main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
     ]);
 
-    // Nothing here is live: the download keeps its look but points nowhere, its click goes nowhere,
-    // not even to a page of the app or a place on this one, and nothing is asked of the API.
-    expect(download.element().getAttribute('href')).toBe('#');
+    // Nothing here is live: the download's click goes nowhere, not even to a page of the app or a
+    // place on this one, and nothing is asked of the API.
     const here = window.location.href;
     await download.click();
     await wait(300);

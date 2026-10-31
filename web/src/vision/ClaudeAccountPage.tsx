@@ -63,7 +63,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="released" source={s.released} plain={t.releasedReceipt} ledgerSeq={44} />,
               ]}
             >
-              <ClaudeMessage blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={ownerName} />
+              <ClaudeMessage blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={ownerName} inertDownload />
             </TranscriptRow>
           </Transcript>
         </PublicShell>

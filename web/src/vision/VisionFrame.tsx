@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type MouseEvent, type ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import { AppShell, ClaudeMessage, Sidebar, VisionBar, type CopyLanguage } from '../ds/index.ts';
@@ -17,46 +17,14 @@ export interface VisionFrameProps {
   children: (bar: ReactNode) => ReactNode;
 }
 
-/** Whether `link` would ask the API for something, such as a document card's download. */
-function callsTheApi(link: HTMLAnchorElement): boolean {
-  try {
-    const url = new URL(link.getAttribute('href') ?? '', window.location.href);
-    return url.origin === window.location.origin && (url.pathname === '/api' || url.pathname.startsWith('/api/'));
-  } catch {
-    return false;
-  }
-}
-
-/** Marks a link whose destination the frame took away: it keeps its look, and its click does nothing. */
-const INERT = 'data-vision-inert';
-
-/** A link that goes nowhere on a vision page: one the frame made inert, or one that would reach the API. */
-function goesNowhere(link: HTMLAnchorElement): boolean {
-  return link.hasAttribute(INERT) || callsTheApi(link);
-}
-
 /**
  * Every vision page's frame: the vision bar ("Vision, not in the prototype. Nothing here is live.",
  * with "Back to your Desk") handed to the page to put first, and the tab named while it is open.
- * Nothing here is live, so no link on the page names the API, and a link to a page of the app goes
- * through the router, as the owner's pages do.
+ * A link to a page of the app goes through the router, as the owner's pages do. Nothing here is
+ * live, so the pages name no API path: the design system draws their controls going nowhere.
  */
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
-  const follow = followInAppLinks(navigate);
-  const frame = useRef<HTMLDivElement>(null);
-
-  // The design system's document card links only to the API's download path, and a static page has
-  // nothing behind it. Once the page is drawn, before it shows, every link to the API points
-  // nowhere ("#") instead, keeping its look, so not even the browser's own "Open link in new tab"
-  // can reach the API. The pages are static, so what is drawn once stays as drawn.
-  useLayoutEffect(() => {
-    for (const link of frame.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? []) {
-      if (!callsTheApi(link)) continue;
-      link.setAttribute('href', '#');
-      link.setAttribute(INERT, '');
-    }
-  });
 
   // As every page that names the tab does: in a layout effect, handing the title back on leaving.
   useLayoutEffect(() => {
@@ -67,22 +35,8 @@ export function VisionFrame({ title, children }: VisionFrameProps) {
     };
   }, [title]);
 
-  const onClick = (event: MouseEvent<HTMLElement>) => {
-    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
-    if (link instanceof HTMLAnchorElement && goesNowhere(link)) {
-      event.preventDefault();
-      return;
-    }
-    follow(event);
-  };
-  // A middle click opens a link in a new tab without a click event: the same rule.
-  const onAuxClick = (event: MouseEvent<HTMLElement>) => {
-    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
-    if (link instanceof HTMLAnchorElement && goesNowhere(link)) event.preventDefault();
-  };
-
   return (
-    <div ref={frame} className="cd-vision-frame" onClick={onClick} onAuxClick={onAuxClick}>
+    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
     </div>
   );

@@ -205,8 +205,15 @@ const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
 /** Claude's welcome back: its words, then her last visit's booking card. */
 export const CLAUDE_ACCOUNT_WELCOME = [proseBlock(CLAUDE_ACCOUNT_TURNS.matched), DANA_LAST_VISIT];
 
-/** The message Claude sends with the invoice: its words, then the document card, only for her. */
-export const CLAUDE_ACCOUNT_INVOICE = [proseBlock(CLAUDE_ACCOUNT_TURNS.sent), rivera.blocks.document_link.en];
+/**
+ * The message Claude sends with the invoice: its words, then the document card, only for her. A
+ * vision page makes no requests, so the card carries no download path; the page draws its Download
+ * going nowhere (`inertDownload`).
+ */
+export const CLAUDE_ACCOUNT_INVOICE = [
+  proseBlock(CLAUDE_ACCOUNT_TURNS.sent),
+  cardBlock('document_link', { fact_id: 'document_link:DL-501', title: 'Invoice, drain clearing' }),
+];
 
 /** The receipts' sources on the Claude account page. */
 export const CLAUDE_ACCOUNT_SOURCES = { checked: CHECKED, matched: decided('executed'), released: decided('executed') } as const;
