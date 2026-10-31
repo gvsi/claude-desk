@@ -1038,24 +1038,29 @@ async def _cancelled_card(ctx: KernelCtx, link: PaymentLink, session_row: Sessio
     rendered from the link's own `payment_link` fact (the one named after it, whose `ref` is it)
     with the reply check's reader test: the session reads as itself and, once verified, its person
     (`labels.session_readers`), and no field the card shows holds a document canary. None when any
-    of that fails, logged: the chat gets no line rather than figures it may not read, and the
-    checkout page still says why the link was cancelled."""
+    of that fails, or the fact is malformed (claims that don't parse, no source, or a total or
+    title the card can't show), logged: the chat gets no line rather than figures it may not read
+    or that aren't the fact's, and the checkout page still says why the link was cancelled. A
+    malformed fact withholds only its own link's line, never another link's."""
     fact_id = f"{LINK_FACT}{link.link_id}"
-    row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == link.desk_id, FactRow.fact_id == fact_id)))).one_or_none()
-    fact = labels.fact_of(row) if row is not None else None
     template = render.TEMPLATES["link_cancelled"]
-    if fact is None:
-        withheld = "no_such_fact"
-    elif not labels.can_read(fact.label, labels.session_readers(session_row)):
-        withheld = "not_a_reader"
-    elif not template.reads(fact) or claims(fact).get("ref") != link.link_id:
-        withheld = "template_mismatch"
-    else:
-        block = render.render_clause(Clause(template="link_cancelled", fact_id=fact_id), fact, language, desk)
-        if not reply_check.carries(block, canaries):
-            return block
-        withheld = "canary"
+    try:
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == link.desk_id, FactRow.fact_id == fact_id)))).one_or_none()
+        fact = labels.fact_of(row) if row is not None else None
+        if fact is None:
+            withheld = "no_such_fact"
+        elif not labels.can_read(fact.label, labels.session_readers(session_row)):
+            withheld = "not_a_reader"
+        elif not template.reads(fact) or claims(fact).get("ref") != link.link_id:
+            withheld = "template_mismatch"
+        else:
+            block = render.render_clause(Clause(template="link_cancelled", fact_id=fact_id), fact, language, desk)
+            if not reply_check.carries(block, canaries):
+                return block
+            withheld = "canary"
+    except (KeyError, TypeError, ValidationError):
+        withheld = "malformed"
     log.error("link_cancelled_withheld link_id=%s reason=%s", link.link_id, withheld)
     return None
 

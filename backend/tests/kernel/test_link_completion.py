@@ -15,6 +15,7 @@ says otherwise). A test that drafts and confirms cards needs the solver (`solver
 
 import asyncio
 import dataclasses
+import json
 import logging
 import time
 from datetime import time as clock_time
@@ -25,7 +26,7 @@ import psycopg
 import pytest
 from cryptography.exceptions import InvalidSignature
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from desk.contracts import HoursWindow, PolicyVersion, Review, RuleCard
 from desk.db.models import Document
@@ -786,18 +787,24 @@ async def test_a_cancelled_links_card_shows_its_own_title_and_amount(desk_prove,
         (session_id, (f"payment_link:{link.link_id}",)) for session_id, (link, *_) in expected.items())
 
 
+WITHHELD = {"another_session": "not_a_reader", "no_such_fact": "no_such_fact",
+            "another_links_fact": "template_mismatch", "canary": "canary"}
+
+
 @pytest.mark.solver
-@pytest.mark.parametrize("change", ["another_session", "no_such_fact", "another_links_fact", "canary"])
+@pytest.mark.parametrize("change", [*WITHHELD, "no_source", "no_total", "title_not_text", "claims_unreadable"])
 async def test_a_cancelled_links_card_needs_its_own_readable_fact(desk_prove, app, client, reviewer, caplog, change):
     """A cancelled link's card shows only the fact named after that link, which the chat it goes to
-    may read, holding no document text. A link row that names another visitor's chat (who can't read
-    the link's fact), a fact gone, a fact naming another link and a canary in what the card would
-    show each leave the link without a line, logged, with nothing of the link's figures sent or
-    ledgered."""
+    may read, well formed and holding no document text. A link row that names another visitor's chat
+    (who can't read the link's fact), a fact gone, a fact naming another link, a canary in what the
+    card would show, and a malformed fact (no source, no total, a title that isn't text, or claims
+    that don't parse) each leave the link without a line, logged, with nothing of the link's figures
+    sent or ledgered. Another chat's link that the same version cancelled still gets its line."""
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
     stranger = await open_visitor(client, copy)
     heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, stranger, ("drain", 1), call_id="call-drain")     # $180
     version = await lower_the_cap_to_100(client, copy)
     fact_id = f"payment_link:{heater.link_id}"
     async with kernel_ctx(app) as ctx:
@@ -809,6 +816,20 @@ async def test_a_cancelled_links_card_needs_its_own_readable_fact(desk_prove, ap
             link.session_id = stranger.session_id
         elif change == "no_such_fact":
             fact.fact_id = "payment_link:paylink-aaaaaaaaaaaaaaaa"
+        elif change == "no_source":
+            fact.source = None
+        elif change == "no_total":
+            fact.claims = [claim for claim in fact.claims if claim.key != "total"]
+        elif change == "title_not_text":
+            fact.claims = [claim.model_copy(update={"kind": "money", "value": 30_000}) if claim.key == "title"
+                           else claim for claim in fact.claims]
+        elif change == "claims_unreadable":
+            # written around the contract's check: a money claim holding text, so the stored claims don't parse
+            unreadable = [{**claim.model_dump(mode="json"), "value": "$300"} if claim.key == "total"
+                          else claim.model_dump(mode="json") for claim in fact.claims]
+            await ctx.db.execute(text("UPDATE kernel.facts SET claims = CAST(:claims AS jsonb) "
+                                      "WHERE desk_id = :desk_id AND fact_id = :fact_id"),
+                                 {"claims": json.dumps(unreadable), "desk_id": fact.desk_id, "fact_id": fact_id})
         else:
             canary = (await ctx.db.scalars(ctx.repo.scoped(select(Document.canary)))).first()
             key, value = ("ref", "paylink-aaaaaaaaaaaaaaaa") if change == "another_links_fact" else (
@@ -818,11 +839,15 @@ async def test_a_cancelled_links_card_needs_its_own_readable_fact(desk_prove, ap
 
     with caplog.at_level(logging.ERROR, logger="desk.kernel_service.payments"):
         response = await get_cancelled(client, copy, version)
-    assert (response.status_code, response.json()) == (200, [])
-    reason = {"another_session": "not_a_reader", "another_links_fact": "template_mismatch"}.get(change, change)
+    assert response.status_code == 200, response.text
+    [line] = [LinkCancelled.model_validate(item) for item in response.json()]       # the other chat's line only
+    assert (line.link_id, line.session_id, line.verdict.ok, line.verdict.blocks[0].fact_id) == (
+        drain.link_id, stranger.session_id, True, f"payment_link:{drain.link_id}")
+    reason = WITHHELD.get(change, "malformed")
     assert f"link_cancelled_withheld link_id={heater.link_id} reason={reason}" in caplog.text
-    assert not [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
-                and entry.event.summary["author"] == "desk"]
+    assert [(entry.event.session_id, entry.event.summary["fact_ids"]) for entry in await ledger_rows(app, copy)
+            if entry.event.kind == "reply" and entry.event.summary["author"] == "desk"] == [
+        (stranger.session_id, [f"payment_link:{drain.link_id}"])]
 
 
 @pytest.mark.solver
