@@ -255,29 +255,170 @@ async def test_use_your_suggestions_finishes_with_every_limit_asking(proposals, 
     assert (await owner.browser.post(path, json={})).status_code == 409
 
 
-@pytest.mark.parametrize("fail", [False, True])
-async def test_finish_connects_an_accepted_stripe_card_and_goes_on_if_it_fails(proposals, engine, monkeypatch, fail):
+async def test_accepting_stripe_connects_after_the_decision_commit(proposals, engine, monkeypatch):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    calls = []
+
+    async def connect(ctx, desk_id):
+        assert interview_id not in setup._RUNNING
+        saved = await stored(engine, interview_id)
+        card = next(entry["card"] for entry in reversed(saved["transcript"])
+                    if (entry.get("card") or {}).get("proposal_id") == ids[2])
+        assert card["state"] == "accepted"
+        calls.append(desk_id)
+        return []
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[2]}?cards=1",
+                                     json={"accept": True})
+    assert reply.status_code == 200, reply.text
+    assert calls == [state["desk_id"]]
+
+
+async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, engine, monkeypatch):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    calls = []
+
+    async def connect(ctx, desk_id):
+        saved = await stored(engine, interview_id)
+        card = next(entry["card"] for entry in reversed(saved["transcript"])
+                    if (entry.get("card") or {}).get("proposal_id") == ids[2])
+        assert card["state"] == "accepted"
+        assert interview_id not in setup._RUNNING
+        calls.append(desk_id)
+        return []
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    model.add(card_answer("accept", next=next_ask("what_you_do"), reply="The consultant reply."))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                     json={"card": ids[2], "text": "Yes"})
+    assert reply.status_code == 200, reply.text
+    assert calls == [state["desk_id"]]
+    assert any(message["text"] == "The consultant reply." for message in reply.json()["messages"])
+
+
+async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engine, monkeypatch, caplog):
     from desk.api.kernel_client import KernelFailed
 
     owner, state, ids = proposals
+    await show_card(engine, state["interview_id"], ids[2])
     calls = []
 
     async def connect(ctx, desk_id):
         assert state["interview_id"] not in setup._RUNNING
-        assert (await stored(engine, state["interview_id"]))["step"] == "tools"
         calls.append(("connect", desk_id))
-        if fail:
-            raise KernelFailed(503, "unavailable")
-        return []
+        raise KernelFailed(503, "unavailable")
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{ids[2]}?cards=1",
+                                     json={"accept": True})
+    assert reply.status_code == 200, reply.text
+    assert calls == [("connect", state["desk_id"])]
+    saved = await stored(engine, state["interview_id"])
+    assert any((entry.get("card") or {}).get("state") == "accepted" and
+               entry["card"]["proposal_id"] == ids[2] for entry in saved["transcript"])
+    assert any(message["text"] == "Got it." for message in reply.json()["messages"])
+    assert "a setup payments connection failed (KernelFailed)" in caplog.text
+
+
+async def test_use_your_suggestions_never_connects(proposals, engine, monkeypatch):
+    owner, state, ids = proposals
+    connects, writes = [], []
+
+    async def connect(ctx, desk_id):
+        connects.append(desk_id)
 
     async def put(ctx, desk_id, jobs):
-        calls.append(("put", desk_id, [job.job for job in jobs]))
+        writes.append((desk_id, [job.job for job in jobs]))
 
     monkeypatch.setattr(setup, "connect_payments", connect)
     monkeypatch.setattr(setup, "_put_business_tools", put)
-    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions?cards=1", json={})
     assert reply.status_code == 200, reply.text
-    assert calls == [("connect", state["desk_id"]), ("put", state["desk_id"], ["schedule"])]
+    assert next(card for card in shown(reply) if card["proposal_id"] == ids[2])["state"] == "accepted"
+    assert (await stored(engine, state["interview_id"]))["step"] == "tools"
+    assert connects == []
+    assert writes == [(state["desk_id"], ["schedule"])]
+
+
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("app_key", ["google_calendar", "square"])
+async def test_accepting_a_non_connectable_card_only_plans_it(proposals, model, engine, monkeypatch, typed, app_key):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    entry = setup.proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])[0]
+    assert entry.card.connector.connectable is False
+    row = await stored(engine, interview_id)
+    row["transcript"] += [setup.Entry(role="claude", text="", planned=[entry.card]).model_dump(mode="json"),
+                          entry.model_dump(mode="json")]
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    connects = []
+    async def connect(ctx, desk_id):
+        connects.append(desk_id)
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    if typed:
+        model.add(card_answer("accept", next=next_ask("what_you_do")))
+    endpoint, body = (("answer", {"card": entry.card.proposal_id, "text": "Yes"}) if typed else
+                      (f"proposals/{entry.card.proposal_id}", {"accept": True}))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    assert next(card for card in shown(reply) if card["proposal_id"] == entry.card.proposal_id)["state"] == "accepted"
+    assert connects == []
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_connector_decision_that_cannot_commit_never_connects(proposals, model, engine, monkeypatch, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    before = await stored(engine, interview_id)
+    connects = []
+
+    async def connect(ctx, desk_id):
+        connects.append(desk_id)
+
+    async def conflict(*args):
+        raise setup.ApiProblem(409, "conflict")
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    monkeypatch.setattr(setup, "_commit", conflict)
+    if typed:
+        model.add(card_answer("accept", next=next_ask("what_you_do")))
+    endpoint, body = (("answer", {"card": ids[2], "text": "Yes"}) if typed else
+                      (f"proposals/{ids[2]}", {"accept": True}))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}", json=body)
+    assert reply.status_code == 409, reply.text
+    assert await stored(engine, interview_id) == before
+    assert connects == []
+
+
+@pytest.mark.parametrize("decision", ["click_decline", "decline", "none"])
+async def test_a_connector_without_an_accept_does_not_connect(proposals, model, engine, monkeypatch, decision):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    connects = []
+
+    async def connect(ctx, desk_id):
+        connects.append(desk_id)
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    if decision == "click_decline":
+        endpoint, body = f"proposals/{ids[2]}", {"accept": False}
+    else:
+        model.add(card_answer(decision, next=next_ask("what_you_do")))
+        endpoint, body = "answer", {"card": ids[2], "text": "Not now" if decision == "decline" else "What does it do?"}
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    card = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
+    assert card["state"] == ("proposed" if decision == "none" else "declined")
+    assert connects == []
 
 
 @pytest.mark.parametrize("action", ["decision", "suggestions"])
@@ -481,8 +622,8 @@ async def test_rules_drafting_receives_only_owner_decided_jobs(proposals, model,
     assert "Meet new clients" not in message
 
 
-@pytest.mark.parametrize("app_key, declined", [("stripe", True), ("square", False), ("google_calendar", False)])
-async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_key, declined):
+@pytest.mark.parametrize("app_key, declined", [("stripe", False), ("stripe", True), ("square", False), ("google_calendar", False)])
+async def test_finish_and_after_finish_never_connect(monkeypatch, app_key, declined):
     from types import SimpleNamespace
 
     connector = ConnectorProposal(app=app_key, label="Model label", why="Help customers", connectable=True)
@@ -616,12 +757,11 @@ async def test_answer_holds_the_turn_before_reading(proposals, model, engine, mo
 
 
 @pytest.mark.parametrize("fail", [False, True])
-async def test_duplicate_stripe_cards_connect_once(monkeypatch, fail):
-    from types import SimpleNamespace
-
-    entries = setup.proposal_entries([], [stripe(), stripe()])
-    state = plan_state(entries)
-    connects, writes = [], []
+async def test_duplicate_stripe_cards_connect_once(proposals, model, engine, monkeypatch, fail):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    connects = []
 
     async def connect(owner, desk_id):
         connects.append(desk_id)
@@ -629,16 +769,25 @@ async def test_duplicate_stripe_cards_connect_once(monkeypatch, fail):
             raise RuntimeError("connection failed")
         return []
 
-    async def put(owner, desk_id, jobs):
-        writes.append((desk_id, jobs))
-
     monkeypatch.setattr(setup, "connect_payments", connect)
-    monkeypatch.setattr(setup, "_put_business_tools", put)
-    setup.settle_plan(state)
-    setup.finish(state)
-    await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
-    assert connects == [state.desk_id]
-    assert writes == [(state.desk_id, [])]
+    path = f"/api/owner/setup/{interview_id}/proposals/{ids[2]}?cards=1"
+    assert (await owner.browser.post(path, json={"accept": True})).status_code == 200
+    assert (await owner.browser.post(path, json={"accept": True})).status_code == 409
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).status_code == 200
+    # A new card in the same interview still cannot trigger another connection, even after a failure.
+    duplicate = setup.proposal_entries([], [stripe()])[0]
+    row = await stored(engine, interview_id)
+    row["transcript"] += [setup.Entry(role="claude", text="", planned=[duplicate.card]).model_dump(mode="json"),
+                          duplicate.model_dump(mode="json")]
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    model.add(card_answer("accept", next=next_ask("what_you_do")))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                     json={"card": duplicate.card.proposal_id, "text": "Yes"})
+    assert reply.status_code == 200, reply.text
+    assert next(card for card in shown(reply) if card["proposal_id"] == duplicate.card.proposal_id)["state"] == "accepted"
+    assert connects == [state["desk_id"]]
 
 
 async def test_a_failed_business_tool_write_keeps_saved_setup(proposals, engine, monkeypatch, caplog):

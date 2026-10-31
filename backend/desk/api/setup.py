@@ -428,6 +428,7 @@ class Entry(BaseModel):
     held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
     connected_apps: list[ConnectorKey] | None = None
     owner_decided: bool = False
+    connector_connect_attempted: bool = False
 
 
 def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[ConnectorProposal], *,
@@ -601,7 +602,8 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_decided"}
+                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_decided",
+                                                                           "connector_connect_attempted"}
                                                                   and not value)})
                            for entry in interview.transcript],
             "draft_cards": [card.model_dump(mode="json") for card in interview.draft_cards],
@@ -1190,7 +1192,10 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
                      if entry.card is not None and entry.card.proposal_id == proposal_id)
         entry.owner_decided = True
         await card_turn(owner, engine, model, interview, proposal_id)
+        connect = _claim_connector_connect(interview, proposal_id)
         await _commit(engine, owner, interview, seen)
+    if connect:
+        await _connect_accepted_connector(owner, interview)
     if interview.step == "tools":
         await after_finish(owner, interview)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
@@ -1879,6 +1884,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     if (question is None) == (card is None):
         raise ApiProblem(422, "invalid_request")
 
+    connect = False
+
     def check(interview: Interview) -> None:
         if card is not None:
             if card != interview.pending_card:
@@ -1890,11 +1897,13 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         return [Entry(role="owner", text=text)]
 
     async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
         interview.business_tools_enabled = business_tools_enabled
         if card is not None:
             if not interview.business_tools_enabled:
                 _clear_configs(interview)
             await card_turn(ctx, engine, model, interview, card, text=text)
+            connect = _claim_connector_connect(interview, card)
             return
         since = len(interview.transcript)
         key = question
@@ -1943,6 +1952,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                                  follow_up=turn if not turn.step_done else None)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, interview)
         if interview.step == "tools":
             await after_finish(ctx, interview)
 
@@ -2042,17 +2053,30 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
     """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
 
 
+def _claim_connector_connect(interview: Interview, proposal_id: str) -> bool:
+    """Persist one attempt with the accepted card before any connection, including one that fails."""
+    if any(entry.connector_connect_attempted for entry in interview.transcript):
+        return False
+    entry = next(entry for entry in reversed(interview.transcript)
+                 if entry.card is not None and entry.card.proposal_id == proposal_id)
+    card = entry.card
+    if card.state != "accepted" or card.connector is None or not card.connector.connectable:
+        return False
+    entry.connector_connect_attempted = True
+    return True
+
+
+async def _connect_accepted_connector(owner: OwnerCtx, interview: Interview) -> None:
+    """Connect after the decision commit; failures leave the Tools step's Connect available."""
+    try:
+        await connect_payments(owner, owner.desk(interview.desk_id))
+    except Exception as failed:
+        logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
+
+
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
-    """Apply the finished proposals after the setup commit, without a turn guard or database lock."""
+    """Apply business tools after the setup commit, without a turn guard or database lock."""
     desk_id = owner.desk(interview.desk_id)
-    for card in interview.planned:
-        if (card.state == "accepted" and card.connector is not None
-                and card.connector.connectable and card.connector.app == "stripe"):
-            try:
-                await connect_payments(owner, desk_id)
-            except Exception as failed:
-                logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
-            break
     try:
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
     except Exception as failed:
