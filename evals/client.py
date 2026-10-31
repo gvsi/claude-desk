@@ -59,17 +59,24 @@ class ApiCallFailed(AssertionError):
     JSON as its first 80 characters, named by its `content_type` (None for a JSON body). The message,
     and a body that isn't JSON, have their credentials masked before they are cut (`mask_credentials`),
     so one that crosses a cut is never shown in part; a JSON body's message shows a copy masked before it
-    is serialized (`mask_values`)."""
+    is serialized (`mask_values`). The whole body is kept privately, so `message(replace)` can replace a
+    caller's own secrets in it before any cut."""
 
     def __init__(self, op: str, status: int, body: Any, *, content_type: str | None = None, what: str = "a body"):
-        self.op, self.status, self.content_type = op, status, content_type
+        self.op, self.status, self.content_type, self._what = op, status, content_type, what
+        self._sent = body   # the whole body as it came, never shown before `message` replaces, masks and cuts it
         self.body = body if content_type is None else mask_credentials(body)[:SHOWN_UNREADABLE]
-        if content_type is None:
+        super().__init__(self.message())
+
+    def message(self, replace: Callable[[Any], Any] = lambda body: body) -> str:
+        """The refusal's message, with `replace` (a run's own secrets, say) applied to the whole body before it
+        is masked and cut, so a secret that crosses a cut is replaced whole, never shown in part."""
+        body = replace(self._sent)
+        if self.content_type is None:
             shown = json.dumps(mask_values(body)) if not isinstance(body, str) else body
-            message = f"{op} answered {status}: {mask_credentials(shown)[:SHOWN_BODY]}"
-        else:
-            message = f"{op} answered {status} ({content_type}) with {what} that isn't JSON: {self.body!r}"
-        super().__init__(message)
+            return f"{self.op} answered {self.status}: {mask_credentials(shown)[:SHOWN_BODY]}"
+        shown = mask_credentials(body)[:SHOWN_UNREADABLE]
+        return f"{self.op} answered {self.status} ({self.content_type}) with {self._what} that isn't JSON: {shown!r}"
 
 
 class AnswerUnreadable(ApiCallFailed):

@@ -240,9 +240,10 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     run = _Run(scenario, rep, target, simulator, turn_timeout_s=turn_timeout_s, pass_id=pass_id,
                new_client=new_client, seed=seed or rivera_seed_data, landed=landed)
     artifact = verdict = None
-    # The error's kind and its whole detail: the RunError is built once, after the run's own secrets are
-    # replaced in it, since it cuts the detail and a secret crossing the cut would otherwise be written in part.
-    failed: tuple[RunErrorKind, str] | None = None
+    # The error's kind and its whole detail, or the failure it is described from: the RunError is built once,
+    # after the run closes and its own secrets are all known and replaced in it, since it cuts the detail (and
+    # an API refusal cuts the body it quotes) and a secret crossing a cut would otherwise be written in part.
+    failed: tuple[RunErrorKind, str | Exception] | None = None
     try:
         try:
             async with asyncio.timeout(wall_clock_s):
@@ -258,7 +259,7 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     except SimulatorError as failure:
         failed = (failure.kind, failure.detail)
     except Exception as failure:   # the stack or the harness failed: never a verdict
-        failed = ("infra", _describe(failure))
+        failed = ("infra", failure)
     finally:
         await run.close()
     # A run that failed before its artifact was built keeps the usage it holds, so its spend is never dropped.
@@ -266,7 +267,7 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     sim = run.sim_run
     outcome = RunOutcome(
         scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=pass_id, artifact=artifact, verdict=verdict,
-        error=RunError(kind=failed[0], detail=redact(failed[1], run.secrets)) if failed else None,
+        error=RunError(kind=failed[0], detail=_detail(failed[1], run.secrets)) if failed else None,
         simulator=SimulatorStats(provider=simulator.provider, model=simulator.model, turns=len(sim.turns),
                                  fallback_turns=sim.fallback_turns, switches=sim.switches,
                                  served_models=sim.served_models),
@@ -279,10 +280,14 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     return outcome
 
 
-def _describe(failure: Exception) -> str:
+def _detail(failure: str | Exception, secrets: set[str]) -> str:
+    """An error's whole detail with the run's own secrets replaced (RunError then masks it and cuts it): an
+    API refusal's are replaced in the body it quotes before its message cuts that body."""
     if isinstance(failure, ApiCallFailed):
-        return str(failure)
-    return f"{type(failure).__name__}: {failure}"   # RunError masks it, then cuts it
+        failure = failure.message(lambda body: redact(body, secrets))
+    elif isinstance(failure, Exception):
+        failure = f"{type(failure).__name__}: {failure}"
+    return redact(failure, secrets)
 
 
 class _Run:

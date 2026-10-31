@@ -1552,6 +1552,19 @@ async def test_an_error_detail_is_masked_before_it_is_cut(tmp_path):
     assert len(cut.detail) <= 500 and "Zq9" not in cut.detail
 
 
+async def test_a_run_secret_crossing_a_refusals_cut_is_replaced_whole(tmp_path):
+    """A refusal whose body isn't JSON quotes its first 80 characters; the run's own secrets are replaced
+    in the whole body before that cut, so a passcode that crosses it is written with no part of it shown."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    # "x" * 70 puts the 80 cut 10 characters into the run's passcode
+    desk.failures["send"] = ApiCallFailed("send", 502, "x" * 70 + "a demo passcode was sent", content_type="text/html")
+    outcome = await drive(scenario, desk, Visitor(desk), out_dir=tmp_path)
+    assert outcome.error.kind == "infra" and "send answered 502" in outcome.error.detail
+    for written in (outcome.error.detail, (tmp_path / f"{scenario.id}-1.json").read_text()):
+        assert "a dem" not in written and "x[redacted]'" in written   # replaced whole, then cut after it
+
+
 class CutSnapshotFailure(Records):
     """`Records`, but reading the copy's records fails with a message its library already cut, which
     ends inside a URL's password, before its @."""
