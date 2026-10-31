@@ -60,6 +60,18 @@ export interface PublicChatProps {
   onSession?: (session: SessionState) => void;
   /** Links under "For AI agents" in the about column, on the public page itself. */
   aboutLinks?: { label: string; href: string }[];
+  /**
+   * Words a link carried for the chat box (`?draft=`): typed into the composer once the chat can be
+   * written in, as plain text and cut to `MESSAGE_MAX_LENGTH`, then sent only by the visitor's own
+   * Send, as typed words are. Read on mount only; blank does nothing.
+   */
+  draft?: string;
+}
+
+/** A link's words as the chat box takes them: cut to the limit; nothing when blank. */
+function draftText(draft: string | undefined): string | null {
+  if (draft === undefined || draft.trim() === '') return null;
+  return draft.slice(0, MESSAGE_MAX_LENGTH);
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -460,7 +472,7 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
   );
 }
 
-export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks }: PublicChatProps) {
+export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks, draft }: PublicChatProps) {
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -515,8 +527,9 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
 
-  // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
-  const carried = useRef<string | null>(null);
+  // Words wait in the composer once it can be used: the link's draft as the page opens, and words
+  // that didn't send when the chat ended, in the new chat's. Neither is sent without Send.
+  const carried = useRef<string | null>(draftText(draft));
   useEffect(() => {
     const text = carried.current;
     const box = composerRef.current?.querySelector('textarea');
