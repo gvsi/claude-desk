@@ -62,6 +62,8 @@ export async function expectOwnerBoard(root: HTMLElement, { current, fill = fals
  * the element focused last, even once it's blurred, so a check that follows another (in the same
  * test, or an earlier test in the file) would start where focus was left. Focus goes to a mark at
  * the start of the document first, which Tab never stops on, and the mark goes once Tab is done.
+ * While a modal dialog is open everything outside it is inert, so the mark can't take focus and
+ * this throws rather than checking an order.
  */
 export async function expectTabOrderFromTop(stops: HTMLElement[], user: { tab: () => Promise<void> } = userEvent): Promise<HTMLElement[]> {
   const start = document.createElement('span');

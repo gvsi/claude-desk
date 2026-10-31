@@ -34,4 +34,11 @@ describe('expectTabOrderFromTop', () => {
     await expectTabOrderFromTop(stops);
     expect(document.body.innerHTML).toBe(before);
   });
+
+  it('leaves_the_page_as_it_found_it_when_the_order_is_wrong', async () => {
+    const [first, , third] = await threeButtons();
+    const before = document.body.innerHTML;
+    await expect(expectTabOrderFromTop([third, first])).rejects.toThrow();
+    expect(document.body.innerHTML).toBe(before);
+  });
 });
