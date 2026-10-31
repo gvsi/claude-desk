@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
+import { tokenColor } from '../test/screen.ts';
+import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
 
@@ -96,6 +98,22 @@ function timing(part: Element) {
 function inView(el: Element): boolean {
   const box = el.getBoundingClientRect();
   return box.bottom > 0 && box.top < window.innerHeight;
+}
+
+/**
+ * The part of the architecture figure that lights for one step of the request's path, named by its `data-arch-step`
+ * hook: a box, or the ledger, lights itself; an outcome lights its pill.
+ */
+function stepIn(figure: Element, name: string): HTMLElement {
+  const hook = figure.querySelector<HTMLElement>(`[data-arch-step="${name}"]`);
+  if (!hook) throw new Error(`no step ${name}`);
+  return hook.querySelector<HTMLElement>(':scope > .cd-pill') ?? hook;
+}
+
+/** How a part of the architecture figure looks: its outline and its ground. */
+function look(part: Element) {
+  const { boxShadow, backgroundColor } = getComputedStyle(part);
+  return { boxShadow, backgroundColor };
 }
 
 describe('the about-motion project', () => {
@@ -253,5 +271,103 @@ describe('Tau3Chart with motion', () => {
     await frames();
     expect(figure.hasAttribute('data-play')).toBe(false);
     expect(unfinishedParts(figure)).toEqual([]);
+  });
+});
+
+describe('ArchitectureFigure with motion', () => {
+  it('architecture_traces_its_path_once', async () => {
+    // The board's path: one request lights, in turn, the visitor, the chat layer, the kernel's Decide and its
+    // "Runs", Check reply and its "Shown", then the signed ledger, 300 ms apart. Each step's outline brightens to
+    // secondary ink on a hover ground over 120 ms, holds for 400 ms, and goes back over 120 ms.
+    const PATH = ['visitor', 'chat', 'decide', 'runs', 'check', 'shown', 'ledger'];
+    const lit = {
+      boxShadow: `${tokenColor('--text-secondary')} 0px 0px 0px 1px inset`,
+      backgroundColor: tokenColor('--fill-hover'),
+    };
+    const ease = tokenEasing('--motion-ease');
+
+    for (const compact of [false, true]) {
+      const size = compact ? 'phone' : 'desktop';
+      if (compact) await page.viewport(390, 844);
+      const screen = await renderBelowTheFold(<ArchitectureFigure compact={compact} />);
+      const figure = figureIn(screen.container);
+
+      // Before it plays: nothing moves and nothing is lit. This is how each step rests.
+      await frames();
+      expect(figure.dataset.play, size).toBe('ready');
+      expect(figure.getAnimations({ subtree: true }), size).toEqual([]);
+      const steps = PATH.map((name) => {
+        const part = stepIn(figure, name);
+        const rest = look(part);
+        expect(rest.boxShadow, `${size}: ${name} before`).not.toBe(lit.boxShadow);
+        expect(rest.backgroundColor, `${size}: ${name} before`).not.toBe(lit.backgroundColor);
+        return { name, part, rest };
+      });
+
+      figure.scrollIntoView({ block: 'center' });
+      await expect.poll(() => figure.dataset.play).toBe('played');
+
+      // Only the seven steps move. Held still, the trace reads at any moment from the start of its play.
+      const animations = figure.getAnimations({ subtree: true });
+      const targetOf = (animation: Animation) => (animation.effect instanceof KeyframeEffect ? animation.effect.target : null);
+      expect(new Set(animations.map(targetOf)), size).toEqual(new Set(steps.map(({ part }) => part)));
+      for (const animation of animations) animation.pause();
+      const at = (time: number) => {
+        for (const animation of animations) animation.currentTime = time;
+      };
+
+      for (const [i, { name, part, rest }] of steps.entries()) {
+        // Its turn comes 300 ms after the step before's, and its light takes 640 ms. (Read from the animations as
+        // the play began: one that has run its course by the time held is no longer listed on the part.)
+        const start = i * 300;
+        const timings = animations
+          .filter((animation) => targetOf(animation) === part)
+          .map((animation) => animation.effect?.getComputedTiming() ?? {});
+        const first = Math.min(...timings.map((timing) => Number(timing.delay)));
+        const last = Math.max(...timings.map((timing) => Number(timing.endTime)));
+        expect(Math.round(first), `${size}: ${name} starts`).toBe(start);
+        expect(Math.round(last), `${size}: ${name} ends`).toBe(start + 640);
+        // At rest until its turn; brightening, then lit through its hold; going back, then at rest again.
+        for (const [time, state, expected] of [
+          [start - 1, 'before its turn', rest],
+          [start + 120, 'brightened', lit],
+          [start + 320, 'holding', lit],
+          [start + 519, 'still held', lit],
+          [start + 641, 'gone back', rest],
+        ] as const) {
+          at(time);
+          expect(look(part), `${size}: ${name} ${state}`).toEqual(expected);
+        }
+        for (const [time, state] of [
+          [start + 60, 'brightening'],
+          [start + 580, 'going back'],
+        ] as const) {
+          at(time);
+          expect(look(part), `${size}: ${name} ${state}`).not.toEqual(rest);
+          expect(look(part), `${size}: ${name} ${state}`).not.toEqual(lit);
+        }
+        // Every part of its light eases as the design system's motion does.
+        const easings = getComputedStyle(part).animationTimingFunction.split(/,\s*(?![^()]*\))/);
+        for (const easing of easings) expect(easing, `${size}: ${name}`).toBe(ease);
+      }
+
+      // Played through, the figure rests as drawn, and nothing holds it.
+      for (const animation of animations) animation.finish();
+      expect(figure.getAnimations({ subtree: true }), size).toEqual([]);
+      for (const { name, part, rest } of steps) expect(look(part), `${size}: ${name} after`).toEqual(rest);
+
+      // Drawn again, as when the reader opens the other document and comes back, it rests and doesn't trace again.
+      await screen.unmount();
+      const again = await render(<ArchitectureFigure compact={compact} />);
+      const redrawn = figureIn(again.container);
+      await frames();
+      expect(inView(redrawn), size).toBe(true);
+      expect(redrawn.hasAttribute('data-play'), size).toBe(false);
+      expect(redrawn.getAnimations({ subtree: true }), size).toEqual([]);
+
+      await again.unmount();
+      forgetPlayedFigures();
+      window.scrollTo(0, 0);
+    }
   });
 });

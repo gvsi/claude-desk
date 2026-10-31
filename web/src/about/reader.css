@@ -475,6 +475,55 @@
   margin-top: var(--space-12);
 }
 
+/* The figure traces one request once, the first time it is a third in view (`usePlayOnce` marks it): the visitor,
+   the chat layer, Decide and "Runs", Check reply and "Shown", then the signed ledger, each two staggers after the
+   one before (`--cd-arch-i` is a step's place on the path). Each step's outline brightens to secondary ink on a
+   hover ground over motion-fast, holds for two motion-base, and goes back over motion-fast; then the figure rests
+   as drawn. Nothing waits hidden, so a ready figure looks as it always does, and every rule here is on screen with
+   motion only. A keyframe's offset can't be worked out from the tokens, so the light is three animations in turn
+   (in, held, out) rather than one: only one runs at a time, so each starts or ends on the part's own look, and none
+   fills, so once the light has gone back nothing holds the part. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  .cd-about-arch {
+    --cd-arch-step: calc(var(--motion-stagger) * 2);
+    --cd-arch-hold: calc(var(--motion-base) * 2);
+  }
+
+  /* A box and the ledger light themselves; an outcome lights its pill, below the list item that names its step. */
+  .cd-about-arch[data-play='played'] :is(.cd-about-arch__box, .cd-about-arch__ledger)[data-arch-step],
+  .cd-about-arch[data-play='played'] [data-arch-step] > .cd-pill {
+    --cd-arch-turn: calc(var(--cd-arch-i) * var(--cd-arch-step));
+    animation:
+      cd-arch-light-in var(--motion-fast) var(--motion-ease) var(--cd-arch-turn),
+      cd-arch-lit var(--cd-arch-hold) var(--motion-ease) calc(var(--cd-arch-turn) + var(--motion-fast)),
+      cd-arch-light-out var(--motion-fast) var(--motion-ease) calc(var(--cd-arch-turn) + var(--motion-fast) + var(--cd-arch-hold));
+  }
+
+  /* From the part's own look. Its inset outline changes colour in place, so nothing moves or reflows. */
+  @keyframes cd-arch-light-in {
+    to {
+      box-shadow: inset 0 0 0 1px var(--text-secondary);
+      background-color: var(--fill-hover);
+    }
+  }
+
+  @keyframes cd-arch-lit {
+    from,
+    to {
+      box-shadow: inset 0 0 0 1px var(--text-secondary);
+      background-color: var(--fill-hover);
+    }
+  }
+
+  /* Back to the part's own look. */
+  @keyframes cd-arch-light-out {
+    from {
+      box-shadow: inset 0 0 0 1px var(--text-secondary);
+      background-color: var(--fill-hover);
+    }
+  }
+}
+
 /* The readiness scale: on each row the axis, its rating marked on four steps, and the rating in words; its
    evidence and what to watch for line up under the scale. On a phone the name and rating share a line. */
 

@@ -317,6 +317,47 @@ describe('ArchitectureFigure', () => {
     }
   });
 
+  it('architecture_is_still_under_reduced_motion', async () => {
+    // Below the fold, then in view: under reduced motion the figure never traces its path, and nothing in it moves
+    // or is lit (an outline in secondary ink on a hover ground) at any point.
+    const lit = `${tokenColor('--text-secondary')} 0px 0px 0px 1px inset`;
+    const hover = tokenColor('--fill-hover');
+    const litUnder = (figure: Element) =>
+      [...figure.querySelectorAll('*')].flatMap((el) => {
+        const { boxShadow, backgroundColor } = getComputedStyle(el);
+        return boxShadow === lit || backgroundColor === hover ? [`${el.localName} (${el.getAttribute('class') ?? ''})`] : [];
+      });
+
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      await page.viewport(size.width, size.height);
+      const screen = await render(
+        <>
+          <div style={{ height: '150vh' }} />
+          <ArchitectureFigure compact={compact} />
+          <div style={{ height: '150vh' }} />
+        </>,
+      );
+      const figure = screen.container.querySelector('figure');
+      if (!figure) throw new Error('no figure');
+      await frames();
+      expect(figure.getBoundingClientRect().top, `${size.width} wide`).toBeGreaterThan(window.innerHeight);
+      for (const where of ['below the fold', 'in view']) {
+        if (where === 'in view') {
+          figure.scrollIntoView({ block: 'center' });
+          await frames();
+        }
+        expect(figure.hasAttribute('data-play'), `${size.width} wide, ${where}`).toBe(false);
+        expect(motionUnder(figure), `${size.width} wide, ${where}`).toEqual([]);
+        expect(litUnder(figure), `${size.width} wide, ${where}`).toEqual([]);
+      }
+      await screen.unmount();
+      window.scrollTo(0, 0);
+    }
+  });
+
   it('architecture_outcomes_have_words', async () => {
     for (const compact of [false, true]) {
       const screen = await render(<ArchitectureFigure compact={compact} />);
