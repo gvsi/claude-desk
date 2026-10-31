@@ -4,6 +4,17 @@
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
 import type { QuestionKey, SetupStep } from '../api/views.ts';
+import { UNREACHABLE_COPY } from '../ds/index.ts';
+
+/**
+ * What setup says when its checking ran out of time on this side (the proving give-up) and the
+ * interview hasn't moved on: the outcome is unknown, and pressing again joins the work still
+ * running, so it never says the step wasn't done.
+ * stopgap: the design system's line for an outcome still being checked.
+ */
+export function stillCheckingLine(): string {
+  return UNREACHABLE_COPY.en;
+}
 
 /** The steps, as the bar lists them. */
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;
@@ -111,6 +122,7 @@ export const SETUP_COPY = {
     confirm: 'Confirm rules',
     runAgain: 'Run again',
     conflictSubtitle: 'Confirming your rules.',
+    back: 'Back',
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
   },
 

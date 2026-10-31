@@ -8,7 +8,7 @@ import { Button, Card, EmptyState, LoadingLine, Notice, PageHeader, SafetyCheckR
 import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
-import { SETUP_COPY } from './copy.ts';
+import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { setupRulesQuery } from './RulesStep.tsx';
 
 const copy = SETUP_COPY.safety;
@@ -19,6 +19,15 @@ export interface SafetyStepProps {
   onConfirmed: () => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
   reread: () => Promise<SetupState | null>;
+}
+
+/**
+ * The checking ran out of time on this side: the client's own give-up after a minute of proving
+ * retries (no answer from the server, so no status), as against the server's 409 that the rules
+ * can't be checked.
+ */
+export function gaveUp(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 'rules_cannot_be_checked' && err.status === null;
 }
 
 /** A setup confirm's answer that is a rules draft, which a proving retry can give, rather than the confirmed version. */
@@ -59,6 +68,8 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<RuleDraft | null>(null);
+  /** The server said the rules can't be checked: only "Save and exit". */
+  const [unchecked, setUnchecked] = useState(false);
 
   /** Confirms setup's rules; an answer that is the redrafted rules (after a proving retry) is confirmed once more. */
   const confirmSetup = async (): Promise<PolicyVersion> => {
@@ -87,9 +98,16 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
         await showConflict(err.draft).catch((readError: unknown) => setError(ownerErrorCopy(readError)));
         return;
       }
-      // A lost answer may have confirmed them: the interview as it stands says whether it moved on.
-      const now = isUncertain(err) ? await reread() : null;
-      if (now === null || (now.step !== 'preview' && now.step !== 'live')) setError(ownerErrorCopy(err));
+      if (err instanceof ApiError && err.code === 'rules_cannot_be_checked' && !gaveUp(err)) {
+        setUnchecked(true);
+        return;
+      }
+      // A lost answer, the give-up, or a 409 (setup is past the safety check once confirmed) may
+      // mean they were confirmed: the interview as it stands says whether it moved on.
+      const unsure = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+      const now = unsure ? await reread() : null;
+      if (now !== null && (now.step === 'preview' || now.step === 'live')) return;
+      setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
     } finally {
       setConfirming(false);
     }
@@ -115,7 +133,17 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
           draft={conflict}
           inline
           confirm={confirmAgain}
-          onDone={(outcome) => (outcome === 'confirmed' ? onConfirmed() : setConflict(null))}
+          cancelLabel={copy.back}
+          onDone={(outcome) => {
+            if (outcome === 'confirmed') {
+              onConfirmed();
+              return;
+            }
+            // Back: the earlier rows described the earlier draft, so the safety check runs again,
+            // on the draft that is now the one to confirm.
+            setConflict(null);
+            void queryClient.resetQueries({ queryKey: ['setupSafetyCheck', id] });
+          }}
         />
       </div>
     );
@@ -151,7 +179,7 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   let body: ReactNode;
   if (draft.data === undefined) {
     body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
-  } else if (!checked) {
+  } else if (!checked || unchecked) {
     body = cantCheck;
   } else if (check.isError) {
     // The latest run failed: its rows, from an earlier run, no longer stand, and nothing confirms on them.

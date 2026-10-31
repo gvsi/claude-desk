@@ -83,6 +83,8 @@ export interface RuleDraftReviewProps {
    * applying it makes `draft.version` the active rules, which is how a lost answer is settled.
    */
   confirm?: () => Promise<unknown>;
+  /** The keep button's words where the review sits inside a flow ("Back" in setup's conflict review); the review's own by default. */
+  cancelLabel?: string;
 }
 
 /**
@@ -90,7 +92,7 @@ export interface RuleDraftReviewProps {
  * has nothing to compare with, then `ChangeReview` with a row per change and the check in plain
  * words. Only a draft whose check passed can be confirmed, and nothing changes until it is.
  */
-export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, confirm }: RuleDraftReviewProps) {
+export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, confirm, cancelLabel }: RuleDraftReviewProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -195,6 +197,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
           hasOtherChanges={moneyCap !== null}
           cancelsLinks={cancelsLinksFor(draft)}
           {...(turningOn ? { confirmLabel: 'Confirm and turn on', cancelLabel: 'Back' } : {})}
+          {...(cancelLabel === undefined ? {} : { cancelLabel })}
           onConfirm={onConfirm}
           onCancel={() => finish('kept')}
           pending={pending}

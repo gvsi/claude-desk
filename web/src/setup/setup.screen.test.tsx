@@ -745,6 +745,82 @@ describe('setup', () => {
 
     await screen.getByRole('link', { name: 'Go to Today' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    // Today's Answering reads on at once: going live refreshed the Desks the page had read.
+    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
+    // A confirm the API took whose reply was lost, and the read after it failed: unknown. Pressed
+    // again, the API answers 409 (setup is past the safety check), which is read: the preview opens.
+    const first = await interviewAtSafety();
+    const { screen } = await renderRoute(`/app/setup/${first.state.interview_id}`);
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    const mark = mockStore.requests.length;
+    mockStore.inject({ route: 'setupConfirm', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'setup', status: 503 });
+    await screen.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.poll(() => requests('setup', mark).length).toBe(1);
+    await expect.element(screen.getByRole('button', { name: 'Confirm rules' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
+    expect(requests('setupConfirm', mark)).toHaveLength(2);
+    expect(deskOf(first.state).policy.version).toBe(first.draft.version);
+    expect(deskOf(first.state).summary.answering).toBe(false);
+
+    // The checking ran out of time on this side (the proving give-up): the interview, read, hasn't
+    // moved on, so the outcome is unknown and "Confirm rules" stays, since a repeated post joins
+    // the work still running.
+    const second = await interviewAtSafety();
+    const page = (await renderRoute(`/app/setup/${second.state.interview_id}`)).screen;
+    await expect.element(page.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    const from = mockStore.requests.length;
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
+    const retry = { retry: { path: `/api/owner/policy/setup/${second.state.interview_id}/confirm`, body: null } };
+    mockStore.inject({ route: 'setupConfirm', status: 202, body: retry, times: 5 });
+    await page.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.poll(() => requests('setupConfirm', from).length).toBe(1);
+    vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect.element(page.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Confirm rules' })).toBeVisible();
+    expect(page.getByText(CANT_CHECK, { exact: true }).elements()).toHaveLength(0);
+    expect(requests('setup', from).length).toBeGreaterThan(0);
+    vi.useRealTimers();
+
+    // The API itself says the rules can't be checked (409): the can't-check line, only "Save and exit".
+    mockStore.inject({ route: 'setupConfirm', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    await page.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.element(page.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    expect(page.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
+    await expect.element(page.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
+    expect(deskOf(second.state).summary.answering).toBe(false);
+  });
+
+  it('conflict_review_back_runs_the_check_again', async () => {
+    const { state } = await interviewAtSafety();
+    const desk = deskOf(state);
+    const entries = ['native.payment_link', 'native.charge_mandate'].map((tool) => ({
+      tool: tool as 'native.payment_link',
+      definition_sha256: desk.tools.find((t) => t.tool === tool)?.definition_sha256 ?? '',
+    }));
+    const turnedOn = mockStore.world.confirmTools(desk, entries, true);
+    if (typeof turnedOn === 'string' || turnedOn.draft === null) throw new Error('the mock drafts the tools');
+    mockStore.world.confirmDraft(desk, turnedOn.draft.version);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
+
+    // The review reads "Back", as N-R2-Setup-12 draws it, and Back runs the safety check again on
+    // the draft that will be confirmed.
+    expect(screen.getByRole('button', { name: 'Keep my rules' }).elements()).toHaveLength(0);
+    const checks = requests('setupSafetyCheck').length;
+    await screen.getByRole('button', { name: 'Back' }).click();
+    await expect.poll(() => requests('setupSafetyCheck').length).toBeGreaterThan(checks);
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Confirm rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
+    expect(desk.summary.answering).toBe(false);
   });
 
   /** Each step of a setup, as a test opens it: its path, and what shows once it is drawn. */

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -5,7 +6,9 @@ import type { SetupState, WentLive } from '../api/views.ts';
 import { Button, Notice, PageHeader } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
-import { SETUP_COPY } from './copy.ts';
+import { DESKS_KEY } from '../owner/useDesks.ts';
+import { SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { gaveUp } from './SafetyStep.tsx';
 
 const copy = SETUP_COPY.live;
 
@@ -40,6 +43,7 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
  * the link to share with "Copy link" and "Open", and "Go to Today".
  */
 export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
+  const queryClient = useQueryClient();
   const id = state.interview_id;
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
   const [pending, setPending] = useState(false);
@@ -48,14 +52,18 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
   const goLive = async () => {
     setPending(true);
     setError(null);
+    // Answering is on now: the Desks the app read before say it's off, so they are read again.
+    const answering = () => void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
     try {
       setWentLive(await request('goLive', { params: { id } }));
+      answering();
       onLive();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer, or one that says the interview has moved on: it says whether the Desk is live.
+      // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk is live.
       const now = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict') ? await reread() : null;
-      if (now?.step !== 'live') setError(ownerErrorCopy(err));
+      if (now?.step === 'live') answering();
+      else setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
     } finally {
       setPending(false);
     }
