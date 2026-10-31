@@ -106,9 +106,9 @@ async def test_memory_topic_boundaries(app, client, topics, accepted):
     [desk] = await rows_of(app, copy.copy_id, select(Desk).where(Desk.desk_id == copy.desk_id))
     assert desk.simulated_memory == (body if accepted else None)
     added = (await entries(app, copy.copy_id, copy.desk_id))[before:]
-    assert [(entry.event.kind, entry.event.summary) for entry in added] == [
-        ("desk_data", {"part": "memory", "refs": ["business", "hours"]} if accepted else
-         {"part": "memory", "refused": "invalid"})]
+    # a body past the contract's limits is refused before the route, as on every route, and not ledgered
+    assert [(entry.event.kind, entry.event.summary) for entry in added] == (
+        [("desk_data", {"part": "memory", "refs": ["business", "hours"]})] if accepted else [])
 
 
 @pytest.mark.parametrize("field", ["about", "title", "topics", "text"])

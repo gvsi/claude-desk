@@ -758,15 +758,6 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
-    # Memory's contract limits run before its writer, but their refusals still belong on the
-    # live Desk's ledger. Authenticate and lock it before recording; never copy the bad body.
-    if route_template(request) == "PUT /desks/{id}/memory":
-        try:
-            async with kernel_transaction(request.app.state.kernel) as ctx:
-                desk_row = await desks.owner_desk(ctx, request, request.path_params["id"])
-                await desks.ledger_desk_data(ctx, desk_row, {"part": "memory", "refused": "invalid"})
-        except KernelFailure as failure:
-            return await _kernel_failure(request, failure)
     return error_response(422, "invalid")
 
 
