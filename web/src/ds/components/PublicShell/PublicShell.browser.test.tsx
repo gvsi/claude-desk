@@ -325,6 +325,62 @@ function lastRow(): HTMLElement {
   return last;
 }
 
+/** A computed color's alpha: 0 for `rgba(0, 0, 0, 0)`, 1 for `rgb(…)`. */
+function alphaOf(color: string): number {
+  const parts = /^rgba?\(([^)]*)\)$/.exec(color)?.[1]?.split(',') ?? [];
+  return parts.length === 4 ? parseFloat(parts[3] ?? '0') : 1;
+}
+
+/**
+ * The horizontal lines a visitor sees within `depth` px under the chat head's bottom edge, as how
+ * far under it each lies: the head's own hairline (-1), and every drawn top or bottom border in the
+ * shell below the head, where the head doesn't hide it. A border is drawn when it has a style, a
+ * width and a color that isn't wholly transparent.
+ */
+function linesUnderTheHead(depth: number): number[] {
+  const head = one('.cd-public-shell__chat-head');
+  const edge = head.getBoundingClientRect().bottom;
+  const found = new Set<number>();
+  for (const el of one('.cd-public-shell').querySelectorAll<HTMLElement>('*')) {
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    if (style.visibility !== 'visible' || box.width === 0 || box.right <= 0 || box.left >= innerWidth) continue;
+    const sides = [
+      { y: box.top, style: style.borderTopStyle, width: style.borderTopWidth, color: style.borderTopColor },
+      { y: box.bottom - parseFloat(style.borderBottomWidth), style: style.borderBottomStyle, width: style.borderBottomWidth, color: style.borderBottomColor },
+    ];
+    for (const side of sides) {
+      const drawn = side.style !== 'none' && side.style !== 'hidden' && parseFloat(side.width) > 0 && alphaOf(side.color) > 0;
+      const shown = el === head || side.y >= edge;
+      const under = Math.round(side.y - edge);
+      if (drawn && shown && under >= -1 && under < depth) found.add(under);
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/**
+ * Brings the conversation to rest with the about column's hairline `gap` px under the chat head's
+ * edge, wherever the page or the visitor leaves it, and waits the frames the shell needs to hear of
+ * the scroll. Returns how far under the head's edge the hairline came to rest, in whole px.
+ */
+async function restAboutLine(gap: number): Promise<number> {
+  const about = one('.cd-public-shell__scroll > .cd-public-shell__about');
+  const head = one('.cd-public-shell__chat-head');
+  const under = () => about.getBoundingClientRect().bottom - 1 - head.getBoundingClientRect().bottom;
+  const scrolls = scroller();
+  // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
+  for (let pass = 0; pass < 2; pass += 1) scrolls.scrollTop += under() - gap;
+  await nextFrames();
+  return Math.round(under());
+}
+
+/** Whether the about column draws its hairline as the chat's head draws its own: 1 px, in the same color. */
+function aboutDrawsItsLine(): boolean {
+  const about = getComputedStyle(one('.cd-public-shell__scroll > .cd-public-shell__about'));
+  return about.borderBottomWidth === '1px' && about.borderBottomColor === getComputedStyle(one('.cd-public-shell__chat-head')).borderBottomColor;
+}
+
 /** Each window's name: "390x844". */
 const named = ([width, height]: Size) => `${width}x${height}`;
 
@@ -424,6 +480,53 @@ it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
         : { window: named(size), inTheRegion: true, regionWide: true, atItsStart: true },
     ),
   );
+});
+
+it('one_line_under_the_chat_head_at_the_chats_start', async () => {
+  // On a phone the about column opens the scroll region with a hairline under it, above the first
+  // message. Where the chat comes to rest at its start (as when the page follows a reopened chat a
+  // little shorter than the region to its end), that hairline can lie just under the chat's head,
+  // which draws its own: the visitor sees the head's one line there, not two a few px apart. Lower
+  // down, as the column scrolls into view mid-page, its hairline is drawn as ever.
+  const seen = [];
+  for (const language of ['en', 'es'] as const) {
+    await renderLongChat([390, 844], { language });
+    await nextFrames();
+    for (const gap of [0, 1, 3, 6, 12, 20]) {
+      seen.push({ language, gap: await restAboutLine(gap), lines: linesUnderTheHead(24) });
+    }
+    seen.push({ language, gap: await restAboutLine(60), aboutDrawsItsLine: aboutDrawsItsLine() });
+    scroller().scrollTop = 0;
+    await nextFrames();
+    seen.push({ language, atTheTop: true, aboutDrawsItsLine: aboutDrawsItsLine() });
+  }
+  expect(seen).toEqual(
+    (['en', 'es'] as const).flatMap((language) => [
+      ...[0, 1, 3, 6, 12, 20].map((gap) => ({ language, gap, lines: [-1] })),
+      { language, gap: 60, aboutDrawsItsLine: true },
+      { language, atTheTop: true, aboutDrawsItsLine: true },
+    ]),
+  );
+});
+
+it('one_line_under_the_chat_head_on_a_short_shell_too', async () => {
+  // On a phone on its side the shell itself scrolls, and the about column passes under the chat's
+  // pinned head: where its hairline comes to rest just under the head, the head's is the one line,
+  // and mid-page the column draws its own again.
+  await renderLongChat([568, 320]);
+  await nextFrames();
+  expect(isShort()).toBe(true);
+  expect(scroller()).toBe(one('.cd-public-shell'));
+  const seen = [];
+  for (const gap of [3, 60, 20]) {
+    const rested = await restAboutLine(gap);
+    seen.push(gap < 24 ? { gap: rested, lines: linesUnderTheHead(24) } : { gap: rested, aboutDrawsItsLine: aboutDrawsItsLine() });
+  }
+  expect(seen).toEqual([
+    { gap: 3, lines: [-1] },
+    { gap: 60, aboutDrawsItsLine: true },
+    { gap: 20, lines: [-1] },
+  ]);
 });
 
 it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () => {

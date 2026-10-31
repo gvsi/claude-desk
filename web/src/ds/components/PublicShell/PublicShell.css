@@ -303,6 +303,13 @@
   border-left: 0;
 }
 
+/* While that hairline lies within 24 px under the chat's head, as where a chat comes to rest at its
+   start, it is left out (the component marks the column), so the head's own line is the one line
+   there, not two a few px apart. It keeps its pixel, so nothing moves. */
+.cd-public-shell__scroll > .cd-public-shell__about--under-head {
+  border-bottom-color: transparent;
+}
+
 .cd-public-shell__blocks {
   display: flex;
   flex-direction: column;
