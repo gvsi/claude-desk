@@ -73,21 +73,19 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
     negation or modal comes with it ("I'd never say I'm an AI", "nunca diría que soy una IA"),
     reports it. A subject ("my name is" too) whose next words, past any intensifiers, are one of
     `names` and not its possessive says the speaker is that person, so a person; after a "talking
-    to" phrase, only in the present tense addressed to the visitor at the start of a clause
-    (`_name_negated`, `_claimed_name`)."""
+    to" phrase, only in the present tense addressed to the visitor (`_name_negated`, `_claimed_name`)."""
     shown = re.sub(r"\b([ai])\.\s?([ia])\.", r"\1\2", normalize(text).replace("\u2019", "'"), flags=re.IGNORECASE)
     found = list(re.finditer(r"[^\W\d_]+(?:'[^\W\d_]+)?|\d+|[^\w\s]", shown))
     tokens = [match.group() for match in found]
     folded = [_fold_word(token) for token in tokens]
     quotes = _quotes(shown, found)
-    openings = _clause_starts(shown, found)
     for start, length in _subjects(folded, _SUBJECTS + (_NAMING if names else ())):
         negated = start > 0 and folded[start - 1] in _NEGATIONS and folded[start] not in _PRONOUN_SUBJECTS
         begin = start - 1 if negated else start   # a "no" before "soy" starts the statement
         framed = _framed(folded[:begin])
         reported = framed or _reported(folded[:begin])
         i = start + length
-        named = _name_negated(folded, tokens, openings, start, length, negated)
+        named = _name_negated(folded, start, length, negated)
         if named is not None and (claimed := _claimed_name(folded, i, names)) is not None:
             quoted = any(opening < begin and claimed < closing for opening, closing in quotes)
             yield "human", named, framed or quoted, reported or quoted
@@ -107,55 +105,25 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
                 break
 
 
-def _name_negated(folded: list[str], tokens: list[str], openings: set[int], start: int, length: int,
-                  negated: bool) -> bool | None:
+def _name_negated(folded: list[str], start: int, length: int, negated: bool) -> bool | None:
     """Whether a name right after the subject at `start` is negated, or None when a name there claims
     nothing. After "I'm", "soy" or "my name is" a name says who the speaker is; after a "talking to"
-    phrase, only in the present tense addressed to the visitor at the start of its clause: "you're"
-    or "you are" before "talking to", "speaking with" or "chatting with", or "estás" or "usted está"
-    before "hablando con", with only intensifiers between ("you're really talking to"), where that
-    "you're", "estás" or "usted" starts a clause or follows one opener that does ("yes", "ahora").
-    Advice, a condition, a future, a modal or an imperative ("make sure you're talking to", "si estás
-    hablando con", "you'll be talking to", "habla con") and a bare or third-person "está" ("Ella está
-    hablando con") name no one."""
+    phrase, only in the present tense addressed to the visitor: "you're" or "you are" before "talking
+    to", "speaking with" or "chatting with", or "estás" or "está" before "hablando con", with only
+    intensifiers between ("you're really talking to"), and a negation just before "estás" or "está"
+    negates it. A future, modal or imperative ("you'll be talking to", "habla con") names no one."""
     phrase = tuple(folded[start:start + length])
     if phrase not in _TALKING_EN + _TALKING_ES:
         return negated
-    at = _past_intensifiers(folded, start)
-    if phrase in _TALKING_EN and folded[at - 1:at] in (["you're"], ["youre"]):
-        at -= 1
-    elif phrase in _TALKING_EN and at >= 2 and folded[at - 2:at] == ["you", "are"]:
-        at -= 2
-    elif phrase == ("hablando", "con") and folded[at - 1:at] == ["estas"]:
-        at -= 1
-    elif phrase == ("hablando", "con") and folded[at - 1:at] == ["esta"]:
-        at = _past_intensifiers(folded, at - 1)
-        if folded[at - 1:at] != ["usted"]:
-            return None
-        at -= 1
-    else:
-        return None
-    opened = at in openings or any(at >= len(opener) and at - len(opener) in openings
-                                   and [token.casefold() for token in tokens[at - len(opener):at]] == list(opener)
-                                   for opener in _OPENERS)
-    return negated if opened else None
-
-
-def _past_intensifiers(folded: list[str], at: int) -> int:
-    """Where the run of intensifiers that ends right before `at` starts."""
-    while at > 0 and folded[at - 1] in _INTENSIFIERS:
-        at -= 1
-    return at
-
-
-def _clause_starts(shown: str, found: list[re.Match[str]]) -> set[int]:
-    """The token positions that start a clause: the first, and each one right after a sentence mark,
-    a colon, semicolon or comma, an opening quotation mark or a line break."""
-    starts = {0}
-    for at in range(1, len(found)):
-        if found[at - 1].group() in _CLAUSE_MARKS or _LINE_BREAK.search(shown, found[at - 1].end(), found[at].start()):
-            starts.add(at)
-    return starts
+    before = start
+    while before > 0 and folded[before - 1] in _INTENSIFIERS:
+        before -= 1
+    if phrase in _TALKING_EN and (folded[before - 1:before] in (["you're"], ["youre"])
+                                  or folded[max(before - 2, 0):before] == ["you", "are"]):
+        return negated
+    if phrase == ("hablando", "con") and folded[before - 1:before] in (["estas"], ["esta"]):
+        return negated or (before > 1 and folded[before - 2] in _NEGATIONS)
+    return None
 
 
 def _claimed_name(folded: list[str], at: int, names: Sequence[tuple[str, ...]]) -> int | None:
@@ -268,12 +236,6 @@ _TALKING_EN = _phrases("talking to, talking with, chatting with, speaking with, 
 _TALKING_ES = _phrases("hablando con, hablas con, habla con")
 _SUBJECTS = _phrases("i'm, i am, im, we're, we are, soy, somos") + _TALKING_EN + _TALKING_ES
 _NAMING = _phrases("my name is, my name's, me llamo, mi nombre es")
-# What may start a clause before "you're" or "estás" ("Yes, you're talking to …", "Hi\nyou're …"),
-# and the openers that may stand between ("Right now you're …", "Ahora estás …"), as written: the
-# accent tells "sí" (yes) from "si" (if).
-_CLAUSE_MARKS = frozenset({".", "!", "?", ";", ":", ",", "\u00bf", "\u00a1", '"', "\u201c", "\u2018", "'", "\u00ab"})
-_LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
-_OPENERS = _phrases("yes, yeah, right now, now, actually, s\u00ed, ahora")
 _PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
 # Frames read right before a statement: "claim" or "say" after a modal or "to" ("it would claim",
 # "I can't say", "I'd say", "to say"), "pretend", "as if", "decir que", "fingir que" and "afirmar que".

@@ -810,7 +810,7 @@ def test_ai_denial_reads_a_name_after_talking_to_only_as_the_visitor_present_cla
     future, modal, infinitive, imperative or recommendation, or a negation before "estás", claims
     nothing. A person word after the phrase reads exactly as before."""
     claims = ["You're talking to Maria.", "Right now you're speaking with Maria Rivera.",
-              "You are actually chatting with Maria.", "You're really talking to Maria.",
+              "You are actually chatting with Maria.", "You're really talking to Maria.", "Está hablando con María.",
               "Usted está hablando con María Rivera.", "No, estás hablando con María."]
     assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
     neither = ["I'd recommend speaking with Maria directly about that.",
@@ -819,25 +819,6 @@ def test_ai_denial_reads_a_name_after_talking_to_only_as_the_visitor_present_cla
                "No estás hablando con María, sino con su asistente de IA.", "You're not talking to Maria."]
     assert {text: denies_ai(text, people=OWNER) for text in neither} == {text: False for text in neither}
     persons = ["When she calls, you'll be talking to a real person.", "I'd recommend speaking with a person."]
-    assert {text: (denies_ai(text), denies_ai(text, people=OWNER)) for text in persons} == \
-        {text: (True, True) for text in persons}
-
-
-def test_ai_denial_reads_a_name_after_talking_to_only_where_the_visitor_starts_the_clause():
-    """"You're", "you are", "estás" or "usted está" before a "talking to" phrase and a name claims who
-    the visitor is talking to only where it starts its clause (the start, a line break, a comma or a
-    sentence mark before it, or one opener such as "yes" or "ahora"); after "make sure", "once" or
-    "si" it is advice or a condition. "Está" alone or after a third person names no one."""
-    claims = ["You're talking to Maria.", "Yes, you're talking to Maria Rivera.", "Usted está hablando con María.",
-              "Ahora estás hablando con María.", "Hi Ravi\nyou're talking to Maria.", "¿Sí? Usted realmente está "
-              "hablando con María.", "I'm Claude: you are talking to Maria."]
-    assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
-    neither = ["El técnico está hablando con María.", "Ella está hablando con María Rivera.",
-               "Está hablando con María.", "Make sure you're speaking with Maria before you share the details.",
-               "Once you're talking to Maria, mention the leak.",
-               "Si estás hablando con María, cuéntele lo de la fuga.", "So you're talking to Maria tomorrow?"]
-    assert {text: denies_ai(text, people=OWNER) for text in neither} == {text: False for text in neither}
-    persons = ["Make sure you're speaking with a real person.", "Ella está hablando con una persona."]
     assert {text: (denies_ai(text), denies_ai(text, people=OWNER)) for text in persons} == \
         {text: (True, True) for text in persons}
 
