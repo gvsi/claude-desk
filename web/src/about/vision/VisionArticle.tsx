@@ -6,15 +6,18 @@
  *
  * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
  * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
- * picture cards that end the article, each a link to its idea's vision page. The page is static: its words come
- * from `text.ts`, nothing on it moves, and it makes no request.
+ * picture cards that end the article, each a link to its idea's vision page. As one of the About set, it carries
+ * the reading pages' switch and their way into the prototype in its own bar, and "Read next" at its end. The page
+ * is static: its words come from `text.ts`, nothing on it moves, and it makes no request.
  */
-import { Fragment, useId } from 'react';
+import { Fragment, useId, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 
 import { ConceptFooter } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { prototypeHref } from '../prototypeHref.ts';
+import { AboutSwitch } from '../AboutSwitch.tsx';
+import { readNext } from '../links.ts';
+import { PrototypeLink } from '../PrototypeLink.tsx';
 import { useNoIndex } from '../useNoIndex.ts';
 import {
   ARTICLE,
@@ -31,6 +34,19 @@ import {
 } from './text.ts';
 
 import './VisionArticle.css';
+
+/** The article's phone layout (VisionArticle.css): the switch leaves the bar for a row under it. */
+const NARROW = '(max-width: 720px)';
+
+function subscribeNarrow(onChange: () => void): () => void {
+  const query = window.matchMedia(NARROW);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function isNarrow(): boolean {
+  return window.matchMedia(NARROW).matches;
+}
 
 /** What happened, under the message it belongs to, with a dot in its tone. */
 function Receipt({ tone, text }: { tone: 'done' | 'held' | 'declined'; text: string }) {
@@ -231,24 +247,39 @@ function PictureCards() {
   );
 }
 
+/** "Read next" at the end: the next page in the About set, its title and summary, the whole card one link. */
+function ReadNext() {
+  const next = readNext('vision');
+  return (
+    <div className="va-next">
+      <p className="va-next__label" data-next-label="">
+        Read next
+      </p>
+      <Link className="va-next__link" to={next.route}>
+        {next.title}
+      </Link>
+      <p className="va-next__summary">{next.summary}</p>
+    </div>
+  );
+}
+
 export function VisionArticle() {
   // The tab names the page while it is open; search engines are asked not to list it, as the other About pages.
   useDocumentTitle(inApp(ARTICLE.kicker));
   useNoIndex();
-  // Where the reading pages' way back goes: the last Desk this browser opened, or the prototype's start.
-  const back = prototypeHref();
+  const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+  // The About set's switch, the article marked as the page on show: in the bar, or under it on a phone, where it
+  // scrolls away with the page as the reading pages' does.
+  const about = <AboutSwitch current="vision" className="va-switch" linkClassName="va-switch__link" />;
 
   return (
     <div className="vision-article">
       <header className="va-bar">
         <span className="va-bar__brand">Claude Desk</span>
-        <span className="va-bar__here" aria-current="page">
-          {ARTICLE.kicker}
-        </span>
-        <Link className="va-bar__back" to={back}>
-          {ARTICLE.back}
-        </Link>
+        {compact ? null : about}
+        <PrototypeLink />
       </header>
+      {compact ? about : null}
       <main>
         <article>
           <header className="va-hero">
@@ -287,9 +318,7 @@ export function VisionArticle() {
       <footer className="va-end">
         <hr className="va-end__rule" />
         <p>{ARTICLE.end}</p>
-        <p>
-          <Link to={back}>{ARTICLE.back}</Link>
-        </p>
+        <ReadNext />
         <ConceptFooter />
       </footer>
     </div>

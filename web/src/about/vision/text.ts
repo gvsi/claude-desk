@@ -263,7 +263,6 @@ export const ARTICLE = {
     'That shape isn’t special to plumbing. Anywhere a person answers the same questions under rules they already know, a Desk can take the first conversation and hand off the rest. Here are four places we think it goes next.',
   ],
   end: 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.',
-  back: 'Back to your Desk',
 } as const;
 
 /** Everything written on a screen, top to bottom, but its initials, which stand beside the name written out. */

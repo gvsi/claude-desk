@@ -331,31 +331,82 @@ describe('The Vision article', () => {
     }
   });
 
-  it('the_back_links_go_where_the_reading_pages_way_back_goes', async () => {
+  it('the_way_into_the_prototype_is_the_reading_pages_own', async () => {
     for (const [lastDesk, to] of [
       [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
       [null, '/'],
     ] as const) {
-      writeLocal('lastDesk', lastDesk);
-      // A reading page's way back into the prototype.
-      const reader = await renderRoute('/about/prediction');
-      await expect.element(reader.screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', to);
+      for (const viewport of ['desktop', 'phone'] as const) {
+        const where = `at ${viewport}, last Desk ${lastDesk}`;
+        writeLocal('lastDesk', lastDesk);
+        // A reading page's way into the prototype.
+        const reader = await renderRoute('/about/prediction', { viewport });
+        await expect.element(reader.screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', to);
 
-      // The article's two: in the top bar and at the end.
-      const { screen } = await renderRoute(PATH);
-      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
-      const top = screen.getByRole('banner').getByRole('link', { name: 'Back to your Desk', exact: true });
-      const end = screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true });
-      await expect.element(top, { message: `top, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
-      await expect.element(end, { message: `end, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
-      expect(screen.getByRole('link', { name: 'Back to your Desk', exact: true }).elements()).toHaveLength(2);
+        // The article's: the same words and target, once, in its top bar, in place of "Back to your Desk".
+        const { screen } = await renderRoute(PATH, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: where }).toBeVisible();
+        const tryIt = screen.getByRole('banner').getByRole('link', { name: 'Try Desk prototype', exact: true });
+        await expect.element(tryIt, { message: where }).toHaveAttribute('href', to);
+        expect(screen.getByRole('link', { name: 'Try Desk prototype', exact: true }).elements(), where).toHaveLength(1);
+        expect(document.body.textContent, where).not.toContain('Back to your Desk');
+      }
     }
 
-    // Followed, the way back opens the Desk.
+    // Followed, it opens the Desk.
     writeLocal('lastDesk', RIVERA.deskId);
     const { screen, router } = await renderRoute(PATH);
-    await screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true }).click();
+    await screen.getByRole('banner').getByRole('link', { name: 'Try Desk prototype', exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/today`);
+  });
+
+  it('the_bar_and_the_end_join_the_about_set', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: viewport }).toBeVisible();
+      const bar = screen.getByRole('banner').element();
+      const documents = screen.getByRole('navigation', { name: 'Documents' });
+      const vision = documents.getByRole('link', { name: 'Vision', exact: true }).element();
+      expect(vision.getAttribute('aria-current'), viewport).toBe('page');
+      // The page on show is drawn as the reading pages draw it, in the article's palette: ink on the band's paper.
+      expect(getComputedStyle(vision).backgroundColor, viewport).toBe('rgb(234, 230, 220)');
+      expect(getComputedStyle(vision).color, viewport).toBe('rgb(28, 27, 25)');
+      if (viewport === 'desktop') {
+        // In the bar, between the name and the way into the prototype, on one line.
+        expect(bar.contains(documents.element()), viewport).toBe(true);
+        const [name, links, tryIt] = [bar.querySelector('.va-bar__brand'), documents.element(), bar.querySelector('a.cd-about-try')].map((el) =>
+          (el as Element).getBoundingClientRect(),
+        ) as [DOMRect, DOMRect, DOMRect];
+        expect(links.left, viewport).toBeGreaterThan(name.right);
+        expect(tryIt.left, viewport).toBeGreaterThan(links.right);
+        expect(Math.abs(links.top + links.height / 2 - (tryIt.top + tryIt.height / 2)), viewport).toBeLessThanOrEqual(0.5);
+      } else {
+        // On a phone, under the bar, and it scrolls away with the page while the bar stays.
+        expect(bar.contains(documents.element()), viewport).toBe(false);
+        expect(documents.element().getBoundingClientRect().top, viewport).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+        window.scrollTo(0, 600);
+        await expect.poll(() => window.scrollY).toBe(600);
+        expect(bar.getBoundingClientRect().top, viewport).toBe(0);
+        expect(documents.element().getBoundingClientRect().bottom, viewport).toBeLessThan(0);
+        window.scrollTo(0, 0);
+      }
+
+      // The end: its note, "Read next" back to the prediction on its own card, then the footer.
+      const end = screen.getByRole('contentinfo').element();
+      const note = screen.getByText(END_NOTE, { exact: true }).element();
+      const label = end.querySelector('[data-next-label]');
+      expect(label?.textContent, viewport).toBe('Read next');
+      const card = label?.parentElement as HTMLElement;
+      const next = screen.getByRole('contentinfo').getByRole('link', { name: 'Capability prediction', exact: true });
+      await expect.element(next, { message: viewport }).toHaveAttribute('href', '/about/prediction');
+      expect(card.contains(next.element()), viewport).toBe(true);
+      expect(card.getBoundingClientRect().top, viewport).toBeGreaterThan(note.getBoundingClientRect().bottom);
+      const footer = end.querySelector('[data-ds="concept-footer"]') as Element;
+      expect(footer.getBoundingClientRect().top, viewport).toBeGreaterThan(card.getBoundingClientRect().bottom);
+      // A paper card on the page, its corners 14 px.
+      expect(getComputedStyle(card).backgroundColor, viewport).toBe('rgb(251, 250, 247)');
+      expect(getComputedStyle(card).borderTopLeftRadius, viewport).toBe('14px');
+    }
   });
 
   it('the_article_names_the_tab_and_is_noindex', async () => {
