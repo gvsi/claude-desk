@@ -159,13 +159,14 @@ const LEAVE_SHORT_MARGIN = 16;
 const SHORT_CLASS = 'cd-public-shell--short';
 
 /**
- * How close under the chat's head, in px, the about column's hairline is left out where the column
- * opens the scroll region: the head draws its own line, and the column's a few px under it would
- * read as two.
+ * How close under the chat's head, in px, the about column's own hairline (its bottom border, not
+ * a card's edge inside it) is left out where the column opens the scroll region: the head draws its
+ * own line, and the column's a few px under it would read as two. A card's edge passing under the
+ * head is the column's content scrolling, as a message's is.
  */
 const ABOUT_LINE_CLEAR_OF_HEAD = 24;
 
-/** The about column's class while its hairline lies that close under the chat's head. */
+/** The about column's class while its own hairline lies that close under the chat's head. */
 const ABOUT_UNDER_HEAD_CLASS = 'cd-public-shell__about--under-head';
 
 /**
@@ -278,18 +279,36 @@ function uncoverComposer(shell: HTMLElement): void {
   if (overlap > 0) shell.scrollTop += overlap;
 }
 
+/** The about column while it opens the scroll region; null while it stands beside the chat, or there is none. */
+function aboutInRegion(shell: HTMLElement): HTMLElement | null {
+  return partsOf(shell).region?.querySelector<HTMLElement>(':scope > .cd-public-shell__about') ?? null;
+}
+
 /**
- * Marks the about column, where it opens the scroll region, while its hairline lies within
+ * Marks the about column, where it opens the scroll region, while its own hairline lies within
  * `ABOUT_LINE_CLEAR_OF_HEAD` px under the chat's head, so the stylesheet leaves that line out and
  * the head's is the one line there. Lower down the column draws its line as ever.
  */
 function markAboutUnderHead(shell: HTMLElement): void {
-  const { head, region } = partsOf(shell);
-  const about = region?.querySelector<HTMLElement>(':scope > .cd-public-shell__about');
+  const { head } = partsOf(shell);
+  const about = aboutInRegion(shell);
   if (!head || !about) return;
   // The column's hairline is its last pixel row: `under` px under the head's edge.
   const under = about.getBoundingClientRect().bottom - 1 - head.getBoundingClientRect().bottom;
   about.classList.toggle(ABOUT_UNDER_HEAD_CLASS, under < ABOUT_LINE_CLEAR_OF_HEAD);
+}
+
+/**
+ * Has the shell's `observer` watch the about column while it opens the scroll region, and stop
+ * watching one that has moved beside the chat or gone (`watched` is the one it watches now). The
+ * column's own height moves its hairline, as when the web font arrives after the fallback laid it out.
+ */
+function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched: { current: HTMLElement | null }): void {
+  const about = aboutInRegion(shell);
+  if (!observer || about === watched.current) return;
+  if (watched.current) observer.unobserve(watched.current);
+  if (about) observer.observe(about);
+  watched.current = about;
 }
 
 /**
@@ -309,8 +328,10 @@ function markAboutUnderHead(shell: HTMLElement): void {
  * - **Measurements for the stylesheet:** the shell's height as `--cd-public-shell-height` (it caps
  *   the composer's text box), and the chat's head's and the composer area's heights as
  *   `--cd-public-head-height` and `--cd-public-composer-height` (a short shell's scroll padding).
- * - **The about column's hairline** under the conversation's start, left out while it lies just under
- *   the chat's head (`markAboutUnderHead`), judged again after every render, scroll and resize.
+ * - **The about column's own hairline** under the conversation's start, left out while it lies just
+ *   under the chat's head (`markAboutUnderHead`), judged again after every render, scroll and
+ *   resize, the column's own included: while it opens the scroll region the shell watches it too,
+ *   from whenever it mounts or moves there.
  *
  * When the shell or a pinned part changes size, it lays out again at once, before the browser paints
  * and before the page's own observers measure the conversation. If the about column moves with
@@ -321,12 +342,16 @@ function markAboutUnderHead(shell: HTMLElement): void {
 function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
   const short = useRef(false);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const watchedAbout = useRef<HTMLElement | null>(null);
 
   // After every render, before the page's layout effects: the short class, if the shell is short,
-  // and the about column's hairline, with the column as it now is.
+  // and the about column, watched where it now is and its hairline judged there.
   useLayoutEffect(() => {
     shell.current?.classList.toggle(SHORT_CLASS, short.current);
-    if (shell.current) markAboutUnderHead(shell.current);
+    if (!shell.current) return;
+    watchAbout(shell.current, observerRef.current, watchedAbout);
+    markAboutUnderHead(shell.current);
   });
 
   useLayoutEffect(() => {
@@ -389,15 +414,20 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
         );
       }
       uncoverComposer(el);
+      // A scroll the page's later ResizeObserver makes is heard only next frame; that one frame's lag, mid-resize as all moves, is accepted.
       markAboutUnderHead(el);
     });
     const { banner, header, head, composer } = partsOf(el);
     for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);
+    observerRef.current = observer;
+    watchAbout(el, observer, watchedAbout);
     // The composer taking focus at the top of a short chat comes out from under the chat's head.
     const onFocusIn = () => uncoverComposer(el);
     composer?.addEventListener('focusin', onFocusIn);
     return () => {
       observer.disconnect();
+      observerRef.current = null;
+      watchedAbout.current = null;
       composer?.removeEventListener('focusin', onFocusIn);
       stopScroll();
     };

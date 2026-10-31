@@ -6,8 +6,8 @@
  */
 import { act, useLayoutEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest';
+import { cdp, page, userEvent } from 'vitest/browser';
 
 import type { PublicDesk } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
@@ -500,14 +500,27 @@ it('one_line_under_the_chat_head_at_the_chats_start', async () => {
     await nextFrames();
     seen.push({ language, atTheTop: true, aboutDrawsItsLine: aboutDrawsItsLine() });
   }
-  expect(seen).toEqual(
-    (['en', 'es'] as const).flatMap((language) => [
+  // Only the column's own hairline steps aside: a card's edge 21 px above it is content scrolling
+  // under the head, so the runs above stop at 20 px. With the links for people's agents last, whose
+  // part has no line at its foot, the sweep runs past the threshold: the head's one line through
+  // 23 px, and from 24 px the column's hairline drawn again.
+  await renderLongChat([390, 844], { links: true });
+  await nextFrames();
+  for (const gap of THRESHOLD_SWEEP) {
+    seen.push({ links: true, gap: await restAboutLine(gap), lines: linesUnderTheHead(32) });
+  }
+  expect(seen).toEqual([
+    ...(['en', 'es'] as const).flatMap((language) => [
       ...[0, 1, 3, 6, 12, 20].map((gap) => ({ language, gap, lines: [-1] })),
       { language, gap: 60, aboutDrawsItsLine: true },
       { language, atTheTop: true, aboutDrawsItsLine: true },
     ]),
-  );
+    ...THRESHOLD_SWEEP.map((gap) => ({ links: true, gap, lines: gap < 24 ? [-1] : [-1, gap] })),
+  ]);
 });
+
+/** Where the about column's hairline rests under the chat's head, up to and past the 24 px threshold. */
+const THRESHOLD_SWEEP = [0, 1, 3, 6, 12, 20, 21, 23, 24, 30];
 
 it('one_line_under_the_chat_head_on_a_short_shell_too', async () => {
   // On a phone on its side the shell itself scrolls, and the about column passes under the chat's
@@ -527,6 +540,92 @@ it('one_line_under_the_chat_head_on_a_short_shell_too', async () => {
     { gap: 60, aboutDrawsItsLine: true },
     { gap: 20, lines: [-1] },
   ]);
+});
+
+/**
+ * Forces colors for the rest of the test, as a visitor's high-contrast setting does; the project's
+ * reduced motion stays on, and colors are no longer forced after the test.
+ */
+async function forceColors(): Promise<void> {
+  const emulate = async (forced: 'active' | 'none'): Promise<void> => {
+    await cdp().send('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'forced-colors', value: forced },
+        { name: 'prefers-reduced-motion', value: 'reduce' },
+      ],
+    });
+  };
+  await emulate('active');
+  onTestFinished(() => emulate('none'));
+  expect(window.matchMedia('(forced-colors: active)').matches).toBe(true);
+}
+
+it('one_line_under_the_chat_head_with_forced_colors', async () => {
+  // With forced colors the browser draws every border in the system's colors, a transparent one
+  // too: the column's own hairline, at rest just under the chat's head, still can't be told from
+  // the column's ground there, while the head's line and, mid-page, the column's are drawn.
+  await forceColors();
+  await renderLongChat([390, 844]);
+  await nextFrames();
+  const about = one('.cd-public-shell__scroll > .cd-public-shell__about');
+  const head = one('.cd-public-shell__chat-head');
+  // Whether a border shows against the ground behind it.
+  const shows = (line: string, ground: string) => alphaOf(line) > 0 && line !== ground;
+  const aboutLineShows = () => shows(getComputedStyle(about).borderBottomColor, getComputedStyle(about).backgroundColor);
+  const headLineShows = () => shows(getComputedStyle(head).borderBottomColor, getComputedStyle(one('.cd-public-shell')).backgroundColor);
+  const seen = [];
+  for (const gap of [3, 60, 12]) {
+    seen.push({ gap: await restAboutLine(gap), headLineShows: headLineShows(), aboutLineShows: aboutLineShows() });
+  }
+  expect(seen).toEqual([
+    { gap: 3, headLineShows: true, aboutLineShows: false },
+    { gap: 60, headLineShows: true, aboutLineShows: true },
+    { gap: 12, headLineShows: true, aboutLineShows: false },
+  ]);
+});
+
+it('the_mark_follows_the_about_column_changing_height', async () => {
+  // The column's own height can change with nothing scrolled and nothing rendered, as when the web
+  // font arrives after the fallback has laid the column out: its hairline moves away from the
+  // chat's head or up under it, and whether it is drawn follows. So it does for a column that has
+  // just moved into the scroll region, as the window narrows past 900 px.
+  await renderLongChat([390, 844], { links: true });
+  await nextFrames();
+  const seen = [];
+  for (const when of ['opened on a phone', 'moved back from beside the chat'] as const) {
+    if (when === 'moved back from beside the chat') {
+      await page.viewport(1440, 900);
+      await vi.waitFor(() => expect(container.querySelector('.cd-public-shell__scroll > .cd-public-shell__about')).toBeNull());
+      await page.viewport(390, 844);
+      await vi.waitFor(() => one('.cd-public-shell__scroll > .cd-public-shell__about'));
+      await nextFrames();
+    }
+    const about = one('.cd-public-shell__scroll > .cd-public-shell__about');
+    const head = one('.cd-public-shell__chat-head');
+    const gap = () => Math.round(about.getBoundingClientRect().bottom - 1 - head.getBoundingClientRect().bottom);
+    seen.push({ when, gap: await restAboutLine(10), lines: linesUnderTheHead(24) });
+    // A line more at the column's end, added straight to the page: the hairline moves 24 px or more lower.
+    const line = document.createElement('li');
+    line.textContent = 'A line the column gained';
+    one('.cd-public-shell__link-list').append(line);
+    await nextFrames();
+    const grown = gap();
+    seen.push({ when, movedDown: grown >= 34, aboutDrawsItsLine: aboutDrawsItsLine() });
+    // Scrolled away and back to rest there, then the line gone again, as a column the font shrank:
+    // the hairline comes up under the head.
+    await restAboutLine(60);
+    await restAboutLine(grown);
+    line.remove();
+    await nextFrames();
+    seen.push({ when, gap: gap(), lines: linesUnderTheHead(24) });
+  }
+  expect(seen).toEqual(
+    (['opened on a phone', 'moved back from beside the chat'] as const).flatMap((when) => [
+      { when, gap: 10, lines: [-1] },
+      { when, movedDown: true, aboutDrawsItsLine: true },
+      { when, gap: 10, lines: [-1] },
+    ]),
+  );
 });
 
 it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () => {
