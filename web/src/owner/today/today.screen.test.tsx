@@ -953,6 +953,20 @@ describe('Today', () => {
     expect(row.element().querySelector('a')?.getAttribute('href')).toBe(`${DESK}/safety/dec-refused-1`);
   });
 
+  it('a_newest_row_the_api_leaves_out_is_skipped', async () => {
+    // An API from before turned-down requests sends `blocked` where `turned_down` now is. The key this
+    // build doesn't read and the one that's missing make no row; the rows it can name still show, and
+    // "See all 3" opens the rest.
+    const older = { blocked: { ...REFUSAL, kind: 'blocked' }, booking: BOOKING, lead_or_answer: ANSWER } as unknown as Today['briefing']['newest'];
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: older } }));
+    const { screen } = await renderRoute(TODAY);
+    const since = region(screen, 'Since last night');
+    await expect.element(since.getByText('Claude answered Dana Whitfield.')).toBeVisible();
+    const rows = since.getByRole('listitem').elements();
+    expect(rows.map((row) => row.querySelector('.cd-briefing-row__kind')?.textContent)).toEqual(['Booked', 'Answered']);
+    await expect.element(since.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
+  });
+
   it('see_all_opens_the_full_briefing', async () => {
     const items: BriefingItem[] = [
       { ...REFUSAL, at: minutesAgo(10) },
