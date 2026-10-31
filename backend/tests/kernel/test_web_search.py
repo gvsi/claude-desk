@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from desk.db.models import ActorSession, Document
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_service import auth
+from desk.kernel_service import auth, labels
 from desk.kernel_service.decisions import AnthropicDecisions, OfflineDecisions, SearchHit
 from .fakes import FakeAnthropicClient
 from .helpers import kernel_ctx, rows_of
@@ -192,3 +192,59 @@ async def test_parser_citation_canary_after_view_limit_is_dropped(app, client, r
     assert result.model_view == {"results": [], "simulated": False, "kind": "cited_excerpts"}
     assert await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.source == "web_search")) == []
     assert len(model.requests) == 1
+
+
+async def fill_knowledge_to(app, copy, total):
+    existing = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.desk_id == copy.desk_id))
+    assert len(existing) <= total
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add_all([
+            KnowledgeRow(desk_id=copy.desk_id, copy_id=copy.copy_id, item_id=f"capacity-{i}", source="setup",
+                         title=f"Existing item {i}", text="Existing knowledge", readers=["owner"],
+                         created_at=ctx.clock.now()) for i in range(total - len(existing))])
+
+
+async def test_search_keeps_only_hits_that_fit_knowledge_capacity(app, client, reviewer):
+    copy, _ = await visitor_of(app, client)
+    owner = await owner_of(client, copy.owner, copy.desk_id)
+    await fill_knowledge_to(app, copy, labels.MAX_KNOWLEDGE_ITEMS - 1)
+    hits = [SearchHit(title=f"Page {i}", url=f"https://trade.example/capacity/{i}", snippet=f"Cited text {i}")
+            for i in range(3)]
+    reviewer.search_answer = hits
+
+    _, result = await owner.run("native.web_search", {"query": "plumber services"})
+
+    assert result.state == "succeeded"
+    assert result.model_view == {"results": [hits[0].model_dump()], "simulated": False, "kind": "cited_excerpts"}
+    stored = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.desk_id == copy.desk_id))
+    assert len(stored) == labels.MAX_KNOWLEDGE_ITEMS
+    assert [(item.title, item.text, item.readers) for item in stored if item.source == "web_search"] == [
+        ("Web search: Page 0", "Cited text 0", ["owner"])]
+
+
+async def test_search_can_replace_existing_item_when_knowledge_is_full(app, client, reviewer):
+    copy, _ = await visitor_of(app, client)
+    owner = await owner_of(client, copy.owner, copy.desk_id)
+    hit = SearchHit(title="Updated page", url="https://trade.example/existing", snippet="Updated cited text")
+    item_id = "search-" + hashlib.sha256(hit.url.encode()).hexdigest()[:16]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, copy_id=copy.copy_id, item_id=item_id, source="web_search",
+                                title="Old page", text="Old cited text", readers=["owner"],
+                                created_at=ctx.clock.now()))
+    await fill_knowledge_to(app, copy, labels.MAX_KNOWLEDGE_ITEMS)
+    before = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.desk_id == copy.desk_id))
+    reviewer.search_answer = [
+        SearchHit(title="New page", url="https://trade.example/new-before", snippet="New cited text"), hit,
+        SearchHit(title="Another new page", url="https://trade.example/new-after", snippet="New cited text")]
+
+    _, result = await owner.run("native.web_search", {"query": "plumber services"})
+
+    assert result.state == "succeeded"
+    assert result.model_view == {"results": [hit.model_dump()], "simulated": False, "kind": "cited_excerpts"}
+    after = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.desk_id == copy.desk_id))
+    assert len(after) == labels.MAX_KNOWLEDGE_ITEMS
+    assert {item.item_id for item in after} == {item.item_id for item in before}
+    [stored] = [item for item in after if item.item_id == item_id]
+    assert (stored.title, stored.text, stored.readers) == ("Web search: Updated page", hit.snippet, ["owner"])

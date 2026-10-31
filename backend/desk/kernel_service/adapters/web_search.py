@@ -9,6 +9,7 @@ from desk.contracts import KnowledgeItem, Label, LedgerEvent, NormalizedAction, 
 from desk.db.models import Action as ActionRow
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Execution, Tool
+from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_service import labels, ledger
 from desk.kernel_service.adapters import register
 from desk.kernel_service.decisions import CallUsage, SearchHit, search_url
@@ -78,6 +79,11 @@ class WebSearchAdapter:
             raise SearchFailure(usage)
         try:
             canaries = await labels.copy_canaries(xctx.ctx)
+            # Budget this batch against the Desk's current contents. This snapshot does not
+            # serialize other knowledge writers; replacements do not consume a new slot.
+            item_ids = set(await xctx.ctx.db.scalars(xctx.ctx.repo.scoped(
+                select(KnowledgeRow.item_id).where(KnowledgeRow.desk_id == action.desk_id))))
+            remaining = max(0, labels.MAX_KNOWLEDGE_ITEMS - len(item_ids))
             kept: list[dict[str, str]] = []
             seen: set[str] = set()
             for raw in hits:
@@ -88,11 +94,18 @@ class WebSearchAdapter:
                 if hit.url in seen:
                     continue
                 seen.add(hit.url)
+                item_id = "search-" + hashlib.sha256(hit.url.encode()).hexdigest()[:16]
+                is_new = item_id not in item_ids
+                if is_new and remaining == 0:
+                    continue
                 snippet = hit.snippet[:500]
                 await labels.store_knowledge(xctx.ctx, action.desk_id, KnowledgeItem(
-                    item_id="search-" + hashlib.sha256(hit.url.encode()).hexdigest()[:16], source="web_search",
+                    item_id=item_id, source="web_search",
                     title=("Web search: " + hit.title)[:labels.MAX_KNOWLEDGE_TITLE],
                     text=snippet or hit.title, label=Label(readers=["owner"])))
+                if is_new:
+                    remaining -= 1
+                    item_ids.add(item_id)
                 kept.append({"title": hit.title, "url": hit.url, "snippet": snippet})
                 if len(kept) == 8:
                     break
