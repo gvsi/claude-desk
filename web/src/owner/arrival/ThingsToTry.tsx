@@ -182,15 +182,47 @@ interface ThingProps {
 }
 
 /**
- * What stays as a row turns done in view, in the commit that ticks it, before paint:
- * - Its height, the whole row's as it stood, kept as its least height: its done line and Done pill
- *   can be shorter than the detail and the button they replace, and the ideas under "Try to break
- *   it" close inside it, so nothing below the list moves. A row already done when it was first drawn
- *   keeps its own height, and a change of the row's width (a resized window) lets the kept height go.
+ * How long past its own transition a row's settle waits for `transitionend` before it ends itself:
+ * a browser that drops the event still lets the row take its own height.
+ */
+const SETTLE_SLACK_MS = 100;
+
+/**
+ * Whether the browser asks for reduced motion. The base stylesheet stops every transition then; a
+ * ticking row also keeps no height, so its end state draws at once.
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** The longest of an element's transitions, delay included, in milliseconds. */
+function transitionMs(el: Element): number {
+  const style = getComputedStyle(el);
+  const ms = (value: string) => (value.trim().endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000) || 0;
+  const durations = style.transitionDuration.split(',').map(ms);
+  const delays = style.transitionDelay.split(',').map(ms);
+  return Math.max(0, ...durations.map((duration, i) => duration + (delays[i % delays.length] ?? 0)));
+}
+
+/** A ticked row easing from the height it had to its own, both measured. */
+interface Settle {
+  from: number;
+  to: number;
+}
+
+/**
+ * What happens to a row as it turns done in view, in the commit that ticks it, before paint:
+ * - Its height, when it ticks in view (`eases`, its check drawing): the whole row's height as it
+ *   stood (its open ideas included) holds while the check draws, then eases to the done row's own
+ *   height (`motion-base`, emphasis ease), so what's below glides up once instead of jumping. The
+ *   stylesheet's transition carries it between the two measured heights, and the row lets go on
+ *   `transitionend` or `transitioncancel`, with a fallback. Under reduced motion, and for a row done
+ *   before Today opened, the row takes its own height at once: there is no change of the owner's to
+ *   show.
  * - Focus: the button or idea that had it is gone, so focus that was in the row goes to its title
  *   rather than falling to the page. Focus anywhere else is left alone.
  */
-function useTickInPlace(done: boolean) {
+function useTickInPlace(done: boolean, eases: boolean) {
   const ref = useRef<HTMLLIElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   // The row's height while it isn't done, kept up to date as it changes.
@@ -198,7 +230,7 @@ function useTickInPlace(done: boolean) {
   const wasDone = useRef(done);
   // Whether focus is in the row, as the row's own focus events last said.
   const focusInside = useRef(false);
-  const [kept, setKept] = useState<{ height: number; width: number } | null>(null);
+  const [settle, setSettle] = useState<Settle | null>(null);
 
   useLayoutEffect(() => {
     const item = ref.current;
@@ -210,17 +242,42 @@ function useTickInPlace(done: boolean) {
     }
     if (wasDone.current) return;
     wasDone.current = true;
-    if (before.current !== null) setKept({ height: before.current, width: item.getBoundingClientRect().width });
     const active = document.activeElement;
     if (focusInside.current && (active === null || active === document.body)) titleRef.current?.focus({ preventScroll: true });
+    const from = before.current;
+    const to = item.getBoundingClientRect().height;
+    if (eases && from !== null && from - to > 0.5 && !prefersReducedMotion()) setSettle({ from, to });
   });
+
+  // The settle, before paint: locked at the height the row had, then set to its own height, which the
+  // stylesheet's transition reaches once the check has drawn.
+  useLayoutEffect(() => {
+    const item = ref.current;
+    if (settle === null || item === null) return undefined;
+    item.style.minHeight = `${settle.from}px`;
+    // Read back, so the browser starts the transition from the height the row had.
+    void item.offsetHeight;
+    item.style.minHeight = `${settle.to}px`;
+    const end = () => setSettle(null);
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === item && event.propertyName === 'min-height') end();
+    };
+    item.addEventListener('transitionend', onEnd);
+    item.addEventListener('transitioncancel', onEnd);
+    const fallback = window.setTimeout(end, transitionMs(item) + SETTLE_SLACK_MS);
+    return () => {
+      item.removeEventListener('transitionend', onEnd);
+      item.removeEventListener('transitioncancel', onEnd);
+      window.clearTimeout(fallback);
+      item.style.minHeight = '';
+    };
+  }, [settle]);
 
   useEffect(() => {
     const item = ref.current;
     if (item === null || typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(() => {
       if (!wasDone.current) before.current = item.getBoundingClientRect().height;
-      else setKept((now) => (now !== null && Math.abs(item.getBoundingClientRect().width - now.width) > 0.5 ? null : now));
     });
     observer.observe(item);
     return () => observer.disconnect();
@@ -229,7 +286,7 @@ function useTickInPlace(done: boolean) {
   return {
     ref,
     titleRef,
-    minHeight: kept?.height,
+    settling: settle !== null,
     onFocus: () => {
       focusInside.current = true;
     },
@@ -241,16 +298,16 @@ function useTickInPlace(done: boolean) {
 
 /**
  * One thing to try. Once it's done, its icon gives way to a check, its detail to its done line and
- * its next step to a Done pill, in place and at the height it had. The check draws once when it's
+ * its next step to a Done pill, in place, at the height it had until the check has drawn. The check draws once when it's
  * done in view; it is drawn still when it was already done at load, or done before this row was
  * drawn (a list shown again).
  */
 function Thing({ icon, title, held = false, detail, below, done = null, children }: ThingProps) {
-  const { ref, titleRef, minHeight, onFocus, onBlur } = useTickInPlace(done !== null);
   const [drawnDone] = useState(done !== null);
   const ticked = done !== null && !done.atLoad && !drawnDone;
+  const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(done !== null, ticked);
   return (
-    <li ref={ref} className="cd-things__item" style={minHeight === undefined ? undefined : { minHeight }} onFocus={onFocus} onBlur={onBlur}>
+    <li ref={ref} className={settling ? 'cd-things__item cd-things__item--settling' : 'cd-things__item'} onFocus={onFocus} onBlur={onBlur}>
       <span className="cd-things__icon">
         {done === null ? <Icon name={icon} size={16} /> : <Icon name="check" size={16} className={ticked ? 'cd-things__check cd-things__check--draws' : 'cd-things__check'} />}
       </span>

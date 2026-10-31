@@ -1187,7 +1187,7 @@ describe('Things to try ticks off', () => {
     draw.finish();
   });
 
-  it.each(['desktop', 'phone'] as const)('nothing_under_the_list_moves_at_%s', async (viewport) => {
+  it.each(['desktop', 'phone'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (viewport) => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -1199,14 +1199,13 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // Needs you starts where it did, below the list's top, on every frame from the answer to the tick.
-    const below = frames.map((frame) => frame.below);
-    expect(Math.max(...below) - Math.min(...below)).toBeLessThan(0.5);
+    // Needs you holds while the check draws, then glides up once to where the done row's own height puts it.
+    expectHeldThenGlided(frames, row.element() as HTMLElement);
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
 
-  it.each(['desktop', 'phone'] as const)('ideas_open_as_a_row_ticks_move_nothing_under_the_list_at_%s', async (viewport) => {
+  it.each(['desktop', 'phone'] as const)('ideas_open_as_a_row_ticks_hold_then_glide_up_at_%s', async (viewport) => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Try to break it');
@@ -1222,11 +1221,45 @@ describe('Things to try ticks off', () => {
     mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
     const frames = await watching;
 
-    // Needs you starts where it did, below the list's top, on every frame through the tick.
-    const below = frames.map((frame) => frame.below);
-    expect(Math.max(...below) - Math.min(...below)).toBeLessThan(0.5);
+    // The ideas close inside the row's height; once the check has drawn, it eases to its own height.
+    expectHeldThenGlided(frames, row.element() as HTMLElement);
     expect(row.getByRole('group', { name: 'Ideas to try' }).elements()).toHaveLength(0);
     expectNoHorizontalScroll();
+  });
+
+  it('under_reduced_motion_a_ticking_row_takes_its_own_height_at_once', async () => {
+    // The browser asks for reduced motion: the end state draws at once, as the approval card's does.
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => {
+      if (!query.includes('prefers-reduced-motion')) return matchMedia(query);
+      const ignore = () => undefined;
+      const reduced: MediaQueryList = {
+        matches: query.includes('reduce'),
+        media: query,
+        onchange: null,
+        addEventListener: ignore,
+        removeEventListener: ignore,
+        addListener: ignore,
+        removeListener: ignore,
+        dispatchEvent: () => false,
+      };
+      return reduced;
+    });
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
+    const watching = watchTheList(row.element(), things.element(), needsYou, ANSWERED_LINE);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    const frames = await watching;
+
+    // The row never keeps a height: Needs you takes its new place in the frame the row ticks.
+    expect(frames.every((frame) => frame.kept === '')).toBe(true);
+    const from = frames[0]?.below ?? 0;
+    const to = frames.at(-1)?.below ?? 0;
+    expect(to).toBeLessThan(from - 4);
+    expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5 || Math.abs(frame.below - to) < 0.5)).toBe(true);
   });
 
   it('done_before_load_is_drawn_still_while_another_chat_is_read', async () => {
@@ -1599,10 +1632,43 @@ function dashShows(path: SVGPathElement, at: number): boolean {
 interface ListFrame {
   /** The row is in the list. */
   drawn: boolean;
-  /** Something in the row animates: its check drawing. */
+  /** Something in the row animates: its check drawing, or its height easing. */
   drawing: boolean;
+  /** The row's check is drawing. */
+  checkDrawing: boolean;
+  /** The least height the row keeps, as its inline style says it ('' for none). */
+  kept: string;
   /** Where `next` starts, below the top of the list's section. */
   below: number;
+}
+
+/** A move this small (in px) can't show whether it eased: it fits in a frame or two whatever the curve. */
+const TOO_SMALL_TO_EASE = 4;
+
+/**
+ * What follows the list held its place while the row's check drew, then moved up one way only, by
+ * way of places between (when it moved more than a few px), to where the row's own height puts it:
+ * the row keeps no least height at the end.
+ */
+function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
+  const from = frames[0]?.below ?? 0;
+  const to = frames.at(-1)?.below ?? 0;
+  for (const [i, frame] of frames.entries()) {
+    if (frame.checkDrawing) expect(Math.abs(frame.below - from), `held while the check drew, frame ${i}`).toBeLessThan(0.5);
+  }
+  expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
+  for (const [i, frame] of frames.entries()) {
+    const step = frame.below - (frames[i - 1]?.below ?? frame.below);
+    expect(step, `moved down at frame ${i}`).toBeLessThan(0.5);
+  }
+  expect(to).toBeLessThan(from);
+  if (from - to > TOO_SMALL_TO_EASE) {
+    expect(
+      frames.some((frame) => frame.below < from - 0.5 && frame.below > to + 0.5),
+      'eased through places between, never in one jump',
+    ).toBe(true);
+  }
+  expect(row.style.minHeight).toBe('');
 }
 
 /** How long a row may take to tick and settle before the watch gives up. */
@@ -1618,9 +1684,12 @@ function watchTheList(row: Element, list: Element, next: Element, doneLine: stri
   let still = 0;
   return new Promise((resolve, reject) => {
     const step = () => {
+      const animations = row.getAnimations({ subtree: true });
       const frame: ListFrame = {
         drawn: row.isConnected && list.contains(row),
-        drawing: row.getAnimations({ subtree: true }).length > 0,
+        drawing: animations.length > 0,
+        checkDrawing: animations.some((a) => (a as CSSAnimation).animationName === 'cd-things-check-draw' && a.playState === 'running'),
+        kept: row instanceof HTMLElement ? row.style.minHeight : '',
         below: next.getBoundingClientRect().top - list.getBoundingClientRect().top,
       };
       frames.push(frame);
