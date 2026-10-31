@@ -11,6 +11,11 @@
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
  * its own (after the visitor confirmed it's them) explains its reply too.
+ *
+ * A row the stream appends (a reply, the owner's words, a line about the chat) arrives `live`, so
+ * it lands once with its receipts one by one; the page says `shown` once it has drawn it, and it is
+ * live no more. The stored conversation, read at load or after a reload, is never live, and nothing
+ * the stream replays adds a row.
  */
 import type {
   EvDemoInbox,
@@ -80,6 +85,8 @@ export type ChatAction =
   | { type: 'owner_typing_over' }
   /** The visitor sent a message: it shows at once, in its place. */
   | { type: 'sent'; id: string; text: string }
+  /** The page has drawn the rows that arrived live: they are live no more. */
+  | { type: 'shown' }
   /** Its answer was lost, so the chat reads the conversation before saying anything. */
   | { type: 'send_checking'; id: string }
   | { type: 'send_failed'; id: string; failure: SendFailure }
@@ -193,7 +200,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       if (state.seen.has(key)) return { ...state, ownerTyping };
       return {
         ...state,
-        ...addPart(state, { kind: 'reply', row: { kind: 'message', seq, ev }, receipt: receiptFromEvent(ev) }),
+        ...arrived(addPart(state, { kind: 'reply', row: { kind: 'message', seq, ev }, receipt: receiptFromEvent(ev) })),
         writing: false,
         ownerTyping,
         seen: new Set(state.seen).add(key),
@@ -214,9 +221,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false };
+      return { ...state, ...arrived(addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false };
     case 'owner_left':
-      return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false, ownerTyping: null };
+      return { ...state, ...arrived(addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false, ownerTyping: null };
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;
@@ -227,6 +234,19 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'error':
       return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
   }
+}
+
+/** `groups` with its last row, the one the stream just appended, arriving live. */
+function arrived<G extends RowGroups<ChatItem, ReceiptView>>(groups: G): G {
+  const last = groups.rows.at(-1);
+  if (last === undefined) return groups;
+  return { ...groups, rows: [...groups.rows.slice(0, -1), { ...last, live: true }] };
+}
+
+/** The chat with no row live, the same state when none was. */
+function shown(state: ChatState): ChatState {
+  if (!state.rows.some((row) => row.live === true)) return state;
+  return { ...state, rows: state.rows.map(({ live: _live, ...row }) => row) };
 }
 
 /** The chat with the visitor's message `id` changed by `change`. */
@@ -254,6 +274,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // A chat that ended stays ended; any other error was the last turn's.
       return { ...state, ...addPart(state, { kind: 'turn', row }), error: state.error === 'session' ? 'session' : null };
     }
+    case 'shown':
+      return shown(state);
     case 'send_checking':
       return withVisitor(state, action.id, (item) => ({ ...item, status: 'checking' }));
     case 'send_failed':

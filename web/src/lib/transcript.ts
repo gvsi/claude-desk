@@ -21,6 +21,11 @@ export interface GroupedRow<Row, R> {
   item: Row;
   /** The receipts attached under the row, in order. */
   receipts: R[];
+  /**
+   * The row arrived while the page was open and hasn't been shown yet: it lands once, its receipts
+   * one by one (`TranscriptRow`'s `live`). A row read from a stored conversation never has it.
+   */
+  live?: boolean;
 }
 
 export interface RowGroups<Row, R> {

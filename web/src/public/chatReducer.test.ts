@@ -37,7 +37,7 @@ describe('chatReducer', () => {
     const answered = run(events([quoteMessage], 2), writing);
     expect(answered.writing).toBe(false);
     expect(answered.lastSeq).toBe(2);
-    expect(answered.rows).toEqual([{ item: { kind: 'message', seq: 2, ev: quoteMessage }, receipts: [receiptFromEvent(quoteMessage)] }]);
+    expect(answered.rows).toEqual([{ item: { kind: 'message', seq: 2, ev: quoteMessage }, receipts: [receiptFromEvent(quoteMessage)], live: true }]);
   });
 
   it('status_attaches_to_the_last_row', () => {
@@ -129,7 +129,7 @@ describe('chatReducer', () => {
     const joined: SseEvent = { type: 'owner_joined', name: 'Maria Rivera' };
     const taken = run(events([{ type: 'writing' }, joined]));
     expect(taken.writing).toBe(false);
-    expect(taken.rows).toEqual([{ item: { kind: 'system', seq: 2, ev: joined }, receipts: [] }]);
+    expect(taken.rows).toEqual([{ item: { kind: 'system', seq: 2, ev: joined }, receipts: [], live: true }]);
     const left = run(events([{ type: 'owner_left' }], 3), taken);
     expect(left.rows.map((row) => row.item.kind)).toEqual(['system', 'system']);
   });
@@ -223,6 +223,51 @@ describe('chatReducer', () => {
     // Loading the conversation again replaces what the chat held: nothing doubles.
     const again = run([{ type: 'sent', id: 'local-1', text: 'Thanks' }, { type: 'history', transcript: transcript(12, items) }], state);
     expect(again.rows).toEqual(state.rows);
+  });
+
+  it('rows_from_the_stream_arrive_live_until_shown', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const liveOf = (state: ChatState) => state.rows.map((row) => row.live === true);
+
+    // The visitor's own message shows at once; Claude's reply comes from the stream and arrives
+    // live, its receipts with it.
+    const asked = run([{ type: 'sent', id: 'v1', text: 'How much is drain clearing?' }]);
+    expect(liveOf(asked)).toEqual([false]);
+    const answered = run(events(rivera.events.quoteTurn), asked);
+    expect(liveOf(answered)).toEqual([false, true]);
+    expect(answered.rows[1]?.receipts).toEqual([receiptFromEvent(quoteMessage), receiptFromEvent(quoteReceipt)]);
+
+    // Once the page has shown it, it is live no more: a re-render or a remount draws it still.
+    const shown = run([{ type: 'shown' }], answered);
+    expect(liveOf(shown)).toEqual([false, false]);
+    expect(shown.rows.map(({ item, receipts }) => ({ item, receipts }))).toEqual(answered.rows.map(({ item, receipts }) => ({ item, receipts })));
+    // Nothing live to clear changes nothing.
+    expect(run([{ type: 'shown' }], shown)).toBe(shown);
+
+    // A line about the chat and the owner's own words from the stream arrive live too.
+    const takenOver = run(events([ownerJoined, ownerSaid], 5), shown);
+    expect(liveOf(takenOver)).toEqual([false, false, true, true]);
+
+    // The stream reconnects and replays what the chat holds: nothing arrives again.
+    const replayed = run(events(rivera.events.quoteTurn), shown);
+    expect(replayed).toEqual(shown);
+
+    // The stored conversation, read at load or after a reload, draws still, and so does an event
+    // the stream replays that the read already showed (matched by its id).
+    const reloaded = run([
+      {
+        type: 'history',
+        transcript: transcript(0, [
+          visitorText(1, 'Can I get 15% off if I pay cash?'),
+          { ...item(2, 'status'), event: held },
+          { ...item(3, 'delivered'), event: handoff },
+        ]),
+      },
+    ]);
+    expect(liveOf(reloaded)).toEqual([false, false]);
+    expect(liveOf(run(events(rivera.events.heldTurn), reloaded))).toEqual([false, false]);
+    // A read replaces live rows with still ones.
+    expect(liveOf(run([{ type: 'history', transcript: transcript(4, [{ ...item(1, 'delivered'), event: quoteMessage }]) }], answered))).toEqual([false]);
   });
 
   it('later_statuses_attach_to_their_hold', () => {
