@@ -137,7 +137,8 @@ async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: Approv
     """An approval that can't run: the re-check failed, and `check` names the part that did (a
     deleted Desk is `desk`), or `prepare` refused (`prepare`), both "rules changed"; or it would
     release private data into a session that no longer stands for its person
-    (`execute.session_ended`, its status line the plain reason `status`). The approval is used up
+    (`execute.session_ended`, ledgered as `reason="session_ended"` with the part in `check`). The
+    visitor's status line is the state's own, never why their session ended. The approval is used up
     all the same, nothing ran and no intent row was written."""
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
@@ -201,7 +202,7 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=card_diff)
     if execute.releases_private_data(row.tool) and (ended := await execute.session_ended(ctx, row)) is not None:
         # private data goes only to a session that still stands for its person; T2 asks again under its lock
-        return await _refused_at_execution(ctx, row, answer, ended, reason="session_ended", status=f"refused_{ended}")
+        return await _refused_at_execution(ctx, row, answer, ended, reason="session_ended")
     checked = await execute.recheck_under(ctx, row, path="approved")
     if not isinstance(checked, execute.Checked):     # not a version: the part of the re-check that failed
         return await _refused_at_execution(ctx, row, answer, checked)

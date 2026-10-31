@@ -29,6 +29,8 @@ STATUS: dict[str, str] = {
     "owner_said": "Written by {owner}",
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
     # an approved release of private data whose session no longer stands for its person (shown to the owner)
+    # Why an approved private release was refused, for the owner: unused until an owner-facing field carries
+    # it, since a decision's status line reaches the visitor, who mustn't read why their session ended.
     "refused_contact_changed": "Not shared: their session ended when their contact changed",
     "refused_person_removed": "Not shared: they were removed from your records",
     "refused_session_closed": "Not shared: their session ended before your answer",

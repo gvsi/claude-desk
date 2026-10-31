@@ -502,8 +502,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     if path == "approved" and releases_private_data(target.action.tool):
         # step 6 runs an approved hold for a closed session, but never one that releases private data
         if (ended := await session_ended(ctx, target.decision)) is not None:
-            return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended",
-                                        status=f"refused_{ended}")
+            return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended")
     if path == "allow":
         # the request's own session check, before the adapter acts: the commit below records what
         # it did whatever happens to the session after, so it runs no recheck of its own
@@ -890,8 +889,7 @@ async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execu
     if undone:
         await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
                       _summary(target, "refused_at_execution", reason="session_ended", check=ended,
-                               reconciled=True),
-                      status=f"refused_{ended}")
+                               reconciled=True))
     return True
 
 async def _ask_adapter(ctx: KernelCtx, target: _Target,

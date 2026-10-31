@@ -60,6 +60,12 @@ async def nothing_released(app, copy) -> None:
         FactRow.fact_id.like("document_link:%")))] == []
 
 
+# A visitor's status line for an approved release refused because their session ended: the generic line, never the
+# owner's reason (that the person was removed or their contact changed), which their session's holder mustn't read.
+RULES_CHANGED = "The rules changed, so this didn't go ahead"
+OWNER_LINES = ("Not shared", "No se compartió")
+
+
 async def test_an_approved_release_for_a_session_closed_by_a_contact_change_releases_nothing(app, client):
     copy, dana, held = await held_release(app, client)
     await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
@@ -68,7 +74,7 @@ async def test_an_approved_release_for_a_session_closed_by_a_contact_change_rele
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
 
     assert (result.decision.state, result.decision.visitor_plain) == (
-        "refused_at_execution", "Not shared: their session ended when their contact changed")
+        "refused_at_execution", RULES_CHANGED)
     assert result.execution is None or (result.execution.facts, result.execution.model_view) == ([], {})
     await nothing_released(app, copy)
     refusal = (await ledger_rows(app, copy))[-1].event
@@ -83,7 +89,7 @@ async def test_an_approved_release_for_a_removed_person_releases_nothing(app, cl
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
 
     assert (result.decision.state, result.decision.visitor_plain) == (
-        "refused_at_execution", "Not shared: they were removed from your records")
+        "refused_at_execution", RULES_CHANGED)
     assert result.execution is None or (result.execution.facts, result.execution.model_view) == ([], {})
     await nothing_released(app, copy)
     refusal = (await ledger_rows(app, copy))[-1].event
@@ -105,7 +111,7 @@ async def test_a_session_closed_after_the_answers_intent_releases_nothing(app, c
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
 
     assert (result.decision.state, result.decision.visitor_plain) == (
-        "refused_at_execution", "Not shared: their session ended when their contact changed")
+        "refused_at_execution", RULES_CHANGED)
     assert (result.execution.state, result.execution.facts, result.execution.model_view) == ("failed", [], {})
     await nothing_released(app, copy)
     [execution] = await rows_of(app, copy.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
@@ -113,6 +119,27 @@ async def test_a_session_closed_after_the_answers_intent_releases_nothing(app, c
     refusal = [entry.event for entry in await ledger_rows(app, copy) if entry.event.kind == "execute"][-1]
     assert (refusal.summary["state"], refusal.summary["reason"], refusal.summary["check"]) == (
         "refused_at_execution", "session_ended", "contact_changed")
+
+
+@pytest.mark.parametrize("change", ["contact", "removal"])
+async def test_a_spanish_visitor_sees_the_generic_line_and_no_owner_reason(app, client, change):
+    from .helpers import kernel_ctx
+    from desk.db.models import ActorSession
+    copy, dana, held = await held_release(app, client)
+    async with kernel_ctx(app) as ctx:                          # the visitor writes in Spanish
+        ctx.bind(copy.copy_id)
+        [session] = await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
+            ActorSession.session_id == held.session_id)))
+        session.last_language = "es"
+    if change == "contact":
+        await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                           "contact": "dana.w@example.net"}]})
+    else:
+        await updated(client, copy, "people", {"remove": ["dana"]})
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.decision.visitor_plain) == (
+        "refused_at_execution", "Las reglas cambiaron, así que no se hizo")
+    assert not any(line in result.decision.visitor_plain for line in OWNER_LINES)
 
 
 async def test_an_approved_quote_still_runs_for_a_closed_session(app, client):
@@ -292,7 +319,7 @@ async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app
     [decision] = await rows_of(app, rows.copy_id, select(DecisionRow).where(
         DecisionRow.decision_id == held.decision_id))
     assert (decision.state, decision.visitor_plain) == (
-        "refused_at_execution", "Not shared: their session ended when their contact changed")
+        "refused_at_execution", RULES_CHANGED)
     [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
     assert (execution.state, execution.result.facts, execution.result.model_view) == ("failed", [], {})
     settled = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
