@@ -1203,7 +1203,8 @@ async def test_a_later_questions_exchange_leaves_out_earlier_replies(app, browse
     fake.script("native.fetch_website", model_view={"item_id": "website:1", "title": "Rivera Plumbing",
                                                     "text": planted})
     owner = await new_owner(app, browser, kernel_http)
-    state = await begin(owner, model, website=WEBSITE)
+    state = await begin(owner, model, website=WEBSITE,
+                        memory=[{"title": "Services", "topics": ["business"], "text": "I fix leaks in Oakland."}])
     interview_id = state["interview_id"]
     await wrote_memory(kernel_http, owner, state)
     await consent(owner, interview_id, True, model)
@@ -1255,6 +1256,18 @@ async def test_start_writes_the_sample_memory_before_the_consent_read(app, brows
     assert all(note["text"] in memory["content"] for note in notes)
 
 
+async def test_start_drops_overlong_memory_topics_and_still_writes(app, browser, fake, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started(memory=[{"title": "Customer habits", "topics": ["x" * 61, " Y" + "y" * 59 + " ",
+                                                                      " CUSTOMERS ", "customers", " "],
+                               "text": "I ask for a photo before a visit."}]))
+    reply = await owner.browser.post("/api/owner/setup", json=start_body())
+    assert reply.status_code == 201, reply.text
+    (written,) = fake.called("PUT /desks/{id}/memory")
+    assert written.body["items"][0]["topics"] == ["y" * 60, "customers", "business"]
+    assert not fake.desks[reply.json()["desk_id"]].answering
+
+
 @pytest.mark.parametrize("failure, expected", [("500", "KernelUnavailable internal"),
                                                ("422", "KernelFailed invalid"),
                                                ("timeout", "KernelUnavailable None")])
@@ -1277,6 +1290,30 @@ async def test_a_failed_memory_write_reads_an_empty_memory_never_riveras(app, br
     (memory,) = [entry for entry in transcript if entry.get("read") == "memory"]
     assert "Rivera" not in memory["content"] and "Maria" not in memory["content"]
     assert "I send a photo" not in memory["content"]
+    assert memory["content"] == ""
+
+
+async def test_an_invalid_memory_request_logs_and_start_continues(app, browser, fake, kernel_http, model,
+                                                                 engine, caplog, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    request_type = desk_setup.DeskMemoryRequest
+
+    def invalid_request(**fields):
+        return request_type(**{**fields, "about": "private draft " * 40})
+
+    monkeypatch.setattr(desk_setup, "DeskMemoryRequest", invalid_request)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    model.add(started(memory=[{"title": "Customer habits", "topics": ["business"],
+                               "text": "I ask for a photo before a visit."}]))
+    reply = await owner.browser.post("/api/owner/setup", json=start_body())
+    assert reply.status_code == 201, reply.text
+    assert [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"] == [
+        "the sample memory couldn't be written (ValidationError)"]
+    assert not fake.called("PUT /desks/{id}/memory")
+    assert not fake.desks[reply.json()["desk_id"]].answering
+    await consent(owner, reply.json()["interview_id"], True)
+    transcript = (await stored(engine, reply.json()["interview_id"]))["transcript"]
+    (memory,) = [entry for entry in transcript if entry.get("read") == "memory"]
     assert memory["content"] == ""
 
 
@@ -1309,6 +1346,17 @@ async def test_connected_apps_outside_the_catalog_are_dropped(app, browser, fake
     assert all("connected_apps" not in entry for entry in saved["transcript"][1:])
     assert all("connected_apps" not in message for message in reply.json()["messages"])
     assert not fake.called("PUT /desks/{id}/memory")   # no draft notes means no write
+
+
+def test_memory_topics_leave_room_for_the_query_fallback():
+    # The draft currently allows six; keep the builder safe if that upstream bound grows.
+    topics = [f"topic-{index}" for index in range(11)]
+    draft = MemoryDraft.model_construct(title="Customer habits", topics=topics, text="My short note.")
+    (item,) = desk_setup.memory_items([draft])
+    assert item.topics == [*topics[:9], "business"]
+    draft.topics = [" HOURS ", *topics]
+    (item,) = desk_setup.memory_items([draft])
+    assert item.topics == ["hours", *topics[:8]]
 
 
 def test_memory_ids_are_built_by_code():

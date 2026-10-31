@@ -819,7 +819,8 @@ def memory_items(drafts: list[MemoryDraft]) -> list[MemoryItem]:
             item_id = base[:58].rstrip("-") + "-" + chr(suffix)
             suffix += 1
         used.add(item_id)
-        topics = [topic.strip().lower() for topic in draft.topics if topic.strip()]
+        topics = list(dict.fromkeys(topic for value in draft.topics
+                                    if 1 <= len(topic := value.strip().lower()) <= 60))[:9]
         if not query.intersection(topics):
             topics.append("business")
         items.append(MemoryItem(id=item_id, title=draft.title, topics=topics, text=draft.text))
@@ -834,10 +835,11 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
     await _answering_off(owner, created.desk_id)
     if described.memory:
         try:
-            await owner.kernel.call("PUT /desks/{id}/memory",
-                                    DeskMemoryRequest(about=described.summary[:500],
-                                                      items=memory_items(described.memory)),
+            memory = DeskMemoryRequest(about=described.summary[:500], items=memory_items(described.memory))
+            await owner.kernel.call("PUT /desks/{id}/memory", memory,
                                     path={"id": created.desk_id})
+        except ValidationError as failure:
+            logger.warning("the sample memory couldn't be written (%s)", type(failure).__name__)
         except (KernelFailed, KernelUnavailable) as failure:
             logger.warning("the sample memory couldn't be written (%s %s)", type(failure).__name__, failure.code)
     site = website_url(described.website)
