@@ -17,6 +17,11 @@
   min-width: 0;
 }
 
+/* The payment limit's trail, "Rules" alone, on the breadcrumb's one line of meta type. */
+.cd-rule-draft__trail > p {
+  margin: 0;
+}
+
 /* The draft's rules by outcome, in Claude's serif. */
 .cd-rule-draft__summary {
   display: flex;

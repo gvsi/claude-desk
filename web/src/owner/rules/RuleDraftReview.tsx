@@ -59,6 +59,20 @@ function RouterLink({ href, children, ...rest }: RulesLinkProps) {
   );
 }
 
+/**
+ * A trail of one step back, as the payment limit's review draws it (N-Conn-20): "Rules" alone, a
+ * link. The design system's `Breadcrumb` always ends on the page itself, so this is its link alone.
+ */
+function TrailBack({ label, href }: { label: string; href: string }) {
+  return (
+    <nav aria-label="Breadcrumb" className="cd-rule-draft__trail">
+      <p className="cd-type-meta">
+        <TextLink href={href}>{label}</TextLink>
+      </p>
+    </nav>
+  );
+}
+
 /** The draft changes the payment limit and no rule: nothing else to review. */
 function onlyTheLimit(draft: RuleDraft): boolean {
   return draft.moneyCap !== null && draft.turnedOn.length === 0 && ruleDiff(draft.before, draft.after).length === 0;
@@ -104,7 +118,8 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   const tools = rules.data?.tools;
   const rows = useMemo(() => changeRows(draft, people.data ?? null, tools ?? []), [draft, people.data, tools]);
   const turningOn = draft.turnedOn.length > 0;
-  const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : 'Review the change');
+  const limitOnly = onlyTheLimit(draft);
+  const heading = title ?? (limitOnly ? 'Change your payment limit' : 'Review the change');
   const root = turningOn ? { label: 'Connectors', href: connectorsPath(deskId) } : { label: 'Rules', href: rulesPath(deskId) };
 
   const finish = (outcome: 'confirmed' | 'kept') => {
@@ -208,7 +223,8 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
     <div className="cd-rule-draft" onClick={followInAppLinks(navigate)}>
       {inline ? null : (
         <div className="cd-rule-draft__header">
-          <Breadcrumb items={[root, { label: heading }]} linkComponent={RouterLink} />
+          {/* A change to the payment limit alone goes back to "Rules" alone (N-Conn-20); every other review names itself after it. */}
+          {limitOnly ? <TrailBack {...root} /> : <Breadcrumb items={[root, { label: heading }]} linkComponent={RouterLink} />}
           {/* Once the change applied, nothing still says it waits for the owner. */}
           <PageHeader title={heading} {...(done ? {} : { subtitle: SUBTITLE })} />
         </div>
