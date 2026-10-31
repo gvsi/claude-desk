@@ -66,9 +66,20 @@ export const CARD_CHROME: Readonly<Record<ClauseTemplate, Readonly<Record<CopyLa
   link_cancelled: { en: { label: 'Payment link cancelled' }, es: { label: 'Enlace de pago cancelado' } },
 };
 
-/** The template's chrome in `language`, or null for a template this build doesn't know. */
-export function cardChrome(template: string, language: CopyLanguage): Readonly<CardChrome> | null {
+/**
+ * The policy card for the Desk's service area (setup's charter claim `policy:service_area`), named
+ * for what it is (the owner's decision); every other policy card stays "Policy".
+ */
+const SERVICE_AREA_FACT = 'charter:policy:service_area';
+const SERVICE_AREA: Readonly<Record<CopyLanguage, CardChrome>> = { en: { label: 'Service area' }, es: { label: 'Zona de servicio' } };
+
+/**
+ * The template's chrome in `language`, or null for a template this build doesn't know. `factId` is
+ * the card's fact, which names the service area's policy card apart from the Desk's other policies.
+ */
+export function cardChrome(template: string, language: CopyLanguage, factId?: string | null): Readonly<CardChrome> | null {
   if (!Object.hasOwn(CARD_CHROME, template)) return null;
+  if (template === 'policy' && factId === SERVICE_AREA_FACT) return SERVICE_AREA[language];
   const chrome = CARD_CHROME[template as ClauseTemplate];
   return Object.hasOwn(chrome, language) ? chrome[language] : chrome.en;
 }
