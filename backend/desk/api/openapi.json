@@ -6469,6 +6469,117 @@
         }
       }
     },
+    "/api/owner/policy/{desk_id}/money_cap": {
+      "post": {
+        "summary": "Draft Money Cap",
+        "description": "Draft the active rules at a new money cap, the most Claude takes or pays out in one action without asking:\nlowering it brings each rule that takes or pays out more on its own down to it (asking instead at $0), each saying\nits new limit, and the draft's diff lists them; raising it changes no rule. The draft is at the new cap, which\nbecomes the Desk's only when the owner confirms it. 422 `above_platform_ceiling` above the $10,000 ceiling, with\nnothing drafted.",
+        "operationId": "owner_draft_money_cap",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoneyCapIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesDraft"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/policy/{desk_id}/confirm": {
       "post": {
         "summary": "Confirm Rules",
@@ -9154,6 +9265,23 @@
           "text"
         ],
         "title": "MessageIn"
+      },
+      "MoneyCapIn": {
+        "properties": {
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Auto Money Cap Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "auto_money_cap_cents"
+        ],
+        "title": "MoneyCapIn",
+        "description": "`POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule\nmay take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform\nceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422\n`invalid`."
       },
       "NeedsYouItem": {
         "properties": {

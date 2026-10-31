@@ -8,12 +8,10 @@ A draft is compiled and proved by the kernel (`POST /policy/draft`): the API sen
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from pydantic import BaseModel
-
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.kernel_client import KernelUnavailable
 from desk.api.schemas import CardDiff, CoveringCard, RulesDraft, RulesSummary, ToolRow
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, PolicyVersion, RuleCard, ToolProfile
+from desk.contracts import PolicyVersion, RuleCard, ToolProfile
 from desk.kernel_api import PolicyDraftRequest, ToolsConnectRequest
 
 TOOL_ROW_FIELDS = tuple(name for name in ToolRow.model_fields if name != "cards")
@@ -32,14 +30,10 @@ async def active_row(owner: OwnerCtx, desk_id: str) -> dict[str, Any]:
     return row
 
 
-def version_cap(version: Mapping[str, Any] | BaseModel) -> int:
-    """A rules version's money cap: the most an auto card may take or pay out in one action. Until the kernel's money
-    cap contract (Plan 01b) puts `auto_money_cap_cents` on the version, every version is held to the platform's cap,
-    `AUTO_MONEY_HARD_CAP_CENTS` (master "Money cap", sequencing); from then on, it is the version's own."""
-    if "auto_money_cap_cents" not in PolicyVersion.model_fields:
-        return AUTO_MONEY_HARD_CAP_CENTS
-    fields = version.model_dump() if isinstance(version, BaseModel) else version
-    return fields["auto_money_cap_cents"]
+def version_cap(version: Mapping[str, Any] | PolicyVersion) -> int:
+    """A rules version's money cap, as the kernel keeps it on the version (a `PolicyVersion` or its
+    `kernel_ro.policy_versions` row): the most an auto card may take or pay out in one action (master "Money cap")."""
+    return version.auto_money_cap_cents if isinstance(version, PolicyVersion) else version["auto_money_cap_cents"]
 
 
 async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expected_parent: int, *,

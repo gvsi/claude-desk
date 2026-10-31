@@ -5,7 +5,8 @@ of its own before anything is read or sent.
   mock payments connection and the demo's tool change, and the owner's knowledge and documents, each sent to the
   kernel with the owner's credential.
 - Under `/api/owner/policy/{desk_id}`, the proving routes: each drafts a change the kernel compiles and proves
-  (asked of Claude in plain words, an approval's cards, a preset or a suggestion), and `confirm` activates a draft.
+  (asked of Claude in plain words, an approval's cards, a preset, a suggestion or a new money cap), and `confirm`
+  activates a draft.
   Each runs its work through `routes.setup.proving_answer`: past `PROVING_WAIT_S` it answers 202 `ProvingPending`
   naming the same path and body, and that request sent again joins the work or takes its answer. A draft with a new
   or changed card above the Desk's money cap is 422 `above_money_cap` with the cap, and nothing reaches the kernel.
@@ -22,7 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from desk.api import rules
-from desk.api.deps import OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
+from desk.api.deps import ApiProblem, OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.routes.setup import PROVING_RESPONSES, proving_answer
 from desk.api.schemas import (
@@ -33,6 +34,7 @@ from desk.api.schemas import (
     DraftAddIn,
     DraftCardsIn,
     KnowledgeIn,
+    MoneyCapIn,
     PresetIn,
     RuleChatIn,
     RuleChatOut,
@@ -46,7 +48,7 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.versions import connect_payments
-from desk.contracts import KnowledgeItem, PolicyVersion, ToolProfile
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, KnowledgeItem, PolicyVersion, ToolProfile
 from desk.kernel_api import (
     DocumentCreated,
     DocumentUploadRequest,
@@ -216,6 +218,24 @@ async def draft_suggestion(desk_id: DeskId, tool: Annotated[str, Path(max_length
         return await rules.draft_suggestion(owner, desk_id, tool, state.clock())
 
     return await _drafting(request, ctx, desk_id, work)
+
+
+@policy_router.post("/money_cap", response_model=RulesDraft, responses=PROVING_RESPONSES)
+async def draft_money_cap(desk_id: DeskId, body: MoneyCapIn, request: Request,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Draft the active rules at a new money cap, the most Claude takes or pays out in one action without asking:
+    lowering it brings each rule that takes or pays out more on its own down to it (asking instead at $0), each saying
+    its new limit, and the draft's diff lists them; raising it changes no rule. The draft is at the new cap, which
+    becomes the Desk's only when the owner confirms it. 422 `above_platform_ceiling` above the $10,000 ceiling, with
+    nothing drafted."""
+    ctx.desk(desk_id)
+    if body.auto_money_cap_cents > AUTO_MONEY_HARD_CAP_CENTS:
+        raise ApiProblem(422, "above_platform_ceiling")
+
+    async def work(owner: OwnerCtx, state: Runtime) -> RulesDraft:
+        return await rules.draft_money_cap(owner, desk_id, body.auto_money_cap_cents)
+
+    return await _drafting(request, ctx, desk_id, work, body=body)
 
 
 @policy_router.post("/confirm", response_model=PolicyVersion, responses=PROVING_RESPONSES)

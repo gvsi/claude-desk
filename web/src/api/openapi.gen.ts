@@ -349,6 +349,15 @@ export interface MessageIn {
   text: string;
 }
 /**
+ * `POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule
+ * may take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform
+ * ceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422
+ * `invalid`.
+ */
+export interface MoneyCapIn {
+  auto_money_cap_cents: number;
+}
+/**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
  * an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted).
@@ -932,5 +941,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/draft": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

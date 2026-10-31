@@ -17,6 +17,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     StringConstraints,
     field_validator,
     model_validator,
@@ -34,6 +35,7 @@ from desk.api.prompts import (
     Triage,
 )
 from desk.contracts import (
+    AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
     ApprovalAnswer,
     Assurance,
@@ -836,6 +838,17 @@ class ConfirmRulesIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
+
+
+class MoneyCapIn(BaseModel):
+    """`POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule
+    may take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform
+    ceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422
+    `invalid`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_money_cap_cents: StrictInt = Field(ge=0, json_schema_extra={"maximum": AUTO_MONEY_HARD_CAP_CENTS})
 
 
 class AboveMoneyCap(BaseModel):

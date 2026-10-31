@@ -1,8 +1,9 @@
 """Rules by chat, presets, card diffs, tools and knowledge (Plan 02b, Task 9).
 
-The owner changes a Desk's rules in four ways, each a draft the kernel compiles and proves and the owner confirms:
-asking Claude in plain words (route `rules_chat`), adding the cards an approval drafted, applying a preset, or taking
-a suggestion drawn from their own approvals. Every draft answers with its owner cards and how they differ from the
+The owner changes a Desk's rules in five ways, each a draft the kernel compiles and proves and the owner confirms:
+asking Claude in plain words (route `rules_chat`), adding the cards an approval drafted, applying a preset, taking a
+suggestion drawn from their own approvals, or setting a new money cap (the active money cards above a lower one come
+down to it in the draft, each saying its new limit). Every draft answers with its owner cards and how they differ from the
 active rules, by card ID, default asks left out; a new or changed money card above the Desk's money cap is refused
 before the kernel is asked, and nothing changes until the owner confirms. The Rules page lists each tool with the
 cards that cover it, and each tool's page its recent decisions. Documents, knowledge and the demo's tool change go to
@@ -598,7 +599,7 @@ async def test_drafting_counts_on_the_copys_drafts_limit(app, browser, fake, ker
     drafts, confirms = len(fake.called("POST /policy/draft")), len(fake.called("POST /policy/confirm"))
     for path, body in (("draft", {"add": [card("added-1", "native.capture_lead").model_dump(mode="json")]}),
                        ("preset", {"preset": "ask_first"}), ("suggestions/native.quote", None),
-                       ("confirm", {"version": auto.version + 1})):
+                       ("money_cap", {"auto_money_cap_cents": 10_000}), ("confirm", {"version": auto.version + 1})):
         limited = await owner.browser.post(rules_path(owner, path), json=body)
         assert (limited.status_code, limited.json()["error"]) == (429, "rate_limited"), path
     assert (len(fake.called("POST /policy/draft")), len(fake.called("POST /policy/confirm"))) == (drafts, confirms)
@@ -628,6 +629,113 @@ async def test_card_above_the_money_cap_is_refused_with_the_limit(app, browser, 
     above = {**rule_card(at_cap).model_dump(mode="json"), "max_amount_cents": 50_001}
     reply = await owner.browser.post(rules_path(owner, "draft"), json={"add": [above]})
     assert reply.status_code == 422 and len(fake.called("POST /policy/draft")) == drafts
+
+
+async def test_money_cap_change_drafts_through_the_kernel(app, browser, fake, kernel_http):
+    # Rivera's money cap is $500, with an auto payment link card up to $300 (`rv-link`) and agent payments up to $20.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk, path = fake.desks[owner.desk_id], rules_path(owner, "money_cap")
+    active, rivera = desk.policy_version, owner_cards(fake, owner.desk_id)
+    by_id = {each.card_id: each for each in rivera}
+    link, mandate = by_id["rv-link"], by_id["rv-mandate"]
+    assert (desk.auto_money_cap_cents, link.max_amount_cents, mandate.max_amount_cents) == (50_000, 30_000, 2_000)
+
+    # Lowering it to $100: one draft of the active owner cards, on the active version, at the new cap. The $300 card
+    # comes down to $100, its reason replaced by the new limit in the owner's words (the Rules page is in English),
+    # and the $20 card stays as it is.
+    lowered = await drafted(owner, path, {"auto_money_cap_cents": 10_000})
+    (posted,) = fake.called("POST /policy/draft")
+    assert posted.headers["x-owner-session"] == owner.token
+    down = link.model_copy(update={"max_amount_cents": 10_000, "reason": "Up to $100, your payment limit."})
+    assert PolicyDraftRequest.model_validate(posted.body) == PolicyDraftRequest(
+        desk_id=owner.desk_id, cards=[down if each == link else each for each in rivera], expected_parent=active,
+        auto_money_cap_cents=10_000)
+    assert lowered.cards == [down if each == link else each for each in rivera]
+    assert lowered.diff == CardDiff(added=[], removed=[], changed=[(link, down)])
+    assert lowered.auto_money_cap_cents == 10_000 == desk.versions[lowered.version].auto_money_cap_cents
+    # Nothing changes until the owner confirms: the Rules page still shows the $500 version.
+    view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
+    assert (view.active.version, view.active.auto_money_cap_cents) == (active, 50_000)
+
+    # At $0 each auto money card asks instead, and says so.
+    zero = await drafted(owner, path, {"auto_money_cap_cents": 0})
+    assert zero.auto_money_cap_cents == 0
+    assert [after.model_dump(include={"card_id", "mode", "max_amount_cents", "reason"})
+            for _, after in zero.diff.changed] == [
+        {"card_id": card_id, "mode": "ask", "max_amount_cents": None, "reason": "Your payment limit is $0."}
+        for card_id in ("rv-link", "rv-mandate")]
+
+    # Confirming the $100 draft makes its cap the Desk's.
+    confirmed = await owner.browser.post(rules_path(owner, "confirm"), json={"version": lowered.version})
+    assert confirmed.status_code == 200, confirmed.text
+    view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
+    assert (view.active.version, view.active.auto_money_cap_cents) == (lowered.version, 10_000)
+    assert down in view.active.cards
+
+    # Raising it to $800 changes no card: the same cards, at the new cap.
+    raised = await drafted(owner, path, {"auto_money_cap_cents": 80_000})
+    request = PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body)
+    assert (request.cards, request.expected_parent, request.auto_money_cap_cents) == (
+        owner_cards(fake, owner.desk_id), lowered.version, 80_000)
+    assert raised.diff == CardDiff(added=[], removed=[], changed=[]) and raised.auto_money_cap_cents == 80_000
+
+    # A cap above the $10,000 platform ceiling, or one that isn't a whole number of cents from 0, never reaches the
+    # kernel.
+    drafts = len(fake.called("POST /policy/draft"))
+    for body, error in (({"auto_money_cap_cents": 1_000_001}, "above_platform_ceiling"),
+                        ({"auto_money_cap_cents": -1}, "invalid"), ({"auto_money_cap_cents": 500.0}, "invalid"),
+                        ({"auto_money_cap_cents": "500"}, "invalid"), ({"auto_money_cap_cents": True}, "invalid"),
+                        ({}, "invalid"), ({"auto_money_cap_cents": 500, "cards": []}, "invalid")):
+        reply = await owner.browser.post(path, json=body)
+        assert (reply.status_code, reply.json()) == (422, {"error": error}), body
+    assert (await owner.browser.post(path, json={"auto_money_cap_cents": 1_000_000})).status_code == 200
+    drafts += 1
+
+    # Another copy's Desk is not found, whatever the cap.
+    other = await new_owner(app, browser, fake, kernel_http)
+    for cap in (10_000, 1_000_001):
+        reply = await other.browser.post(path, json={"auto_money_cap_cents": cap})
+        assert (reply.status_code, reply.json()) == (404, {"error": "not_found"}), cap
+    assert len(fake.called("POST /policy/draft")) == drafts
+
+
+async def test_the_money_cap_shown_is_the_drafted_versions(db, fake, api_settings, clock, model, browser,
+                                                           kernel_http):
+    # The cap a money-limit draft shows is read back from the version the kernel drafted, never the API's copy of
+    # the cap it asked for: a kernel answering another cap is what the owner reads.
+    drafting = fake.policy_draft
+
+    def another_cap(request, body: PolicyDraftRequest) -> PolicyVersion:
+        return drafting(request, body).model_copy(update={"auto_money_cap_cents": 12_345})
+
+    fake.policy_draft = another_cap
+    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), model=model,
+                     clock=clock, jobs_connector=InMemoryConnector())
+    async with app.router.lifespan_context(app):
+        owner = await new_owner(app, browser, fake, kernel_http)
+        draft = await drafted(owner, rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})
+    (posted,) = fake.called("POST /policy/draft")
+    assert PolicyDraftRequest.model_validate(posted.body).auto_money_cap_cents == 10_000
+    assert draft.auto_money_cap_cents == 12_345
+
+
+async def test_a_money_cap_lowering_that_fails_sends_nothing(app, browser, fake, kernel_http, monkeypatch):
+    # The lowering is the API's convenience, never the guard: if it fails, the route refuses, and nothing is drafted
+    # or sent to the kernel.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    active, versions = desk.policy_version, set(desk.versions)
+
+    def failing(cards, active, cap, language):
+        raise ValueError("the lowering failed")
+
+    monkeypatch.setattr("desk.api.rules.lower_to_cap", failing)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                 base_url="https://desk.test", cookies=owner.browser.cookies) as client:
+        reply = await client.post(rules_path(owner, "money_cap"), json={"auto_money_cap_cents": 10_000})
+    assert (reply.status_code, reply.json()) == (500, {"error": "internal"})
+    assert fake.called("POST /policy/draft") == []
+    assert (desk.policy_version, set(desk.versions), desk.auto_money_cap_cents) == (active, versions, 50_000)
 
 
 async def test_preset_drafts_the_shared_preset_cards(app, browser, fake, kernel_http, model):
