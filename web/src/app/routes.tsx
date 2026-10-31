@@ -51,11 +51,12 @@ function aboutRoute(id: AboutId): RouteObject {
 
 /**
  * The Vision article, under About this prototype. It loads only when its address opens, as the reading pages
- * do, and shares their error page and their wait. It reads no document: its words are its own.
+ * do, and shares their error page, which calls it a page, and their wait. It reads no document: its words are
+ * its own.
  */
 const visionArticleRoute: RouteObject = {
   path: VISION_ARTICLE.route,
-  errorElement: <ReaderError />,
+  errorElement: <ReaderError kind="page" />,
   HydrateFallback: ReaderLoading,
   lazy: async () => {
     const { VisionArticle } = await import('../about/vision/VisionArticle.tsx');
