@@ -95,6 +95,7 @@ export function stillToday(now: Date): StillToday {
     business_name: rivera.business.name,
     hours: [],
     answering: true,
+    setup: null,
   };
   const business: BusinessOut = {
     business_id: 'preview-business',
