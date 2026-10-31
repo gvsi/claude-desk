@@ -4,7 +4,7 @@
  * rules read only, and the Desk's public link with its QR card and ready-made words.
  */
 import QRCode from 'qrcode';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
@@ -30,6 +30,27 @@ const LA = 'America/Los_Angeles';
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 const { bob, dana } = rivera.people;
 
+/** The one instant the Customers tests run at: Friday, October 30, 12:30 pm in Los Angeles. */
+const NOW = Date.parse('2026-10-30T19:30:00Z');
+
+/**
+ * Holds the page's clock at `NOW` (moving on from there, so reads and polls still happen), the
+ * same instant the leads are dated from, so "Today" and every time read the same on every run.
+ */
+function freezeClock(): void {
+  vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+  vi.setSystemTime(NOW);
+}
+
+/** A request the test lets land when it chooses. */
+function held(): { until: Promise<void>; release: () => void } {
+  let release = () => {};
+  const until = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { until, release };
+}
+
 interface LeadFields {
   name: string;
   note: string;
@@ -38,9 +59,9 @@ interface LeadFields {
   replayed?: boolean;
 }
 
-/** Adds a lead to the mock's Desk, as the kernel keeps one. Returns when it came in. */
+/** Adds a lead to the mock's Desk, as the kernel keeps one, dated from `NOW`. Returns when it came in. */
 function addLead({ name, note, minutesAgo, replayed }: LeadFields): string {
-  const createdAt = mockStore.world.now() - minutesAgo * MINUTE;
+  const createdAt = NOW - minutesAgo * MINUTE;
   mockStore.world.leads.push({
     leadId: `lead-${mockStore.world.leads.length + 1}`,
     deskId: RIVERA.deskId,
@@ -134,9 +155,12 @@ async function setupAtPreview(): Promise<SetupState> {
 afterEach(() => {
   Reflect.deleteProperty(navigator, 'clipboard');
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('customers', () => {
+  beforeEach(freezeClock);
+
   it('people_lists_contacts_and_leads', async () => {
     const samAt = addLead(SAM);
     const jordanAt = addLead(JORDAN);
@@ -173,16 +197,15 @@ describe('customers', () => {
     const leads = screen.getByRole('list', { name: 'Leads' });
     await expect.element(screen.getByLabelText('2 leads')).toBeVisible();
     const rows = leads.getByRole('listitem').elements();
-    const now = new Date();
     expect(rows.map((row) => [...row.querySelectorAll('[data-copy="user"]')].map((el) => el.textContent))).toEqual([
       [SAM.name, SAM.note],
       [JORDAN.name, JORDAN.note],
     ]);
     expect(rows.map((row) => row.querySelector('.cd-lead-row__note')?.textContent)).toEqual([SAM.note, JORDAN.note]);
     expect(leads.element().textContent).not.toContain('Lead ·');
-    expect(rows[0]?.textContent).toContain(formatWhen(samAt, LA, now));
-    expect(rows[1]?.textContent).toContain(formatWhen(jordanAt, LA, now));
-    expect(formatWhen(samAt, LA, now)).toMatch(/, \d{1,2}:\d{2} (am|pm)$/);
+    // On the business's clock: 20 minutes and 26 hours before 12:30 pm on October 30.
+    expect(rows.map((row) => row.querySelector('.cd-lead-row__time')?.textContent)).toEqual(['Today, 12:10 pm', 'Oct 29, 10:30 am']);
+    expect([formatWhen(samAt, LA, new Date(NOW)), formatWhen(jordanAt, LA, new Date(NOW))]).toEqual(['Today, 12:10 pm', 'Oct 29, 10:30 am']);
     // Live leads: no Recorded tag, and no caption about recorded history.
     expect(screen.container.querySelector('.cd-recorded-tag')).toBeNull();
     expect(screen.getByRole('link', { name: 'Includes recorded history' }).query()).toBeNull();
@@ -286,17 +309,21 @@ describe('customers', () => {
   });
 
   it('people_loading_then_failure_offers_a_retry', async () => {
-    // While the list is on its way: the loading line under a hairline, where the list goes.
-    mockStore.inject({ route: 'people', status: 200, delayMs: 300, body: { people: [], leads: [] } });
+    // While the list is on its way: the loading line under a hairline, where the list goes, until
+    // the test lets the answer land.
+    const list = held();
+    mockStore.inject({ route: 'people', status: 200, until: list.until, body: { people: [], leads: [] } });
     const slow = await renderRoute(PEOPLE, { pollScale: 100 });
     const loading = slow.screen.getByRole('status').filter({ hasText: /^Loading your customers$/ });
     await expect.element(loading).toBeVisible();
+    expect(slow.screen.getByText('No customers yet', { exact: true }).query()).toBeNull();
+    list.release();
     await expect.element(slow.screen.getByText('No customers yet', { exact: true })).toBeVisible();
     expect(loading.query()).toBeNull();
 
-    // A read that fails (and its one retry): what went wrong and a way to read it again, no list.
+    // A read that fails (and its one retry, at once): what went wrong and a way to read it again, no list.
     mockStore.inject({ route: 'people', status: 503, times: 2 });
-    const { screen } = await renderRoute(PEOPLE, { pollScale: 100 });
+    const { screen } = await renderRoute(PEOPLE, { pollScale: 100, retryScale: 0 });
     await expect.element(screen.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
     expect(screen.getByRole('list').query()).toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
@@ -369,10 +396,13 @@ describe('customers', () => {
     // meant for the page.
     await cleanup();
     mockStore.nextEpoch();
-    mockStore.inject({ route: 'people', status: 200, delayMs: 300, body: (await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } }) as { body: unknown }).body });
+    const list = held();
+    mockStore.inject({ route: 'people', status: 200, until: list.until, body: (await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } }) as { body: unknown }).body });
     mockStore.inject({ route: 'rules', status: 503, times: 2 });
-    const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100, retryScale: 0 })).screen;
     await expect.element(slow.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    expect(slow.getByRole('region', { name: 'Contact on record' }).query()).toBeNull();
+    list.release();
     // The rules can't be read: her contact still shows, and the rules say what went wrong.
     await expect.element(slow.getByRole('region', { name: 'Contact on record' })).toBeVisible();
     await expect.element(slow.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
@@ -382,7 +412,7 @@ describe('customers', () => {
 
     // A failed read of the list: what went wrong and Try again, no one's contact.
     mockStore.inject({ route: 'people', status: 503, times: 2 });
-    const failed = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    const failed = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100, retryScale: 0 })).screen;
     await expect.element(failed.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
     expect(failed.getByText(dana.maskedContact).query()).toBeNull();
     await failed.getByRole('button', { name: 'Try again' }).click();
@@ -506,6 +536,8 @@ describe('share', () => {
 });
 
 describe('customers and share, everywhere', () => {
+  beforeEach(freezeClock);
+
   /** Each page of this task with what shows once it is drawn: the list with leads, a person's page with rules, and Share. */
   async function everyPage(): Promise<{ name: string; path: string; ready: string }[]> {
     addLead(SAM);

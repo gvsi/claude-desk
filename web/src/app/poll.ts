@@ -39,6 +39,22 @@ export function agentRunPollMs(): number {
   return Math.max(1, Math.round(AGENT_RUN_POLL_MS * scale));
 }
 
+let retryScale = 1;
+
+/**
+ * How long a failed read waits before its one retry, React Query's own curve (a second, doubling, at
+ * most 30), scaled by `setRetryScale`: real time unless a test asks for another pace.
+ */
+export function retryDelayMs(failures: number): number {
+  return Math.min(1_000 * 2 ** failures, 30_000) * retryScale;
+}
+
+/** Scales the retry delay by `factor` (1 is real time); a test of a failed read passes 0. */
+export function setRetryScale(factor: number): void {
+  if (!Number.isFinite(factor) || factor < 0) throw new Error(`setRetryScale: ${factor} is not zero or a positive number`);
+  retryScale = factor;
+}
+
 /** Scales every interval by `factor` (1 is real time); tests use 0.05. */
 export function setPollScale(factor: number): void {
   if (!Number.isFinite(factor) || factor <= 0) throw new Error(`setPollScale: ${factor} is not a positive number`);

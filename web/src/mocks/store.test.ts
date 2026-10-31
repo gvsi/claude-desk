@@ -1117,6 +1117,32 @@ describe('deleting a Desk', () => {
 describe('planted faults', () => {
   const answering = async () => ((await call('me')).body as CopyOut).desks[0]?.answering;
 
+  it('held_answer_waits_for_its_release', async () => {
+    // A test holds a request in flight and lets it land when it chooses, with no clock involved.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'people', status: 200, until, body: { people: [], leads: [] } });
+    let landed = false;
+    const answer = call('people', { params: { desk_id: deskId } }).then((a) => {
+      landed = true;
+      return a;
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(landed).toBe(false);
+    release();
+    expect(await answer).toEqual({ status: 200, body: { people: [], leads: [] } });
+
+    // One held past the end of its epoch changes nothing and is dropped.
+    let late = () => {};
+    mockStore.inject({ route: 'people', status: 200, until: new Promise<void>((resolve) => (late = resolve)), body: { people: [], leads: [] } });
+    const dropped = mockStore.dispatch('people', { params: { desk_id: deskId }, epoch: mockStore.epoch });
+    mockStore.nextEpoch();
+    late();
+    expect(await dropped).toEqual({ network: true });
+  });
+
   it('injected_fault_applies_once', async () => {
     // A fault answers in the route's place, once, and changes nothing.
     mockStore.inject({ route: 'setAnswering', status: 503 });
