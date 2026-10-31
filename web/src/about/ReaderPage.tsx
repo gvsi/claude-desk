@@ -10,6 +10,7 @@
 import {
   Fragment,
   useContext,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -116,6 +117,7 @@ function useReadingPlace(id: AboutId, hash: string) {
     const reading = READING.get(navigator) ?? { drawn: false, places: {} };
     READING.set(navigator, reading);
     if (opening.current?.id !== id) opening.current = { id, back: navigationType === 'POP' && reading.drawn };
+    // What stops keeping an address's section in place while the type loads, once this document goes.
     let stopKeeping = () => {};
     if (opening.current.back) {
       window.scrollTo({ top: reading.places[id] ?? 0, behavior: 'instant' });
@@ -261,6 +263,18 @@ interface ContentsListProps {
 function useFollowSection(onFollow?: (id: string) => void): (event: MouseEvent<HTMLAnchorElement>, id: string) => void {
   const navigate = useNavigate();
   const { pathname, search, hash } = useLocation();
+  // The last move's watch, and the address it moved to. Navigation that changes the reading place (Back to where
+  // the reader was, the other document) cancels it, so a correction still waiting on the type can't take the window
+  // back to the section; so does the list going away.
+  const moved = useRef<{ at: string; cancel: () => void } | null>(null);
+  const here = `${pathname}${search}${hash}`;
+  useEffect(() => {
+    if (moved.current && moved.current.at !== here) {
+      moved.current.cancel();
+      moved.current = null;
+    }
+  }, [here]);
+  useEffect(() => () => moved.current?.cancel(), []);
   return (event, id) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const heading = document.getElementById(id);
@@ -272,7 +286,8 @@ function useFollowSection(onFollow?: (id: string) => void): (event: MouseEvent<H
     navigate({ pathname, search, hash: `#${id}` }, { replace: hash === `#${id}` });
     // Only this scroll glides: the page's own (opening a document, Back and Forward) stay instant. The heading's
     // scroll margin keeps it clear of the pinned bar.
-    moveToSection(heading, prefersReducedMotion() ? 'instant' : 'smooth');
+    moved.current?.cancel();
+    moved.current = { at: `${pathname}${search}#${id}`, cancel: moveToSection(heading, prefersReducedMotion() ? 'instant' : 'smooth') };
     heading.focus({ preventScroll: true });
   };
 }

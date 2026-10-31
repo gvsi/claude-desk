@@ -338,6 +338,35 @@ describe('ReaderPage with motion', () => {
     await screen.unmount();
   });
 
+  it('a_pending_font_correction_gives_way_to_back', async () => {
+    // Followed before the type has loaded, then Back before it loads: once it does, the window stays where Back put
+    // it, and isn't taken back to the section. A memory router has no browser to restore the place, so the test puts
+    // the window back as the browser does. Scroll anchoring is off, so nothing else moves it.
+    document.documentElement.style.overflowAnchor = 'none';
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+    });
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction');
+    await jumpTo(1800);
+    followLink('limitations');
+    const heading = headingOf('limitations');
+    await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
+    await untilStill();
+    at.navigate?.(-1);
+    await expect.poll(() => at.path).toBe('/about/prediction');
+    await jumpTo(1800);
+    const grown = document.createElement('div');
+    grown.style.height = '29px';
+    onTestFinished(() => grown.remove());
+    (document.querySelector('[data-hero]') as HTMLElement).append(grown);
+    loaded();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(Math.round(window.scrollY), 'where Back put the window').toBe(1800);
+    await untilStill();
+    await screen.unmount();
+  });
+
   it('page_scrolls_stay_instant_with_motion', async () => {
     // The scrolls the page makes itself land in the frame the page draws, never part way, and the place the page
     // remembers for Back is where they landed.

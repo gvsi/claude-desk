@@ -303,6 +303,46 @@ test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) 
   }
 });
 
+test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
+  // The reading type's font files are held back, so the type is still loading when the reader follows "Limitations"
+  // and presses Back. Once it loads, the window stays where Back put it rather than going back to the section.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('https://fonts.gstatic.com/**', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto('/about/prediction');
+  await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
+  await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type is still loading').toBe('loading');
+  await scrollWindow(page, 1800);
+  const before = await settledScrollY(page);
+
+  const contents = page.getByRole('navigation', { name: 'On this page' });
+  // Clicked where it is: Playwright's own click may scroll the pinned list's link into view first, which moves the
+  // reader's place.
+  await contents.getByRole('link', { name: 'Limitations', exact: true }).evaluate((link: HTMLElement) => link.click());
+  await page.waitForURL('**/about/prediction#limitations');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const section = document.getElementById('limitations');
+        return section ? Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) : 1e9;
+      }),
+    )
+    .toBeLessThanOrEqual(1);
+
+  await page.goBack();
+  await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
+  await expectBackAt(page, before, 'back');
+  release();
+  await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type has loaded').toBe('loaded');
+  await page.waitForTimeout(500);
+  await expectBackAt(page, before, 'after the type loaded');
+});
+
 test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
   // On screen the top bar stays while the page scrolls; on paper it is the page's first line.
   await page.goto('/about/proposal');

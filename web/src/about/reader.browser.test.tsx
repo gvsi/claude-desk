@@ -764,6 +764,32 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_font_correction_keeps_the_followed_mark', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. When the type then loads and the
+    // page has grown, the page follows the section to the new end by itself; that isn't the reader scrolling on, so
+    // the mark stays.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    swapType();
+    expect(end() - Math.round(window.scrollY), 'the page grew below the window').toBeGreaterThan(20);
+    loaded();
+    await expect.poll(() => Math.round(window.scrollY), { message: 'followed to the new end' }).toBe(end());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marked(), 'after the page followed the section').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
   it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
     // Followed from the contents list before the type has loaded, a section that the swap moves after the jump has
     // arrived is back at its place once the type has loaded. The jump is instant under reduced motion.

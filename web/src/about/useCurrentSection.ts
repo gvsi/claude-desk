@@ -27,7 +27,7 @@ const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home
 
 /**
  * Waits on a jump the page started, for the ways it can end other than arriving: the reader scrolling the window
- * themselves (the wheel, a touch that moves, a scrolling key) calls `onTakenOver`; a second with no scroll calls
+ * themselves (the wheel, a touch that moves, a scrolling key) or going Back or Forward calls `onTakenOver`; a second with no scroll calls
  * `onQuiet`, so a long glide isn't cut short and a jump that never moves doesn't wait forever. Returns what stops
  * waiting.
  */
@@ -52,11 +52,13 @@ function waitForJump(onTakenOver: () => void, onQuiet: () => void): () => void {
     window.removeEventListener('scroll', later);
     window.removeEventListener('wheel', takenOver);
     window.removeEventListener('touchmove', takenOver);
+    window.removeEventListener('popstate', takenOver);
     window.removeEventListener('keydown', onKey);
   }
   window.addEventListener('scroll', later, { passive: true });
   window.addEventListener('wheel', takenOver, { passive: true });
   window.addEventListener('touchmove', takenOver, { passive: true });
+  window.addEventListener('popstate', takenOver);
   window.addEventListener('keydown', onKey);
   later();
   return stop;
@@ -78,18 +80,18 @@ function atPlaceOf(heading: HTMLElement): boolean {
 }
 
 /**
- * Moves the window to a contents link's section: to `heading`, below its scroll margin, gliding unless `behavior` is
- * instant. A glide heads for where the heading was when it started; if the page grows above the section on the way,
+ * Moves the window to a contents link's section, and returns what cancels the watch it keeps, as when navigation
+ * changes the reading place: to `heading`, below its scroll margin, gliding unless `behavior` is instant. A glide heads for where the heading was when it started; if the page grows above the section on the way,
  * as when the reading type's web font swaps in on a cold load, it ends short. So once the window has come to rest
  * where the glide was going, a heading that has moved is followed once more. A rest short of there is an earlier
  * scroll's or the reader's, and the reader taking over ends the watch.
  */
-export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): void {
+export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): () => void {
   let going = placeOf(heading);
   heading.scrollIntoView({ behavior, block: 'start' });
-  keepSectionWhileTypeLoads(heading, behavior);
+  const stopKeeping = keepSectionWhileTypeLoads(heading, behavior);
   // An instant jump has arrived already, and keeps its place as the page changes; so has a jump to where it is.
-  if (Math.abs(window.scrollY - going) <= 1) return;
+  if (Math.abs(window.scrollY - going) <= 1) return stopKeeping;
   let followedAgain = false;
   const stopWaiting = waitForJump(stop, stop);
   // A rest is heard from the scroll's end, or from the window going still: a browser can skip the end of a glide
@@ -111,6 +113,10 @@ export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): v
     stopResting();
     stopStill();
   }
+  return () => {
+    stop();
+    stopKeeping();
+  };
 }
 
 /** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
@@ -145,7 +151,7 @@ export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: Scroll
   function followAgain() {
     stop();
     if (acted || !heading.isConnected) return;
-    if (!atPlaceOf(heading)) heading.scrollIntoView({ behavior, block: 'start' });
+    if (!atPlaceOf(heading)) movedByThePage(() => heading.scrollIntoView({ behavior, block: 'start' }));
   }
   for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
   void fonts.ready.then(() => {
@@ -154,6 +160,29 @@ export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: Scroll
     if (stillNow()) followAgain();
   });
   return act;
+}
+
+/** Whether the window is moving because the page moved it, not the reader: a correction still settling. */
+let pageMoving = false;
+
+/**
+ * Moves the window by the page's own hand, and marks it so until the window has gone still, so the scroll isn't taken
+ * for the reader scrolling on.
+ */
+function movedByThePage(move: () => void): void {
+  pageMoving = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = () => {
+    pageMoving = false;
+    window.removeEventListener('scroll', later);
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(settled, REST_WAIT);
+  };
+  window.addEventListener('scroll', later, { passive: true });
+  later();
+  move();
 }
 
 /** When the window last scrolled, by the page's clock. */
@@ -256,6 +285,12 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
       stopWaiting = () => {};
     }
     function scrolledOn() {
+      // The page following the section again once the type has loaded is not the reader scrolling on.
+      if (pageMoving) return;
+      arrived = false;
+      window.removeEventListener('scroll', scrolledOn);
+    }
+    function forget() {
       arrived = false;
       window.removeEventListener('scroll', scrolledOn);
     }
@@ -266,7 +301,7 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
     }
     function letGo() {
       release();
-      scrolledOn();
+      forget();
       look();
     }
     /** Whether the window rests where the jump in hand goes. */
@@ -277,7 +312,7 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
     following.current = (id) => {
       if (!sections.includes(id)) return;
       release();
-      scrolledOn();
+      forget();
       held = id;
       setCurrent(id);
       // The reader scrolling on their own ends the jump. So does a second with no scroll: arrived if the window is
@@ -294,7 +329,7 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
       }),
       () => {
         release();
-        scrolledOn();
+        forget();
         following.current = () => {};
       },
     ];
