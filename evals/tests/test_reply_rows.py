@@ -21,14 +21,14 @@ from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 64
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 60, ("01b",): 1, ("01c",): 3}
+    assert len(rows) == len({row.id for row in rows}) == 65
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 61, ("01b",): 1, ("01c",): 3}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
 def test_rows_show_the_blocks_the_table_states():
-    """A failed check of Claude's draft shows only the handoff clause; a passing one its prose (when
-    not empty), then a card per clause."""
+    """Prose-only failures keep checked cards; other failures show the handoff. Passing drafts
+    show their prose (when not empty), then a card per clause."""
     rows = {row.id: row for row in load_rows()}
     assert rows["r-en-clean"].blocks == ["prose"]
     assert rows["c-own-quote"].blocks == ["prose", "quote"]
@@ -36,6 +36,8 @@ def test_rows_show_the_blocks_the_table_states():
     assert rows["c-hours"].blocks == ["prose", "hours"]
     assert rows["c-other-session-quote"].blocks == ["handoff"]
     assert rows["r-en-dollar"].blocks == ["handoff"]
+    assert rows["c-final-prose-quote"].blocks == ["quote"]
+    assert rows["c-digit-quote-payment"].blocks == ["quote", "payment_link"]
 
 
 def test_rows_hold_the_amended_table_expectations():
@@ -197,6 +199,30 @@ def test_verdict_expect_states_each_block_and_its_fact():
     for shown in (verdict(["stale_fact"], [HANDOFF]), verdict(["unknown_fact"], [PROSE, HANDOFF]),
                   verdict(["unknown_fact"], [HANDOFF], ok=True)):
         assert match_expect(200, shown.model_dump(mode="json"), failed), shown
+
+
+@pytest.mark.parametrize("kind", ["number_in_prose", "promise_word", "soft_promise", "uncertain_language",
+                                  "check_unavailable"])
+def test_prose_failure_expects_checked_cards_without_prose_or_handoff(kind):
+    row = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE, {"template": "handoff"}],
+                                  "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+    expect = row.verdict_expect(0, {"own-quote": "quote:Q-1"})
+    assert match_expect(200, verdict([kind], [QUOTE_CARD]).model_dump(mode="json"), expect) == []
+    for blocks in ([PROSE, QUOTE_CARD], [QUOTE_CARD, HANDOFF], [HANDOFF], [],
+                   [QUOTE_CARD.model_copy(update={"fact_id": "quote:wrong"})],
+                   [QUOTE_CARD.model_copy(update={"title": None})], [QUOTE_CARD.model_copy(update={"lines": []})]):
+        assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), expect)
+    no_cards = ReplyRow.model_validate({**GOOD_ROW, "expect": {"ok": False, "violations": [kind]}})
+    assert no_cards.blocks == ["handoff"]
+
+
+@pytest.mark.parametrize("kind", ["canary", "unknown_fact", "stale_fact", "unentitled_fact", "unsupported_language",
+                                  "session_paused"])
+def test_non_prose_failure_cannot_expect_kept_cards(kind):
+    raw = {**GOOD_ROW, "clauses": [QUOTE_CLAUSE], "expect": {"ok": False, "violations": [kind]}}
+    assert ReplyRow.model_validate(raw).blocks == ["handoff"]
+    with pytest.raises(ValueError):
+        ReplyRow.model_validate({**raw, "expect": {**raw["expect"], "blocks": ["quote"]}})
 
 
 def test_violation_kinds_compare_as_sets():

@@ -57,6 +57,7 @@ OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
+PROSE_FAILURES = {"number_in_prose", "promise_word", "soft_promise", "uncertain_language", "check_unavailable"}
 
 # Rows of golden/replies.yaml
 
@@ -161,7 +162,8 @@ class ReplyRow(BaseModel):
                              "so it requires it")
         if self.expect.blocks is not None and self.expect.blocks != self.blocks:
             raise ValueError(f"the draft shows {self.blocks}, not {self.expect.blocks}: a failed check shows "
-                             "the handoff clause (or no blocks on a rewritable first attempt), a passing one its prose and cards "
+                             "checked cards alone for prose-only failures, otherwise the handoff clause "
+                             "(or no blocks on a rewritable first attempt), a passing one its prose and cards "
                              "in order")
         if self.setup == "travel_past_expiry" and not any(clause.fact in QUOTE_ROLES for clause in self.clauses):
             raise ValueError("travel_past_expiry travels past a cited quote's expiry, so the row cites a quote")
@@ -183,12 +185,19 @@ class ReplyRow(BaseModel):
         return "01b" if any(clause.fact == "other-session-owner-statement" for clause in self.clauses) else "01a"
 
     @property
+    def kept_clauses(self) -> list[ClauseSpec]:
+        """Cards a prose-only failure may keep, excluding a drafted handoff."""
+        return [clause for clause in self.clauses if clause.template != "handoff"]
+
+    @property
     def blocks(self) -> list[str]:
-        """A failed check shows the handoff, or nothing on a rewritable first attempt; a passing
-        one its prose and cited cards. A row's stated `blocks` must say the same."""
+        """Prose-only failures keep their cards alone; other failures hand off. A rewritable
+        first attempt shows nothing, and a passing one its prose and cited cards."""
         if not self.expect.ok:
             if not self.final and set(self.expect.kinds) <= REWRITABLE:
                 return []
+            if set(self.expect.kinds) <= PROSE_FAILURES and self.kept_clauses:
+                return [clause.template for clause in self.kept_clauses]
             return HANDED_OFF
         return (["prose"] if self.prose else []) + [clause.template for clause in self.clauses]
 
@@ -207,7 +216,7 @@ class ReplyRow(BaseModel):
         else:
             fields["violations.0.kind"] = {"$in": expect.kinds}
         fields |= shown_blocks(self.blocks)
-        cited = iter(self.clauses if expect.ok else [])
+        cited = iter(self.clauses if expect.ok else self.kept_clauses if self.blocks != HANDED_OFF else [])
         for n, block in enumerate(self.blocks):
             if block == "prose":
                 continue

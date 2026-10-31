@@ -410,4 +410,11 @@
   requires: [01c]
   prose: "Here is $20."
   clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
-  expect: {ok: false, violations: [number_in_prose]}
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote, payment_link]}
+
+- id: c-final-prose-quote
+  requires: [01a]
+  prose: "Here is $20."
+  clauses: [{template: quote, fact: own-quote}]
+  final: true
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote]}
