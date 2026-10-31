@@ -87,16 +87,20 @@ def collect_usage(records: Mapping[str, Iterable[Mapping[str, Any]]], session_id
 def kernel_check_call(event: Mapping[str, Any]) -> UsageRecord | None:
     """The model call a kernel ledger event records, the one reading of it for the report's usage and a
     run's spend alike: a `review` entry's is its summary (route `reviewer`), a `reply` entry's is its
-    summary's `soft_promise` (route `soft_promise`), null when the check made no call; no other entry
-    records one. A call that can't be read (not an object, no model, a token count that isn't a whole
-    number) raises `ValueError` saying what, so none is left out unseen."""
+    summary's `soft_promise` (route `soft_promise`), which the kernel always writes, null when the check
+    made no call; no other entry records one. Only that explicit null reads as no call: an entry whose
+    summary isn't an object, a `reply` entry without `soft_promise`, or a call that can't be read (not an
+    object, no model, a token count that isn't a whole number) raises `ValueError` saying what, so none
+    is left out unseen."""
     kind = event.get("kind")
-    route, summary = KERNEL_ROUTES.get(kind), event.get("summary") or {}
+    route, summary = KERNEL_ROUTES.get(kind), event.get("summary")
     if route is None:
         return None
     if not isinstance(summary, Mapping):
-        raise ValueError(f"the kernel's {kind} entry has a summary that isn't an object")
-    call = summary.get("soft_promise") if route == "soft_promise" else summary
+        raise ValueError(f"the kernel's {kind} entry has no summary to read")
+    if route == "soft_promise" and "soft_promise" not in summary:
+        raise ValueError(f"the kernel's {kind} entry doesn't say whether its check made a call (no soft_promise)")
+    call = summary["soft_promise"] if route == "soft_promise" else summary
     if call is None:
         return None   # the soft-promise check made no call (a `review` entry is written only when one ran)
     if not isinstance(call, Mapping):

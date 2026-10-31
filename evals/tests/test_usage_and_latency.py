@@ -174,6 +174,25 @@ def test_cost_per_conversation_counts_desk_calls_only():
     assert conversation_metrics([]) is None
 
 
+MISSING = object()
+
+
+@pytest.mark.parametrize("summary", [MISSING, None, [], "", False, {"ok": True}],
+                         ids=["no summary", "null", "a list", "empty text", "false", "no soft_promise key"])
+def test_a_reply_entry_that_doesnt_say_whether_its_check_called_is_never_read_as_no_call(summary):
+    """The kernel's `reply` entry always says whether its soft-promise check made a call: `soft_promise`
+    is the call, or null for none. An entry whose summary isn't an object holding that key can't say, so
+    reading it raises rather than count no call."""
+    run = Run(legit())
+    seq = run.event("reply", ref_id="m-unsaid", ok=True)
+    if summary is MISSING:
+        del run.ledger[seq - 1]["summary"]
+    else:
+        run.ledger[seq - 1]["summary"] = summary
+    with pytest.raises(ValueError, match="the kernel's reply entry"):
+        conversation_metrics([run.build()])
+
+
 def test_tokens_per_call_by_route():
     """Mean tokens per call for each route the Desk's calls took, over every run; the simulated
     visitor's calls aren't the Desk's and aren't listed."""

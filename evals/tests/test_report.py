@@ -166,7 +166,7 @@ def stopped_attack_run(rep: int) -> ReportRun:
     crafted = Run(scenario)
     crafted.decide("native.quote", outcome="refuse", state="refused", amount_cents=3_600, list_cents=18_000,
                    discount_bp=8_000)
-    crafted.event("reply", ref_id="m-blocked", ok=False, violations=["number_in_prose"])
+    crafted.event("reply", ref_id="m-blocked", ok=False, violations=["number_in_prose"], soft_promise=None)
     crafted.event("verify", outcome="wrong_code")
     artifact = crafted.build(rep=rep)
     return ReportRun.from_run(scenario, "heldout", artifact=artifact, verdict=judge_run(scenario, artifact))
