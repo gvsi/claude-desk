@@ -25,18 +25,29 @@ function awaitsConsent(state: SetupState): boolean {
 }
 
 /**
- * An answer that didn't go through: the question it answers, the words, and whether the API may
- * have taken it (its reply was lost, and the interview couldn't be read to say) or plainly didn't.
+ * An answer as sent: the question it answers, the words, and how many messages the interview held
+ * when it was sent, so a read can tell what came after.
  */
 interface Answer {
   question: QuestionKey;
   text: string;
-  /** The API may have taken it: true after a lost reply, false after a refusal. */
-  unknown: boolean;
+  seen: number;
 }
 
-/** The interview no longer waits on `question`: an answer to it was taken, here or elsewhere. */
-const movedPast = (state: SetupState, question: QuestionKey) => state.step !== 'questions' || state.question !== question;
+/**
+ * What a read of the interview says about an answer whose reply didn't settle it. Taken: the
+ * owner's exact words are among the messages that came after it was sent, whether or not the
+ * question moved on (a turn can ask a follow-up on the same question). Refused: something else
+ * came after it, the question moved on or another answer was stored, without these words. Unknown:
+ * nothing has come since, and a turn may still be running.
+ */
+function outcomeOf(now: SetupState, answer: Answer): 'taken' | 'refused' | 'unknown' {
+  const since = now.messages.slice(answer.seen);
+  const words = answer.text.trim();
+  if (since.some((message) => message.role === 'owner' && message.text.trim() === words)) return 'taken';
+  const movedPast = now.step !== 'questions' || now.question !== answer.question;
+  return since.length > 0 || movedPast ? 'refused' : 'unknown';
+}
 
 /**
  * The question in view, counted from 1: the API's own (`question`), else the questions Claude has
@@ -112,15 +123,14 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   };
 
   /**
-   * Sends `answer` for its own question, decided only by the question and where the interview
-   * stands, never by the words. A refusal (a 409 means the interview moved past that question
-   * before these words reached it) keeps the words: the interview is read, and they stay in the
-   * composer for the question now asked. A lost reply reads the interview: moved past that question
-   * means the answer was taken, so the page moves on; still on it means it wasn't, and the words
-   * come back with the failure line; a read that fails leaves the outcome unknown, with the words
-   * and the line.
+   * Sends `answer` for its own question. A 409 to a first send is the API's refusal: the interview
+   * is read and the words go back in the composer for the question it now asks. A lost reply reads
+   * the interview, and what came after the answer was sent settles it (`outcomeOf`): taken moves
+   * the page on; refused puts the words back; unknown, or a read that fails, keeps them with
+   * "Try again". Sent again (`again`), a 409 is settled the same way, since the first send may have
+   * been taken. Words a read shows stored are never sent again or put back.
    */
-  const submit = async (answer: Omit<Answer, 'unknown'>) => {
+  const submit = async (answer: Answer, again = false) => {
     setSending(answer.text);
     setFailed(null);
     try {
@@ -128,28 +138,30 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       setSending(null);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      if (err instanceof ApiError && err.kind === 'conflict') {
-        const now = await reread();
-        setSending(null);
-        // Refused: the words stay, kept with "Try again" while the interview can't be read, else
-        // back in the composer for the question now asked.
-        if (now === null) setFailed({ ...answer, unknown: false });
-        else setRefill({ text: answer.text });
+      const refused = err instanceof ApiError && err.kind === 'conflict';
+      const now = refused || isUncertain(err) ? await reread() : null;
+      setSending(null);
+      if (now === null) {
+        setFailed(answer);
         return;
       }
-      const now = isUncertain(err) ? await reread() : null;
-      setSending(null);
-      if (now !== null && movedPast(now, answer.question)) return;
-      setFailed({ ...answer, unknown: isUncertain(err) && now === null });
+      if (refused && !again) {
+        setRefill({ text: answer.text });
+        return;
+      }
+      const outcome = outcomeOf(now, answer);
+      if (outcome === 'taken') return;
+      if (outcome === 'refused') setRefill({ text: answer.text });
+      else setFailed(answer);
     }
   };
 
   /**
-   * "Try again" reads the interview first, since the answer may have been taken. Moved past its
-   * question: one taken unknowingly moves the page on, with nothing sent; one refused comes back in
-   * the composer for the question now asked. Still on it: the same words are sent again as the
-   * answer to that question, never to another. A read that fails changes nothing, and the failed
-   * box stays.
+   * "Try again" reads the interview first, since the answer may have been taken, by a reply that
+   * was lost or by a turn that committed late. Taken: the page moves on with nothing sent. Refused:
+   * the words go back in the composer for the question now asked. Unknown: the same words are sent
+   * again as the answer to the question they were written for, never to another. A read that fails
+   * changes nothing, and the failed box stays.
    */
   const retry = async () => {
     if (failed === null || retrying) return;
@@ -158,12 +170,13 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     setRetrying(false);
     if (now === null) return;
     const kept = failed;
-    if (movedPast(now, kept.question)) {
-      setFailed(null);
-      if (!kept.unknown) setRefill({ text: kept.text });
+    const outcome = outcomeOf(now, kept);
+    if (outcome === 'unknown') {
+      void submit(kept, true);
       return;
     }
-    void submit({ question: kept.question, text: kept.text });
+    setFailed(null);
+    if (outcome === 'refused') setRefill({ text: kept.text });
   };
 
   /** The composer's words: the answer to the question the page shows. */
@@ -176,7 +189,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       void reread();
       return;
     }
-    void submit({ question: state.question, text });
+    void submit({ question: state.question, text, seen: state.messages.length });
   };
 
   useEffect(() => {

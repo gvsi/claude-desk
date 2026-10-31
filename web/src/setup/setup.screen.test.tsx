@@ -13,7 +13,7 @@ import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, SETUP_START_LOST_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
-import { MEMORY_LABEL, SETUP_QUESTIONS } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
@@ -249,6 +249,48 @@ describe('setup', () => {
     expect(requests('setup', mark).length).toBeGreaterThan(failedReads);
     await expect.element(box).toHaveValue('');
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
+    const said = (await mockStore.dispatch('setup', { params: { id } })) as { body: SetupState };
+    expect(said.body.messages.filter((m) => m.role === 'owner' && m.text === answer)).toHaveLength(1);
+  });
+
+  it('lost_answer_with_a_follow_up_is_not_called_failed', async () => {
+    // An answer turn can store the words and ask a follow-up on the same question. Its reply lost,
+    // the read shows the words stored: taken, so not called failed, not put back and not sent again.
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.fill('Not sure yet.');
+    const mark = mockStore.requests.length;
+    mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
+    await screen.getByRole('button', { name: 'Send' }).click();
+    await expect.element(screen.getByText(FOLLOW_UP, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(box).toHaveValue('');
+    expect(requests('setupAnswer', mark)).toHaveLength(1);
+  });
+
+  it('answer_stored_after_the_read_is_not_put_back', async () => {
+    // An answer turn that runs long commits after the page's read. Nothing new had arrived when the
+    // page read, so the outcome is unknown, not refused: the words stay with "Try again", which
+    // reads first, finds them stored, and moves on with nothing sent again.
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const answer = 'Leaks, drains and water heaters, around Oakland.';
+    await box.fill(answer);
+    const mark = mockStore.requests.length;
+    const commit = holdNextAnswer(mockStore.world, id);
+    mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
+    await screen.getByRole('button', { name: 'Send' }).click();
+    await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
+    await expect.element(keptAnswer(screen).getByText(answer, { exact: true })).toBeVisible();
+
+    commit();
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('');
+    expect(requests('setupAnswer', mark)).toHaveLength(1);
     const said = (await mockStore.dispatch('setup', { params: { id } })) as { body: SetupState };
     expect(said.body.messages.filter((m) => m.role === 'owner' && m.text === answer)).toHaveLength(1);
   });

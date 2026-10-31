@@ -50,6 +50,13 @@ export const SETUP_QUESTIONS: readonly { key: QuestionKey; text: string }[] = [
   { key: 'contact_and_after_hours', text: 'Last one: how should customers reach you, and what should I say after hours?' },
 ];
 
+/**
+ * An answer that leaves the question open: Claude asks a follow-up and the interview stays on the
+ * same question, as a live answer turn can.
+ */
+export const FOLLOW_UP_TRIGGER = /\bnot sure\b/i;
+export const FOLLOW_UP = "That's fine. Give me your best guess, and you can change it later.";
+
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
 /** The label of the read of the owner's Claude memory, as the API writes it. */
@@ -67,6 +74,10 @@ interface Interview {
   capCents: number;
   /** The rules draft the interview made, once it has one. */
   draftVersion: number | null;
+  /** The next answer turn runs long and commits only when a test lets it (`holdNextAnswer`). */
+  holdNext: boolean;
+  /** An answer turn still running: the API refuses another answer until it commits. */
+  running: { text: string } | null;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -345,6 +356,46 @@ function say(interview: Interview, role: SetupMessage['role'], text: string): vo
   interview.state.messages.push({ role, text });
 }
 
+/**
+ * An answer turn, committed: the owner's words, then Claude's follow-up on the same question when
+ * the answer leaves it open, else the next question (or the end of the questions). Only the money
+ * limit's own answer sets the limit.
+ */
+function applyAnswer(interview: Interview, text: string): void {
+  const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
+  say(interview, 'owner', text.trim());
+  if (FOLLOW_UP_TRIGGER.test(text)) {
+    say(interview, 'claude', FOLLOW_UP);
+    return;
+  }
+  if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);
+  const next = SETUP_QUESTIONS[at + 1];
+  if (next) {
+    interview.state.question = next.key;
+    say(interview, 'claude', `Got it. ${next.text}`);
+  } else {
+    interview.state.question = null;
+    say(interview, 'claude', QUESTIONS_DONE);
+    moveTo(interview, 'tools');
+  }
+}
+
+/**
+ * For tests: the interview's next answer turn runs long, as a model turn can, and commits only when
+ * the returned function is called, after whatever the page reads in between.
+ */
+export function holdNextAnswer(world: MockWorld, interviewId: string): () => void {
+  const interview = interviewsOf(world).get(interviewId);
+  if (!interview) throw new Error(`no setup interview ${interviewId}`);
+  interview.holdNext = true;
+  return () => {
+    const turn = interview.running;
+    if (turn === null) throw new Error('no answer turn is running');
+    interview.running = null;
+    applyAnswer(interview, turn.text);
+  };
+}
+
 /** The interview the path names, and its Desk, or why the request can't have it. */
 function interviewOf(sv: Server, req: Req): { interview: Interview; desk: DeskRecord } | Failure {
   if (!req.cookies.owner) return NO_OWNER;
@@ -430,6 +481,8 @@ export const SETUP_ROUTES: ServedRoutes = {
       timezone,
       capCents: 0,
       draftVersion: null,
+      holdNext: false,
+      running: null,
     };
     interviewsOf(world).set(interview.state.interview_id, interview);
     return created(stateOf(interview));
@@ -467,18 +520,15 @@ export const SETUP_ROUTES: ServedRoutes = {
     const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
     if (interview.state.step !== 'questions' || at === -1 || question !== interview.state.question) return CONFLICT;
-    say(interview, 'owner', text);
-    // Only the money limit's own answer sets the limit.
-    if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);
-    const next = SETUP_QUESTIONS[at + 1];
-    if (next) {
-      interview.state.question = next.key;
-      say(interview, 'claude', `Got it. ${next.text}`);
-    } else {
-      interview.state.question = null;
-      say(interview, 'claude', QUESTIONS_DONE);
-      moveTo(interview, 'tools');
+    // One turn at a time, as the API runs them: another answer while one is running is refused.
+    if (interview.running !== null) return CONFLICT;
+    if (interview.holdNext) {
+      // A turn that runs long: it commits later, when the test lets it.
+      interview.holdNext = false;
+      interview.running = { text };
+      return ok(stateOf(interview));
     }
+    applyAnswer(interview, text);
     return ok(stateOf(interview));
   },
   setupTools(sv, req) {
