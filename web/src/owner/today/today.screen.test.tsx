@@ -4,7 +4,7 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
@@ -20,6 +20,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { watchFor, watchPages } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -108,33 +109,6 @@ function holdReads(path: string): { held: () => number; release: () => void } {
     }),
   );
   return { held: () => waiting, release };
-}
-
-/**
- * Whether Today was drawn, even for a moment, without the held request asked for `reason`, from
- * now until the test ends: a Today still reading what needs the owner.
- */
-function watchTodayDrawnWithout(reason: string): () => boolean {
-  let seen = false;
-  const look = () => {
-    if (document.querySelector('.cd-today') !== null && document.querySelector(`article[aria-label="Held for you: ${reason}"]`) === null) seen = true;
-  };
-  look();
-  const observer = new MutationObserver(look);
-  observer.observe(document.body, { childList: true, subtree: true });
-  onTestFinished(() => observer.disconnect());
-  return () => seen;
-}
-
-/** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
-function watchFor(text: string): () => boolean {
-  let seen = false;
-  const observer = new MutationObserver(() => {
-    if (document.body.textContent.includes(text)) seen = true;
-  });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-  onTestFinished(() => observer.disconnect());
-  return () => seen;
 }
 
 /** The main Desk's Needs you, as the app reads it. */
@@ -262,9 +236,10 @@ describe('Today', () => {
   it('reload_opens_today_drawn', async () => {
     // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
     // first shows is read, so its sections never arrive one by one, each pushing the next down.
-    // The Desks and Today answer at once; Needs you is held back.
+    // The Desks and Today answer at once; Needs you is held back. The page this file drew last goes
+    // first, so the watch sees only this one.
     await cleanup();
-    const drawnWithout = watchTodayDrawnWithout(SEEDED_REASON);
+    const pages = watchPages();
     const needsYou = holdReads(needsYouPath);
     const { screen } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(needsYou.held()).toBe(1));
@@ -281,7 +256,7 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-    expect(drawnWithout()).toBe(false);
+    expect(pages()).toEqual(['loading', 'today']);
   });
 
   it('reload_waits_on_today_no_longer_than_a_first_visit', async () => {

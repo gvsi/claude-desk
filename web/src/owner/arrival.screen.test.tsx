@@ -4,6 +4,7 @@
  * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
  * with the public page always a new tab away and never opened on Today itself.
  */
+import { http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -12,11 +13,13 @@ import { observeRequests } from '../api/http.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
+import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { watchFor, watchPages } from '../test/watch.ts';
 import { FRESH_MS } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
@@ -128,6 +131,27 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     expect(document.body.textContent).not.toContain('Opening your Desk');
+  });
+
+  it('slow_first_visit_waits_out_one_read_ahead', { timeout: 20_000 }, async () => {
+    // On a slow network the visit has one 3 s read ahead, whichever page waits on it. The Desks
+    // come in after it and Needs you later still: Today opens as soon as the Desks are in, still
+    // reading Needs you, rather than wait out a second 3 s on the owner's loading page.
+    delayNextRead(ROUTES.desks.path, 3_400);
+    delayNextRead(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), 10_000);
+    const started = performance.now();
+    const { screen, router } = await renderRoute('/');
+    const pages = watchPages();
+    // Today itself, not the still preview of it behind the intro dialog.
+    const todayDrawn = () => document.querySelector('.cd-today') !== null && document.querySelector('.cd-today-preview') === null;
+    await expect.poll(todayDrawn, { timeout: 10_000, interval: 50 }).toBe(true);
+    const drawnAt = performance.now() - started;
+    expect(router.state.location.pathname).toBe(TODAY);
+    // Once the Desks were in, at 3.4 s; a second full wait would draw Today at 6 s or later.
+    expect(drawnAt).toBeGreaterThan(3_400);
+    expect(drawnAt).toBeLessThan(5_000);
+    expect(pages()).toEqual(['preview', 'loading', 'today without its held request']);
+    expect(heldCard(screen).elements()).toHaveLength(0);
   });
 
   it('returning_owner_leaving_while_today_is_read_stays', async () => {
@@ -896,45 +920,18 @@ function heldCard(screen: RenderResult) {
   return screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true });
 }
 
-/**
- * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
- * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
- * Today, which is named for what it lacks until it holds its held request and its briefing.
- */
-function watchPages(): () => string[] {
-  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
-  const seen: string[] = [];
-  const pageNow = (): string | null => {
-    const state = document.querySelector('.cd-owner-state');
-    const preview = document.querySelector('.cd-today-preview') !== null;
-    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
-    if (!preview && document.querySelector('.cd-today') !== null) {
-      if (document.querySelector(held) === null) return 'today without its held request';
-      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
-      return 'today';
-    }
-    return preview ? 'preview' : null;
-  };
-  const look = () => {
-    const page = pageNow();
-    if (page !== null && seen.at(-1) !== page) seen.push(page);
-  };
-  look();
-  const watch = new MutationObserver(look);
-  watch.observe(document.body, { childList: true, subtree: true });
-  onTestFinished(() => watch.disconnect());
-  return () => [...seen];
-}
-
-/** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
-function watchFor(text: string): () => boolean {
-  let seen = false;
-  const observer = new MutationObserver(() => {
-    if (document.body.textContent?.includes(text)) seen = true;
-  });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-  onTestFinished(() => observer.disconnect());
-  return () => seen;
+/** Holds the next read of `path` for `ms` before it reaches the mock; later reads go straight on. */
+function delayNextRead(path: string, ms: number): void {
+  let next = true;
+  worker.use(
+    http.get(path, async () => {
+      if (next) {
+        next = false;
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      }
+      return undefined;
+    }),
+  );
 }
 
 /** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
