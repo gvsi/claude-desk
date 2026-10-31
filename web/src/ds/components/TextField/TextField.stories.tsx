@@ -173,7 +173,7 @@ export const ReadOnly: Story = {
   render: (args) => (
     <>
       <Controlled {...args} />
-      <Controlled {...args} label="Business name" multiline={false} />
+      <Controlled {...args} label="Business name" multiline={false} value="Rivera Plumbing" hint="Customers see this name at the top of your public page." maxLength={undefined} />
     </>
   ),
   args: {
@@ -191,7 +191,7 @@ export const ReadOnly: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const multiline = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
     const singleLine = canvas.getByRole('textbox', { name: 'Business name' }) as HTMLInputElement;
-    for (const field of [multiline, singleLine]) {
+    for (const [field, value] of [[multiline, args.value], [singleLine, 'Rivera Plumbing']] as const) {
       await expect(field).toHaveAttribute('readonly');
       await expect(field).not.toBeDisabled();
       expectComputed(field, {
@@ -206,13 +206,13 @@ export const ReadOnly: Story = {
       await userEvent.click(field);
       await userEvent.keyboard('{End} We clear drains.');
       await userEvent.paste(' And water heaters.');
-      await expect(field).toHaveValue(args.value);
+      await expect(field).toHaveValue(value);
       await expect(args.onChange).not.toHaveBeenCalled();
 
       // The text stays selectable, to read or copy.
       await expect(getComputedStyle(field).userSelect).not.toBe('none');
       field.select();
-      await expect([field.selectionStart, field.selectionEnd]).toEqual([0, args.value.length]);
+      await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
     }
 
     // Both stay in the tab order and keep the focus ring.
