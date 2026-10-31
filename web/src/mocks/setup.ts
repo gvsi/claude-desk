@@ -639,7 +639,6 @@ export const SETUP_ROUTES: ServedRoutes = {
     const text = description.trim();
     if (text === '' || text.length > DESCRIPTION_MAX) return INVALID;
     const { world } = sv;
-    if (key === null) return created(stateOf(newInterview(world, text, timezone)));
     // A repeat with the client's key answers what the first start made, and makes nothing (plan 02b).
     const keys = setupKeysOf(world);
     const sent = JSON.stringify([description, timezone, body.owner_display_name ?? null]);

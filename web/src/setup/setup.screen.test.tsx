@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, observeRequests, ownerErrorCopy } from '../api/http.ts';
+import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
@@ -34,7 +34,7 @@ const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).fil
 
 /** A new interview in the mock, made the way the start page makes one; with consent given unless `consent` is false. */
 async function startInterview(consent: boolean | null = true, description = DESCRIPTION): Promise<SetupState> {
-  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles' } });
+  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() } });
   // A new interview is created: 201, as the API answers.
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;

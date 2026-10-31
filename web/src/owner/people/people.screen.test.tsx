@@ -9,6 +9,7 @@ import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
+import { newIdempotencyKey } from '../../api/http.ts';
 import type { RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
@@ -139,7 +140,7 @@ function stubClipboard() {
 /** A setup interview made through the mock, its rules confirmed, at the owner's preview before going live. */
 async function setupAtPreview(): Promise<SetupState> {
   const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
-  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA } });
+  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA, idempotency_key: newIdempotencyKey() } });
   // A new interview answers 201, as the API's does.
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;

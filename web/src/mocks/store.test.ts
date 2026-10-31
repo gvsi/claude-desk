@@ -707,7 +707,7 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
-    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit' } });
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
     expect(sent.status).toBe(202);
     const runId = (sent.body as { run_id: string }).run_id;
     await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
@@ -779,7 +779,7 @@ describe('the scripted Desk', () => {
     // The built-in agent's run goes by Answering as it stands at each of its requests: switched off
     // after the agent's quote and before its payment, the payment gets the handoff and nothing is charged.
     await openChat();
-    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit' } });
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit', idempotency_key: 'key-1' } });
     expect(sent.status).toBe(202);
     const runId = (sent.body as { run_id: string }).run_id;
     const read = async () => (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
@@ -1757,22 +1757,39 @@ describe("Today's windows", () => {
 });
 
 describe('idempotency keys', () => {
+  it('start_without_a_key_is_refused', async () => {
+    // As the API does (plan 02b): send_agent and setup's start each require the client's key, so a
+    // body with none (missing or null) is 422 `invalid`, as a malformed key is, and starts nothing.
+    await openChat();
+    const sessions = mockStore.world.sessions.size;
+    const desks = mockStore.world.desks.length;
+    const refused = { status: 422, body: { error: 'invalid' } };
+    for (const body of [{ task: 'book_visit' }, { task: 'book_visit', idempotency_key: null }]) {
+      expect(await call('sendAgent', { params: { slug }, body })).toEqual(refused);
+    }
+    const setup = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    for (const body of [setup, { ...setup, idempotency_key: null }]) {
+      expect(await call('startSetup', { body })).toEqual(refused);
+    }
+    expect(mockStore.world.sessions.size).toBe(sessions);
+    expect(mockStore.world.desks.length).toBe(desks);
+  });
+
   it('send_agent_repeat_answers_the_same_run', async () => {
     // As the API does (plan 02b): a repeat with the same key, task, session and Desk answers the run the
     // first started and starts nothing; the same key with another task is 409 `conflict`.
     await openChat();
-    const send = (task: string, key?: unknown) => call('sendAgent', { params: { slug }, body: { task, ...(key === undefined ? {} : { idempotency_key: key }) } });
+    const send = (task: string, key: unknown) => call('sendAgent', { params: { slug }, body: { task, idempotency_key: key } });
     const first = await send('book_visit', 'key-1');
     expect(first.status).toBe(202);
     const sessions = mockStore.world.sessions.size;
     expect(await send('book_visit', 'key-1')).toEqual(first);
     expect(mockStore.world.sessions.size).toBe(sessions);
     expect(await send('quote_and_deposit', 'key-1')).toEqual({ status: 409, body: { error: 'conflict' } });
-    // A new key, or none, starts a new run each time.
+    // A new key starts a new run.
     const second = await send('book_visit', 'key-2');
     expect(second.status).toBe(202);
     expect(second.body).not.toEqual(first.body);
-    expect((await send('book_visit')).body).not.toEqual((await send('book_visit')).body);
     // A key the API refuses (empty, over 128 characters, a control character, not a string) is 422,
     // and claims nothing.
     for (const bad of ['', 'k'.repeat(129), 'a\nb', 7]) expect((await send('book_visit', bad)).status).toBe(422);
@@ -1797,18 +1814,17 @@ describe('idempotency keys', () => {
     // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
     // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
     const body = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
-    const start = (key?: unknown, description = body.description) =>
-      call('startSetup', { body: { ...body, description, ...(key === undefined ? {} : { idempotency_key: key }) } });
+    const start = (key: unknown, description = body.description) => call('startSetup', { body: { ...body, description, idempotency_key: key } });
     const first = await start('key-1');
     expect(first.status).toBe(201);
     const desks = mockStore.world.desks.length;
     expect(await start('key-1')).toEqual(first);
     expect(await start('key-1', 'Chen Dental. I fix teeth.')).toEqual({ status: 409, body: { error: 'conflict' } });
     expect(mockStore.world.desks.length).toBe(desks);
-    // A key the API refuses is 422; a new key, or none, makes a new interview each time.
+    // A key the API refuses is 422; a new key makes a new interview each time.
     for (const bad of ['', 'k'.repeat(129), 'a\u0000b', 7]) expect((await start(bad)).status).toBe(422);
     expect(mockStore.world.desks.length).toBe(desks);
-    const ids = [await start('key-2'), await start(), await start()].map((r) => (r.body as SetupState).interview_id);
+    const ids = [await start('key-2'), await start('key-3'), await start('key-4')].map((r) => (r.body as SetupState).interview_id);
     expect(new Set([...ids, (first.body as SetupState).interview_id]).size).toBe(4);
   });
 

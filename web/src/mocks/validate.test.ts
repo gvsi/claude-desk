@@ -200,7 +200,8 @@ describe('mock payloads', () => {
   it('setup_desk_tools_say_why_they_wait_for_review', async () => {
     // A new Desk's Documents and Payments tools, and the mock payments server's once connected,
     // wait for review as a connect never confirmed ("new"); the rest are on and wait for nothing.
-    const started = (await body('startSetup', { body: { description: 'Rivera Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles' } })) as SetupState;
+    const start = { description: 'Rivera Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles', idempotency_key: 'key-1' };
+    const started = (await body('startSetup', { body: start })) as SetupState;
     const id = started.interview_id;
     await body('setupConnect', { params: { id }, body: { server: 'mock_payments' } });
     const { tools } = (await body('setupTools', { params: { id } })) as SetupTools;
