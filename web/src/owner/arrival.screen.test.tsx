@@ -563,10 +563,11 @@ describe('Arrival', () => {
     // it opens. That read answers slowly here, as on a slow machine, and is in before the session
     // ends, so the 401 that ends it is Today's own poll and not that read.
     delayNextRead(ROUTES.ownerInbox.path, 60);
-    const inboxRead = nextAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
-    await inboxRead.settled;
+    // In on this page, which counts its entries on the button. Not `nextAnswerTo`: the last test's
+    // page can still have an inbox read out, and its late answer would pass for this one.
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
 
     // The demo session ends: the browser's owner cookie no longer opens a copy, so Today's next poll is a 401.
     mockStore.reset('rivera', { signedIn: false });
@@ -574,7 +575,9 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     await expect.element(dialog.getByText(`${ENDED} ${INTRO}`, { exact: true })).toBeVisible();
-    expect(requests('today').length + requests('needsYou').length + requests('desks').length).toBeGreaterThan(0);
+    // The ended copy heard Today's poll, and never the inbox read.
+    expect(requests('today').length + requests('needsYou').length).toBeGreaterThan(0);
+    expect(requests('ownerInbox')).toEqual([]);
     expect(requests('me')).toHaveLength(1);
 
     // A fresh copy from the passcode, and Today again.
@@ -1123,7 +1126,11 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
   return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
 }
 
-/** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
+/**
+ * The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when
+ * it does. It hears every request on the page, so a late answer to one the last test's page sent
+ * counts too: ask for it once nothing from that page can still be out.
+ */
 function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<void> } {
   let came = false;
   let stop = () => {};
