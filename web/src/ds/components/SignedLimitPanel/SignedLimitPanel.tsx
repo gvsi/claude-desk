@@ -6,12 +6,6 @@ export interface SignedLimitPanelProps {
   /** The most its charges can add up to, in whole cents: the signed mandate's `total_cents`. */
   totalCents: number;
   /**
-   * What its charges have used so far, in whole cents, summed by the screen from the charges the
-   * ledger records against this mandate. The owner's view of an agent's conversation shows it; the
-   * agents page doesn't.
-   */
-  usedCents?: number;
-  /**
    * Writes an amount in cents as the page writes money: the web app's `formatCents` ("$20",
    * "$40.50"). The design system formats no money itself.
    */
@@ -23,23 +17,21 @@ export interface SignedLimitPanelProps {
 }
 
 /** True for an amount the panel can show exactly: a whole number of cents, zero or more. */
-function isWholeCents(cents: number | undefined): cents is number {
-  return Number.isInteger(cents) && (cents as number) >= 0;
+function isWholeCents(cents: number): boolean {
+  return Number.isInteger(cents) && cents >= 0;
 }
 
 /**
- * A visiting agent's signed spending limit: what one charge can be, what its charges can add up to
- * (and, for the owner, what they have used), how long the limit lasts, and whose wallet signed it.
+ * A visiting agent's signed spending limit: what one charge can be, what its charges can add up to,
+ * how long the limit lasts, and whose wallet signed it.
  * Every amount is the mandate's own whole cents, written by the page's formatter; an amount that
  * isn't whole cents draws no panel at all, so no limit is ever shown that the mandate doesn't hold.
  */
-export function SignedLimitPanel({ perChargeCents, totalCents, usedCents, formatCents, duration, source }: SignedLimitPanelProps) {
-  const amounts = [perChargeCents, totalCents, ...(usedCents === undefined ? [] : [usedCents])];
-  if (!amounts.every(isWholeCents)) return null;
+export function SignedLimitPanel({ perChargeCents, totalCents, formatCents, duration, source }: SignedLimitPanelProps) {
+  if (!isWholeCents(perChargeCents) || !isWholeCents(totalCents)) return null;
   const terms: [string, string][] = [
     ['Per charge', formatCents(perChargeCents)],
     ['In total', formatCents(totalCents)],
-    ...(usedCents === undefined ? [] : ([['Used', formatCents(usedCents)]] as [string, string][])),
     ['For', duration],
   ];
   return (

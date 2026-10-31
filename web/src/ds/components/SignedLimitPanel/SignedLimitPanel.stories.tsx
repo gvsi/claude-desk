@@ -99,31 +99,6 @@ export const SendAnAgent: Story = {
   },
 };
 
-export const OwnerConversation: Story = {
-  name: 'An agent’s conversation',
-  args: { usedCents: 2000 },
-  render: (args) => (
-    <div style={{ maxWidth: 640 }}>
-      <SignedLimitPanel {...args} />
-    </div>
-  ),
-  parameters: {
-    canvas: 'none',
-    canvasNote:
-      'N-Conv-Agent-Run1 draws the owner’s view of the limit as two lines with what was used; here it is the panel the agents boards signed (N-R2-Agents-03), on the page, with Used after In total.',
-  },
-  play: async ({ args, canvas }) => {
-    const panel = canvas.getByRole('region', { name: 'Signed limit' });
-    await expect(terms(panel)).toEqual([
-      ['Per charge', '$20'],
-      ['In total', '$100'],
-      ['Used', '$20'],
-      ['For', 'One hour'],
-    ]);
-    await expect(args.formatCents).toHaveBeenCalledTimes(3);
-  },
-};
-
 export const NotWholeCents: Story = {
   name: 'Not whole cents',
   args: { perChargeCents: 20.5 },
