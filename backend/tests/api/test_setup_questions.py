@@ -1122,7 +1122,7 @@ async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refu
     assert owner_lines.count("Plumbing.") == 1
 
 
-async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_refused_at_once(
+async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_answers_busy_at_once(
         app, browser, fake, kernel_http, model, engine, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
@@ -1140,7 +1140,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_re
         assert idle_in_transaction(db) == 0
         reads = len(fake.called("GET /context/{session_id}?desk_id="))
         again = await asyncio.wait_for(owner.browser.post(path, json={"allow": True}), 2)
-        assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+        assert again.status_code == 202 and again.json()["busy"] is True
         assert len(fake.called("GET /context/{session_id}?desk_id=")) == reads
     finally:
         release.set()

@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from 'react';
 
@@ -126,11 +127,23 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   }, [inert]);
 
   const Column = skeleton ? 'div' : 'aside';
+  // Keep the address intact: owner pages may use its fragment for their own state.
+  const mainId = useId();
+  const main = useRef<HTMLElement>(null);
+  const skipToContent = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    main.current?.focus();
+  };
 
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
+      {skeleton ? null : (
+        <a className="cd-app-shell__skip cd-type-control" href={`#${mainId}`} onClick={skipToContent} {...inertWhen(inert)}>
+          Skip to content
+        </a>
+      )}
       {banner ? (
         <div className="cd-app-shell__banner" {...inertWhen(inert)}>
           {banner}
@@ -155,7 +168,15 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
             {sidebar}
           </Column>
         )}
-        <Main fill={fill} inert={inert} skeleton={skeleton} contentRef={content}>
+        <Main
+          id={skeleton ? undefined : mainId}
+          mainRef={skeleton ? undefined : main}
+          tabIndex={skeleton ? undefined : -1}
+          fill={fill}
+          inert={inert}
+          skeleton={skeleton}
+          contentRef={content}
+        >
           {children}
         </Main>
         {/* A panel beside the page slides in and out; a sheet, or any panel under reduced motion, comes and goes at once. */}
@@ -165,26 +186,30 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   );
 }
 
-function Main({
-  fill,
-  inert,
-  skeleton,
-  contentRef,
-  children,
-}: {
+interface MainProps {
+  id?: string;
+  mainRef?: Ref<HTMLElement>;
+  tabIndex?: -1;
   fill: boolean;
   inert: boolean;
   skeleton: boolean;
   contentRef: RefObject<HTMLDivElement>;
   children: ReactNode;
-}) {
-  const Area = skeleton ? 'div' : 'main';
-  return (
-    <Area className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
-      <div ref={contentRef} className="cd-app-shell__content">
-        {children}
-      </div>
-    </Area>
+}
+
+function Main({ id, mainRef, tabIndex, fill, inert, skeleton, contentRef, children }: MainProps) {
+  const area = { className: `cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`, ...inertWhen(inert) };
+  const content = (
+    <div ref={contentRef} className="cd-app-shell__content">
+      {children}
+    </div>
+  );
+  return skeleton ? (
+    <div {...area}>{content}</div>
+  ) : (
+    <main ref={mainRef} id={id} tabIndex={tabIndex} {...area}>
+      {content}
+    </main>
   );
 }
 

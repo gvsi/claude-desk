@@ -747,7 +747,8 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+ * before consent, while busy and after the last one), whether a consent run is pending (`busy`), and the
+ * conversation so far. Its messages start at Claude's consent
  * question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
@@ -767,6 +768,7 @@ export interface SetupState {
         | "contact_and_after_hours"
       )
     | null;
+  busy?: boolean;
   messages: SetupMessage[];
 }
 /**
@@ -998,7 +1000,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
-  "POST /api/owner/setup/{id}/consent": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },

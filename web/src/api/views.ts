@@ -179,14 +179,23 @@ export interface Reports {
   needed_you: number;
 }
 
+/**
+ * A conversation handed to the owner: a visitor's call-back request (`callback`), or one the
+ * handoff card handed over in a chat (`card`), which promises no call back.
+ */
 export interface Handoff {
   handoff_id: string;
   session_id: string;
-  /** `<name> · <contact> · <reason>` as the visitor typed them. Untrusted. */
+  /**
+   * A call-back request's `<name> · <contact> · <reason>` as the visitor typed them; a card's, the
+   * Desk's own words ("The Desk handed this to you."). Untrusted.
+   */
   reason: string;
-  /** `<start>/<end>`, or null when the visitor named no open hour. */
+  /** `<start>/<end>`, or null when the visitor named no open hour. Always null for a card. */
   callback_window: string | null;
   status: string;
+  /** Optional until the API sends it (plan 02b); a handoff without one is a call-back request. */
+  kind?: 'callback' | 'card';
 }
 
 export interface NeedsYouSession {
@@ -204,7 +213,7 @@ interface NeedsYouBase {
 }
 
 /**
- * One held request or one open callback that waits for the owner. The API sends every field, the
+ * One held request or one open handoff that waits for the owner. The API sends every field, the
  * other alternative's as null (openapi.json), so code tells them apart with `!= null`.
  */
 export type NeedsYouItem =
@@ -460,6 +469,11 @@ export interface SetupState {
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
   consent: boolean | null;
+  /**
+   * Derived from the stored transcript: Claude is working on the owner's last message with no
+   * reply yet. Absent means false on older APIs.
+   */
+  busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
 }

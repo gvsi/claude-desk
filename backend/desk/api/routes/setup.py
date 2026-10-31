@@ -96,22 +96,33 @@ async def start_setup(body: SetupStartIn, request: Request,
     return await setup.start(ctx, state.database(), state.model, body, admit=admit)
 
 
-@router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 422, 503))
+@router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
 async def setup_interview(interview_id: InterviewId, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
-    """The setup interview as it stands."""
-    return await setup.read(ctx, runtime(request).started().database(), interview_id)
+    """The setup interview as it stands, reopening consent when its run was abandoned."""
+    state = runtime(request).started()
+    return await setup.read(ctx, state.database(), interview_id, runs=state.consent_runs)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
-             responses=error_responses(401, 404, 409, 422, 429, 503))
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request: Request,
-                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
-    """The owner's answer to whether Claude may read their Claude memory and website, given once (409 `conflict`
-    after). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,
-    neither ever is. Then the first question."""
-    state = await _moving_on(request, ctx)
-    return await setup.consent(ctx, state.database(), interview_id, body.allow)
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Start a background run that stores consent, then reads Claude memory and the named website through the
+    kernel on yes, or skips both on no. Claude's first question and the read labels land together. Wait for the
+    busy commit; answers 200 when finished within the following wait, otherwise 202 with consent still pending.
+    Cancelling the request leaves the run working. A repeat while busy answers 202 without starting or
+    counting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.consent(ctx, state.database(), state.model, interview_id, body.allow,
+                                 runs=state.consent_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
 
 
 @router.post("/{id}/answer", response_model=SetupState,

@@ -172,6 +172,37 @@ export const OwnerToday: Story = {
   },
 };
 
+export const SkipToContent: Story = {
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws Skip to content: the first Tab stop on every owner page, out of sight until the keyboard reaches it, then at the top left over the reviewer bar and the sidebar, on the raised surface with the standard focus ring.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // skip_link_first_and_out_of_sight: nothing shows until the keyboard reaches it.
+    const skip = canvas.getByRole('link', { name: 'Skip to content' });
+    await expect(skip.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+
+    // The first Tab, before Start over: at the top left, over the reviewer bar, with the ring.
+    await userEvent.tab();
+    await expect(skip).toHaveFocus();
+    expectComputed(skip, {
+      height: '32px',
+      paddingLeft: '12px',
+      borderTopLeftRadius: '8px',
+      backgroundColor: 'rgb(42, 41, 39)',
+      color: 'rgba(250, 249, 245, 0.92)',
+      outlineStyle: 'solid',
+      outlineWidth: '2px',
+      outlineColor: 'rgb(126, 174, 218)',
+    });
+    const box = skip.getBoundingClientRect();
+    await expect([box.left, box.top]).toEqual([8, 8]);
+    await expect(box.top).toBeLessThan(canvas.getByRole('note').getBoundingClientRect().bottom);
+    await expect(document.elementFromPoint(box.left + 4, box.top + 4)).toBe(skip);
+  },
+};
+
 /** A page that lays out its own columns, as the conversations page does: a list, then the conversation. */
 const columns = (
   <div style={{ display: 'flex' }}>
@@ -471,16 +502,28 @@ export const Skeleton: Story = {
           sidebar={<Sidebar {...sidebar.props} desks={[{ id: 'desk-rivera-main', name: rivera.business.deskName }]} about={ABOUT} />}
         />
       </div>
-      <div data-shaped-frame aria-hidden="true">
+      <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
         <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={7} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>
     </div>
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, userEvent }) => {
     const real = canvasElement.querySelector<HTMLElement>('[data-real-frame]')!;
     const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-frame]')!;
+    // During the hand-off both shells are mounted, but only the real shell owns a skip target.
+    const main = real.querySelector('main')!;
+    const skip = real.querySelector<HTMLAnchorElement>('.cd-app-shell__skip')!;
+    await expect(canvasElement.querySelectorAll('.cd-app-shell__skip')).toHaveLength(1);
+    await expect(document.querySelectorAll(`#${CSS.escape(main.id)}`)).toHaveLength(1);
+    await expect(shapes.querySelector('.cd-app-shell__main')).not.toHaveAttribute('id');
+    await expect(shapes.querySelector('.cd-app-shell__main')).not.toHaveAttribute('tabindex');
+    await expect(skip).toHaveAttribute('href', `#${main.id}`);
+    await expect(document.getElementById(skip.hash.slice(1))).toBe(main);
+    skip.focus();
+    await userEvent.keyboard('{Enter}');
+    await expect(main).toHaveFocus();
     await expect(shapes.querySelector('main, aside')).toBeNull();
     await expect(shapes.querySelector('button, a[href]')).toBeNull();
     for (const selector of ['.cd-reviewer-bar', '.cd-app-shell__column', '.cd-app-shell__main', '.cd-app-shell__topbar']) {

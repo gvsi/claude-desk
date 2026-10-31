@@ -170,6 +170,7 @@ export const SETUP_COPY = {
     failed: "I couldn't answer just now. Your answer is still here; try again.",
     tryAgain: 'Try again',
     conversation: 'Setup questions',
+    putting: 'Putting together what I’d have your Desk do. This can take a minute or so.',
     loading: 'Opening your setup',
   },
 
@@ -215,7 +216,7 @@ export const SETUP_COPY = {
     who: {
       public: 'A visitor, not verified',
       verified: 'A customer, verified',
-      agent: 'Someone’s agent, signed limit',
+      agent: "Someone's agent, signed limit",
       after_hours: 'A visitor, after hours',
     },
   },
@@ -223,7 +224,7 @@ export const SETUP_COPY = {
   safety: {
     title: 'Safety check',
     loading: 'Trying tricks people use on your draft rules',
-    blocked: (blocked: number, total: number) => `${blocked} of ${total} blocked`,
+    stopped: (stopped: number, total: number) => `${stopped} of ${total} stopped`,
     lead: (total: number) => `I tried ${total} tricks people really use, on your draft rules. Nothing was real, and no one was contacted.`,
     label: 'Tricks tried',
     empty: 'No tricks to show',

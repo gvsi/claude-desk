@@ -398,6 +398,13 @@
   color: var(--text-secondary);
 }
 
+/* The visitor's words, as a held request's card quotes them. */
+.cd-callback__context {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .cd-callback__actions {
   display: flex;
   flex-wrap: wrap;
