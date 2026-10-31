@@ -22,6 +22,7 @@ import {
 } from '../ds/boards/spec.ts';
 import { VISION_LINE } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
+import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll } from '../test/screen.ts';
@@ -31,6 +32,9 @@ const TEAM_DESK = '/vision/team-desk';
 const CLAUDE_ACCOUNT = '/vision/claude-account';
 const PHONE = '/vision/phone';
 const VISION_ROUTES = [CITY_OFFICE, TEAM_DESK, CLAUDE_ACCOUNT, PHONE] as const;
+
+/** Rivera's Today, in the copy each test starts with. */
+const TODAY = `/app/${RIVERA.deskId}/today`;
 
 /** Where "Back to your Desk" goes: the app's entry, which opens a returning owner's Today. */
 const BACK_HREF = '/';
@@ -128,6 +132,20 @@ describe('Vision pages', () => {
     expect(prose).toHaveLength(4);
     for (const line of prose) expect(line.textContent ?? '', 'Claude’s words state no fee, date or status').not.toMatch(FACT_IN_PROSE);
     expect(textOutsideFactCards(page)).not.toMatch(FACT_OUTSIDE_A_CARD);
+  });
+
+  it('things_to_try_links_where_this_is_going', async () => {
+    // Today's "Things to try" leads to the vision pages, starting with the city office.
+    const { screen, router } = await renderRoute(TODAY);
+    const things = screen.getByRole('region', { name: 'Things to try' });
+    const link = things.getByRole('link', { name: 'Where this is going: channels, a city office and a team Desk' });
+    await expect.element(link).toHaveAttribute('href', CITY_OFFICE);
+    // The same tab, through the router: the app stays loaded.
+    expect(link.element().getAttribute('target')).toBeNull();
+    await link.click();
+    await expect.poll(() => router.state.location.pathname).toBe(CITY_OFFICE);
+    await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Good morning, Nadia' })).toBeVisible();
   });
 });
 

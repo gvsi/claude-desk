@@ -12,6 +12,14 @@ import type { DecisionState } from '../api/contracts.ts';
 import { cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { CopyLanguage, FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
+/** Where each vision page lives. Today's "Things to try" leads to the city office. */
+export const VISION_PATHS = {
+  cityOffice: '/vision/city-office',
+  teamDesk: '/vision/team-desk',
+  claudeAccount: '/vision/claude-account',
+  phone: '/vision/phone',
+} as const;
+
 /**
  * Where every vision page's "Back to your Desk" goes: the app's entry, which opens a returning
  * owner's Today on the Desk they last had open (and the intro dialog for anyone without a copy).
