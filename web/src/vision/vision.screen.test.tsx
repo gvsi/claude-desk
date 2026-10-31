@@ -25,7 +25,7 @@ import { expectComputed } from '../ds/test/expectComputed.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
 
 const CITY_OFFICE = '/vision/city-office';
 const TEAM_DESK = '/vision/team-desk';
@@ -148,6 +148,20 @@ describe('Vision pages', () => {
     await expect.poll(() => router.state.location.pathname).toBe(CITY_OFFICE);
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
     await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Good morning, Nadia' })).toBeVisible();
+  });
+
+  it('vision_pages_pass_the_screen_checks', async () => {
+    // On a laptop and on a phone: one footer, clean copy, no axe violations, nothing scrolling
+    // sideways, and on the owner's pages no technical words. The Claude account page is a visitor's.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      for (const path of VISION_ROUTES) {
+        const { screen } = await renderRoute(path, { viewport });
+        await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+        await expect.element(screen.getByRole('main')).toBeVisible();
+        await expectScreenBasics(screen.container, { owner: path !== CLAUDE_ACCOUNT });
+        expectNoHorizontalScroll();
+      }
+    }
   });
 
   it('back_to_your_desk_opens_today', async () => {
