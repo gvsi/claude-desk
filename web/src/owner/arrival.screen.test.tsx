@@ -184,6 +184,7 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(heldCard(screen)).toBeVisible();
     expect(pages()).toEqual(['preview', 'today']);
+    expect(document.title).toBe('Today · Claude Desk');
   });
 
   it('start_the_demo_lets_the_dialog_go_onto_today', async () => {
@@ -833,6 +834,8 @@ describe('The preview behind the intro dialog', () => {
     document.title = 'Claude Desk';
     const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await expect.element(introDialog(screen)).toBeVisible();
+    // Today is drawn behind the dialog, its greeting included.
+    expect(document.querySelector('.cd-today-preview h1')?.textContent).toMatch(/, Maria$/);
     // The dialog is the page here: the Today drawn behind it names nothing, so the tab keeps the
     // app's own name.
     expect(document.title).toBe('Claude Desk');

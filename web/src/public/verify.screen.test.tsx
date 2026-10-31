@@ -3,13 +3,16 @@
  * under the kernel's verify card, the code going only to the verify route, one line for every
  * failed code, the simulated label once it works, and the inbox each side reads.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { http } from 'msw';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { SseEvent } from '../api/contracts.ts';
+import { ROUTES } from '../api/routes.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, UNREACHABLE_COPY } from '../ds/index.ts';
+import { worker } from '../mocks/browser.ts';
 import { DEMO_CODE } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -423,14 +426,18 @@ describe('Demo inbox', () => {
   it('owner_inbox_that_cant_be_read_on_a_reload_says_so', async () => {
     // Opened from the loading page, Today is read ahead, its inbox with it. When that read and its
     // retry fail, Today still opens; it reads the inbox again, saying so, and when that read and its
-    // retry fail too, it says the Demo inbox couldn't be opened, with "Try again".
-    mockStore.inject({ route: 'ownerInbox', status: 500, times: 4, delayMs: 300 });
-    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    // retry fail too, it says the Demo inbox couldn't be opened, with "Try again". Retries go at once,
+    // so the read ahead's two failures are in long before its cap; Today's own read waits until the
+    // line saying it is opening has been seen.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 4 });
+    const todays = holdInboxReadsAfter(2);
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
     await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
-    // Past the read ahead's two.
-    expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(3);
+    await vi.waitFor(() => expect(todays.held()).toBe(1));
+    expect(requests('ownerInbox')).toHaveLength(2);
+    todays.release();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
-    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(line).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(4);
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
 
@@ -473,3 +480,27 @@ describe('Demo inbox', () => {
     expect(requests('ownerInbox')).toHaveLength(4);
   });
 });
+
+/**
+ * Holds every Demo inbox read after the first `n` until `release()`, or the test's end, lets them
+ * through to the mock: `held()` counts the ones that came.
+ */
+function holdInboxReadsAfter(n: number): { held: () => number; release: () => void } {
+  let seen = 0;
+  let held = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(ROUTES.ownerInbox.path, async () => {
+      seen += 1;
+      if (seen <= n) return undefined;
+      held += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => held, release };
+}
