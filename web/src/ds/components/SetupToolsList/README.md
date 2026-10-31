@@ -11,12 +11,14 @@ Drawn on N-R2-Setup-05-Tools, signed on 2026-10-30.
 
 It is its own component rather than a mode of `ConnectorDirectory`: that list's rows are links with tool counts and connection lines, while these rows say where each connector stands or hold its one button, and nothing in them is a link. A mode would mean two row shapes and two sets of words behind a flag.
 
+Its rows start as `ConnectorPicker`'s do, with `ConnectorSummary` (the tile, the name and its badge, the line). The rest of the row isn't shared: the picker, a dialog sized from the window, drops a row's end under its words below a 720 px window, while this list does so below 480 px of its own width, and the two ends say different things ("Added", "Coming soon in this demo" there; "On", "Always on" here).
+
 ## What it shows
 
 - Two cards, 20 px apart, each padded 16 px and named by its `h2` in `.cd-type-control`: "Built in" (`builtIn`) and "Connect your own" (`external`). A group with no rows is left out.
 - 10 px under the heading, a row per connector under a hairline, 12 px above and below:
-  - the connector's 36 px `ConnectorIcon`, 14 px before its words;
-  - its `ConnectorName`, weight 520, with no "Built in" (the group says so) and, for an app, the Mock badge;
+  - `ConnectorSummary`: the connector's 36 px `ConnectorIcon`, 14 px before its words;
+  - its `ConnectorName`, weight 520, with no "Built in" (the group says so) and, for an app, the Mock badge 8 px from the name;
   - its description in secondary meta.
 - At the right of the row, by its `state`:
   - `on`: "On" beside a handled dot, 6 px apart, in primary meta. An app reads "On" too once its tools are turned on.

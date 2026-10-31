@@ -16,6 +16,10 @@
 - `level` makes it a heading (`h1` on a connector's page); without it, a `span`.
 - The name wraps on a narrow line, and the badge moves under it only when both can't share the line.
 
+## ConnectorSummary
+
+`ConnectorSummary` is the start of a row in a list of connectors to choose from, shared by `ConnectorPicker` and `SetupToolsList`: the connector's 36 px `ConnectorIcon`, then its words, `ConnectorName` (`inline`, weight 520, the badge or "Built in" 8 px off) over its description in secondary meta, 2 px under it. It returns the tile and the words as siblings, so each list's row places them beside what it puts at the end and keeps its own breakpoint. Props: `connector`, and `hideBuiltIn` where the list's group already says it.
+
 ## Types
 
 `ConnectorView = { id: string; name: string; icon: ConnectorIconName; description: string; source: { kind: 'built_in' } | { kind: 'external'; mock: true } }`, the screen's view of one connector. The web app owns which tools each connector groups and every word in it.

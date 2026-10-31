@@ -104,7 +104,7 @@ export const Board: Story = {
     await expect(Math.round(rows[0]!.getBoundingClientRect().top - within(builtIn).getByRole('heading').getBoundingClientRect().bottom)).toBe(10);
     const tile = quotes.querySelector<HTMLElement>('.cd-connector-icon')!;
     await expect(tile.getBoundingClientRect().width).toBe(36);
-    await expect(Math.round(quotes.querySelector('.cd-setup-tools__text')!.getBoundingClientRect().left - tile.getBoundingClientRect().right)).toBe(14);
+    await expect(Math.round(quotes.querySelector('.cd-connector-summary')!.getBoundingClientRect().left - tile.getBoundingClientRect().right)).toBe(14);
     expectComputed(within(quotes).getByText('Quotes'), { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
     expectComputed(within(quotes).getByText('Prices jobs from your price list.'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
 
@@ -132,6 +132,10 @@ export const Board: Story = {
     // An app: its Mock badge beside its name, then how many tools it brings before "Connect".
     const [stripe] = rowsOf(canvas, 'Connect your own') as [HTMLElement];
     await expect(expectMockBesideExternalNames(stripe)).toBe(1);
+    // The badge 8 px from the name, as the board and ConnectorPicker draw it.
+    const name = stripe.querySelector<HTMLElement>('.cd-connector-name__name')!;
+    const badge = stripe.querySelector<HTMLElement>('.cd-pill')!;
+    await expect(Math.round(badge.getBoundingClientRect().left - name.getBoundingClientRect().right)).toBe(8);
     const count = within(stripe).getByText('2 tools');
     expectComputed(count, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     const connect = within(stripe).getByRole('button', { name: 'Connect Stripe' });
@@ -175,7 +179,7 @@ export const Phone: Story = {
   play: async ({ canvas }) => {
     const rows = [...rowsOf(canvas, 'Built in'), ...rowsOf(canvas, 'Connect your own')];
     for (const row of rows) {
-      const text = row.querySelector<HTMLElement>('.cd-setup-tools__text')!;
+      const text = row.querySelector<HTMLElement>('.cd-connector-summary')!;
       const end = row.querySelector<HTMLElement>('.cd-setup-tools__end')!;
       await expect(Math.round(end.getBoundingClientRect().left)).toBe(Math.round(text.getBoundingClientRect().left));
       await expect(end.getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);

@@ -30,21 +30,9 @@
   border-top: 1px solid var(--line-hairline);
 }
 
-.cd-setup-tools__text {
+/* The tile and the words are ConnectorSummary's, as in ConnectorPicker; the words take the row. */
+.cd-setup-tools__row > .cd-connector-summary {
   flex: 1;
-  min-width: 0;
-}
-
-.cd-setup-tools__name {
-  display: block;
-  font-weight: 520;
-}
-
-.cd-setup-tools__description {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
 }
 
 /* Where it stands: its dot 6 px before the words, "On" in primary ink, "Always on" in secondary. */
@@ -86,7 +74,7 @@
     grid-area: icon;
   }
 
-  .cd-setup-tools__text {
+  .cd-setup-tools__row > .cd-connector-summary {
     grid-area: text;
   }
 

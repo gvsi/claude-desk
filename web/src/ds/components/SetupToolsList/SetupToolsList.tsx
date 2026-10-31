@@ -2,8 +2,8 @@ import { useId } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
-import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
-import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
+import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
+import { ConnectorSummary } from '../ConnectorName/ConnectorSummary.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 
 import './SetupToolsList.css';
@@ -59,13 +59,7 @@ function Group({ title, verb, rows }: { title: string; verb: 'Add' | 'Connect'; 
       <ul role="list" className="cd-setup-tools__rows" aria-labelledby={headingId}>
         {rows.map((row) => (
           <li key={row.connector.id} className="cd-setup-tools__row">
-            <ConnectorIcon icon={row.connector.icon} size="section" />
-            <span className="cd-setup-tools__text">
-              <span className="cd-setup-tools__name cd-type-body">
-                <ConnectorName connector={row.connector} size="inline" hideBuiltIn />
-              </span>{' '}
-              <span className="cd-setup-tools__description cd-type-meta">{row.connector.description}</span>
-            </span>
+            <ConnectorSummary connector={row.connector} hideBuiltIn />
             <End row={row} verb={verb} />
           </li>
         ))}

@@ -212,6 +212,7 @@ export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './c
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
 export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
 export { ConnectorName, type ConnectorNameProps, type ConnectorView } from './components/ConnectorName/ConnectorName.tsx';
+export { ConnectorSummary, type ConnectorSummaryProps } from './components/ConnectorName/ConnectorSummary.tsx';
 export {
   ConnectorSection,
   type ConnectorSectionProps,
