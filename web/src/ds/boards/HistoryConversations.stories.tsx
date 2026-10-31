@@ -24,7 +24,10 @@ import {
   one,
 } from './spec.ts';
 
-/** The list as the board draws it: today's live conversations, then the recorded ones, each tagged. */
+/**
+ * The list as the board draws it: today's live conversations, then the recorded ones, each tagged.
+ * A row with no name has no status, as in the app, so it says "Visitor" or "Agent" once.
+ */
 const DAYS: ConversationGroup[] = [
   {
     label: 'Today',
@@ -36,22 +39,22 @@ const DAYS: ConversationGroup[] = [
   {
     label: 'Yesterday',
     items: [
-      { name: 'Agent', time: '10:45 pm', status: { tone: 'info', text: 'Agent' }, recorded: true },
-      { name: 'Visitor', time: '10:10 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
-      { name: 'Visitor', time: '9:30 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
+      { name: 'Agent', time: '10:45 pm', recorded: true },
+      { name: 'Visitor', time: '10:10 pm', recorded: true },
+      { name: 'Visitor', time: '9:30 pm', recorded: true },
       { name: 'Marcus Bell', time: '8:50 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
       { name: 'Jordan Pike', time: '8:05 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
-      { name: 'Visitor', time: '7:25 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
-      { name: 'Visitor', time: '6:40 pm', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
+      { name: 'Visitor', time: '7:25 pm', recorded: true },
+      { name: 'Visitor', time: '6:40 pm', recorded: true },
     ],
   },
   {
     label: 'Earlier this week',
     items: [
-      { name: 'Visitor', time: 'Oct 27', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
+      { name: 'Visitor', time: 'Oct 27', recorded: true },
       { name: 'Ana Reyes', time: 'Oct 26', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
-      { name: 'Visitor', time: 'Oct 25', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
-      { name: 'Visitor', time: 'Oct 23', status: { tone: 'handled', text: 'Visitor' }, recorded: true },
+      { name: 'Visitor', time: 'Oct 25', recorded: true },
+      { name: 'Visitor', time: 'Oct 23', recorded: true },
     ],
   },
 ];
@@ -140,6 +143,7 @@ const meta = {
       'A recorded conversation open beside the list: the list marks each replayed conversation with the Recorded tag (ConversationListItem recorded) under "Includes recorded history" (RecordedHistoryLink), and the open one carries the line under its head (RecordedNote). Its transcript is read only: nothing replayed can be acted on, so there is no take-over and no whisper.',
       'The list, its days, the conversation head and the footer at the window’s foot are page layout the web app (plan 04) owns, composed here from ConversationListItem, RecordedHistoryLink, RecordedNote, Pill, the transcript components and the tokens; at this window the list is 312 px wide.',
       'Its receipts are the kernel’s status line, “Reply checked against Maria Rivera’s rules”, where the board writes “Reply checked before the visitor saw it.”, and the public link reads desk.example/rivera where the board writes “[prototype-domain]/rivera”.',
+      'Its rows with no name follow the rule that a conversation with no name says “Visitor” or “Agent” once (owner, 2026-10-30, with the Today fix): they read “Visitor” or “Agent” once, with no status words under the name, only the Recorded tag, as the app draws a conversation with no name (ConversationListItem with no status). The board still writes the word on both lines; its owner will redraw N-History-Conversations to match.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -179,8 +183,22 @@ export const Board: Story = {
       await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
       await expect(Math.round(row.getBoundingClientRect().height)).toBe(49);
     }
+    // unnamed_rows_read_once: a row with no name says "Visitor" or "Agent" once, as the app draws it:
+    // no status words or dot under the name, only the Recorded tag. A named row keeps its status line.
+    const unnamed = rows.filter((row) => ['Visitor', 'Agent'].includes(one(row, '.cd-conversation-item__name').textContent ?? ''));
+    await expect(unnamed).toHaveLength(8);
+    for (const row of rows) {
+      const words = row.querySelector('.cd-conversation-item__status-text');
+      if (unnamed.includes(row)) {
+        await expect(words).toBeNull();
+        await expect(row.querySelector('.cd-status-dot')).toBeNull();
+      } else {
+        await expect(words).not.toBeNull();
+      }
+    }
+    await expect(within(list).getByRole('link', { name: 'Marcus Bell 8:50 pm Visitor Recorded' })).toBeVisible();
     // The open one is the replayed 10:10 pm chat, its tag's word part of its name.
-    await expect(within(list).getByRole('link', { current: true })).toHaveAccessibleName('Visitor 10:10 pm Visitor Recorded');
+    await expect(within(list).getByRole('link', { current: true })).toHaveAccessibleName('Visitor 10:10 pm Recorded');
 
     // The open conversation: its head, the note 6 px under it, then the transcript 20 px under the note.
     const head = one(canvasElement, '.board-conversation-head');
