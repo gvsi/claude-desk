@@ -24,16 +24,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
-- **Consent** (`consent`): after admission, a held background task stores the owner's answer at once, then searches
+- **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
-  skips both. Busy means a stored transcript entry carries a pending run ID on the owner's consent answer.
-  `_after_consent` appends Claude's first question; the labels and reply are saved together. The request waits up to
-  `CONSENT_WAIT_S` after the busy commit, then answers 202 with the stored busy interview. Cancelling the request
-  leaves the run working on its own connections. A repeat while busy returns that state without
-  another run or count on the limits. Failure, timeout or shutdown removes only entries marked by that run and
-  reopens consent when its answer followed Claude's consent question.
-  GET and consent also recover a run older than `CONSENT_ABANDONED_S` when this process holds no run for it; a live
-  run has the shorter `CONSENT_RUN_TIMEOUT_S` deadline, so deploy overlap doesn't reopen another process's live run.
+  skips both. `_after_consent` appends Claude's first question; the labels and reply are saved together.
   No memory or website read ever runs after no, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
@@ -47,7 +40,20 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
   flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
-  step `tools`.
+  step `tools`. Its owner answer is staged by the same runner as consent.
+
+`run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
+admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
+request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
+fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
+connections. Any turn while busy returns that state without running or counting on the limits.
+The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
+seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
+`TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
+Failure, deadline or shutdown before the final commit removes only entries marked by that run. Shutdown after
+the final commit ends the task without rollback. Removing a pending answer immediately
+after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
+`TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
 
 Each setup tool call is an owner call on the new Desk (`run_setup_tool`): the tool must be in the owner's `/context`,
 then `/decide`, and `/execute` only on an allow. A read that is held, refused or fails doesn't stop setup: its inline
@@ -59,10 +65,10 @@ retries included) and recorded right after it returns. An answer that doesn't fi
 errors; then the request is 503 `model_unavailable` and nothing of it is stored. An answer that stopped before it
 finished (`max_tokens`, say), or a call that ran out of time, is 503 at once, whatever its text.
 
-No transaction waits on the model, a read or the kernel. Consent saves its busy state first; its final write and an
-answer lock the row only to check that nothing changed since the snapshot and save (409 `conflict` when something
+No transaction waits on the model, a read or the kernel. Every turn saves its busy state first; its writes
+lock the row only to check that nothing changed since the snapshot and save (409 `conflict` when something
 did, with nothing saved); every row lock is waited for at most `LOCK_TIMEOUT`, then 409 too. While a turn runs,
-another turn is 409 at once in this process, except a busy consent repeat, which answers 202 before taking the guard.
+another turn is 409 at once in this process before the busy commit, or 202 once busy, before taking the guard.
 Another process's changed snapshot is caught when it saves.
 An answer names the question it answers (409 when another is waiting), so two answers can't both answer one question
 and an answer sent twice can't answer the next.
@@ -103,7 +109,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.consent_runs import ConsentRuns
+from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
@@ -239,10 +245,11 @@ TURN_MAX_TOKENS = 4096
 # The most one structured setup call may take, the SDK's retries included (and each of its tries): a stalled call ends
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
 SETUP_TIMEOUT_S = 60.0
-CONSENT_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
-CONSENT_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
-CONSENT_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
-CONSENT_ABANDONED_S = 120       # recover only when this process holds no run
+TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
+TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
+TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
+TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
+TURN_ABANDONED_S = 120       # recover only when this process holds no run
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
@@ -820,22 +827,22 @@ async def _settle(engine: AsyncEngine, statement: Executable) -> None:
         logger.warning("a keyed setup start's row couldn't be settled (%s)", type(failed).__name__)
 
 
-async def _recover_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
-                           runs: ConsentRuns) -> Interview:
+async def _recover_turn(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
+                        runs: TurnRuns) -> Interview:
     interview = await _read(engine, owner, interview_id)
-    if interview.busy and not runs.holds(interview_id) and _consent_abandoned(interview):
-        await _rollback_consent(owner, engine, interview_id, None, abandoned=True)
+    if interview.busy and not runs.holds(interview_id) and _turn_abandoned(interview):
+        await _rollback_turn(owner, engine, interview_id, None, abandoned=True)
         interview = await _read(engine, owner, interview_id)
     return interview
 
 
-def _consent_abandoned(interview: Interview) -> bool:
+def _turn_abandoned(interview: Interview) -> bool:
     return (interview.updated_at is not None
-            and (datetime.now(UTC) - interview.updated_at).total_seconds() > CONSENT_ABANDONED_S)
+            and (datetime.now(UTC) - interview.updated_at).total_seconds() > TURN_ABANDONED_S)
 
 
-async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: ConsentRuns) -> SetupState:
-    interview = await _recover_consent(owner, engine, interview_id, runs)
+async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns) -> SetupState:
+    interview = await _recover_turn(owner, engine, interview_id, runs)
     return setup_state(interview, await _slug(owner, interview.desk_id))
 
 
@@ -849,12 +856,12 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
     interview.transcript.append(_ask(interview, QUESTION_KEYS[0]))
 
 
-async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, run_id: str | None, *,
-                             abandoned: bool = False) -> None:
+async def _rollback_turn(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, run_id: str | None, *,
+                         abandoned: bool = False) -> None:
     """Remove only this run's pending entries, or every pending entry when the row is abandoned."""
     async with engine.connect() as conn, conn.begin():
         current = await _load(conn, owner.copy_id, interview_id, lock=True)
-        if not current.busy or (abandoned and not _consent_abandoned(current)):
+        if not current.busy or (abandoned and not _turn_abandoned(current)):
             return
         kept = []
         for index, entry in enumerate(current.transcript):
@@ -870,18 +877,31 @@ async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: 
         await _save(conn, current)
 
 
-async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
-                  runs: ConsentRuns, ro_schema: str, admit: Callable[[], Awaitable[None]]) -> SetupState:
-    """Hand the turn guard to a background task immediately after admission. It stores consent, then runs the
-    reads and Claude's first question. Wait for the busy commit without cancelling the run if the request ends,
-    then up to `CONSENT_WAIT_S` for the final interview; while still running, return its stored busy state."""
-    interview = await _recover_consent(owner, engine, interview_id, runs)
+async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, *,
+                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                   check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
+                   turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
+                   keep_staged: bool = True,
+                   after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
+                   render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
+    """Store staged entries, run a detached owner turn, and return its landed or busy state.
+
+    `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
+    card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
+    Hand the guard to the task immediately after admission, without an await in between. Request cancellation
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
+    acquisition through the final commit.
+    `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
+    is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
+    rolling back the turn.
+    """
+    interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
     if interview.busy:
-        return setup_state(interview, await _slug(owner, desk_id))
-    if interview.consent is not None or interview.step != "questions":
-        raise ApiProblem(409, "conflict")
+        return render(interview, await _slug(owner, desk_id))
     seen = _stored(interview)
+    check(interview)
     guard = contextlib.ExitStack()
     guard.enter_context(_turn(interview_id))
     busy_stored = asyncio.Event()
@@ -891,41 +911,52 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         nonlocal pending
         run_id = secrets.token_hex(8)
         busy = None
+        committed = False
         try:
-            async with asyncio.timeout(CONSENT_RUN_TIMEOUT_S):
-                async with detached(owner, engine, ro_schema) as ctx:
+            async with contextlib.AsyncExitStack() as stack:
+                async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
+                    ctx = await stack.enter_async_context(detached(owner, engine, ro_schema))
                     slug = await _slug(ctx, desk_id)
-                    interview.consent = allow
-                    interview.transcript.append(Entry(role="owner", text=CONSENT_ANSWERS[allow], pending=run_id))
+                    staged = stage(interview)
+                    for entry in staged:
+                        entry.pending = run_id
+                    interview.transcript += staged
                     busy = _stored(interview)
                     try:
                         await _commit(engine, ctx, interview, seen)
                     except ApiProblem:
                         busy = None          # rejected before storing; another run's snapshot is never ours
                         raise
-                    pending = setup_state(interview, slug)
+                    pending = render(interview, slug)
                     busy_stored.set()
-                    entries = []
-                    if allow:
-                        entries.append(await _read_memory(ctx, desk_id))
-                        site = website_url(interview.transcript[0].website)
-                        if site is not None:
-                            entries.append(await _read_website(ctx, desk_id, *site))
-                    interview.transcript += entries
-                    await _after_consent(ctx, engine, model, interview, entries)
-                    for entry in interview.transcript:
-                        if entry.pending == run_id:
+                    await turn(ctx, interview, staged)
+                    if keep_staged:
+                        for entry in staged:
                             entry.pending = None
+                    else:
+                        interview.transcript = [entry for entry in interview.transcript if entry.pending != run_id]
                     await _commit(engine, ctx, interview, busy)
-                    return setup_state(interview, slug)
+                    committed = True
+                if after is not None:
+                    try:
+                        async with asyncio.timeout(TURN_AFTER_TIMEOUT_S):
+                            await after(ctx, interview)
+                    except Exception as failed:
+                        logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
         except BaseException as failed:
-            logger.warning("setup consent failed (%s)", type(failed).__name__)
+            if committed:
+                if isinstance(failed, asyncio.CancelledError):
+                    raise
+                logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
+            logger.warning("setup turn failed (%s)", type(failed).__name__)
             if busy is not None:
                 try:
-                    async with asyncio.timeout(CONSENT_ROLLBACK_TIMEOUT_S):
-                        await _rollback_consent(owner, engine, interview_id, run_id)
+                    async with asyncio.timeout(TURN_ROLLBACK_TIMEOUT_S):
+                        await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
-                    logger.warning("setup consent couldn't be reopened (%s)", type(rollback_failed).__name__)
+                    logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
             if isinstance(failed, TimeoutError):
                 raise ApiProblem(503, "model_unavailable") from None
             raise
@@ -949,35 +980,62 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
-    done, _ = await asyncio.wait({task}, timeout=CONSENT_WAIT_S)
+    done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
     return pending
 
 
-def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
+async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
+                  runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]]) -> SetupState:
+    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    def check(interview: Interview) -> None:
+        if interview.consent is not None or interview.step != "questions":
+            raise ApiProblem(409, "conflict")
+
+    def stage(interview: Interview) -> list[Entry]:
+        interview.consent = allow
+        return [Entry(role="owner", text=CONSENT_ANSWERS[allow])]
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        entries = []
+        if allow:
+            entries.append(await _read_memory(ctx, interview.desk_id))
+            site = website_url(interview.transcript[0].website)
+            if site is not None:
+                entries.append(await _read_website(ctx, interview.desk_id, *site))
+        interview.transcript += entries
+        await _after_consent(ctx, engine, model, interview, entries)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=turn)
+
+
+def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: str | None = None) -> dict:
     """The answer turn's one message: the fixed head, then everything untrusted inside its wrapper. A limit question's
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
     turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
     or their content. On a limit question these replies were made under the same isolation; earlier questions'
-    replies, which may repeat memory or website text, never enter the exchange."""
+    replies, which may repeat memory or website text, never enter the exchange. Entries staged by this run are
+    excluded from all transcript history; the current answer appears only in `owner_answer`."""
+    transcript = [entry for entry in interview.transcript if run_id is None or entry.pending != run_id]
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     parts = [setup_turn_head(interview.business_type, key), wrap(ANSWERS_SO_FAR_TAG, so_far)]
-    reads = [] if limit_turn else interview.transcript
+    reads = [] if limit_turn else transcript
     for entry in reads:
         if entry.read == "memory" and entry.content:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
-    start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
-                  if interview.transcript[index].question == key), len(interview.transcript))
+    start = next((index + 1 for index in range(len(transcript) - 1, -1, -1)
+                  if transcript[index].question == key), len(transcript))
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
-             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
+             for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
     if lines:
         parts.append(this_question_so_far(lines))
     parts.append(wrap(OWNER_ANSWER_TAG, text))
@@ -1054,31 +1112,35 @@ async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
 
 
 async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey,
-                 text: str) -> SetupState:
-    """One answer turn on the question waiting (module docstring); 409 `conflict`, before any model call, when none
-    is, the answer names another (an answer sent twice finds the next question waiting) or one is running already.
-    The model call, the website read and the kernel's rename run with no lock held."""
-    interview = await _read(engine, owner, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    key = interview.question
-    if key is None or key != question:
-        raise ApiProblem(409, "conflict")
-    seen = _stored(interview)
-    with _turn(interview_id):
-        turn = await structured(model, recorder(engine, owner), SETUP_TURN_SYSTEM,
-                                [_turn_message(interview, key, text)], SETUP_TURNS[key], TURN_MAX_TOKENS)
+                 text: str, *, runs: TurnRuns, ro_schema: str,
+                 admit: Callable[[], Awaitable[None]]) -> SetupState:
+    """Run an answer to the waiting question through the shared turn runner; busy repeats do no work.
+    Model calls, website reads and the kernel's rename run without a transaction open."""
+    def check(interview: Interview) -> None:
+        if interview.question is None or interview.question != question:
+            raise ApiProblem(409, "conflict")
+
+    def stage(interview: Interview) -> list[Entry]:
+        return [Entry(role="owner", text=text)]
+
+    async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        key = question
+        desk_id = interview.desk_id
+        said, = staged
+        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
+                                [_turn_message(interview, key, text, run_id=said.pending)],
+                                SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
-        said = Entry(role="owner", text=text)
-        entries = [said]
+        entries = []
         if turn.reply.strip():
             entries.append(Entry(role="claude", text=turn.reply.strip()))
         site = website_url(turn.website)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
-                entries.append(await _read_website(owner, desk_id, *site))
+                entries.append(await _read_website(ctx, desk_id, *site))
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
-        await _rename(owner, desk_id, patch)
+        await _rename(ctx, desk_id, patch)
         interview.answers = merged(interview.answers, patch, key)
         if turn.step_done:
             later = QUESTION_KEYS[QUESTION_KEYS.index(key) + 1:]
@@ -1088,8 +1150,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 interview.step = "tools"
                 entries.append(Entry(role="claude", text=QUESTIONS_DONE))
         interview.transcript += entries
-        await _commit(engine, owner, interview, seen)
-    return setup_state(interview, await _slug(owner, desk_id))
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=run)
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------

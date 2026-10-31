@@ -20,6 +20,7 @@ import type {
   OwnerTranscript,
   PaymentLinkOut,
   PeopleOut,
+  RefusalCause,
   Reports,
   RulesPreset,
   RulesView,
@@ -119,26 +120,30 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
         from_the_visitor: d.fromTheVisitor,
       } satisfies NeedsYouItem,
     }));
+  // An open handoff quotes what its visitor wrote last, as of this read (the API's `last_texts`).
   const callbacks = [...world.handoffs.values()]
     .filter((h) => h.deskId === deskId && h.handoff.status === 'open')
-    .map((h) => ({
-      at: h.createdAt,
-      item: {
-        handoff: h.handoff,
-        decision: null,
-        held_by: null,
-        held_at: null,
-        session: needsYouSession(world.sessions.get(h.handoff.session_id), h.handoff.session_id),
-        from_the_visitor: h.fromTheVisitor,
-      } satisfies NeedsYouItem,
-    }));
+    .map((h) => {
+      const session = world.sessions.get(h.handoff.session_id);
+      return {
+        at: h.createdAt,
+        item: {
+          handoff: h.handoff,
+          decision: null,
+          held_by: null,
+          held_at: null,
+          session: needsYouSession(session, h.handoff.session_id),
+          from_the_visitor: session?.lastVisitorText ?? null,
+        } satisfies NeedsYouItem,
+      };
+    });
   return [...held, ...callbacks].sort((a, b) => a.at - b.at).map(({ item }) => item);
 }
 
 /**
- * One of Claude's replies the check stopped, as Safety lists them and Today's briefing shows them:
- * its `reply` entry wasn't ok for a reason other than a paused chat. An owner's stopped say isn't
- * an attempt. Nobody tried anything, so the last 7 days don't count it as stopped.
+ * One of Claude's replies the check stopped, as Safety lists them: its `reply` entry wasn't ok for
+ * a reason other than a paused chat. An owner's stopped say isn't an attempt. Nobody tried
+ * anything, so the briefing leaves it out and the last 7 days don't count it as stopped.
  */
 function stoppedReplies(desk: DeskRecord) {
   return desk.ledger.filter((e) => {
@@ -265,14 +270,20 @@ interface Activity {
   texts: Happened[];
   bookings: Booking[];
   leads: (Happened & { leadId: string; displayName: string; note: string | null })[];
-  /** Refusals at decide time, and Claude's replies the check stopped, each with its kind as Safety lists it. */
-  stopped: (Happened & { kind: 'refused' | 'reply_blocked'; refId: string; line: string | null })[];
+  /**
+   * Refusals at decide time, and Claude's replies the check stopped, each with its kind as Safety
+   * lists it. `cause` is read from its deciding policies and decide entry, as on Safety; a refusal
+   * the API can't place and a stopped reply have none.
+   */
+  stopped: (Happened & { kind: 'refused' | 'reply_blocked'; refId: string; line: string | null; cause: RefusalCause | null })[];
   holds: Happened[];
   callbacks: Happened[];
   /** The owner answering a hold, taking over, whispering, resuming, or writing in the chat. */
   steppedIn: Happened[];
   /** Replies Claude delivered that weren't a handoff. */
   replies: Happened[];
+  /** Replies Claude delivered with the handoff clause: the chat is waiting on the owner. */
+  handoffs: Happened[];
 }
 
 const sessionOf = (e: LedgerEntry) => e.event.session_id ?? '';
@@ -311,6 +322,7 @@ function activityOf(world: MockWorld, desk: DeskRecord): Activity {
   const items = sessions.flatMap((s) => s.items.map((item) => ({ sessionId: s.state.session_id, item, at: Date.parse(item.created_at) })));
   const delivered = items.filter(({ item }) => item.kind === 'delivered' && item.event?.type === 'message');
   const author = ({ item }: (typeof items)[number]) => (item.event?.type === 'message' ? item.event.author : null);
+  const handsOff = ({ item }: (typeof items)[number]) => item.event?.type === 'message' && item.event.blocks.some((b) => b.template === 'handoff');
 
   return {
     world,
@@ -323,8 +335,24 @@ function activityOf(world: MockWorld, desk: DeskRecord): Activity {
     stopped: [
       ...decisions
         .filter((d) => d.decision.outcome === 'refuse')
-        .map((d) => ({ sessionId: d.decision.session_id, at: d.createdAt, kind: 'refused' as const, refId: d.decision.decision_id, line: d.decision.reason_plain })),
-      ...stoppedReplies(desk).map((e) => ({ sessionId: sessionOf(e), at: Date.parse(e.created_at), kind: 'reply_blocked' as const, refId: String(e.seq), line: null })),
+        .map((d) => ({
+          sessionId: d.decision.session_id,
+          at: d.createdAt,
+          kind: 'refused' as const,
+          refId: d.decision.decision_id,
+          line: d.decision.reason_plain,
+          cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
+            verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
+          }),
+        })),
+      ...stoppedReplies(desk).map((e) => ({
+        sessionId: sessionOf(e),
+        at: Date.parse(e.created_at),
+        kind: 'reply_blocked' as const,
+        refId: String(e.seq),
+        line: null,
+        cause: null,
+      })),
     ],
     holds: decisions.filter((d) => d.decision.outcome === 'hold').map((d) => ({ sessionId: d.decision.session_id, at: d.createdAt })),
     callbacks: executed('native.request_callback').map((d) => ({ sessionId: d.decision.session_id, at: reachedAt(d.decision) })),
@@ -332,9 +360,8 @@ function activityOf(world: MockWorld, desk: DeskRecord): Activity {
       ...[...approvals, ...ownerActs].map((e) => ({ sessionId: sessionOf(e), at: Date.parse(e.created_at) })),
       ...delivered.filter((d) => author(d) === 'owner'),
     ],
-    replies: delivered.filter(
-      (d) => author(d) === 'claude' && !(d.item.event?.type === 'message' && d.item.event.blocks.some((b) => b.template === 'handoff')),
-    ),
+    replies: delivered.filter((d) => author(d) === 'claude' && !handsOff(d)),
+    handoffs: delivered.filter((d) => author(d) === 'claude' && handsOff(d)),
   };
 }
 
@@ -348,23 +375,32 @@ function conversationsIn(a: Activity, from: number, to: number): Set<string> {
   return new Set(within(a.texts, from, to).map((t) => t.sessionId));
 }
 
-const KIND_ORDER: readonly BriefingKind[] = ['blocked', 'booking', 'lead', 'answer'];
+const KIND_ORDER: readonly BriefingKind[] = ['turned_down', 'booking', 'lead', 'answer'];
 
+/**
+ * Every briefing item since last night, newest first, as the API core lists them: each request
+ * the kernel refused, booking and lead, and each conversation Claude answered alone. Claude's
+ * drafts the reply check stopped stay on Safety: they make no item, and a reply delivered after
+ * one is still an answer.
+ */
 function briefingItems(a: Activity): BriefingItem[] {
   const { since, now } = a.window;
   const end = now + 1;
   const nameOf = (sessionId: string) => a.world.sessions.get(sessionId)?.displayName ?? null;
-  const item = (kind: BriefingKind, h: Happened, refId: string, line: string | null): BriefingItem => ({
+  const item = (kind: BriefingKind, h: Happened, refId: string, line: string | null, cause: RefusalCause | null = null): BriefingItem => ({
     kind,
     at: isoTime(h.at),
     session_id: h.sessionId === '' ? null : h.sessionId,
     display_name: h.sessionId === '' ? null : nameOf(h.sessionId),
     ref_id: refId,
     line,
+    cause,
   });
-  // An answer: Claude replied in the window, to a conversation with nothing else in it.
+  const refused = a.stopped.filter((s) => s.kind === 'refused');
+  // An answer: Claude replied in the window, to a conversation with nothing else in it, and didn't
+  // hand it to the owner.
   const busy = new Set(
-    [a.bookings, a.leads, a.holds, a.stopped, a.callbacks].flatMap((all) => within(all, since, end).map((h) => h.sessionId)),
+    [a.bookings, a.leads, a.holds, refused, a.callbacks, a.handoffs].flatMap((all) => within(all, since, end).map((h) => h.sessionId)),
   );
   const newestReply = new Map<string, Happened>();
   for (const reply of within(a.replies, since, end)) {
@@ -373,7 +409,7 @@ function briefingItems(a: Activity): BriefingItem[] {
     if (!seen || reply.at > seen.at) newestReply.set(reply.sessionId, reply);
   }
   const items = [
-    ...within(a.stopped, since, end).map((s) => item('blocked', s, s.refId, s.line)),
+    ...within(refused, since, end).map((s) => item('turned_down', s, s.refId, s.line, s.cause)),
     ...within(a.bookings, since, end).map((b) => item('booking', b, b.decision.decision_id, b.decision.reason_plain)),
     ...within(a.leads, since, end).map((l) => ({ ...item('lead', l, l.leadId, l.note), display_name: l.displayName })),
     ...[...newestReply.values()].map((r) => item('answer', r, r.sessionId, null)),
@@ -399,23 +435,32 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
-    blocked: within(a.stopped, since, end).length,
+    turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
-    newest: { blocked: first('blocked'), booking: first('booking'), lead_or_answer: leadOrAnswer },
+    newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },
   };
+}
+
+/**
+ * One count of a span, from `from` to `end` (left out), as the API's `week_counts` makes it for
+ * Today's last 7 days and the reports alike: the conversations with someone's own words in it, how
+ * many of them the owner stepped into there, and the bookings made.
+ */
+function spanCounts(a: Activity, from: number, end: number): { conversations: number; steppedIn: number; bookings: Booking[] } {
+  const conversations = conversationsIn(a, from, end);
+  const steppedIn = new Set(within(a.steppedIn, from, end).map((h) => h.sessionId).filter((id) => conversations.has(id)));
+  return { conversations: conversations.size, steppedIn: steppedIn.size, bookings: within(a.bookings, from, end) };
 }
 
 /**
  * The last 7 days, as the API core's `this_week` counts them. `stopped` is the requests the kernel
  * refused, total and by day: a draft of Claude's the reply check stopped is no attempt anyone made,
- * so the briefing and Safety list it but the week doesn't count it.
+ * so Safety lists it, but the briefing leaves it out and the week doesn't count it.
  */
 function thisWeekOf(a: Activity): ThisWeek {
   const { days, weekFrom, now } = a.window;
   const end = now + 1;
-  const conversations = conversationsIn(a, weekFrom, end);
-  const steppedIn = new Set(within(a.steppedIn, weekFrom, end).map((h) => h.sessionId).filter((id) => conversations.has(id)));
-  const bookings = within(a.bookings, weekFrom, end);
+  const { conversations, steppedIn, bookings } = spanCounts(a, weekFrom, end);
   const refused = a.stopped.filter((s) => s.kind === 'refused');
   return {
     timezone: BUSINESS.timezone,
@@ -423,9 +468,9 @@ function thisWeekOf(a: Activity): ThisWeek {
     end: days.at(-1)?.date ?? '',
     bookings: bookings.length,
     booked_cents: bookings.reduce((sum, b) => sum + b.cents, 0),
-    conversations: conversations.size,
-    handled: conversations.size - steppedIn.size,
-    stepped_in: steppedIn.size,
+    conversations,
+    handled: conversations - steppedIn,
+    stepped_in: steppedIn,
     stopped: within(refused, weekFrom, end).length,
     days: days.map(({ date, from, to }) => ({
       date,
@@ -436,29 +481,51 @@ function thisWeekOf(a: Activity): ThisWeek {
   };
 }
 
-function paidCents(world: MockWorld, deskId: string): number {
-  return [...world.links.values()].filter((l) => l.deskId === deskId && l.view.state === 'paid').reduce((sum, l) => sum + l.view.amount_cents, 0);
+/**
+ * The money paid through the Desk's payment links from `from` to `end` (left out), by when the
+ * record says each was paid. (The API also counts what agents charged within their signed limits;
+ * the mock's reports don't yet.)
+ */
+function paidCents(world: MockWorld, desk: DeskRecord, from: number, end: number): number {
+  const paidAt = new Map(
+    desk.ledger.filter((e) => e.event.kind === 'payment' && e.event.summary.state === 'paid').map((e) => [e.event.ref_id, Date.parse(e.created_at)]),
+  );
+  return [...world.links]
+    .filter(([token, l]) => {
+      const at = paidAt.get(token);
+      return l.deskId === desk.summary.desk_id && l.view.state === 'paid' && at !== undefined && at >= from && at < end;
+    })
+    .reduce((sum, [, l]) => sum + l.view.amount_cents, 0);
 }
 
-export function reports(world: MockWorld, desk: DeskRecord): Reports {
-  const deskId = desk.summary.desk_id;
-  const customers = world.sessionsOf(deskId).filter((s) => !s.ownerPreview);
-  const neededYou = new Set([
-    ...decisionsOf(world, deskId).filter((d) => d.decision.outcome === 'hold').map((d) => d.decision.session_id),
-    ...[...world.handoffs.values()].filter((h) => h.deskId === deskId).map((h) => h.handoff.session_id),
-  ]);
+/** The reports' span when none is asked for, and the longest the API allows, in local dates. */
+export const REPORT_DAYS = { default: 30, max: 365 } as const;
+
+/**
+ * The reports for the last `days` local dates, today included, from 00:00 on the first of them to
+ * now, as the API counts them: the same count as Today's last 7 days (`spanCounts`), so a
+ * conversation needed the owner only when she stepped into it there (answered a request in it,
+ * took it over, whispered or resumed it). A request held for her, or a chat the handoff card handed
+ * to her, stays Claude's until she does.
+ */
+export function reports(world: MockWorld, desk: DeskRecord, days: number = REPORT_DAYS.default): Reports {
+  const a = activityOf(world, desk);
+  const { now } = a.window;
+  const end = now + 1;
+  const from = localInstant(addDays(wallClock(now, BUSINESS.timezone).date, 1 - days), 0, BUSINESS.timezone);
+  const { conversations, steppedIn, bookings } = spanCounts(a, from, end);
   return {
-    bookings: decisionsOf(world, deskId).filter((d) => d.decision.action?.tool === 'native.book' && d.decision.state === 'executed').length,
-    paid_cents: paidCents(world, deskId),
-    handled_by_claude: customers.filter((s) => !neededYou.has(s.state.session_id)).length,
-    needed_you: customers.filter((s) => neededYou.has(s.state.session_id)).length,
+    bookings: bookings.length,
+    paid_cents: paidCents(world, desk, from, end),
+    handled_by_claude: conversations - steppedIn,
+    needed_you: steppedIn,
   };
 }
 
 /**
  * Safety's attempts, newest first: decisions refused at decide time and Claude's replies the check
- * stopped, the same filter as the briefing's blocked items (the API core's `_stopped_attempts`);
- * the last 7 days count only the refused ones. A hold is the owner's to answer, not an attempt
+ * stopped (the API core's `_stopped_attempts`); the briefing and the last 7 days count only the
+ * refused ones. A hold is the owner's to answer, not an attempt
  * that was stopped, so it isn't listed. Each refusal carries its cause, read as the API reads it
  * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
  */
