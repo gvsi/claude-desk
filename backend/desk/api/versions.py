@@ -2,19 +2,43 @@
 (Plan 02b, Tasks 7 and 9): the Desk's active version, a draft posted to the kernel and checked, what the owner reads
 of a draft, a version's money cap, and the Desk's tools each with the cards that cover it.
 
-A draft is compiled and proved by the kernel (`POST /policy/draft`): the API sends cards, never Cedar.
+A draft is compiled and proved by the kernel (`POST /policy/draft`): the API sends cards, never Cedar. Before it
+sends any, it names the cards that would change a tool of the always-on baseline, starting a verification
+(`ChangesAlwaysOn`), with the same check the kernel's compiler refuses them with (`desk.always_on`), so the owner sees
+which card; the kernel's refusal stays the enforcement.
 """
 
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from desk.always_on import changes_always_on
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.kernel_client import KernelUnavailable
+from desk.api.proving import AnswerError
 from desk.api.schemas import CardDiff, CoveringCard, RulesDraft, RulesSummary, ToolRow
 from desk.contracts import PolicyVersion, RuleCard, ToolProfile
 from desk.kernel_api import PolicyDraftRequest, ToolsConnectRequest
 
 TOOL_ROW_FIELDS = tuple(name for name in ToolRow.model_fields if name != "cards")
+
+
+class ChangesAlwaysOn(AnswerError):
+    """Cards that would change starting a verification, which is always on (`card_ids`, in the cards' order): the
+    route answers 422 `changes_always_on` naming them, and nothing is sent to the kernel."""
+
+    def __init__(self, card_ids: list[str]):
+        super().__init__("cards would change an always-on tool")
+        self.card_ids = card_ids
+
+
+def check_always_on(cards: Iterable[RuleCard]) -> None:
+    """`ChangesAlwaysOn` naming each card that could change a tool of the always-on baseline
+    (`desk.always_on.changes_always_on`: a card on starting a verification other than the presets' own, an ask or
+    never card on its effect, or an auto card on its effect for one person or agent). Default asks are the compiler's
+    own and are left out, as the kernel leaves them out."""
+    refused = [card.card_id for card in cards if not card.is_default and changes_always_on(card) is not None]
+    if refused:
+        raise ChangesAlwaysOn(refused)
 
 
 def version_from_row(row: Mapping[str, Any]) -> PolicyVersion:
@@ -39,8 +63,10 @@ def version_cap(version: Mapping[str, Any] | PolicyVersion) -> int:
 async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expected_parent: int, *,
                      auto_money_cap_cents: int | None = None) -> PolicyVersion:
     """The kernel's draft of `cards` on `expected_parent`, compiled and proved, at `auto_money_cap_cents` (None keeps
-    the active version's money cap, as the kernel does). A kernel that doesn't answer in time is 409
+    the active version's money cap, as the kernel does). Cards that would change starting a verification are refused
+    before the kernel is asked (`check_always_on`). A kernel that doesn't answer in time is 409
     `rules_cannot_be_checked`, as a proof that timed out or ran bounded is (`checkable`)."""
+    check_always_on(cards)
     request = PolicyDraftRequest(desk_id=desk_id, cards=cards, expected_parent=expected_parent,
                                  auto_money_cap_cents=auto_money_cap_cents)
     try:

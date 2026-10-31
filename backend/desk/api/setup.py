@@ -62,10 +62,11 @@ Part 2 runs through the proving routes (`desk.api.proving`). The rules step puts
 the Desk offers, the contract's limits, the answered limits and money cap, the owner's "never" answers, no money going
 out on its own), stores them, and posts them after the Ask me first preset's utility cards to `POST /policy/draft`,
 which compiles and proves them. Cards code can't use, or that the kernel refuses as invalid (naming no card), get
-Claude's one retry, then the template cards. A re-post sends the stored cards and never drafts again; a rejected proof,
-or stored cards the kernel refuses, fall back to the template cards once. The situations (route `situations`) and the
-safety check (`SAFETY_PROBES`) are probes the kernel decides against the draft, running nothing. The confirm activates
-the draft with Answering still off, and going live turns it on.
+Claude's one retry, then the template cards; so do cards that would change starting a verification, which the API
+refuses before the kernel is asked, with the check the kernel refuses them with. A re-post sends the stored cards and
+never drafts again; a rejected proof, or stored cards the kernel refuses, fall back to the template cards once. The
+situations (route `situations`) and the safety check (`SAFETY_PROBES`) are probes the kernel decides against the draft,
+running nothing. The confirm activates the draft with Answering still off, and going live turns it on.
 """
 
 import asyncio
@@ -165,6 +166,7 @@ from desk.api.schemas import (
 )
 from desk.api.setup_templates import SAFETY_PROBES, SafetyProbe, template_cards
 from desk.api.versions import (
+    ChangesAlwaysOn,
     active_row,
     checkable,
     connect_payments,
@@ -1260,14 +1262,20 @@ async def _post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], cap:
 async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], template: list[RuleCard],
                   cap: int) -> PolicyVersion | None:
     """The kernel's checkable draft of setup's `cards` at the answered cap (`_post_draft`), or None when the kernel
-    refuses them as invalid (422, which names no card: the kernel logs why). The `template` cards refused are the
-    owner's error to see."""
+    refuses them as invalid (422, which names no card: the kernel logs why), or when the API refuses them first for a
+    card that would change starting a verification (`ChangesAlwaysOn`, the check the kernel refuses them with). The
+    `template` cards refused are the owner's error to see."""
     try:
         return checkable(await _post_draft(owner, desk_id, cards, cap))
     except KernelFailed as refused:
         if refused.code != "invalid" or cards == template:
             raise
         logger.warning("the kernel refused setup's cards as invalid")
+        return None
+    except ChangesAlwaysOn as refused:
+        if cards == template:
+            raise
+        logger.warning("setup's cards would change starting a verification: %s", ", ".join(refused.card_ids))
         return None
 
 

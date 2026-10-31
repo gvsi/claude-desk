@@ -203,6 +203,15 @@ export interface CardDiff {
   changed: [unknown, unknown][];
 }
 /**
+ * 422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a
+ * verification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing
+ * was drafted.
+ */
+export interface ChangesAlwaysOn {
+  error?: "changes_always_on";
+  card_ids: string[];
+}
+/**
  * A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses.
  */
 export interface CheckedDraft {

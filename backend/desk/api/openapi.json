@@ -6072,6 +6072,9 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
@@ -6199,6 +6202,9 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
@@ -6316,6 +6322,9 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/AboveMoneyCap"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
                     },
                     {
                       "$ref": "#/components/schemas/ApiError"
@@ -6437,6 +6446,9 @@
                       "$ref": "#/components/schemas/AboveMoneyCap"
                     },
                     {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
                       "$ref": "#/components/schemas/ApiError"
                     }
                   ],
@@ -6551,7 +6563,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ChangesAlwaysOn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Draft Money Cap"
                 }
               }
             },
@@ -7488,6 +7508,29 @@
           "label"
         ],
         "title": "CardOption"
+      },
+      "ChangesAlwaysOn": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "changes_always_on",
+            "title": "Error",
+            "default": "changes_always_on"
+          },
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Card Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_ids"
+        ],
+        "title": "ChangesAlwaysOn",
+        "description": "422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a\nverification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing\nwas drafted."
       },
       "CheckedDraft": {
         "properties": {

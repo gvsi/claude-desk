@@ -157,9 +157,10 @@ async def draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], *, expecte
                 auto_money_cap_cents: int | None = None) -> RulesDraft:
     """The owner cards `cards` drafted on the active version (or `expected_parent`), at the money cap
     `auto_money_cap_cents` (None keeps the active version's): refused before the kernel is asked when there are more
-    than `OWNER_CARDS_MAX` (422 `invalid`, so a Desk never holds more cards than a rules chat can carry) or with
-    `AboveMoneyCap` when a new or changed card is above the draft's cap, else compiled and proved by the kernel, with
-    how the draft differs from the active rules. The draft's cap is read back from the version the kernel drafted."""
+    than `OWNER_CARDS_MAX` (422 `invalid`, so a Desk never holds more cards than a rules chat can carry), with
+    `AboveMoneyCap` when a new or changed card is above the draft's cap, or with `versions.ChangesAlwaysOn` naming
+    the cards that would change starting a verification; else compiled and proved by the kernel, with how the draft
+    differs from the active rules. The draft's cap is read back from the version the kernel drafted."""
     if sum(not card.is_default for card in cards) > OWNER_CARDS_MAX:
         raise ApiProblem(422, "invalid")
     row = await active_row(owner, desk_id)

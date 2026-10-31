@@ -6,10 +6,11 @@ of its own before anything is read or sent.
   kernel with the owner's credential.
 - Under `/api/owner/policy/{desk_id}`, the proving routes: each drafts a change the kernel compiles and proves
   (asked of Claude in plain words, an approval's cards, a preset, a suggestion or a new money cap), and `confirm`
-  activates a draft.
-  Each runs its work through `routes.setup.proving_answer`: past `PROVING_WAIT_S` it answers 202 `ProvingPending`
-  naming the same path and body, and that request sent again joins the work or takes its answer. A draft with a new
-  or changed card above the Desk's money cap is 422 `above_money_cap` with the cap, and nothing reaches the kernel.
+  activates a draft. Each runs its work through `routes.setup.proving_answer`: past `PROVING_WAIT_S` it answers 202
+  `ProvingPending` naming the same path and body, and that request sent again joins the work or takes its answer. A
+  draft with a new or changed card above the Desk's money cap is 422 `above_money_cap` with the cap, and one with
+  cards that would change starting a verification, which is always on, is 422 `changes_always_on` naming them; either
+  way nothing reaches the kernel.
   New work counts on a limit of the copy's before anything runs: a chat on `owner_ai`, every other draft and the
   confirm on `drafts` (40 an hour), since the kernel proves each.
 """
@@ -22,13 +23,14 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from desk.api import rules
+from desk.api import rules, versions
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.routes.setup import PROVING_RESPONSES, proving_answer
 from desk.api.schemas import (
     AboveMoneyCap,
     ApiError,
+    ChangesAlwaysOn,
     ConfirmRulesIn,
     DocumentIn,
     DraftAddIn,
@@ -60,7 +62,10 @@ router = APIRouter(prefix="/api/owner/desks/{desk_id}", generate_unique_id_funct
 policy_router = APIRouter(prefix="/api/owner/policy/{desk_id}", generate_unique_id_function=operation_ids("owner"))
 
 DeskId = Annotated[str, Path(max_length=128)]
-DRAFTING_RESPONSES: dict[int | str, dict[str, Any]] = {**PROVING_RESPONSES, 422: {"model": AboveMoneyCap | ApiError}}
+DRAFTING_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **PROVING_RESPONSES, 422: {"model": AboveMoneyCap | ChangesAlwaysOn | ApiError}}
+# The money-limit draft carries the active cards, held to its own cap, so no card of it can be above the cap.
+MONEY_CAP_RESPONSES: dict[int | str, dict[str, Any]] = {**PROVING_RESPONSES, 422: {"model": ChangesAlwaysOn | ApiError}}
 
 
 @router.get("/rules", response_model=RulesView, responses=error_responses(401, 404, 409, 422, 503))
@@ -144,9 +149,9 @@ Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 
 async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, body: BaseModel | None = None,
                     admit: Callable[[], Awaitable[None]] | None = None, changes_rules: bool = False) -> Any:
-    """`work` on one of the copy's Desks through `proving_answer`; a card above the money cap is 422. New work counts
-    on `admit`, by default the copy's `drafts` limit (drafting and confirming call no model, but the kernel proves
-    each)."""
+    """`work` on one of the copy's Desks through `proving_answer`; a card above the money cap, or one that would change
+    starting a verification, is 422. New work counts on `admit`, by default the copy's `drafts` limit (drafting and
+    confirming call no model, but the kernel proves each)."""
     started = monotonic()
     desk_id = ctx.desk(desk_id)
 
@@ -161,6 +166,8 @@ async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *
                                     changes_rules=changes_rules)
     except rules.AboveMoneyCap as above:
         return JSONResponse(AboveMoneyCap(cap_cents=above.cap_cents).model_dump(mode="json"), status_code=422)
+    except versions.ChangesAlwaysOn as always_on:
+        return JSONResponse(ChangesAlwaysOn(card_ids=always_on.card_ids).model_dump(mode="json"), status_code=422)
 
 
 @policy_router.post("/chat", response_model=RuleChatOut, responses=DRAFTING_RESPONSES)
@@ -220,7 +227,7 @@ async def draft_suggestion(desk_id: DeskId, tool: Annotated[str, Path(max_length
     return await _drafting(request, ctx, desk_id, work)
 
 
-@policy_router.post("/money_cap", response_model=RulesDraft, responses=PROVING_RESPONSES)
+@policy_router.post("/money_cap", response_model=RulesDraft, responses=MONEY_CAP_RESPONSES)
 async def draft_money_cap(desk_id: DeskId, body: MoneyCapIn, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Draft the active rules at a new money cap, the most Claude takes or pays out in one action without asking:

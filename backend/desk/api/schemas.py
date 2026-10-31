@@ -860,6 +860,15 @@ class AboveMoneyCap(BaseModel):
     cap_cents: int
 
 
+class ChangesAlwaysOn(BaseModel):
+    """422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a
+    verification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing
+    was drafted."""
+
+    error: Literal["changes_always_on"] = "changes_always_on"
+    card_ids: list[str]
+
+
 class RuleChatIn(BaseModel):
     """`POST /api/owner/policy/{desk_id}/chat`: what the owner asks Claude about the rules, in their own words."""
 

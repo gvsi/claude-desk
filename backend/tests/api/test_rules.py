@@ -3,11 +3,11 @@
 The owner changes a Desk's rules in five ways, each a draft the kernel compiles and proves and the owner confirms:
 asking Claude in plain words (route `rules_chat`), adding the cards an approval drafted, applying a preset, taking a
 suggestion drawn from their own approvals, or setting a new money cap (the active money cards above a lower one come
-down to it in the draft, each saying its new limit). Every draft answers with its owner cards and how they differ from the
-active rules, by card ID, default asks left out; a new or changed money card above the Desk's money cap is refused
-before the kernel is asked, and nothing changes until the owner confirms. The Rules page lists each tool with the
-cards that cover it, and each tool's page its recent decisions. Documents, knowledge and the demo's tool change go to
-the kernel as the owner.
+down to it in the draft, each saying its new limit). Every draft answers with its owner cards and how they differ from
+the active rules, by card ID, default asks left out; a new or changed money card above the Desk's money cap, or a card
+that would change starting a verification, is refused before the kernel is asked, and nothing changes until the owner
+confirms. The Rules page lists each tool with the cards that cover it, and each tool's page its recent decisions.
+Documents, knowledge and the demo's tool change go to the kernel as the owner.
 
 The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it.
 """
@@ -851,13 +851,12 @@ async def test_suggestion_after_three_approvals(app, browser, fake, kernel_http,
 
 
 async def test_a_draft_the_kernel_refuses_reaches_the_owner_unchanged(app, browser, fake, kernel_http, model, clock):
-    # A card that would change starting a verification: the kernel refuses the whole draft (422 `invalid`, naming no
-    # card). Whichever way the owner drafts, they get the kernel's error as it is, and nothing is drafted.
+    # The kernel refuses a whole draft (422 `invalid`, naming no card) for a reason the API doesn't check first.
+    # Whichever way the owner drafts, they get the kernel's error as it is, with no retry, and nothing is drafted.
     owner = await new_owner(app, browser, fake, kernel_http)
     fake.now = clock.now
     desk = fake.desks[owner.desk_id]
     rivera = owner_cards(fake, owner.desk_id)
-    (verification,) = [each for each in rivera if each.applies_to == "native.start_verification"]
     refused = (422, {"error": "kernel", "code": "invalid"})
 
     # The owner takes away the card that let payment links go out on their own, and approves three of them: a
@@ -870,37 +869,91 @@ async def test_a_draft_the_kernel_refuses_reaches_the_owner_unchanged(app, brows
         await approved_link(kernel_http, owner, items(drain=1), n)
     active, versions, drafts = desk.policy_version, set(desk.versions), len(fake.called("POST /policy/draft"))
 
-    # Rules by chat: Claude makes verification ask the owner. Code can't tell (the tool is the Desk's); the kernel
-    # refuses it, and the owner hears that, with no retry and nothing drafted.
-    model.add(chatted("Codes will wait for you.", *(
-        chat_card(each, mode="ask", reason="Codes ask you first.") if each == verification else chat_card(each)
-        for each in without_link)))
-    reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Ask me before sending any code"})
-    assert (reply.status_code, reply.json()) == refused
-    assert len(model.requests) == 1
-
-    # Cards to add, or cards as they should stand: a never card on verification's effect, or the presets' card for
-    # verified people only.
-    send_never = card("send-never", "effect:send_message", mode="never", reason="Nothing is sent to customers.")
-    narrower = verification.model_copy(update={"who": "verified"})
-    for body in (adding(send_never), {"cards": dumped(*(narrower if each == verification else each
-                                                         for each in without_link)), "expected_parent": active}):
-        reply = await owner.browser.post(rules_path(owner, "draft"), json=body)
-        assert (reply.status_code, reply.json()) == refused, body
-
-    # Presets and suggestions carry only the presets' own card for it, so the kernel's refusal is made to happen: it
-    # reaches the owner the same way.
-    for path, body in ((rules_path(owner, "preset"), {"preset": "auto"}),
-                       (rules_path(owner, "suggestions/native.payment_link"), None)):
+    extra = card("chat-1", "native.capture_lead", reason="Leads are saved on their own.")
+    model.add(chatted("Leads will be saved on their own.", *(chat_card(each) for each in [*without_link, extra])))
+    for path, body in ((rules_path(owner, "chat"), {"text": "Save leads on your own"}),
+                       (rules_path(owner, "draft"), adding(extra)),
+                       (rules_path(owner, "draft"), {"cards": dumped(*without_link, extra), "expected_parent": active}),
+                       (rules_path(owner, "preset"), {"preset": "auto"}),
+                       (rules_path(owner, "suggestions/native.payment_link"), None),
+                       (rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})):
         fake.fail("POST /policy/draft", "422", times=1)
         reply = await owner.browser.post(path, json=body)
         assert (reply.status_code, reply.json()) == refused, path
+    assert len(model.requests) == 1
 
-    assert len(fake.called("POST /policy/draft")) == drafts + 5
+    assert len(fake.called("POST /policy/draft")) == drafts + 6
     assert (desk.policy_version, set(desk.versions)) == (active, versions)
     view = RulesView.model_validate((await owner.browser.get(rules_url(owner))).json())
     assert view.active.version == active
     assert [each for each in view.active.cards if not each.is_default] == without_link
+
+
+def planted(fake, desk_id: str, *cards: RuleCard) -> None:
+    """The Desk's active rules with `cards` added, confirmed straight in the fake kernel: a version the kernel's
+    draft checks never saw, as one confirmed before it refused such cards could be."""
+    desk = fake.desks[desk_id]
+    parent = desk.policy_version
+    fake._supersede_active(desk)
+    desk.cards = [*desk.cards, *cards]
+    desk.policy_version = fake._next_version(desk)
+    fake._put_policy(desk, parent_version=parent)
+    fake.flush()
+
+
+async def test_a_card_that_would_change_verification_is_named_before_the_kernel(app, browser, fake, kernel_http,
+                                                                                model, monkeypatch):
+    # Verification is always on (`desk.always_on`): a card on starting one other than the presets' own, an ask or
+    # never card on its effect, or an auto one on its effect for one person or agent would change it. Whichever way
+    # the owner drafts, the API names each such card (422 `changes_always_on`) before the kernel is asked, with no
+    # retry, and nothing is drafted. The kernel refuses the same cards whatever the API sends (its contract tests).
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    rivera = owner_cards(fake, owner.desk_id)
+    (verification,) = [each for each in rivera if each.applies_to == "native.start_verification"]
+    active, versions = desk.policy_version, set(desk.versions)
+
+    def named(*card_ids: str) -> tuple[int, dict]:
+        return 422, {"error": "changes_always_on", "card_ids": list(card_ids)}
+
+    # Rules by chat: Claude makes verification ask the owner. The owner hears which card, with no retry.
+    model.add(chatted("Codes will wait for you.", *(
+        chat_card(each, mode="ask", reason="Codes ask you first.") if each == verification else chat_card(each)
+        for each in rivera)))
+    reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Ask me before sending any code"})
+    assert (reply.status_code, reply.json()) == named(verification.card_id)
+    assert len(model.requests) == 1
+
+    # Cards to add, or cards as they should stand: each card that would change it is named, in the cards' order.
+    send_never = card("send-never", "effect:send_message", mode="never", reason="Nothing is sent to customers.")
+    send_dana = card("send-dana", "effect:send_message", who="person", person_id=desk.person("dana").person_id,
+                     reason="Dana's messages go out on their own.")
+    narrower = verification.model_copy(update={"who": "verified"})
+    for body, card_ids in ((adding(send_never), ["send-never"]), (adding(send_dana, send_never), ["send-dana",
+                                                                                                "send-never"]),
+                           ({"cards": dumped(*(narrower if each == verification else each for each in rivera)),
+                             "expected_parent": active}, [verification.card_id])):
+        reply = await owner.browser.post(rules_path(owner, "draft"), json=body)
+        assert (reply.status_code, reply.json()) == named(*card_ids), body
+
+    # A preset, made to carry one here (the shipped presets carry only the presets' own card for it).
+    monkeypatch.setitem(PRESETS, "auto", [*PRESETS["auto"], send_never])
+    reply = await owner.browser.post(rules_path(owner, "preset"), json={"preset": "auto"})
+    assert (reply.status_code, reply.json()) == named("send-never")
+    assert fake.called("POST /policy/draft") == []
+
+    # An auto card on its effect for anyone ranks below the presets' card and changes no start: it is drafted.
+    send_anyone = card("send-anyone", "effect:send_message", reason="Messages to customers go out on their own.")
+    assert (await drafted(owner, rules_path(owner, "draft"), adding(send_anyone))).diff.added == [send_anyone]
+    assert len(fake.called("POST /policy/draft")) == 1
+
+    # The money limit drafts the active cards: one that would change verification, as an active version confirmed
+    # before the kernel refused such cards could hold, is named too, and the cap draft waits for the owner to fix it.
+    planted(fake, owner.desk_id, send_never)
+    reply = await owner.browser.post(rules_path(owner, "money_cap"), json={"auto_money_cap_cents": 10_000})
+    assert (reply.status_code, reply.json()) == named("send-never")
+    assert len(fake.called("POST /policy/draft")) == 1
+    assert len(set(desk.versions) - versions) == 1                         # the one draft for anyone
 
 
 async def test_simulate_tool_change_proxies(app, browser, fake, kernel_http):

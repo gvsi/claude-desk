@@ -11,10 +11,12 @@ ERROR = {"$ref": "#/components/schemas/ApiError"}
 OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                     ("owner_answer_approval", "409"): ("AlreadyResolved", "ApiError"),
                     ("owner_setup_confirm", "409"): ("RulesChanged", "ApiError"),
-                    # a rule change above the money cap names the cap the owner must raise first
-                    **{(operation, "422"): ("AboveMoneyCap", "ApiError")
+                    # a rule change above the money cap names the cap the owner must raise first, and one that
+                    # would change starting a verification names the cards
+                    **{(operation, "422"): ("AboveMoneyCap", "ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_rule_chat", "owner_draft_rules", "owner_draft_preset",
                                          "owner_draft_suggestion")},
+                    ("owner_draft_money_cap", "422"): ("ChangesAlwaysOn", "ApiError"),
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included
