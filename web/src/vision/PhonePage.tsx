@@ -57,7 +57,8 @@ function OwnerPhone() {
           <p className="cd-vision-quiet cd-type-caption">{PHONE_TODAY.business}</p>
           <h2 className="cd-type-greeting cd-vision-phone__greeting">{PHONE_TODAY.greeting}</h2>
         </div>
-        <ApprovalCard decision={PHONE_TODAY.held} heldBy={PHONE_TODAY.heldBy} waiting={PHONE_TODAY.waiting} onAnswer={noop} />
+        {/* A vision page sends nothing: the answers keep their look and do nothing. */}
+        <ApprovalCard decision={PHONE_TODAY.held} heldBy={PHONE_TODAY.heldBy} waiting={PHONE_TODAY.waiting} onAnswer={noop} inertAnswers />
         <section aria-labelledby={liveId}>
           <h3 id={liveId} className="cd-type-control cd-vision-phone__live-title">
             {PHONE_TODAY.liveTitle}
@@ -109,7 +110,7 @@ function VisitorPhone() {
         </Transcript>
       </div>
       <div className="cd-vision-phone__composer">
-        <Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} />
+        <Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} inertSend />
         <p className="cd-vision-quiet cd-type-caption cd-vision-phone__disclosure">{PHONE_CHAT.disclosure}</p>
       </div>
     </PhoneFrame>

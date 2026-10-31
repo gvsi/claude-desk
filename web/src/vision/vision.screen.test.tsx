@@ -107,6 +107,41 @@ describe('Vision pages', () => {
     }
   });
 
+  it('vision_controls_send_nothing', async () => {
+    // The phone's held quote: an answer leaves it as it was, waiting, with nothing locked or busy.
+    const phone = await renderRoute(PHONE);
+    const held = phone.screen.getByRole('article', { name: /^Held for you:/ });
+    const allow = held.getByRole('button', { name: 'Allow this time' });
+    const deny = held.getByRole('button', { name: 'Deny this time' });
+    await allow.click();
+    await wait(300);
+    expect(held.getByRole('group', { name: 'Your answer' }).element().hasAttribute('aria-busy')).toBe(false);
+    for (const answer of [allow, deny]) {
+      expect(answer.element().hasAttribute('aria-busy')).toBe(false);
+      expect(answer.element().hasAttribute('aria-disabled')).toBe(false);
+      expect(answer.element().hasAttribute('disabled')).toBe(false);
+    }
+    await expect.element(held.getByText('Waiting for your answer', { exact: true })).toBeVisible();
+    expect(mockStore.requests).toEqual([]);
+
+    // Each composer: the words typed stay after Enter and after Send, and no message is added.
+    for (const path of [PHONE, CLAUDE_ACCOUNT]) {
+      const { screen } = await renderRoute(path);
+      const log = screen.getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+      await expect.element(log).toBeVisible();
+      const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
+      const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+      await composer.fill('Thanks again');
+      await userEvent.keyboard('{Enter}');
+      await expect.element(composer, { timeout: 300 }).toHaveValue('Thanks again');
+      await screen.getByRole('button', { name: 'Send' }).click();
+      await wait(300);
+      await expect.element(composer).toHaveValue('Thanks again');
+      expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble'), path).toHaveLength(bubbles);
+      expect(mockStore.requests, path).toEqual([]);
+    }
+  });
+
   it('vision_pages_pass_the_screen_checks', async () => {
     // On a laptop and on a phone: one footer, clean copy, no axe violations, nothing scrolling
     // sideways, and on the owner's pages no technical words. The Claude account page is a visitor's.

@@ -36,7 +36,7 @@ export function ClaudeAccountPage() {
           language="en"
           onAskForOwner={noop}
           about={CLAUDE_ACCOUNT_ABOUT}
-          composer={<Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} />}
+          composer={<Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} inertSend />}
         >
           <Transcript label={`Conversation with ${brand.name}`}>
             <SystemLine text={t.signedIn} />
