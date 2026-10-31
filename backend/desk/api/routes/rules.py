@@ -126,9 +126,9 @@ async def simulate_tool_change(desk_id: DeskId, body: SimulateChangeIn,
 async def knowledge(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[KnowledgeRow]:
     """The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.
     Content the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text."""
-    rows = [KnowledgeRow.model_validate(row)
-            for row in await ctx.ro.rows("knowledge_items", desk_id=ctx.desk(desk_id))]
-    return sorted(rows, key=lambda row: (row.created_at is not None, row.created_at, row.item_id))
+    return [KnowledgeRow.model_validate(row)
+            for row in await ctx.ro.rows("knowledge_items", desk_id=ctx.desk(desk_id),
+                                         order_by=("created_at", "item_id"), nulls_first=("created_at",))]
 
 
 @router.post("/knowledge", response_model=KnowledgeItem, responses=error_responses(401, 404, 409, 422, 503))
