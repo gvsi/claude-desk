@@ -153,26 +153,17 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   const afterLabels = labelsOf(draft.after);
   const labelOf = (card: RuleCard, labels: ReadonlyMap<RuleCard, RowLabel>) => labels.get(card) ?? rowLabel(card, [card], catalog);
 
-  // The draft's cards go to `reviewChanges` as the draft has them, so which card governs a dropped
-  // one (`rulesForTool`'s order) doesn't depend on the review's order; only the rows are sorted.
-  const changes = reviewChanges(
-    byPlace(draft.before, (card) => labelOf(card, beforeLabels).place),
-    draft.after,
-    effectsOf,
-  );
-  const added = changes.filter((change) => change.before === null);
-  const ordered = [
-    ...changes.filter((change) => change.before !== null),
-    ...byPlace(added, (change) => (change.after === null ? LAST_PLACE : labelOf(change.after, afterLabels).place)),
-  ];
-  const rows: ChangeRowView[] = ordered.map((change): ChangeRowView => {
+  // The draft's cards go to `reviewChanges` as the draft has them, so neither which card governs a
+  // dropped one (`rulesForTool`'s order) nor the pairing depends on the review's order; only the
+  // rows it returns are sorted.
+  const placed = reviewChanges(draft.before, draft.after, effectsOf).map((change) => {
     const card = change.before ?? change.after;
     if (card === null) throw new Error('a review change with no card');
-    const { title, connector } = change.before === null ? labelOf(card, afterLabels) : labelOf(card, beforeLabels);
+    const { title, connector, place } = change.before === null ? labelOf(card, afterLabels) : labelOf(card, beforeLabels);
     const moved = change.before !== null && change.after !== null && change.after.applies_to !== change.before.applies_to;
     // A shared rule's own row (an effect card that doesn't move) is where the design system's
     // `ChangeRowView.shared` goes once it has one; a row that moves shows the move in `appliesTo`.
-    return {
+    const row: ChangeRowView = {
       key: card.card_id,
       change: change.change,
       title,
@@ -181,7 +172,12 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
       after: change.after === null ? defaultSide() : cardSide(change.after, people, moved),
       changed: change.fields,
     };
+    return { row, place };
   });
+  const rows: ChangeRowView[] = [
+    ...byPlace(placed.filter(({ row }) => row.change !== 'added'), ({ place }) => place),
+    ...byPlace(placed.filter(({ row }) => row.change === 'added'), ({ place }) => place),
+  ].map(({ row }) => row);
 
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
     const title = targetWords(row.tool);
