@@ -539,11 +539,7 @@ const SERVED: ServedRoutes = {
     const add = isRecord(req.body) ? req.body.add : undefined;
     if (req.malformed || !Array.isArray(add) || add.length === 0 || !add.every(isRuleCard)) return INVALID;
     // The kernel won't draft a card that takes more money on its own than the active version's limit allows.
-    const cap = desk.policy.auto_money_cap_cents ?? 0;
-    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > cap)) {
-      return failWith(422, 'above_money_cap', { cap_cents: cap });
-    }
-    return ok(sv.world.draft(desk, add));
+    return aboveMoneyCap(desk, add) ?? ok(sv.world.draft(desk, add));
   },
   rules(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

@@ -873,6 +873,22 @@ describe('rules and tools', () => {
     expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
   });
 
+  it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
+    const draft = (card: unknown) => call('draftRules', { params: { desk_id: deskId }, body: { add: [card] } });
+    // A $600 limit on an automatic quote rule moves no money, so Rivera's $500 payment limit doesn't hold it back.
+    const quote600 = { ...rivera.ruleCards['rv-quote'], max_amount_cents: 60_000 };
+    const quoted = await draft(quote600);
+    expect(quoted.status).toBe(200);
+    expect(quoted.body as RulesDraft).toMatchObject({ version: 8, diff: { changed: [[rivera.ruleCards['rv-quote'], quote600]] } });
+
+    // An automatic payment link above it is refused with the limit, and nothing is drafted.
+    const link600 = { ...rivera.ruleCards['rv-link'], max_amount_cents: 60_000 };
+    expect(await draft(link600)).toEqual({ status: 422, body: { error: 'above_money_cap', cap_cents: 50_000 } });
+    // Asking first above it takes no money on its own, so it drafts.
+    expect((await draft({ ...link600, mode: 'ask' })).status).toBe(200);
+    expect((await rules()).active.version).toBe(7);
+  });
+
   it('confirm_tool_takes_the_batch_body', async () => {
     const stripe = ['payments.list_charges', 'payments.create_refund'];
     const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));
