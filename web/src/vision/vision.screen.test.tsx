@@ -21,7 +21,7 @@ import {
   one,
   some,
 } from '../ds/boards/spec.ts';
-import { VISION_LINE } from '../ds/index.ts';
+import { VISION_INERT_LINE, VISION_LINE } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -277,13 +277,20 @@ describe('Vision pages', () => {
   });
 
   it('vision_controls_send_nothing', async () => {
-    // The phone's held quote: an answer leaves it as it was, waiting, with nothing locked or busy.
+    // The phone's held quote: an answer leaves it as it was, waiting, with nothing locked or busy,
+    // and the first one says why, once, in a line under the answers that is announced.
     const phone = await renderRoute(PHONE);
     const held = phone.screen.getByRole('article', { name: /^Held for you:/ });
     const allow = held.getByRole('button', { name: 'Allow this time' });
     const deny = held.getByRole('button', { name: 'Deny this time' });
+    expect(held.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(0);
     await allow.click();
+    const heldLine = held.getByText(VISION_INERT_LINE, { exact: true });
+    await expect.element(heldLine).toBeVisible();
+    expect(heldLine.element().getAttribute('role')).toBe('status');
+    await deny.click();
     await wait(300);
+    expect(held.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(1);
     expect(held.getByRole('group', { name: 'Your answer' }).element().hasAttribute('aria-busy')).toBe(false);
     for (const answer of [allow, deny]) {
       expect(answer.element().hasAttribute('aria-busy')).toBe(false);
@@ -293,7 +300,8 @@ describe('Vision pages', () => {
     await expect.element(held.getByText('Waiting for your answer', { exact: true })).toBeVisible();
     expect(mockStore.requests).toEqual([]);
 
-    // Each composer: the words typed stay after Enter and after Send, and no message is added.
+    // Each composer: the words typed stay after Enter and after Send, no message is added, and the
+    // first press says why, once, in a line that is announced.
     for (const [path, business] of [
       [PHONE, 'Rivera Plumbing'],
       [CLAUDE_ACCOUNT, 'Rivera Plumbing'],
@@ -304,12 +312,24 @@ describe('Vision pages', () => {
       await expect.element(log).toBeVisible();
       const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
       const composer = screen.getByRole('textbox', { name: `Message ${business}` });
+      expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(0);
       await composer.fill('Thanks again');
       await userEvent.keyboard('{Enter}');
       await expect.element(composer, { timeout: 300 }).toHaveValue('Thanks again');
+      const line = screen.getByText(VISION_INERT_LINE, { exact: true });
+      await expect.element(line).toBeVisible();
+      expect(line.element().getAttribute('role'), path).toBe('status');
+      expect(line.element().closest('.cd-composer'), path).toBe(composer.element().closest('.cd-composer'));
       await screen.getByRole('button', { name: 'Send' }).click();
       await wait(300);
       await expect.element(composer).toHaveValue('Thanks again');
+      expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(1);
+      if (path === PHONE) {
+        // On the visitor's phone, 8 px under the composer, in a caption's type, as the story draws it.
+        const box = composer.element().closest('.cd-composer__box') as HTMLElement;
+        expect(round(top(line.element()) - bottom(box))).toBe(8);
+        expectComputed(line.element(), { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+      }
       expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble'), path).toHaveLength(bubbles);
       expect(mockStore.requests, path).toEqual([]);
     }
@@ -711,6 +731,10 @@ describe('Vision pages against their boards', () => {
     // place on this one, and nothing is asked of the API.
     const here = window.location.href;
     await download.click();
+    // The first press says why nothing came, under the card's Download, in a line that is announced.
+    const inertLine = invoice.getByText(VISION_INERT_LINE, { exact: true });
+    await expect.element(inertLine).toBeVisible();
+    expect(inertLine.element().getAttribute('role')).toBe('status');
     await wait(300);
     expect(router.state.location.pathname).toBe(CLAUDE_ACCOUNT);
     expect(window.location.href).toBe(here);
