@@ -46,7 +46,7 @@ export {
   type SegmentedControlProps,
   type SegmentedOption,
 } from './components/SegmentedControl/SegmentedControl.tsx';
-export { Composer, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
+export { Composer, type ComposerFailed, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
 export { SuggestionChips, type SuggestionChipsProps } from './components/SuggestionChips/SuggestionChips.tsx';
 export { TextField, type TextFieldProps } from './components/TextField/TextField.tsx';
 

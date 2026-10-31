@@ -22,7 +22,16 @@
 - `helper` when one plain line says what happens to the words ("Rule changes are shown to you before they apply."). It is the text box's description.
 - `maxLength` to cap the text (2000 for a chat message). From 90% of it a counter shows ("1800 / 2000"), in numbers only so it reads the same in English and Spanish, and joins the description.
 - `onAttach` and `onSpeak` only when they do something: without a handler there is no button, so no control is dead.
-- `onSend` gets the trimmed text, never empty. The composer clears itself; to keep a message that failed, show it in the transcript with a way to try again.
+- `onSend` gets the trimmed text, never empty. The composer clears itself. To keep a message that failed, show it in the transcript with a way to try again, or keep it in the composer with `failed` (below), as the setup interview does with an owner's answer.
+
+## A send that failed
+
+`failed` (N-R2-Setup-04-Answer-Failed) keeps what was sent in the composer until the screen tries again:
+
+- `line`, the screen's own words for what happened and what to do ("I couldn't answer just now. Your answer is still here; try again."), as an error `Notice`: a refused dot, read out at once. It sits 20 px over the box.
+- The box keeps the composer's surface, radius and shadow, without its hairline, as the board draws it, padded 12 px 14 px. In it, `text`, the words as `onSend` got them, in `.cd-type-body` marked `data-copy="user"`, keeping their line breaks, then 12 px after them a primary "Try again", both on the box's bottom line: 56 px high around one line. The box is a group named by `label`.
+- Nothing can be typed while it shows, and the helper, the counter and the other buttons are left out. "Try again" calls `onRetry()`; the screen sends `text` again and clears `failed`, and the text box comes back empty.
+- The switch moves focus only when it would otherwise be lost: when the text box had focus as the failure arrived, "Try again" takes it, and after "Try again" the text box does. Focus the owner moved elsewhere stays there, and a composer that opens failed takes no focus.
 
 ## Props
 
@@ -38,5 +47,6 @@
 | `onSend` | `(text: string) => void` | Required. |
 | `onAttach` | `() => void` | Adds "Add a photo or file". |
 | `onSpeak` | `() => void` | Adds "Speak instead". |
+| `failed` | `{ text: string; line: string; onRetry: () => void }` | A send that failed: `line` over the box, which keeps `text` beside "Try again". |
 
 `bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus the whole composer shows the focus ring (`ring-composer`, 2 px at a 2 px offset), because the canvas's 55% ring is 2.9:1. A button inside it (attach, speak, send) shows its own ring instead, so there is only ever one. The single-row composer is 52 px high with one line of text.

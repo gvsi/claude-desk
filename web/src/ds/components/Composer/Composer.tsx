@@ -1,6 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 
+import { Button } from '../Button/Button.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
+import { Notice } from '../Notice/Notice.tsx';
 
 import './Composer.css';
 
@@ -30,6 +32,21 @@ export interface ComposerProps {
   onAttach?: () => void;
   /** Adds "Speak instead". */
   onSpeak?: () => void;
+  /**
+   * What was sent couldn't be answered: the screen's `line` over the composer's box, which keeps
+   * `text`, the words as sent, beside "Try again" (`onRetry`). Nothing can be typed until it clears.
+   */
+  failed?: ComposerFailed;
+}
+
+/** A send that failed, kept in the composer until the screen tries again. */
+export interface ComposerFailed {
+  /** The words that were sent, as `onSend` got them. */
+  text: string;
+  /** What happened and what to do, in the screen's words: "I couldn't answer just now. Your answer is still here; try again." */
+  line: string;
+  /** "Try again": the screen sends `text` again and clears `failed`. */
+  onRetry: () => void;
 }
 
 const SEND_LABEL = {
@@ -59,11 +76,15 @@ export function Composer({
   onSend,
   onAttach,
   onSpeak,
+  failed,
 }: ComposerProps) {
   const id = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const failedBoxRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [value, setValue] = useState('');
+  const isFailed = failed !== undefined;
+  const shownFailed = useRef(isFailed);
 
   const text = value.trim();
   const canSend = !disabled && text !== '';
@@ -80,6 +101,18 @@ export function Composer({
     input.style.height = 'auto';
     input.style.height = `${input.scrollHeight}px`;
   }, [value]);
+
+  // A failed send takes the text box's place, and trying again gives it back. Each switch removes
+  // the control that had focus; when focus fell to the page with it, it moves on to the control in
+  // its place ("Try again", or the text box), and focus the owner moved elsewhere stays there.
+  useLayoutEffect(() => {
+    if (shownFailed.current === isFailed) return;
+    shownFailed.current = isFailed;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    if (isFailed) failedBoxRef.current?.querySelector<HTMLElement>('button')?.focus();
+    else inputRef.current?.focus();
+  }, [isFailed]);
 
   const send = () => {
     if (!canSend) return;
@@ -151,6 +184,22 @@ export function Composer({
       {label}
     </label>
   );
+
+  if (failed) {
+    return (
+      <div className="cd-composer cd-composer--failed">
+        <Notice tone="error">{failed.line}</Notice>
+        <div ref={failedBoxRef} role="group" aria-label={label} className="cd-composer__box cd-composer__box--failed">
+          <span className="cd-composer__kept cd-type-body" data-copy="user">
+            {failed.text}
+          </span>
+          <Button variant="primary" onClick={() => failed.onRetry()}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (variant === 'owner') {
     return (
