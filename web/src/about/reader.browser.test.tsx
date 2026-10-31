@@ -1175,6 +1175,30 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_followed_section_stays_marked_where_the_rule_cant_mark_it', async () => {
+    // A window tall enough that following "Business path" stops at the proposal's end, short of its place, where the
+    // 40% rule would mark the last section. The section followed stays marked until the reader scrolls on.
+    const screen = await renderReader('proposal');
+    const belowPlace = document.documentElement.scrollHeight - placeOf('business-path');
+    const height = Math.max(1400, belowPlace + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+
+    await userEvent.click(screen.getByRole('link', { name: 'Business path', exact: true }));
+    const end = document.documentElement.scrollHeight - window.innerHeight;
+    await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(end));
+    expect(placeOf('business-path'), 'the jump stops short of its place').toBeGreaterThan(end + 1);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(marked(), 'a moment after the jump').toEqual(['Business path (location)']);
+
+    // The reader's own next scroll marks by the rule again.
+    await jumpTo(0);
+    await expect.poll(marked, { message: 'back at the top' }).toEqual([]);
+    await screen.unmount();
+  });
+
   it('contents_link_moves_focus_to_its_section', async () => {
     const own = window.location.href;
     onTestFinished(() => window.history.replaceState(window.history.state, '', own));
