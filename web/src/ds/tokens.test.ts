@@ -116,12 +116,14 @@ describe('design tokens', () => {
 
   test('mark_tokens_match_the_signed_mark', () => {
     // The mark's fixed colors, the same in every theme: its white tile and the tile's hairline edge,
-    // the clay of the bell's dome and the black ink. They are the favicon's own colors
+    // the clay of the bell's dome, the drawing's dark ink, and the light ink the bell is drawn in on
+    // the dark grounds, where it has no tile. They are the drawing's and the tab icon's own colors
     // (scripts/gen-mark.test.mjs), and nothing but the mark uses them (guards.test.ts).
     const expected = {
       'mark-tile': '#ffffff',
       'mark-clay': '#d97757',
       'mark-ink': '#141413',
+      'mark-ink-light': '#faf9f5',
       'mark-hairline': 'rgba(20,20,19,0.1)',
     };
     const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
@@ -167,6 +169,29 @@ describe('design tokens', () => {
       expect(() => buildTokensCss(withStyle({ ...odd, fontVariantNumeric }))).toThrow(/fontVariantNumeric/);
     }
     expect(buildTokensCss(withStyle({ ...odd, fontVariantNumeric: 'tabular-nums' }))).toContain('.cd-type-odd {');
+  });
+
+  test('badge_caps_is_the_one_all_caps_style', () => {
+    // The lockup's "Preview" badge: the product's one all-caps label (owner, 2026-10-30), small,
+    // weight 520 and slightly spaced (0.06em at 11 px), as N-Explore-Mark-Lockup-Inline draws it, its
+    // capitals drawn by its type style over a word written in sentence case. "Beta" is gone.
+    const ui = tokens.type.groups.find((group) => group.name === 'Interface');
+    const badge = ui?.styles.find((style) => style.name === 'badge-caps');
+    expect(badge).toMatchObject({ fontSize: '11px', lineHeight: '14px', fontWeight: 520, letterSpacing: '0.66px', textTransform: 'uppercase' });
+    expect(ui?.styles.find((style) => style.name === 'beta')).toBeUndefined();
+    // No other style draws capitals.
+    const allStyles = tokens.type.groups.flatMap((group) => group.styles as TypeStyle[]);
+    expect(allStyles.filter((style) => style.textTransform !== undefined).map((style) => style.name)).toEqual(['badge-caps']);
+    const css = buildTokensCss(tokens);
+    expect(new RegExp(String.raw`\.cd-type-badge-caps \{[^}]*\}`).exec(css)?.[0]).toContain('text-transform: uppercase;');
+    expect(css.match(/text-transform/g)).toHaveLength(1);
+    // The builder writes only `uppercase`, and only for the badge's style: another transform, more CSS,
+    // or capitals on any other style is refused.
+    const odd = { name: 'odd', fontSize: '11px', lineHeight: '14px', fontWeight: 460, usage: 'A test style.' };
+    for (const textTransform of ['capitalize', 'lowercase', 'uppercase; color: red']) {
+      expect(() => buildTokensCss(withStyle({ ...odd, name: 'badge-caps', textTransform }))).toThrow(/textTransform/);
+    }
+    expect(() => buildTokensCss(withStyle({ ...odd, textTransform: 'uppercase' }))).toThrow(/textTransform/);
   });
 
   test('reading_page_tokens_match_the_design_ask', () => {
@@ -303,19 +328,24 @@ describe('design tokens', () => {
     const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
-    // The mark: its tile on the app and the sidebar, and its drawing on the tile, the ink where it
-    // crosses the clay dome included.
-    add(['mark-tile'], ['bg-app', 'bg-panel'], 3);
+    // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
+    // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
+    add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
+    add(['mark-ink'], ['illustration-card'], 3);
+    // The mark with its tile: the tile on the app, as the design system's stories show it, and its
+    // drawing on the tile, the ink where it crosses the clay dome included.
+    add(['mark-tile'], ['bg-app'], 3);
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
+    // The About pages' app icon: its clay field, the icon's edge, on the page.
+    add(['clay'], ['bg-app'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);
     add(['text-secondary'], ['fill-secondary'], 3, 'bg-panel');
     // The switch row's label and description while it is hovered in the sidebar.
     add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
-    // The first-visit intro dialog: the mark on its surface and the passcode in its field.
-    add(['mark-tile'], ['bg-surface'], 3);
+    // The first-visit intro dialog: the passcode in its field.
     add(['text-primary'], ['fill-card'], 4.5, 'bg-surface');
     // The intro illustration's light cards: their text, the initials, the check and receipt dots.
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
@@ -416,10 +446,10 @@ describe('design tokens', () => {
   });
 
   test('connector_tokens_are_decorative', () => {
-    // A connector's brand tile: the light tile, and each brand mark's own colors, with nothing read on them.
+    // Each third-party connector's mark, with no tile behind it: Stripe's in white on the dark grounds,
+    // as Stripe's guidelines allow, and Google Calendar's in its own blue. Nothing is read on them.
     const expected = {
-      'connector-tile-brand': '#ffffff',
-      'connector-stripe': '#635bff',
+      'connector-stripe': '#ffffff',
       'connector-google-blue': '#4285f4',
       'size-side-panel': '400px',
     };
@@ -427,7 +457,7 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
 
     const connectorColors = colorNames.filter((name) => name.startsWith('connector-'));
-    expect(connectorColors.sort()).toEqual(['connector-google-blue', 'connector-stripe', 'connector-tile-brand']);
+    expect(connectorColors.sort()).toEqual(['connector-google-blue', 'connector-stripe']);
     for (const name of connectorColors) {
       expect(DECORATIVE_COLORS[name], `${name} is decorative`).toBe("A third-party brand mark beside its name; nothing is read on it.");
     }
@@ -466,7 +496,6 @@ describe('design tokens', () => {
       'clay',
       'connector-google-blue',
       'connector-stripe',
-      'connector-tile-brand',
       'illustration-arc',
       'illustration-line',
       'line-card',

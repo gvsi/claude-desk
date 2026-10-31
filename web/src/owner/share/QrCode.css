@@ -1,0 +1,6 @@
+/* QrCode: the image fills the square its parent gives it (the printable card's, or setup's). */
+.cd-qr-code {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

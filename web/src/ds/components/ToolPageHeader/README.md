@@ -11,7 +11,7 @@
 ## What it shows
 
 - `name` as the page's `h1` in serif `.cd-type-page-title`, then `description` 4 px under it in body type, `text-secondary`.
-- The source line, 8 px under that, in `.cd-type-meta`: the connector's `ConnectorIcon` at `inline` size (24 px), "From {name}" with "Built in" or the Mock badge (`ConnectorName` at `inline` size), and 16 px on, the status in words with its dot:
+- The source line, 8 px under that, in `.cd-type-meta`: the connector's `ConnectorIcon` at `inline` size (a built-in connector's 24 px tile, or a third-party connector's 20 px mark), "From {name}" with "Built in" or the Mock badge (`ConnectorName` at `inline` size), and 16 px on, the status in words with its dot:
   - `enabled`: handled "On", followed by " · {definitionNote}" when given ("On · Definition unchanged").
   - `needs_review`: info "Off until you review a change".
   - `disabled`: info "Off".

@@ -7,6 +7,7 @@
 - A visitor's level beside their name: "Public", "Verified", "Agent".
 - A short standing fact about a page or a payment, such as "Vision" or "Test payment, no money moves"; put a `StatusDot` first when the fact has a status.
 - Not for actions (use a `Chip`) and not for counts (use a `CountPill`).
+- `caps` is the lockup's "Preview" badge (`Wordmark preview`) and nothing else: the product's one all-caps label.
 
 ## What the consumer provides
 
@@ -21,5 +22,6 @@ A page the prototype only sketches (Settings › Notifications and Billing) open
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `children` | `ReactNode` | Required; in `.cd-type-pill`. |
+| `caps` | `boolean` | Only for the "Preview" badge: `.cd-type-badge-caps`, 11 px with 0.06em tracking, its word drawn in capitals, marked `data-ds="preview-badge"` for the copy check. |
 
 20 px tall, outlined in `line-control`, never filled and never colored.

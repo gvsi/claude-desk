@@ -20,6 +20,8 @@ export interface TypeStyle {
   /** `italic`, for a reading page's quotations; the builder refuses any other value. */
   fontStyle?: string;
   letterSpacing?: string;
+  /** `uppercase`, only on `badge-caps`, the lockup's "Preview" badge; the builder refuses anything else. */
+  textTransform?: string;
   /** `tabular-nums`, for figures that line up; the builder refuses any other value. */
   fontVariantNumeric?: string;
   opticalSize?: number;

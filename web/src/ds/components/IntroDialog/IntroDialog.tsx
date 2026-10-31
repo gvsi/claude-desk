@@ -15,7 +15,6 @@ import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { Notice } from '../Notice/Notice.tsx';
-import { Pill } from '../Pill/Pill.tsx';
 import { INTRO_ERROR_COPY, type IntroErrorCode } from './introCopy.ts';
 
 import './IntroDialog.css';
@@ -167,8 +166,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
         <div className="cd-intro__content">
           <div className="cd-intro__brand">
             <Mark />
-            <Wordmark />
-            <Pill>Demo</Pill>
+            <Wordmark preview />
           </div>
 
           <div className="cd-intro__lede">
@@ -259,9 +257,8 @@ function Illustration() {
       </div>
 
       <div className="cd-intro__card">
-        <span className="cd-intro__tile">
-          <Mark size={18} />
-        </span>
+        {/* The mark alone in an avatar's place: no tile and no frame, in its dark ink on the light card. */}
+        <Mark size={32} ground="light" />
         <div className="cd-intro__card-body cd-intro__card-body--reply">
           <p className="cd-intro__who cd-type-body">
             Rivera Plumbing <span className="cd-intro__where cd-type-caption">Claude, an AI</span>
