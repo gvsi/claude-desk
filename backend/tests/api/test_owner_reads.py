@@ -447,7 +447,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "decision": None, "held_by": None, "held_at": None,
         "handoff": {"handoff_id": handoff["handoff_id"], "session_id": caller.session_id,
                     "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None,
-                    "status": "open"},
+                    "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
                     "verified": False, "assurance": "none"},
         "from_the_visitor": "It's the heater in the garage"}
@@ -457,6 +457,46 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
+                                                                                   engine, db):
+    """A conversation the kernel's handoff card handed to the owner (#96) is in Needs you as a handoff of kind `card`:
+    no call-back window, since none was promised, and the kernel's reason, never the draft's words. A call-back
+    request is kind `callback`, so the owner's screens can tell the two apart though neither has a window here, and a
+    session whose call-back request is open gets no second handoff from a blocked reply."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    caller = await guest(kernel_http, fake, owner)
+    await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                 "reason": "Leaking water heater"})
+    fake.now += timedelta(minutes=5)
+    handed = await guest(kernel_http, fake, owner)
+    await write(engine, db, handed.ids, "visitor_text", text="How much is a new water heater?")
+    for who in (handed, caller):
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    # one handoff each: the caller's is its call back
+    assert sorted(row["session_id"] for row in fake.handoffs.values()) == sorted([caller.session_id, handed.session_id])
+    opened = {row["session_id"]: handoff_id for handoff_id, row in fake.handoffs.items()}
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    handoffs = {item["session"]["session_id"]: item for item in listed.json() if item["handoff"] is not None}
+    assert handoffs[handed.session_id] == {
+        "decision": None, "held_by": None, "held_at": None,
+        "handoff": {"handoff_id": opened[handed.session_id], "session_id": handed.session_id,
+                    "reason": "The Desk handed this to you.", "callback_window": None, "status": "open",
+                    "kind": "card"},
+        "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
+                    "assurance": "none"},
+        "from_the_visitor": "How much is a new water heater?"}
+    assert handoffs[caller.session_id]["handoff"] == {
+        "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
+        "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None, "status": "open",
+        "kind": "callback"}
+    assert len(handoffs) == 2
 
 
 async def test_handoff_done_leaves_needs_you(app, browser, fake, kernel_http):

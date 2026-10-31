@@ -331,20 +331,30 @@ class NeedsYouSession(BaseModel):
 
 
 class Handoff(BaseModel):
-    """An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
-    typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one."""
+    """A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:
+
+    - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
+      (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+    - `card`: the kernel's handoff card handed the conversation over (in place of a reply its check blocked, or cited
+      by Claude). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is
+      None: no call back was promised.
+
+    A null window alone can't tell them apart; `kind` does. The card opens none while its session has an open
+    handoff of either kind."""
 
     handoff_id: str
     session_id: str
     reason: str
     callback_window: str | None
     status: Literal["open", "done"]
+    kind: Literal["callback", "card"]
 
 
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
-    an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted)."""
+    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
+    thing they wrote (untrusted)."""
 
     decision: Decision | None
     held_by: str | None
