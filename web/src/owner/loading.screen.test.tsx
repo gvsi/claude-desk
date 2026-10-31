@@ -4,16 +4,19 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 
-import { observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
+import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
+import type { SetupState } from '../api/views.ts';
 import { retryDelayMs } from '../app/poll.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { Skeleton, SkeletonScreen } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
+import { SETUP_QUESTIONS } from '../mocks/setup.ts';
+import { START_EXAMPLES } from '../setup/copy.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectSkeletonLoad, expectSkeletonStill, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
+import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
@@ -76,6 +79,68 @@ it('reload_with_two_desks_moves_once', async () => {
   expect(tops()[1]! - tops()[0]!).toBe(40);
 });
 
+/** A Desk the mock's setup made for Okafor Plumbing, its questions answered and its rules drafted, then left there. */
+async function deskLeftAtRules(): Promise<SetupState> {
+  const description = START_EXAMPLES.en.examples[0]?.description ?? '';
+  const started = await mockStore.dispatch('startSetup', {
+    body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
+  });
+  if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+  const state = started.body as SetupState;
+  const id = state.interview_id;
+  await mockStore.dispatch('setupConsent', { params: { id }, body: { allow: false } });
+  for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: question.key, text: 'Yes, that works.' } });
+  await mockStore.dispatch('setupRules', { params: { id } });
+  return state;
+}
+
+/** The element for `selector` outside any skeleton layer, once the page has drawn it. */
+function landedElement(selector: string): Element | null {
+  return [...document.querySelectorAll(selector)].find((el) => el.closest('.cd-skeleton-screen__layer') === null) ?? null;
+}
+
+it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
+  // Decision 15: the skeleton draws a fresh copy's Today, which has no "Not live yet" card. For a
+  // Desk whose setup isn't finished, nothing of the card shows while Today's reads are out; once
+  // they settle, the card lands once with Today, first in its column, in the place the skeleton's
+  // Things to try had, and Things to try lands under it and stays there.
+  const state = await deskLeftAtRules();
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+  const cardsAdded = new Set<Element>();
+  const cards = new MutationObserver(() => {
+    document.querySelectorAll('.cd-continue-setup').forEach((card) => cardsAdded.add(card));
+  });
+  cards.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => cards.disconnect());
+  const sawNotLive = watchFor('Not live yet');
+  const { screen } = await renderRoute(`/app/${state.desk_id}/today`, { pollScale: 100 });
+  await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const layer = document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')!;
+  expect(layer.querySelector('.cd-things'), "the skeleton draws Today's Things to try").not.toBeNull();
+  expect(document.querySelector('.cd-continue-setup'), 'no setup card while the reads are out').toBeNull();
+  expect(sawNotLive()).toBe(false);
+  const shapeThings = layer.querySelector('.cd-things')!.getBoundingClientRect();
+  const thingsTops = watchTop(() => landedElement('.cd-things'));
+
+  needsYou.release();
+  const card = screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true });
+  await expect.element(card).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
+  const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+  expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING, 'the card comes before Things to try').toBeTruthy();
+  expect(card.element().parentElement?.firstElementChild?.classList.contains('cd-today__greeting')).toBe(true);
+  expect(card.element().previousElementSibling?.classList.contains('cd-today__greeting')).toBe(true);
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeThings.top), "the card takes Things to try's place").toBeLessThanOrEqual(
+    SKELETON_TOLERANCE_PX,
+  );
+  expect(thingsTops(), 'Things to try lands once, under the card').toHaveLength(1);
+  expect(thingsTops()[0]!).toBeGreaterThan(card.element().getBoundingClientRect().bottom);
+  expect(cardsAdded.size, 'the card mounts once').toBe(1);
+  expect(card.element().isConnected).toBe(true);
+});
+
 it('reload_waits_for_the_demo_inbox', async () => {
   const inbox = holdReads(ROUTES.ownerInbox.path);
   await expectSkeletonLoad({
@@ -108,6 +173,56 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
 const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner-footer');
+
+/**
+ * Decision 15's accepted move on a Desk switch. A copy with two Desks has made a Desk of its own, so
+ * Things to try's last row lands ticked ("Create your own Desk", one done line) where the skeleton
+ * draws a fresh copy's row. The card keeps its top, left and width and lands one row's change
+ * shorter; what Today draws under it in its column, the aside stacked under that on a phone and the
+ * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
+ */
+const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'week-title', 'week-bar-0'];
+
+function switchedAnchors(phone: boolean): SkeletonAnchor[] {
+  const under = new Set(phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS);
+  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && name !== 'thing-tile-3').map((anchor) =>
+    anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
+  );
+}
+
+/** The landed element for `selector`, outside any skeleton layer. */
+function landedRect(selector: string): DOMRect {
+  const element = [...document.querySelectorAll(selector)].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  if (element === undefined) throw new Error(`No landed element for ${selector}`);
+  return element.getBoundingClientRect();
+}
+
+/** Records Today's shapes and the footer as the reads are released, then checks the one move. */
+function watchTheTickedRow(phone: boolean) {
+  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS).includes(name));
+  const shape = (name: string) => document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
+  let before: { card: DOMRect; under: DOMRect[]; footer: DOMRect } | undefined;
+  return {
+    record: () => {
+      before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('.cd-owner-layout__footer') };
+    },
+    expectOneMove: () => {
+      expect(before, 'the shapes were measured before the reads came in').toBeDefined();
+      const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+      expect(last?.textContent).toContain('Done. Your new Desk is live.');
+      const change = landedRect('.cd-things > .cd-card').height - before!.card.height;
+      expect(change, 'the ticked row is shorter than the fresh one').toBeLessThan(-SKELETON_TOLERANCE_PX);
+      under.forEach(({ name, page }, i) => {
+        const real = landedRect(page);
+        expect(Math.abs(real.top - before!.under[i]!.top - change), `${name} moves by the card's change`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+        expect(Math.abs(real.left - before!.under[i]!.left), `${name} left`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      });
+      const footer = landedRect('.cd-owner-layout__footer');
+      expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    },
+  };
+}
 const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'reviewer-bar', page: '.cd-reviewer-bar', size: true },
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
@@ -128,16 +243,21 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: TODAY_CONTENT_ANCHORS,
-    stays: ['.cd-owner-layout__footer', '.cd-reviewer-bar', '.cd-sidebar'],
+    anchors: switchedAnchors(false),
+    stays: ['.cd-reviewer-bar', '.cd-sidebar'],
     open: async () => {
       await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
       await screen.getByRole('button', { name: 'Main line', exact: true }).click();
     },
-    release: () => reads.forEach((read) => read.release()),
+    release: () => {
+      ticked.record();
+      reads.forEach((read) => read.release());
+    },
   });
+  ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -150,13 +270,18 @@ it('switching_desks_opens_on_todays_shape at 390', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  const ticked = watchTheTickedRow(true);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: TODAY_CONTENT_ANCHORS,
-    stays: ['.cd-owner-layout__footer', '.cd-reviewer-bar', '.cd-app-shell__topbar'],
+    anchors: switchedAnchors(true),
+    stays: ['.cd-reviewer-bar', '.cd-app-shell__topbar'],
     open: async () => { await router.navigate(TODAY); },
-    release: () => reads.forEach((read) => read.release()),
+    release: () => {
+      ticked.record();
+      reads.forEach((read) => read.release());
+    },
   });
+  ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -287,12 +412,17 @@ it('todays_hold_still_under_reduced_motion', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonStill({
     status: 'Opening your Desk',
-    anchors: TODAY_CONTENT_ANCHORS,
+    anchors: switchedAnchors(false),
     open: async () => { await router.navigate(TODAY); },
-    release: needsYou.release,
+    release: () => {
+      ticked.record();
+      needsYou.release();
+    },
   });
+  ticked.expectOneMove();
   await expectScreenBasics(document.body, { owner: true });
 });
 
