@@ -109,7 +109,11 @@ RESERVING_LINK_STATES = frozenset({"issued", "paid", "unknown"})
 AFTER_APPROVAL = frozenset({"approved", "executed", "failed", "unknown", "refused_at_execution"})
 # Card templates that show money, checked against their cited record and fact.
 PRICED_CARDS = frozenset({"quote", "payment_link", "charges", "refund_issued", "charge_confirmed",
-                          "payment_confirmed"})
+                          "payment_confirmed", "link_cancelled"})
+# Card templates that name a record which has ended, from that record's own fact, which ended with it:
+# the fact's expiry is no fault, but it must be of this kind and its record in this state. A
+# link_cancelled card cites the cancelled link's `payment_link` fact.
+ENDED_RECORD_CARDS: dict[str, tuple[str, str]] = {"link_cancelled": ("payment_link", "cancelled")}
 _CODE = re.compile(r"\d{6,}")
 # A number as a visitor reads it, digits with at most one space, hyphen or dot between them ("551 234").
 _DIGIT_RUN = re.compile(r"\d(?:[ .\-]?\d)*")
@@ -1287,7 +1291,8 @@ class _Judge:
     def _card_fault(self, shown: _Shown, block: RenderedBlock) -> tuple[str, str] | None:
         """What is wrong with the fact a delivered card cites, as `commitment.card_fact` says it, or None
         when the session may be shown the card: its template renders no fact, or it cites one on record,
-        readable by the session and current when it was delivered."""
+        readable by the session and current when it was delivered; or, for a card naming a record that
+        has ended (`ENDED_RECORD_CARDS`), that record's own fact, whose expiry is no fault."""
         if block.template in FACTLESS:
             return None
         session = self.sessions.get(shown.session_id) or {}
@@ -1308,6 +1313,14 @@ class _Judge:
             return "a card cites a fact that isn't on record", f"{where} cites {block.fact_id}"
         if not readers & set(fact.get("readers") or []):
             return "a card cites a fact the session may not read", f"{where} cites {block.fact_id}"
+        if (ended := ENDED_RECORD_CARDS.get(block.template)) is not None:
+            kind, state = ended
+            _, refs = self._cited(session.get("desk_id"), block.fact_id)
+            records = [self.links.get(ref) for ref in refs] if kind == "payment_link" else []
+            if fact.get("kind") != kind or not any(r is not None and r.get("state") == state for r in records):
+                return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
+                        f"{where} cites {block.fact_id}")
+            return None                         # its fact ended with the record it names
         if expires_at is not None and (expires_at <= shown.at or (checked_at is not None and expires_at <= checked_at)):
             return "a card cites a fact that had expired when it was delivered", f"{where} cites {block.fact_id}"
         return None
