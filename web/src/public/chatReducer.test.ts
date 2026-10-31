@@ -270,6 +270,37 @@ describe('chatReducer', () => {
     expect(liveOf(run([{ type: 'history', transcript: transcript(4, [{ ...item(1, 'delivered'), event: quoteMessage }]) }], answered))).toEqual([false]);
   });
 
+  it('what_the_stream_catches_up_on_draws_still', () => {
+    const liveOf = (state: ChatState) => state.rows.map((row) => row.live === true);
+    const asked = run([{ type: 'sent', id: 'v1', text: 'How much is drain clearing?' }]);
+    const shown = run([...events(rivera.events.quoteTurn), { type: 'shown' }], asked);
+    expect(liveOf(shown)).toEqual([false, false]);
+
+    // The connection drops and comes back. What the stream replays after it happened while the
+    // chat wasn't following, even what the chat hadn't seen: it draws still.
+    const back = run([{ type: 'connection', connection: 'reconnecting' }, { type: 'connection', connection: 'open' }], shown);
+    const missed = run(events([ownerJoined, ownerSaid], 5), back);
+    expect(liveOf(missed)).toEqual([false, false, false, false]);
+
+    // Once the stream has caught up, what it brings arrives live again.
+    const current = run([{ type: 'caught_up' }], missed);
+    const said = run(events([{ ...ownerSaid, message_id: 'msg-owner-later' }], 7), current);
+    expect(liveOf(said)).toEqual([false, false, false, false, true]);
+
+    // The page coming back to the chat, or a stream the server closed, catches up the same way.
+    for (const away of [{ type: 'catching_up' }, { type: 'connection', connection: 'closed' }] as const) {
+      const returned = run([away, ...events([{ ...ownerSaid, message_id: `msg-while-${away.type}` }], 8)], said);
+      expect(returned.rows.at(-1)?.live).toBeUndefined();
+    }
+
+    // A read of the stored conversation is the chat caught up: what follows it arrives live.
+    const read = run(
+      [{ type: 'catching_up' }, { type: 'history', transcript: transcript(4, [{ ...item(1, 'delivered'), event: quoteMessage }]) }],
+      said,
+    );
+    expect(liveOf(run(events([ownerJoined], 5), read))).toEqual([false, true]);
+  });
+
   it('later_statuses_attach_to_their_hold', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const cancelled: StatusEvent = { ...held, type: 'resolved', state: 'cancelled', visitor_plain: 'Cancelled', ledger_seq: 9 };
