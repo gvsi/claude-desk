@@ -11,7 +11,7 @@
 
 - The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and its lead line, beside the page's `h1`, "Review what Claude could do with {name}" in serif `.cd-type-page-title`, with "Built in" or the Mock badge (`ConnectorName`). The title balances its lines when it wraps (see Long names).
 - Under the title, in secondary body type: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." for a built-in connector, or "Nothing runs until you turn it on." followed by `intro` (the connector's promise) for an app.
-- A `Card` named "Tools" with a row per tool, each under a hairline (the first too) and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
+- A `Card` named "Tools" with a row per tool, separated by hairlines only between rows and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
   - the owner's rule: "Covered by your rule: {text} · {outcomePhrase(mode, limit)}" ("… · Automatic up to $300; over $300, ask me first");
   - an always-on rule: "Covered by your always-on rule: {text}";
   - none: "No rule of yours covers this yet, so it starts at Ask me first." (or "No rule of yours covers this yet." once the owner picked another outcome).

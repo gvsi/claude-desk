@@ -1,4 +1,4 @@
-/* SafetyCheckRow: laid out as a SituationRow is. A hairline over each row, padded 14 px top and
+/* SafetyCheckRow: laid out as a SituationRow is. Hairlines between rows, padded 14 px top and
    bottom; the trick at the left, the outcome and its reason in a 300 px column at the right.
    Narrow, the outcome drops under the trick. A live row lands motion-stagger after the one before
    it. */
@@ -8,6 +8,9 @@
   box-sizing: border-box;
   min-width: 0;
   padding: var(--space-14) 0;
+}
+
+li + li > .cd-safety-check-row {
   border-top: 1px solid var(--line-hairline);
 }
 
