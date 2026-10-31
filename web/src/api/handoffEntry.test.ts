@@ -6,9 +6,14 @@ import { handoffEntryOf } from './handoffEntry.ts';
 const entry = (kind: LedgerEvent['kind'], summary: unknown) => ({ kind, summary }) as Pick<LedgerEvent, 'kind' | 'summary'>;
 
 describe('handoffEntryOf', () => {
-  it('names_the_two_handoff_entries_as_the_kernel_writes_them', () => {
+  it('names_the_handoff_entries_as_the_kernel_writes_them', () => {
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], kind: 'card' }))).toBe('opened');
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'] }))).toBe('done');
+    // The kernel closing one: a call-back that replaced it, the owner taking the chat over, or the
+    // owner writing in it.
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: 'h-2' }))).toBe('replaced');
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'takeover' }))).toBe('took_over');
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'owner_message' }))).toBe('wrote');
   });
 
   it('leaves_every_other_entry_alone', () => {
@@ -20,5 +25,10 @@ describe('handoffEntryOf', () => {
     expect(handoffEntryOf(entry('execute', { part: 'handoffs', refs: ['h-1'] }))).toBeNull();
     expect(handoffEntryOf(entry('desk_data', null))).toBeNull();
     expect(handoffEntryOf(entry('desk_data', ['handoffs']))).toBeNull();
+    // A closing this build doesn't know, or that names two causes, is never called the owner's.
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'expired' }))).toBeNull();
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: null }))).toBeNull();
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: null }))).toBeNull();
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: 'h-2', closed_by: 'takeover' }))).toBeNull();
   });
 });

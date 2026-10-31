@@ -5,7 +5,7 @@
  * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import { handoffEntryOf } from '../../api/handoffEntry.ts';
+import { handoffEntryOf, type HandoffEntry } from '../../api/handoffEntry.ts';
 import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
@@ -114,14 +114,18 @@ export function kindCopy(kind: string): string {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * The two `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), as the
- * checkpoint writes them: the handoff card handing one over (`kind: "card"`), and the owner marking
- * one done, a call-back request or the card's (no `kind`).
+ * The `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), by
+ * `handoffEntryOf`, in the owner's signed words: the handoff card handing one over, the owner
+ * marking one done, and the kernel closing one when a call-back request replaced it, the owner
+ * took the chat over, or the owner wrote in it.
  */
 export const HANDOFF_ENTRY_COPY = {
-  card: 'Chat handed to you',
+  opened: 'Chat handed to you',
   done: 'Chat marked done',
-} as const;
+  replaced: 'Chat moved to a call-back',
+  took_over: 'Handoff closed when you took over',
+  wrote: 'Handoff closed when you wrote in the chat',
+} as const satisfies Record<HandoffEntry, string>;
 
 /**
  * An entry's name as a row of the record names it: its kind's, but a `desk_data` entry about a
@@ -130,9 +134,7 @@ export const HANDOFF_ENTRY_COPY = {
  */
 export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
   const handoff = handoffEntryOf(event);
-  if (handoff === 'opened') return HANDOFF_ENTRY_COPY.card;
-  if (handoff === 'done') return HANDOFF_ENTRY_COPY.done;
-  return kindCopy(event.kind);
+  return handoff === null ? kindCopy(event.kind) : HANDOFF_ENTRY_COPY[handoff];
 }
 
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */

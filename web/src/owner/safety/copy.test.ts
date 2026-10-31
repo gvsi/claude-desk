@@ -130,6 +130,9 @@ describe('Safety copy', () => {
     const deskData = (summary: Record<string, unknown>) => ({ kind: 'desk_data' as const, summary });
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: 'card' }))).toBe('Chat handed to you');
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'] }))).toBe('Chat marked done');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], replaced_by: 'handoff-2' }))).toBe('Chat moved to a call-back');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], closed_by: 'takeover' }))).toBe('Handoff closed when you took over');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], closed_by: 'owner_message' }))).toBe('Handoff closed when you wrote in the chat');
     // Every other `desk_data` entry is unchanged, a handoffs entry of a kind this build doesn't know among them.
     for (const summary of [{ part: 'tools', refs: ['native.quote'] }, { part: 'desk', created: true }, { part: 'hours', refs: [] }, {}]) {
       expect(entryCopy(deskData(summary)), JSON.stringify(summary)).toBe('Desk details changed');
