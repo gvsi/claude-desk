@@ -21,7 +21,6 @@ import type {
   SessionState,
   ToolProfile,
 } from './contracts.ts';
-import type { MoneyCapIn } from './openapi.gen.ts';
 import type {
   AgentCardOut,
   AgentRunStarted,
@@ -45,6 +44,7 @@ import type {
   HealthOut,
   KnowledgeBody,
   MessageAccepted,
+  MoneyCapIn,
   NeedsYouItem,
   OwnerMessageBody,
   OwnerTranscript,

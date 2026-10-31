@@ -617,6 +617,9 @@ export interface PresetBody {
   preset: RulesPreset;
 }
 
+/** `draftMoneyCap`'s body, the payment limit a draft changes to: the API's own model, from its document. */
+export type { MoneyCapIn } from './openapi.gen.ts';
+
 export interface ConfirmRulesBody {
   version: number;
 }
