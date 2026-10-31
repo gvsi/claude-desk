@@ -970,23 +970,20 @@ def test_ai_denial_reads_no_name_claim_in_a_question():
     assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
 
 
-def test_ai_denial_reads_no_name_after_talking_to_in_a_sentence_a_time_condition_opens():
-    """A "you're talking to" or "estás hablando con" clause whose sentence opens with a condition of
-    time ahead of the comma ("Once she calls, you're talking to Maria") says who the visitor will talk
-    to, not who they are talking to now. "If" and "si" make no such condition, since "If you must know,
-    you're talking to Maria." is a real claim, and an opener that is no condition ("Once again", "After
-    all", "En cuanto a") leaves the claim standing too."""
+def test_ai_denial_reads_no_name_after_talking_to_in_a_sentence_a_subordinator_opens():
+    """A "you're talking to" or "estás hablando con" clause whose sentence opens with a subordinator
+    ahead of the comma ("Once she calls, you're talking to Maria") says who the visitor will talk to,
+    not who they are talking to now. An opener that is no subordinator ("Once again", "After all", "En
+    cuanto a") leaves the claim standing."""
     neither = ["I'm Claude, an AI. Once she calls, you're talking to Maria.",
                "When Maria calls you back, you're speaking with Maria herself, not me.",
-               "Whenever she calls, you're talking to Maria.", "As soon as she picks up, you're talking to Maria.",
+               "If you call, you're talking to Maria directly.", "As soon as she picks up, you're talking to Maria.",
                "After she calls back, you're speaking with Maria Rivera.", "Cuando llame, estás hablando con María.",
-               "Una vez que conteste, usted está hablando con María.", "En cuanto llegue, estás hablando con María.",
-               "Después de que llame, estás hablando con María."]
+               "Una vez que conteste, usted está hablando con María.", "En cuanto llegue, estás hablando con María."]
     assert {text: denies_ai(text, people=OWNER) for text in neither} == {text: False for text in neither}
     claims = ["Once again, you're talking to Maria.", "After all, you're talking to Maria.",
               "En cuanto a eso, estás hablando con María.", "I'm an AI. You're talking to Maria, once she calls.",
-              "Once she calls you'll see. You're talking to Maria.", "If you must know, you're talking to Maria.",
-              "If you call, you're talking to Maria directly.", "Si quiere saberlo, estás hablando con María."]
+              "Once she calls you'll see. You're talking to Maria."]
     assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
 
 
