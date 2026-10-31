@@ -32,6 +32,7 @@ import type {
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { AGENT_CARD_BLOCKS } from './agents.ts';
+import { refusalCause } from './causes.ts';
 import type { Language } from './script.ts';
 import { BUSINESS, PRESETS } from './seed.ts';
 import {
@@ -458,7 +459,8 @@ export function reports(world: MockWorld, desk: DeskRecord): Reports {
  * Safety's attempts, newest first: decisions refused at decide time and Claude's replies the check
  * stopped, the same filter as the briefing's blocked items (the API core's `_stopped_attempts`);
  * the last 7 days count only the refused ones. A hold is the owner's to answer, not an attempt
- * that was stopped, so it isn't listed.
+ * that was stopped, so it isn't listed. Each refusal carries its cause, read as the API reads it
+ * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
   const stopped: Attempt[] = decisionsOf(world, desk.summary.desk_id)
@@ -472,6 +474,9 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       created_at: isoTime(d.createdAt),
       triage: null,
       ledger_seq: d.decision.ledger_seq,
+      cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
+        verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
+      }),
     }));
   const replies: Attempt[] = stoppedReplies(desk).map((entry) => ({
     ref_id: String(entry.seq),
@@ -482,6 +487,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     created_at: entry.created_at,
     triage: null,
     ledger_seq: entry.seq,
+    cause: null,
   }));
   return [...stopped, ...replies].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

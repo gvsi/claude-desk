@@ -245,6 +245,75 @@ async def test_blocked_prose_gets_one_rewrite_then_the_handoff(api_conn, kernel_
     assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
 
 
+def finals(fake, caller: Caller) -> list[bool]:
+    """`CheckReplyRequest.final` of each of the session's reply checks, in order (absent means final)."""
+    return [call.body.get("final", True) for call in fake.called("/check_reply")
+            if call.body["draft"]["session_id"] == caller.session_id]
+
+
+def card_handoffs(fake, caller: Caller) -> list[str]:
+    """The statuses of the handoffs the handoff card opened for the session."""
+    return [row["status"] for row in fake.handoffs.values()
+            if row["session_id"] == caller.session_id and row["kind"] == "card"]
+
+
+async def test_a_first_draft_claude_can_rewrite_is_checked_as_not_final_and_never_shown(api_conn, kernel_http, fake,
+                                                                                         ro_schema):
+    """A first draft blocked only for kinds a rewrite fixes (`desk.rewrites`), while the turn has a model call left,
+    is checked with `final` false: the kernel then opens no owner handoff, and the API shows nothing of it, not on the
+    stream and not in the transcript, and asks Claude to rewrite. The rewrite, attempt 2, is checked as final: blocked
+    again, the handoff it shows is the one the kernel opened for the owner."""
+    async def turn(*texts: str):
+        caller = await new_caller(kernel_http, fake, ro_schema)
+        await said(api_conn, caller, "How much is a drain clearing?")
+        model = ScriptedModel([response({"type": "text", "text": words}) for words in texts])
+        return caller, model, await run_turn(api_conn, caller, model)
+
+    caller, model, outcome = await turn("It's $180.", "Let me get you a quote card for that.")
+    assert outcome == "done" and finals(fake, caller) == [False, True]
+    assert card_handoffs(fake, caller) == []                           # nothing the visitor saw promised the owner
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert [[block.text for block in event.blocks] for event in shown] == [["Let me get you a quote card for that."]]
+    delivered = [[block["text"] for block in blocks]
+                 for (blocks,) in await rows(api_conn, caller.session_id, "delivered", "blocks")]
+    assert delivered == [["Let me get you a quote card for that."]]
+
+    caller, model, outcome = await turn("It's $180.", "Still $180.")
+    assert outcome == "handoff" and finals(fake, caller) == [False, True]
+    assert card_handoffs(fake, caller) == ["open"]
+    (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+
+
+async def test_a_first_draft_on_the_turns_last_call_is_final(api_conn, caller, fake):
+    """On the turn's last allowed model call Claude can't rewrite, so its first draft is checked as final: blocked,
+    the handoff that check shows, and the kernel opened for the owner, goes out at once, with no further check."""
+    await said(api_conn, caller, "Keep checking, then tell me the price.")
+    model = ScriptedModel([*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(MAX_MODEL_CALLS - 1)),
+                           response(reply("It's $180."))])
+
+    assert await run_turn(api_conn, caller, model) == "handoff"
+
+    assert len(model.requests) == MAX_MODEL_CALLS and finals(fake, caller) == [True]
+    assert card_handoffs(fake, caller) == ["open"]
+    (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+
+
+async def test_a_first_draft_blocked_for_a_kind_no_rewrite_fixes_shows_the_handoff(api_conn, caller, fake):
+    """A first draft blocked for a kind a rewrite can't fix (a document's canary) is not final, yet hands off at once:
+    the handoff it shows is the one the kernel opened for the owner."""
+    await said(api_conn, caller, "What's on my last invoice?")
+    fake.violation("canary")
+    model = ScriptedModel([response(reply("Here is what I know.")), response({"type": "text", "text": "Done."})])
+
+    assert await run_turn(api_conn, caller, model) == "handoff"
+
+    assert finals(fake, caller) == [False] and card_handoffs(fake, caller) == ["open"]
+    (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+
+
 DRAIN = {"items": [{"item_id": "drain", "qty": 1}]}
 
 

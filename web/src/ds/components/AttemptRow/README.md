@@ -11,6 +11,7 @@
 
 - A row link at `radius-control`, at least 50 px tall, in three columns:
   - the time in `meta` type, `text-secondary`, with tabular figures;
+  - for a refused request with a reason to give (`why`), a refused `StatusLabel` with the reason in `meta` type, `text-primary`, `space-2` over the rest, wrapping onto more lines rather than cut; the time stands on its first line;
   - what they tried in `control` type, and under it where it came from in `caption` type, `text-secondary`, each on one line with an ellipsis. A replayed attempt (`recorded`) puts a `RecordedTag` `space-10` after where it came from, on the same baseline; those words ellipsize before the tag;
   - the `CheckpointMeter`.
 - In a list narrower than 400 px, the meter moves under the words, beside the time's column.
@@ -26,6 +27,7 @@
 ## What the consumer provides
 
 - `time` as the screen writes it ("9:52 am"); the design system formats no times.
+- `why`, for a refused request only: why it was turned down, in a few words ("Your rule says no"). Leave it out for a stopped reply, a held request, or a refusal with no reason to give.
 - `title`: what they tried, in one line (the attempt's summary, or its reason). Mark any words quoted from a visitor with `data-copy="user"`.
 - `who`: where it came from ("From chat", "From the chat service").
 - `stoppedBy`: the checkpoint that stopped it.
@@ -37,6 +39,7 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `time` | `string` | Required. Shown as given. |
+| `why` | `string` | A refused `StatusLabel` over `title`. Its words join the link's name, after the time. |
 | `title` | `ReactNode` | Required. |
 | `who` | `string` | Required. |
 | `stoppedBy` | `Checkpoint` | Required. `'who' \| 'action' \| 'review' \| 'reply'`. |

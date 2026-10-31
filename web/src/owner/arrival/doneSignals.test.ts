@@ -95,6 +95,7 @@ function attempt(seq: number, kind: Attempt['kind'] = 'reply_blocked'): Attempt 
     created_at: '2026-10-30T16:00:00.000000Z',
     triage: null,
     ledger_seq: seq,
+    cause: null,
   };
 }
 
