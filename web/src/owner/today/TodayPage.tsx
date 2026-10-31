@@ -22,6 +22,14 @@ import { TodayAside } from './TodayAside.tsx';
 
 import './Today.css';
 
+export interface TodayPageProps {
+  /**
+   * Whether Today names the tab (default true). The still picture of Today behind the intro dialog
+   * doesn't: there the dialog is the page, and the tab keeps the app's own name.
+   */
+  namesTheTab?: boolean;
+}
+
 /** What the copy button's press did, read out to screen readers. */
 type LinkCopy = 'idle' | 'copied' | 'failed';
 
@@ -42,10 +50,10 @@ export const COPIED_FOR_MS = 1_600;
  * owner's alert) brings that request's card into view and focus. Until what the page first shows is
  * read, it holds the loading line alone, so it opens drawn however the owner came to it.
  */
-export function TodayPage() {
+export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const { business, desk, reachPlace } = useOwnerDesk();
   // The page's heading greets the owner, so the tab takes the sidebar's row.
-  useDocumentTitle(inApp(NAV_LABELS.today));
+  useDocumentTitle(namesTheTab ? inApp(NAV_LABELS.today) : null);
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();

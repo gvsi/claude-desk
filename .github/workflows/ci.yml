@@ -1,4 +1,4 @@
-# The nine checks on main and on pull requests to main; docs/ci.md says what each one proves.
+# The nine checks on main and on pull requests to any base; docs/ci.md says what each one proves.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
 # Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2" and
@@ -10,7 +10,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -159,7 +158,9 @@ jobs:
         with:
           build: false
       - name: Check the tier 2 results
-        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE=origin/main
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$PR_BASE_SHA"
 
   web:
     name: web tests

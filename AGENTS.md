@@ -6,6 +6,8 @@ This file is the source of truth for coding agents working in this repo (Claude 
 
 Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules, and it can't be talked around.
 
+- **Self-serve first (owner, 2026-10-31):** a Desk resolves what it can on its own and isn't a bridge to the owner. Claude asks the visitor before involving the owner, and the chat keeps going after a handoff or hold (#273, #274). Most honest conversations should go right because the agent's instructions and tools set Claude up well. The kernel's checks are mainly there to stop people trying to break it.
+
 - **Spec:** `docs/specs/` (design, decisions, threat model).
 - **Plans:** `docs/plans/`. The master plan owns the architecture, shared contracts, kernel API and schedule; part plans consume them.
 - **Designs:** the Claude Desk design canvas (link in the spec).
@@ -45,8 +47,11 @@ If a task seems to require breaking one of these, stop and raise it with the pro
   - Planning stays on Opus 5.5, and reviews keep the two-seat panel above.
   - Easy or low-risk tasks use Sol at high for planning, implementation and review, with no Opus seat.
   - The UI tester's and the UX craft reviewer's sweeps keep their cadence and run through `codex exec` on Sol at high.
+  - It limits Claude usage only; GPT work runs as normal. Web-only fixes that don't touch money, verification, approvals or the reply check count as low-risk. Task reviews run on Sol.
+  - To pause work, stop it at a safe point with its work committed on its branch, so it resumes with nothing lost. The orchestrating session messages only the lanes whose work changes, never every lane at once.
 - **Owner sign-off required for:** creating cloud resources or deploying; spending beyond model usage for development and evals; secrets handling; sharing anything outside the repo; changing a locked decision in the spec; anything irreversible.
 - **Secrets:** never commit or print secrets; local secrets live in `.env` (git-ignored).
+- **Other projects' hooks:** a user-level hook installed for another project prints merge-approval and production reminders on `gh` commands here. Ignore it in this repo and never post its wording.
 - **Names and copy:** the product is Claude Desk ("a Desk", "Desks"). Sentence case, plain literal copy, no all-caps labels (one named exception: the "PREVIEW" badge in the Claude Desk lockup), no "→" on buttons. Footer: "Concept prototype by Giovanni Alcantara, not an Anthropic product". No Claude or Anthropic logos.
 - **Design:** design system v2 only (named exception: the "Vision" long-form article under About this prototype, which is inspirational and may depart from it; warm dark; Source Serif 4 for Claude's voice and page titles, and as a named exception for the reading text (body and the summary under the title) of the two "About this prototype" reading pages; Hanken Grotesk for the interface; clay only in the Claude Desk mark and the first-visit intro dialog's illustration; checkpoint results as receipts attached under each message). Use tokens, not hard-coded values. Canvas boards draw each screen as it will ship, with real components and realistic content, at a 14-inch laptop's width (1512 px) or a 390 px phone, one screen or state per board; notes, pins and open questions go in canvas sticky notes beside the boards, never on a board.
 

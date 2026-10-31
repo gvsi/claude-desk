@@ -123,6 +123,30 @@ export const TOOL_NAMES = {
 } as const satisfies Record<ToolName, ToolWords>;
 
 /**
+ * Each tool's request as one thing the owner names after "this", plain and lowercase, as Rules asks
+ * Claude about a held one ("Why was this refund held?"): the API's words for each tool's requests
+ * (`TOOL_LABELS` in `backend/desk/api/rules.py`) where they name one thing, and the owner app's
+ * "identity check" in place of the API's "verification". Open times and contact details are
+ * plural, and the setup interview's own tools hold nothing on a Desk, so these have none.
+ */
+const TOOL_NOUNS = {
+  'native.quote': 'quote',
+  'native.book': 'booking',
+  'native.release_document': 'document',
+  'native.payment_link': 'payment link',
+  'native.charge_mandate': 'agent payment',
+  'native.request_callback': 'callback',
+  'native.start_verification': 'identity check',
+  'payments.list_charges': 'payment history',
+  'payments.create_refund': 'refund',
+} as const satisfies Partial<Record<ToolName, string>>;
+
+/** The tool's request as one plain noun ("refund"), or null for a tool that has none or the catalog doesn't know. */
+export function toolNoun(tool: string): string | null {
+  return Object.hasOwn(TOOL_NOUNS, tool) ? TOOL_NOUNS[tool as keyof typeof TOOL_NOUNS] : null;
+}
+
+/**
  * What each tool acts on, as the kernel's tool profiles have it (`ToolProfile.resource_kind`: each
  * adapter's profile under `backend/desk/kernel_service/adapters/`, and the master plan's tool table
  * for the payment tools). The tool rows the API sends don't carry it. Of these, only a document or

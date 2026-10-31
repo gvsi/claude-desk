@@ -3,14 +3,18 @@
  * the page, the presets and the payment limit, each change through its proved review, and the
  * house rules.
  */
+import { onlineManager } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
 import type { RouteObject } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
@@ -86,6 +90,53 @@ const DANA_REFUNDS: Suggestion = {
     reason: 'Refunds to Dana Whitfield up to $50 go through on their own.',
   },
 };
+
+/** The suggestions under Ask Claude that every Desk has, in order; a question about a hold may follow them. */
+const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
+
+/** The words of each suggestion in `group`, in order. */
+function chipWords(group: Locator): string[] {
+  return group.getByRole('button').elements().map((chip) => chip.textContent ?? '');
+}
+
+/** The main Desk's Needs you, as the app reads it. */
+const NEEDS_YOU_PATH = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/** Holds every read of the main Desk's Needs you until `release()` lets them through to the mock; `held()` counts them. */
+function holdNeedsYou(): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  worker.use(
+    http.get(NEEDS_YOU_PATH, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/** Every read of the main Desk's Needs you fails until `recover()`, then goes through to the mock; `failed()` counts the failures. */
+function failNeedsYou(): { failed: () => number; recover: () => void } {
+  let failing = true;
+  let failures = 0;
+  worker.use(
+    http.get(NEEDS_YOU_PATH, () => {
+      if (!failing) return undefined;
+      failures += 1;
+      return HttpResponse.json({ error: 'unavailable' }, { status: 503 });
+    }),
+  );
+  return {
+    failed: () => failures,
+    recover: () => {
+      failing = false;
+    },
+  };
+}
 
 /** Rivera's payment limit, atop Payments and Stripe. */
 const LIMIT_500 = 'No payment over $500 goes through without asking you, whatever the rules below say.';
@@ -358,9 +409,9 @@ describe('rules page', () => {
 
   it('rules_header_keeps_its_title_whole_beside_ask_claude', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: "Why was Dana's refund held?" }).click();
+    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' }).click();
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
-    await expect.element(panel.getByRole('log').getByText(/^Dana's refund waited for you/)).toBeVisible();
+    await expect.element(panel.getByRole('log').getByText(/^A visitor not on record asked for a drain clearing quote/)).toBeVisible();
     const box = (el: Element) => el.getBoundingClientRect();
     /** How many lines an element's words run over. */
     const lines = (el: Element) => {
@@ -414,11 +465,18 @@ describe('rules page', () => {
 
   it('rule_chat_without_change_drafts_nothing', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
-    // A question from the suggestions: Claude answers, and drafts nothing.
-    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: "Why was Dana's refund held?" }).click();
+    // A question from the suggestions, about the seed's held quote: Claude answers about that
+    // quote, and drafts nothing.
+    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' }).click();
     const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
-    await expect.element(log.getByText(/^Dana's refund waited for you because refunds ask you first/)).toBeVisible();
-    expect(requests('ruleChat').map((r) => r.body)).toEqual([{ text: "Why was Dana's refund held?" }]);
+    await expect
+      .element(
+        log.getByText(
+          /^A visitor not on record asked for a drain clearing quote at 15% off, \$153\.00 instead of \$180\.00\. It was held by your rule: Quotes from your price list, at list price\./,
+        ),
+      )
+      .toBeVisible();
+    expect(requests('ruleChat').map((r) => r.body)).toEqual([{ text: 'Why was this quote held?' }]);
     expect(log.getByRole('region', { name: 'Changes' }).elements()).toHaveLength(0);
     expect(log.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(desk().drafts.size).toBe(0);
@@ -428,7 +486,7 @@ describe('rules page', () => {
     await box.fill('What can you do?');
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText(/^I can explain what a rule does/)).toBeVisible();
-    expect(log.getByText("Why was Dana's refund held?", { exact: true }).elements()).toHaveLength(1);
+    expect(log.getByText('Why was this quote held?', { exact: true }).elements()).toHaveLength(1);
     expect(desk().drafts.size).toBe(0);
 
     // Words past Plan 02's 2,000 characters aren't sent: the line says so, and the words stay in
@@ -706,8 +764,11 @@ describe('rules page', () => {
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).element() as HTMLElement;
-    const chips = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').elements() as HTMLElement[];
-    expect(chips.map((chip) => chip.textContent)).toEqual(['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"]);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    // The third is the seed's hold, once Needs you is read.
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const chips = group.getByRole('button').elements() as HTMLElement[];
+    expect(chips.map((chip) => chip.textContent)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
     // Then each payment limit's "Change", in order, and nothing else in the connectors: their
     // headers and tools aren't links until their pages are built.
     const changes = [...main.querySelectorAll<HTMLElement>('.cd-connector-section .cd-money-limit button')];
@@ -722,10 +783,10 @@ describe('rules page', () => {
     const bottom = (el: Element) => Math.round(el.getBoundingClientRect().bottom);
     const box = composer.closest('.cd-composer__box') as HTMLElement;
     const header = main.querySelector('.cd-page-header') as HTMLElement;
-    const group = main.querySelector('.cd-suggestion-chips') as HTMLElement;
+    const row = main.querySelector('.cd-suggestion-chips') as HTMLElement;
     expect(top(box) - bottom(header)).toBe(20);
-    expect(top(group) - bottom(box)).toBe(10);
-    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(group)).toBe(20);
+    expect(top(row) - bottom(box)).toBe(10);
+    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(row)).toBe(20);
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
@@ -768,3 +829,138 @@ describe('rules page', () => {
   });
 });
 
+describe("Ask Claude's question about a hold", () => {
+  it('hold_question_names_a_held_refund', async () => {
+    // Dana's refund, held a minute ago, after the seed's quote: the newest hold is asked about.
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
+  });
+
+  it('hold_question_names_a_held_quote', async () => {
+    // The seed's hold: a visitor's quote at 15% off.
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
+  });
+
+  it('hold_question_only_while_a_request_is_held', async () => {
+    // A copy with no hold: once Needs you has been read and drawn (a second read starts only after
+    // the first one's answer), only the suggestions every Desk has.
+    const quiet = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const none = quiet.screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(none.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThanOrEqual(2);
+    expect(chipWords(none)).toEqual([...FIXED_CHIPS]);
+
+    // The seed's quote, held and then answered elsewhere: its question goes with it, and the others stay.
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera' });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('hold_question_never_shows_a_hold_from_an_earlier_read', async () => {
+    // The seed's quote, held and read, so the app keeps it.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // Answered elsewhere while Needs you's reads are slow to come back: on Rules again, the kept
+    // read still holds the quote, and no chip asks about it while the page's own read is on its way.
+    const reads = holdNeedsYou();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const again = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(again.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    const waiting = reads.held();
+    await expect.poll(() => reads.held()).toBeGreaterThan(waiting);
+    expect(chipWords(again)).toEqual([...FIXED_CHIPS]);
+
+    // Dana's refund is held meanwhile: once the reads come back, the chip asks about it.
+    mockStore.world.addHeldRefund();
+    reads.release();
+    await expect.element(again.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
+    expect(chipWords(again)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
+  });
+
+  it('hold_question_goes_while_needs_you_cannot_be_read', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { retryScale: 0.05 });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // A read of Needs you fails, its retry too: what was read before may be out of date, so no
+    // chip asks about it, and the others stay.
+    const reads = failNeedsYou();
+    await expect.poll(() => reads.failed()).toBeGreaterThanOrEqual(2);
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    // Once a read works again, the quote, still held, is asked about again.
+    reads.recover();
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
+  });
+
+  it('hold_question_goes_while_needs_you_waits_for_the_network', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // Offline, the next poll waits for the network: what was read before may be out of date, so
+    // no chip asks about it, and the others stay.
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    // Online again, the read goes out and the quote, still held, is asked about again.
+    onlineManager.setOnline(true);
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
+  });
+
+  it('hold_question_reads_needs_you_as_rules_opens', async () => {
+    // From Today, which has just read Needs you, with polls far apart (a minute): Rules reads it
+    // again as it opens, so the chip comes with that one read, not the first poll.
+    const { screen, router } = await renderRoute(`${DESK}/today`, { pollScale: 20 });
+    await expect.element(screen.getByRole('button', { name: 'Deny this time' })).toBeVisible();
+    const before = requests('needsYou').length;
+    await router.navigate(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(requests('needsYou')).toHaveLength(before + 1);
+  });
+
+  it('hold_question_reaches_ask_claude_as_typed', async () => {
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this refund held?' }).click();
+
+    // The owner's words, as the chip has them, are her question to Claude; Claude answers about
+    // that refund, the request and the rule that held it, and drafts nothing.
+    const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
+    await expect
+      .element(
+        log.getByText(
+          /^Dana Whitfield, verified with a code, asked for a refund of her \$180\.00 payment from Monday, October 12\. It was held by your rule: Refunds to a customer wait for your answer\./,
+        ),
+      )
+      .toBeVisible();
+    expect(requests('ruleChat').map((r) => r.body)).toEqual([{ text: 'Why was this refund held?' }]);
+    expect(log.getByText('Why was this refund held?', { exact: true }).elements()).toHaveLength(1);
+    expect(desk().drafts.size).toBe(0);
+  });
+});

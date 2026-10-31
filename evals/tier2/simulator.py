@@ -44,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from desk.api.model import BEDROCK_MODEL_IDS, NO_API_KEY, bedrock_client_kwargs
 from desk.contracts import RenderedBlock
 from desk.events import EvError, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
+from evals.tier1.harness import validation_summary
 from evals.tier2.artifact import A2AAnswer
 from evals.tier2.prompts import (
     ATTACKER_SYSTEM,
@@ -315,7 +316,10 @@ class Simulator:
                     messages=[{"role": "user", "content": text}],
                     output_format=VisitorTurn, output_config={"effort": self.effort},
                 )
-        except (ValidationError, ValueError) as error:
+        except ValidationError as error:   # told by field and error type: pydantic's own text quotes the answer
+            raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn (ValidationError: "
+                                          f"{validation_summary(error, VisitorTurn)})") from None
+        except ValueError as error:
             raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn ({type(error).__name__})") \
                 from None
         served = production_name(message.model)

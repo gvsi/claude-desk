@@ -8,8 +8,9 @@ import type { ToolName } from '../../api/contracts.ts';
 import type { ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import type { ConnectorIconName } from '../../ds/index.ts';
+import { TOOL_LABELS } from '../../mocks/script.ts';
 import { riveraTools } from '../../mocks/seed.ts';
-import { CONNECTORS, TOOL_NAMES, TOOL_RESOURCES, connectorByKey, connectorOf, connectorOn, hasRecordOwner, toolState } from './catalog.ts';
+import { CONNECTORS, TOOL_NAMES, TOOL_RESOURCES, connectorByKey, connectorOf, connectorOn, hasRecordOwner, toolNoun, toolState } from './catalog.ts';
 
 /** Every tool the contracts name: a tool added to or dropped from them fails to compile here. */
 const EVERY_TOOL = {
@@ -114,6 +115,43 @@ describe('the connector catalog', () => {
     expect(TOOL_NAMES['native.fetch_website'].name).toBe('Website reading');
     expect(TOOL_NAMES['native.read_memory'].name).toBe('Memory reading');
     for (const tool of Object.keys(EVERY_TOOL) as ToolName[]) expect(TOOL_NAMES[tool].line, tool).toMatch(/^[A-Z].*\.$/);
+  });
+
+  it('held_requests_have_plain_nouns', () => {
+    // Each tool's request as the owner names it after "this" ("Why was this refund held?"): the
+    // API's words for its requests where they name one thing, plain and lowercase.
+    const nouns = Object.fromEntries((Object.keys(EVERY_TOOL) as ToolName[]).map((tool) => [tool, toolNoun(tool)]));
+    expect(nouns).toEqual({
+      'native.quote': 'quote',
+      // "Open times" is plural: no noun.
+      'native.find_slots': null,
+      'native.book': 'booking',
+      'native.release_document': 'document',
+      'native.payment_link': 'payment link',
+      'native.charge_mandate': 'agent payment',
+      // "Contact details" is plural: no noun.
+      'native.capture_lead': null,
+      'native.request_callback': 'callback',
+      // The owner app's word for these ("identity checks"), plainer than the API's "verification".
+      'native.start_verification': 'identity check',
+      // The setup interview's own tools hold nothing on a Desk.
+      'native.fetch_website': null,
+      'native.read_memory': null,
+      'payments.list_charges': 'payment history',
+      'payments.create_refund': 'refund',
+    });
+    for (const noun of Object.values(nouns)) if (noun !== null) expect(noun).toMatch(/^[a-z]+(?: [a-z]+)?$/);
+    // A tool the catalog doesn't know has none.
+    expect(toolNoun('calendar.free_busy')).toBeNull();
+    expect(toolNoun('toString')).toBeNull();
+  });
+
+  it('ask_claude_knows_each_held_noun', () => {
+    // Each noun Rules asks about a hold by is the word the mock's Ask Claude knows that tool by, so
+    // it can tell which hold "Why was this {noun} held?" means.
+    const named = (Object.keys(EVERY_TOOL) as ToolName[]).filter((tool) => toolNoun(tool) !== null);
+    expect(named.length).toBeGreaterThan(0);
+    for (const tool of named) expect(TOOL_LABELS[tool], tool).toBe(toolNoun(tool));
   });
 
   it('record_owners_only_where_the_kernel_resolves_one', () => {

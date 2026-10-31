@@ -4,7 +4,7 @@
  * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
  * with the public page always a new tab away and never opened on Today itself.
  */
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -184,6 +184,7 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(heldCard(screen)).toBeVisible();
     expect(pages()).toEqual(['preview', 'today']);
+    expect(document.title).toBe('Today · Claude Desk');
   });
 
   it('start_the_demo_lets_the_dialog_go_onto_today', async () => {
@@ -198,7 +199,7 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     // Each of Today's reads had been answered, once and successfully, before it started to leave.
-    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
   });
 
@@ -281,8 +282,8 @@ describe('Arrival', () => {
     // Time for a read on mount to go out, had Today sent one.
     await new Promise((resolve) => setTimeout(resolve, 500));
     // Read once each, ahead of Today, and not again when it mounts.
-    const reads = (['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
-    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1 });
+    const reads = (['desks', 'today', 'needsYou', 'ownerInbox'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
   });
 
   it('start_the_demo_reads_a_slow_today_once', async () => {
@@ -560,9 +561,10 @@ describe('Arrival', () => {
   });
 
   it('session_end_returns_to_the_intro', async () => {
-    // Today opens drawn, with nothing of its own still being read, and reads the Demo inbox once as
-    // it opens. That read answers slowly here, as on a slow machine, and is in before the session
-    // ends, so the 401 that ends it is Today's own poll and not that read.
+    // Today opens drawn, on what it first shows read before it opens, the Demo inbox among them;
+    // Things to try's reads go out as it opens. The inbox read answers slowly here, as on a slow
+    // machine, and is in before the session ends, so the 401 that ends it is one of Today's own
+    // reads, a poll or Things to try's, and not that read.
     delayNextRead(ROUTES.ownerInbox.path, 60);
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
@@ -576,8 +578,9 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     await expect.element(dialog.getByText(`${ENDED} ${INTRO}`, { exact: true })).toBeVisible();
-    // The ended copy heard Today's poll, and never the inbox read.
-    expect(requests('today').length + requests('needsYou').length).toBeGreaterThan(0);
+    // The ended copy heard one of Today's own reads, and never the inbox read.
+    const todaysReads = ['today', 'needsYou', 'conversations', 'conversation', 'ledger', 'safety'].map((key) => requests(key).length);
+    expect(todaysReads.reduce((sum, n) => sum + n, 0)).toBeGreaterThan(0);
     expect(requests('ownerInbox')).toEqual([]);
     expect(requests('me')).toHaveLength(1);
 
@@ -585,6 +588,43 @@ describe('Arrival', () => {
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+  });
+
+  it('a_new_passcode_drops_the_old_copys_late_inbox', async () => {
+    // The ended copy's inbox holds an entry the new copy's doesn't, and its first read is still out
+    // when the session ends; it answers, with the ended copy's entries, while the new copy is read
+    // ahead. The new copy's Today reads and shows its own inbox.
+    const leftBehind = 'A note in the copy that ended.';
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: leftBehind, created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    const oldInbox = holdTheAnswerTo('ownerInbox');
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+    mockStore.reset('rivera', { signedIn: false });
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    await expect.element(introDialog(screen)).toBeVisible();
+
+    // The new copy's reads wait until the ended copy's inbox has answered.
+    const newInbox = holdReads(ROUTES.ownerInbox.path);
+    const newDesks = holdReads(ROUTES.desks.path);
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
+    const late = nextAnswerTo('ownerInbox');
+    oldInbox.release();
+    await late.settled;
+    newInbox.release();
+    newDesks.release();
+
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one: the new copy's inbox was read once, ahead.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(1);
   });
 
   it('arrival_keeps_the_chat_closed', async () => {
@@ -734,6 +774,77 @@ describe('Arrival', () => {
     expect(writeText).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expectNoChatOnToday();
+  });
+});
+
+describe('The preview behind the intro dialog', () => {
+  for (const viewport of ['desktop', 'phone'] as const) {
+    it(`preview_is_todays_layout_${viewport}`, async () => {
+      const { screen, router } = await renderRoute('/', { viewport, seed: { name: 'rivera', signedIn: false } });
+      const dialog = introDialog(screen);
+      await expect.element(dialog).toBeVisible();
+      const preview = document.querySelector<HTMLElement>('.cd-today-preview');
+      if (preview === null) throw new Error('no preview behind the dialog');
+      const before = layoutOf(preview);
+      const firstFrame = layoutAsTodayArrives();
+
+      // The dialog fades out over the preview, then Today replaces it: in its first frame and once
+      // it has read everything it reads, every part of Today is where the preview drew it.
+      await startTheDemo(screen);
+      await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+      await expect.element(heldCard(screen)).toBeVisible();
+      await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+      const after = layoutOf(document.body);
+
+      expect(Object.keys(before)).toEqual(Object.keys(after));
+      expect(misplaced(before, firstFrame()), 'Today as it first draws').toEqual([]);
+      expect(misplaced(before, after), 'Today once it has read everything').toEqual([]);
+    });
+  }
+
+  it('a_preview_that_throws_leaves_the_dialog_usable', async () => {
+    // React reports the error on the console, as it should; only the page must not show it.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // A browser that can't keep the business's time zone: the preview can't draw at all.
+    const restoreIntl = intlRefusing((options) => options?.timeZone === 'America/Los_Angeles');
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+
+    // The dialog stays, over an empty page, never an error page in its place.
+    await expect.element(introDialog(screen)).toBeVisible();
+    expect(document.querySelector('.cd-standalone-page')).toBeNull();
+    expect(document.querySelector('.cd-today-preview')).toBeNull();
+
+    // The passcode still opens the demo.
+    restoreIntl();
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+  });
+
+  it('preview_draws_where_offset_names_are_unknown', async () => {
+    // Older Safari refuses `timeZoneName: 'longOffset'`, so the preview never asks for it.
+    intlRefusing((options) => options?.timeZoneName === 'longOffset');
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    const preview = document.querySelector('.cd-today-preview');
+    expect(preview?.querySelector('h1')?.textContent).toMatch(/, Maria$/);
+    expect(preview?.querySelectorAll('.cd-today__main > *').length).toBeGreaterThan(0);
+    expect(preview?.querySelectorAll('.cd-today-aside > *').length).toBeGreaterThan(0);
+  });
+
+  it('preview_makes_no_request', async () => {
+    document.title = 'Claude Desk';
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // Today is drawn behind the dialog, its greeting included.
+    expect(document.querySelector('.cd-today-preview h1')?.textContent).toMatch(/, Maria$/);
+    // The dialog is the page here: the Today drawn behind it names nothing, so the tab keeps the
+    // app's own name.
+    expect(document.title).toBe('Claude Desk');
+    // Long enough for every read Today polls to have gone out several times over, had the preview
+    // sent one: only the arrival's own question about the copy went out.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(mockStore.requests.map((r) => r.key)).toEqual(['me']);
   });
 });
 
@@ -1001,6 +1112,75 @@ describe('OwnerLayout', () => {
       `/d/${mockStore.world.ids.slug}?preview=${fresh}`,
     );
     expect(sawNotFound()).toBe(false);
+  });
+
+  it('start_over_reads_the_new_copys_inbox', async () => {
+    // Polls far apart, so only the reads that open a page land.
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(1);
+
+    // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
+    await screen.getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one: the new copy's inbox is read once.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
+  });
+
+  it('start_over_drops_the_old_copys_late_inbox', async () => {
+    // This copy's inbox holds an entry the new copy's doesn't, so whose inbox Today shows is plain.
+    const leftBehind = 'A note in the copy left behind.';
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: leftBehind, created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    // Polls far apart, so only the reads that open a page land.
+    const oldInbox = holdTheAnswerTo('ownerInbox');
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+
+    // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    const newDesks = holdReads(ROUTES.desks.path);
+    await screen.getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+    const fresh = `/app/${mockStore.world.ids.deskId}/today`;
+    expect(router.state.location.pathname).toBe(fresh);
+    await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
+    // The old copy's Today is gone (its inbox was still opening), and the new copy's loading page is up.
+    expect(pageNow()).toBe('loading');
+    const sawItOpening = watchFor('Opening your Demo inbox');
+
+    // The old copy's inbox answers late, before the new copy's Desks do.
+    const late = nextAnswerTo('ownerInbox');
+    oldInbox.release();
+    await late.settled;
+    newDesks.release();
+
+    // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
+    // entry counted, never with the inbox still opening.
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(sawItOpening()).toBe(false);
+    // Time for a read on mount to go out, had Today sent one: the old copy's read and the new one's.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
+
+    // With the sheet's own read held, it shows what Today read: the new copy's alert, linking to the
+    // new copy's held request, and nothing of the old copy.
+    const newHold = mockStore.world.inbox.find((record) => record.entry.decision_id != null)?.entry.decision_id;
+    if (newHold == null) throw new Error("the new copy's hold alerted the owner, naming it");
+    holdReads(ROUTES.ownerInbox.path);
+    await screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true }).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
+    expect(sheet.getByText(leftBehind).elements()).toHaveLength(0);
   });
 
   it('late_answering_failure_keeps_the_fresh_copy', async () => {
@@ -2131,8 +2311,8 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
-/** Today's first reads: the copy's Desks, Today and Needs you. */
-type TodaysReads = Record<'desks' | 'today' | 'needsYou', number>;
+/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's Demo inbox. */
+type TodaysReads = Record<'desks' | 'today' | 'needsYou' | 'ownerInbox', number>;
 
 /**
  * The intro dialog's hand-off to Today, from now until the test ends, each step named once: the
@@ -2145,7 +2325,7 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
   answeredAsItLeft: () => TodaysReads | null;
 } {
   const steps: string[] = [];
-  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0 };
+  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0, ownerInbox: 0 };
   let answeredAsItLeft: TodaysReads | null = null;
   const stopCounting = observeRequests((outcome) => {
     if (outcome.ok && Object.hasOwn(answered, outcome.key)) answered[outcome.key as keyof TodaysReads] += 1;
@@ -2167,6 +2347,81 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
   return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
 }
 
+/** Where one part of the owner's frame or of Today sits in the window, in px. */
+interface Placed {
+  top: number;
+  left: number;
+  width: number;
+  height?: number;
+}
+
+/**
+ * Where Today's parts sit under `root`, by name: the frame (the reviewer bar, the sidebar or the
+ * phone's top bar, the page's area), each section of the page's column in order, and each part of
+ * the right column. Sections are named by their heading, so both sides must draw the same ones.
+ */
+function layoutOf(root: ParentNode): Record<string, Placed> {
+  const rect = (el: Element, withHeight: boolean): Placed => {
+    const r = el.getBoundingClientRect();
+    return withHeight ? { top: r.top, left: r.left, width: r.width, height: r.height } : { top: r.top, left: r.left, width: r.width };
+  };
+  const drawn = (selector: string) => [...root.querySelectorAll(selector)].find((el) => el.getClientRects().length > 0);
+  const nameOf = (el: Element) => el.querySelector('h1, h2')?.textContent?.trim() || (el.classList.item(0) ?? el.localName);
+  const out: Record<string, Placed> = {};
+  // The page's area grows with the page, which has the concept footer under it only on Today: its
+  // height isn't compared.
+  for (const [name, selector, withHeight] of [
+    ['reviewer bar', '.cd-app-shell__banner', true],
+    ['sidebar', '.cd-app-shell__column', true],
+    ['top bar', '.cd-app-shell__topbar', true],
+    ['page area', '.cd-app-shell__content', false],
+  ] as const) {
+    const el = drawn(selector);
+    if (el) out[name] = rect(el, withHeight);
+  }
+  for (const [column, selector] of [
+    ['page', '.cd-today__main'],
+    ['right column', '.cd-today-aside'],
+  ] as const) {
+    const el = root.querySelector(selector);
+    for (const child of el?.children ?? []) out[`${column}: ${nameOf(child)}`] = rect(child, false);
+  }
+  return out;
+}
+
+/** Every measure in `after` more than 2 px from where `before` put it, as a line each. */
+function misplaced(before: Record<string, Placed>, after: Record<string, Placed> | null): string[] {
+  if (after === null) return ['Today never drew'];
+  const lines: string[] = [];
+  for (const [name, was] of Object.entries(before)) {
+    const now = after[name];
+    if (now === undefined) {
+      lines.push(`${name}: missing`);
+      continue;
+    }
+    for (const key of ['top', 'left', 'width', 'height'] as const) {
+      const a = was[key];
+      const b = now[key];
+      if (a !== undefined && b !== undefined && Math.abs(a - b) > 2) lines.push(`${name} ${key}: ${a.toFixed(1)} then ${b.toFixed(1)}`);
+    }
+  }
+  for (const name of Object.keys(after)) if (!(name in before)) lines.push(`${name}: not in the preview`);
+  return lines;
+}
+
+/** Where Today's parts sit in the first frame Today draws in place of the preview, until the test ends. */
+function layoutAsTodayArrives(): () => Record<string, Placed> | null {
+  let first: Record<string, Placed> | null = null;
+  const look = () => {
+    if (first !== null || document.querySelector('.cd-today-preview') !== null || document.querySelector('.cd-today') === null) return;
+    first = layoutOf(document.body);
+  };
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  return () => first;
+}
+
 /**
  * The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when
  * it does. It hears every request on the page, so a late answer to one the last test's page sent
@@ -2185,6 +2440,81 @@ function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<vo
   });
   onTestFinished(() => stop());
   return { came: () => came, settled };
+}
+
+/**
+ * Until the test ends or the returned function is called, `Intl.DateTimeFormat` refuses with a
+ * `RangeError`, as a browser does with options it can't keep, every formatter whose options
+ * `refuses` picks; every other formatter is the browser's own.
+ */
+function intlRefusing(refuses: (options: Intl.DateTimeFormatOptions | undefined) => boolean): () => void {
+  const own = Intl.DateTimeFormat;
+  const check = (args: unknown[]) => {
+    if (refuses(args[1] as Intl.DateTimeFormatOptions | undefined)) throw new RangeError('Invalid option');
+  };
+  const refusing = new Proxy(own, {
+    construct: (target, args) => {
+      check(args);
+      return Reflect.construct(target, args) as object;
+    },
+    apply: (target, self, args) => {
+      check(args);
+      return Reflect.apply(target, self, args) as unknown;
+    },
+  });
+  const put = (value: typeof Intl.DateTimeFormat): void => {
+    Object.defineProperty(Intl, 'DateTimeFormat', { value, configurable: true, writable: true });
+  };
+  put(refusing);
+  const restore = () => put(own);
+  onTestFinished(restore);
+  return restore;
+}
+
+/**
+ * Holds every read of `path` until `release()`, or the test's end, lets them through to the mock:
+ * `held()` counts the reads that came.
+ */
+function holdReads(path: string): { held: () => number; release: () => void } {
+  let held = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(path, async () => {
+      held += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => held, release };
+}
+
+/**
+ * The next read of `key`, answered by the mock as it is sent, so from the copy as it is then, and
+ * held until `release()`, or the test's end, sends that answer on. `sent()` says whether it came.
+ */
+function holdTheAnswerTo(key: RouteKey): { sent: () => boolean; release: () => void } {
+  let sent = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(ROUTES[key].path, async ({ request }) => {
+      if (sent) return undefined;
+      sent = true;
+      const url = new URL(request.url);
+      const answer = await mockStore.dispatch(key, { path: url.pathname, query: url.searchParams });
+      await released;
+      if ('network' in answer) return HttpResponse.error();
+      return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+    }),
+  );
+  return { sent: () => sent, release };
 }
 
 /** Links to the owner's preview of Rivera's public page. */
