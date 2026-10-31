@@ -77,6 +77,19 @@ the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
 
+A payment link's completion holds the same row `FOR SHARE` across its provider call (C2,
+`payments._pay`, Plan 01c), so a decision and a completion on one session take turns: each takes
+the row first and asks for nothing the other holds, so neither deadlocks. A decision that arrives
+during C2 waits for it to commit, up to the provider's deadline (`payments.PROVIDER_DEADLINE_S`,
+2 s), and then runs its own normalize and review. A completion that arrives during a decision
+waits for the decision's normalize (a refund's charge read at most `payments.READ_DEADLINE_S`,
+1 s; other normalize steps only read rows) and review (4 s), then has up to 2 s at the provider:
+about 7 s in all, past the API client's 6 s (`desk.api.kernel_client.DEFAULT_TIMEOUT_S`). The
+API can then give up on a completion that goes on to finish. Every path still fails closed: C1
+commits the completion's marker before anything is sent, so the link is paid at most once, and a
+completion nobody saw finish is settled from that marker at the provider by the next read or by
+reconciliation (`reconcile_link`).
+
 A person's removal or new contact (`desks.put_people`) is the one step that may ask for an
 earlier row, and only for a session a check verified as the person after the write's session
 step and before it held their row: it takes that session too once it holds the people, so the
