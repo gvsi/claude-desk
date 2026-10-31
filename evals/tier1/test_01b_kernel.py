@@ -284,8 +284,9 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
                                                                             change: str):
     """Dana, verified, asks for her invoice, which the owner's rules hold; the owner then gives Dana another
     contact (or removes her), which ends the session that asked, and approves the held release. It is refused
-    at execution with nothing run: no document link is written, the answer is ledgered as refused because the
-    session ended, and no entry names a document link."""
+    at execution with nothing run: the decision's status line, which Dana's session reads, is the state's own
+    and never says why the session ended; the answer is ledgered as refused because the session ended; and no
+    document link entry is written."""
     desk = await golden_desk(k)
     await confirm_cards(k, desk, [ASK_FOR_DOCUMENTS])
     dana = await open_caller(k, desk, "dana")
@@ -302,14 +303,15 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
         await k.call("POST /approvals/{decision_id}/answer", path={"decision_id": held.decision_id},
                      body={"answer": "allow_once"}, auth=desk.owner, expect=Expect(fields={
                          "decision.decision_id": held.decision_id, "decision.state": "refused_at_execution",
+                         "decision.visitor_plain": "The rules changed, so this didn't go ahead",
                          "execution": None}))
     if k.is_real:
         refused = [(entry.event.summary.get("state"), entry.event.summary.get("reason"), entry.event.summary.get("check"))
                    for entry in new if entry.event.ref_id == held.decision_id]
         ended = "contact_changed" if change == "contact" else "person_removed"
         assert ("refused_at_execution", "session_ended", ended) in refused, f"the answer is ledgered as {refused}"
-        assert not [entry for entry in new if "document_link" in str(entry.event.summary)], (
-            "an entry names a document link after a release to a session that ended")
+        links = [entry.seq for entry in new if entry.event.kind == "document_link"]
+        assert not links, f"entries {links} record a document link after a release to a session that ended"
 
 
 # Document canaries, however they are written
