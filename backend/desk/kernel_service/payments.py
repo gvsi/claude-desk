@@ -55,7 +55,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, Val
 from psycopg import errors as pg_errors
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from desk.contracts import (AUTO_MONEY_HARD_CAP_CENTS, Claim, Clause, Fact, Label, LedgerEvent, NormalizedAction,
                             RenderedBlock, ReplyVerdict)
@@ -1041,7 +1041,8 @@ async def _cancelled_card(ctx: KernelCtx, link: PaymentLink, session_row: Sessio
     of that fails, or the fact is malformed (claims that don't parse, no source, or a total or
     title the card can't show), logged: the chat gets no line rather than figures it may not read
     or that aren't the fact's, and the checkout page still says why the link was cancelled. A
-    malformed fact withholds only its own link's line, never another link's."""
+    malformed fact withholds only its own link's line, never another link's. A database error
+    raises, even one that is also a `KeyError` (`NoSuchColumnError`), and fails the whole read."""
     fact_id = f"{LINK_FACT}{link.link_id}"
     template = render.TEMPLATES["link_cancelled"]
     try:
@@ -1059,6 +1060,8 @@ async def _cancelled_card(ctx: KernelCtx, link: PaymentLink, session_row: Sessio
             if not reply_check.carries(block, canaries):
                 return block
             withheld = "canary"
+    except SQLAlchemyError:
+        raise                                           # the database's failure, not the fact's: fail the read
     except (KeyError, TypeError, ValidationError):
         withheld = "malformed"
     log.error("link_cancelled_withheld link_id=%s reason=%s", link.link_id, withheld)

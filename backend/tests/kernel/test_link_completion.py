@@ -26,7 +26,9 @@ import psycopg
 import pytest
 from cryptography.exceptions import InvalidSignature
 from fastapi import FastAPI
-from sqlalchemy import select, text
+from sqlalchemy import Select, select, text
+from sqlalchemy.exc import NoSuchColumnError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from desk.contracts import HoursWindow, PolicyVersion, Review, RuleCard
 from desk.db.models import Document
@@ -852,6 +854,37 @@ async def test_a_cancelled_links_card_needs_its_own_readable_fact(desk_prove, ap
     assert [(entry.event.session_id, entry.event.summary["fact_ids"]) for entry in await ledger_rows(app, copy)
             if entry.event.kind == "reply" and entry.event.summary["author"] == "desk"] == [
         (stranger.session_id, [f"payment_link:{drain.link_id}"])]
+
+
+@pytest.mark.solver
+async def test_a_database_error_fails_the_whole_cancelled_links_read(desk_prove, app, client, reviewer, caplog,
+                                                                     monkeypatch):
+    """Only a malformed fact withholds one link's line. A database error loading a link's fact
+    fails the whole read, even one that is also a `KeyError` (`NoSuchColumnError`): nothing is
+    listed or ledgered, and the API's read of the version again lists every link."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    stranger = await open_visitor(client, copy)
+    heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, stranger, ("drain", 1), call_id="call-drain")     # $180
+    version = await lower_the_cap_to_100(client, copy)
+    fact_id = f"payment_link:{heater.link_id}"
+    scalars = AsyncSession.scalars
+
+    async def failing_scalars(self: AsyncSession, statement, *args, **kwargs):
+        if (isinstance(statement, Select) and statement.column_descriptions[0]["entity"] is FactRow
+                and fact_id in statement.compile().params.values()):
+            raise NoSuchColumnError("Could not locate column in row for column 'facts.claims'")
+        return await scalars(self, statement, *args, **kwargs)
+
+    with monkeypatch.context() as patched, caplog.at_level(logging.ERROR, logger="desk.kernel_service.payments"):
+        patched.setattr(AsyncSession, "scalars", failing_scalars)
+        response = await get_cancelled(client, copy, version)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert "link_cancelled_withheld" not in caplog.text
+    assert not [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
+                and entry.event.summary["author"] == "desk"]
+    assert {line.link_id for line in await cancelled_links(client, copy, version)} == {heater.link_id, drain.link_id}
 
 
 @pytest.mark.solver
