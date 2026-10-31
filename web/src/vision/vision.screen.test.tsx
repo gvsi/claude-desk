@@ -264,12 +264,16 @@ describe('Vision pages', () => {
     expect(mockStore.requests).toEqual([]);
 
     // Each composer: the words typed stay after Enter and after Send, and no message is added.
-    for (const path of [PHONE, CLAUDE_ACCOUNT]) {
+    for (const [path, business] of [
+      [PHONE, 'Rivera Plumbing'],
+      [CLAUDE_ACCOUNT, 'Rivera Plumbing'],
+      [CITY_OFFICE, 'Meridian Bay Permits'],
+    ] as const) {
       const { screen } = await renderRoute(path);
-      const log = screen.getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+      const log = screen.getByRole('log', { name: `Conversation with ${business}` });
       await expect.element(log).toBeVisible();
       const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
-      const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+      const composer = screen.getByRole('textbox', { name: `Message ${business}` });
       await composer.fill('Thanks again');
       await userEvent.keyboard('{Enter}');
       await expect.element(composer, { timeout: 300 }).toHaveValue('Thanks again');
@@ -279,6 +283,28 @@ describe('Vision pages', () => {
       expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble'), path).toHaveLength(bubbles);
       expect(mockStore.requests, path).toEqual([]);
     }
+
+    // The city office's suggestions: a pick asks nothing, adds no message, fills nothing in and goes
+    // nowhere, not even to a place on the page.
+    const city = await renderRoute(CITY_OFFICE);
+    const log = city.screen.getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
+    await expect.element(log).toBeVisible();
+    const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
+    const composer = city.screen.getByRole('textbox', { name: 'Message Meridian Bay Permits' });
+    const here = window.location.href;
+    const chips = city.screen.getByRole('group', { name: 'Try asking' }).getByRole('button');
+    expect(chips.elements()).toHaveLength(3);
+    for (const chip of chips.elements() as HTMLElement[]) {
+      chip.click();
+      await wait(100);
+    }
+    await wait(200);
+    await expect.element(composer).toHaveValue('');
+    expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble')).toHaveLength(bubbles);
+    expect(city.router.state.location.pathname).toBe(CITY_OFFICE);
+    expect(window.location.href).toBe(here);
+    expect(mockStore.requests).toEqual([]);
+    expect(mockStore.unhandled).toEqual([]);
   });
 
   it('vision_pages_pass_the_screen_checks', async () => {
