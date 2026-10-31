@@ -12,13 +12,13 @@ defaults to Postgres `now()`: every time comes from the kernel's clock. The tabl
 kernel_ro view, and desk_ro_owner and desk_resolver get no grant on it, so the API can't read it.
 
 Revision ID: 01b_1_verification
-Revises: 0012_inbox_decision_id
+Revises: api_replay
 """
 
 from alembic import op
 
 revision = "01b_1_verification"
-down_revision = "0012_inbox_decision_id"
+down_revision = "api_replay"
 branch_labels = None
 depends_on = None
 
