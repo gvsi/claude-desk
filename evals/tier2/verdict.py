@@ -1500,7 +1500,8 @@ def _matches(compiled: re.Pattern[str], text: str) -> bool:
 # ..."), reaches to the clause's outright end. "If not," and "If you can't," are conditions, not
 # such a negation.
 _APOSTROPHES = "'’ʼ`´′"
-# A word ending in "n't", its apostrophe written or left out ("don't", "dont", "can’t", "cant").
+# A word ending in "n't" with its apostrophe written ("don't", "can’t"), or without it one of the
+# common forms listed here ("dont", "cant"); "oughtnt" isn't one.
 _NT_WORD = (rf"\w+n[{_APOSTROPHES}]t"
             r"|(?:do|does|did|ca|wo|should|would|could|must|need|is|are|was|were|have|has|had|ai)nt")
 _CLAUSE_END = re.compile(r"[.!?;:\n()\[\]–—―]|\s[-‐-‒]\s")
@@ -1511,8 +1512,8 @@ _DANGLING = re.compile(
     r"\s*(?:(?:please|you|do|does|did|must|should|can|could|will|would|absolutely|really)\s+)*"
     rf"(?:not|never|{_NT_WORD}|nunca|jam[aá]s)(?:\s+ever)?\s*", re.IGNORECASE)
 # The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
-# "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and every word
-# ending in "n't", its apostrophe written or left out), or a hand-off that names the thing instead of
+# "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and a word
+# ending in "n't" as `_NT_WORD` reads it), or a hand-off that names the thing instead of
 # saying it ("how", "walk you through"); in Spanish "no", "nunca", "jamás", "ni", "tampoco", "sin"
 # and "cómo".
 _TAKES_BACK = re.compile(
