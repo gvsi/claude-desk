@@ -2,7 +2,7 @@ import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate, useParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
-import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import type { SetupState, SetupStep } from '../api/views.ts';
 import { Button, ConceptFooter, LoadingLine, Mark, Notice, Steps, Wordmark } from '../ds/index.ts';
@@ -15,6 +15,7 @@ import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
+import { SETUP_REACHES, laterStep } from './shared.ts';
 import { ToolsStep } from './ToolsStep.tsx';
 
 import './SetupPage.css';
@@ -132,23 +133,52 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const business = desk?.business_name ?? null;
 
   /**
+   * The step the API has confirmed the interview at: the step it was read at, then what the API's
+   * answers say (an answer, a re-read) and the step each request that moves it on reaches once it
+   * succeeds (`SETUP_REACHES`). The page's own step can run ahead of it: "Continue" on the tools
+   * shows the rules before their draft is made, which may never be. Only the confirmed step is
+   * carried into the copy's Desks, and setup reopens at it.
+   */
+  const confirmed = useRef<SetupStep | null>(null);
+  if (confirmed.current === null && setup.data !== undefined) confirmed.current = setup.data.step;
+  const confirm = useCallback((step: SetupStep) => {
+    confirmed.current = confirmed.current === null ? step : laterStep(confirmed.current, step);
+  }, []);
+  useEffect(
+    () =>
+      observeRequests((outcome) => {
+        const reached = outcome.ok ? SETUP_REACHES[outcome.key] : undefined;
+        if (reached !== undefined) confirm(reached);
+      }),
+    [confirm],
+  );
+  /** The interview as setup holds it, at the step the API confirmed. */
+  const asConfirmed = useCallback((now: SetupState): SetupState => ({ ...now, step: confirmed.current ?? now.step }), []);
+
+  /**
    * The interview as it now stands. The copy's Desks name its step (`DeskSummary.setup`), so a new
-   * step is written into them (`carrySetup`), which also reads them again in the background: Today,
-   * opened next, would otherwise name the step before.
+   * step has the confirmed one written into them (`carrySetup`), which also reads them again in the
+   * background: Today, opened next, would otherwise name the step before.
    */
   const update = useCallback(
     (next: (now: SetupState | undefined) => SetupState | undefined) => {
       const key = setupQuery(setupId).queryKey;
       const was = queryClient.getQueryData<SetupState>(key)?.step;
       const now = queryClient.setQueryData<SetupState>(key, next);
-      if (now !== undefined && now.step !== was) void carrySetup(queryClient, now);
+      if (now !== undefined && now.step !== was) void carrySetup(queryClient, asConfirmed(now));
     },
-    [queryClient, setupId],
+    [queryClient, setupId, asConfirmed],
   );
-  /** The interview moved on: the screen shows its next step, as the API's state now says. */
+  /** The page moves on: the screen shows the next step; the API confirms it with that step's own request. */
   const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
   /** The API answered with the interview as it stands. */
-  const onState = useCallback((next: SetupState) => update(() => next), [update]);
+  const onState = useCallback(
+    (next: SetupState) => {
+      confirm(next.step);
+      update(() => next);
+    },
+    [confirm, update],
+  );
   /**
    * Leaving setup carries the interview as it stands into the copy's Desks once more (then they are
    * read again): the steps' own reads (the draft, the situations, the safety check) can have moved it
@@ -159,10 +189,10 @@ function SetupInterview({ setupId }: { setupId: string }) {
    */
   const carry = useCallback((): Promise<void> => {
     const now = queryClient.getQueryData<SetupState>(setupQuery(setupId).queryKey);
-    if (now !== undefined) return carrySetup(queryClient, now);
+    if (now !== undefined) return carrySetup(queryClient, asConfirmed(now));
     void invalidateCopy(queryClient);
     return Promise.resolve();
-  }, [queryClient, setupId]);
+  }, [queryClient, setupId, asConfirmed]);
   const leftByLink = useRef(false);
   const beforeLeave = useCallback(() => {
     leftByLink.current = true;
@@ -170,9 +200,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   }, [carry]);
   useEffect(
     () => () => {
+      // Setup reopens at the step the API confirmed, not one only this page showed.
+      queryClient.setQueryData<SetupState>(setupQuery(setupId).queryKey, (now) => (now === undefined ? now : asConfirmed(now)));
       if (!leftByLink.current) void carry();
     },
-    [carry],
+    [carry, queryClient, setupId, asConfirmed],
   );
   /** The interview read again, after a write whose answer was lost; null when it can't be read. */
   const reread = useCallback(
@@ -180,9 +212,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
       queryClient
         // One read, no retry: when it fails, the step says the outcome is unknown and the owner tries again.
         .fetchQuery({ ...setupQuery(setupId), staleTime: 0, retry: false })
-        .then((next) => next)
+        .then((next) => {
+          confirm(next.step);
+          return next;
+        })
         .catch(() => null),
-    [queryClient, setupId],
+    [queryClient, setupId, confirm],
   );
 
   const state = setup.data;

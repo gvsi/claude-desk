@@ -1833,6 +1833,54 @@ describe("Today's unfinished setup", () => {
     await expectCardAtRules(screen);
   });
 
+  /** The card's line at the tools, with Answering off. */
+  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.';
+
+  /**
+   * From Today, setup reopened at its tools; the rules it goes on to can't be checked (the API keeps
+   * it at the tools), and the owner leaves from there with "Save and exit", back to a Today already
+   * read. `meanwhile` runs once setup shows its tools. Resolves on Today, watching for the rules ever
+   * being named on the way.
+   */
+  async function leaveAfterACheckThatCannotRun(meanwhile: () => void = () => undefined) {
+    const state = await deskAtTools();
+    mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
+    const first = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(first.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    await first.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    meanwhile();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText(/^I can't check these rules right now/)).toBeVisible();
+    const sawRules = watchFor('Pick up at your rules');
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    return { screen, router, state, sawRules };
+  }
+
+  it('rules_that_cannot_be_checked_leave_today_at_the_tools', async () => {
+    // The API keeps setup at its tools when its rules can't be checked: Today names the tools, and
+    // never the rules the page went on to, not even for a moment.
+    const { screen, sawRules } = await leaveAfterACheckThatCannotRun();
+    await expect.element(region(screen, 'Finish setting up Okafor Plumbing').getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+  });
+
+  it('rules_that_cannot_be_checked_reopen_at_the_tools_when_the_desks_cannot_be_read', async () => {
+    // The same, with the copy's Desks failing from the tools on: the card still names the tools, and
+    // "Continue setup" opens the tools, whose Continue checks the rules again.
+    const { screen, router, state, sawRules } = await leaveAfterACheckThatCannotRun(() => {
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+    await card.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+  });
+
   it('the_card_waits_for_today_to_open', async () => {
     // Leaving setup for Today while what Today first shows is still being read: Today holds its
     // loading line alone, with no card, then opens with the card first.
