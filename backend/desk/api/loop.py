@@ -198,6 +198,7 @@ class _Turn:
     rebound: bool = False                              # a thinking-binding 400 started a fresh context this turn
     recovered: bool = False                            # the turn `_drain` runs so Claude reads recovered results
     said_n: int | None = None                          # the newest message sent to `/turn` this turn, by its `n`
+    annotates: bool = True                             # False for a handoff with no model call: none for the owner
 
     @property
     def visitor(self) -> bool:
@@ -217,6 +218,7 @@ class _Turn:
         if session.mode == "paused":                       # the breaker tripped: the kernel's handoff, no model call
             await clear_wake(conn, caller.session_id)
             await conn.commit()
+            self.annotates = False
             return await self._hand_off()
         if self.production:                                # past today's model budget: the handoff, no model call
             over = await over_daily_budget(conn, self.clock)
@@ -224,6 +226,7 @@ class _Turn:
                 await clear_wake(conn, caller.session_id)
             await conn.commit()
             if over:
+                self.annotates = False
                 return await self._hand_off()
         if self.visitor:
             await emit(conn, caller.ids, EvWriting(type="writing"))
@@ -550,7 +553,9 @@ class _Turn:
 
     async def finish(self, outcome: TurnOutcome) -> None:
         """Show why the turn failed, if it did, record the turn's metrics and, for a visitor, end the turn on its
-        stream (silent ends included); then leave the turn's triage and translations for the job queue."""
+        stream (silent ends included); then leave the turn's triage and translations for the job queue, unless it
+        handed off with no model call (paused, or past today's budget), which sets off no model call for the owner
+        either: its handoff card, in the visitor's language, isn't translated."""
         conn, ids = self.conn, self.caller.ids
         if outcome in ERROR_CODES:
             await emit(conn, ids, EvError(type="error", code=ERROR_CODES[outcome]))
@@ -563,6 +568,8 @@ class _Turn:
         if self.visitor:
             await emit(conn, ids, EvTurnEnd(type="turn_end"))
         await conn.commit()
+        if not self.annotates:
+            return
         await defer_turn_annotations(self.jobs, conn, ids, self.stopped, self.replied, limiter=self.limiter,
                                      ledger=RateLimitLedger(self.caller.kernel, desk_id=ids.desk_id,
                                                             session_id=ids.session_id))

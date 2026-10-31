@@ -1188,10 +1188,11 @@ async def test_a_message_placed_after_the_last_look_still_goes_first(api_conn, c
 
 @pytest.mark.parametrize("stop", ["paused", "over_budget"])
 async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_conn, kernel_http, fake, ro_schema,
-                                                                            clock, stop):
+                                                                            clock, monkeypatch, stop):
     """A paused session's turn, and one past today's model budget, hand off with no model call, and the kernel renders
     that handoff card in the session's language. So the turn sends its newest message first: a Spanish message after
-    an English reply gets the handoff in Spanish (GitHub issue #121)."""
+    an English reply gets the handoff in Spanish (GitHub issue #121). Such a turn sets off no model call for the owner
+    either: the Spanish card queues no translation."""
     caller = await new_caller(kernel_http, fake, ro_schema)
     await said(api_conn, caller, "Hi, do you clear drains?")
     assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help with your drain."))])) == (
@@ -1208,6 +1209,12 @@ async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_
     await said(api_conn, caller, words)
     fake.calls.clear()
     model = ScriptedModel()
+    annotated = []
+
+    async def annotations(app, conn, ids, stopped, replied, **limits) -> None:
+        annotated.append((stopped, replied))
+
+    monkeypatch.setattr(loop_module, "defer_turn_annotations", annotations)
 
     assert await run_turn(api_conn, caller, model, production=stop == "over_budget", clock=clock) == "handoff"
 
@@ -1218,6 +1225,7 @@ async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_
     *_, message, end = await events(api_conn, caller.session_id)
     assert (message.type, end.type) == ("message", "turn_end")
     assert [block.text for block in message.blocks] == ["Déjame consultarlo con Maria Rivera."]
+    assert annotated == []
 
 
 async def test_a_turns_message_is_cut_to_the_kernels_limit(api_conn, caller, fake):
