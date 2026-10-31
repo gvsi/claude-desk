@@ -112,11 +112,13 @@ NEW_DESK = {   # a second Desk the owner adds to the copy: no connections, as `P
 async def test_a_new_desk_has_no_payments_tools(k: KernelHarness, records):
     """A Desk the owner adds with `POST /desks` starts with no `payments.*` tool, until its owner
     connects the payments server: its tool rows hold none, the owner's `/context` on it holds none,
-    and a visitor's call to one is refused before it is normalized, with nothing to run. The copy's
-    seeded Desk keeps both, pinned and on."""
+    and, with Answering on, a visitor's call to one is refused before it is normalized, with nothing
+    to run. The copy's seeded Desk keeps both, pinned and on."""
     desk = await golden_desk(k)
     created = await k.call("POST /desks", body=NEW_DESK, auth=desk.owner,
                            expect=Expect(fields={"desk_id": {"$not": desk.desk_id}}))
+    await k.call("PUT /desks/{id}/answering", path={"id": created.desk_id}, body={"on": True}, auth=desk.owner,
+                 expect=Expect(fields={"desk_id": created.desk_id}))   # so a visitor is given every tool it may be
     owner = desk.copy.owner_session.session_id
     context = await k.call("GET /context/{session_id}?desk_id=", path={"session_id": owner},
                            query={"desk_id": created.desk_id}, auth=desk.owner)
