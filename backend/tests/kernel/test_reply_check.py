@@ -747,6 +747,7 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
     "Don't pour grease down the drain.",            # "pour" and "et" mark no other language
     "Don't pour it.",
     "We fix sinks, tubs, et cetera.",
+    "We serve Des Moines.",
 ])
 async def test_plumbing_english_with_a_dropped_word_reads_as_english(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -1816,6 +1817,19 @@ def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context
     ("", []),
 ])
 def test_public_policy_language_requires_positive_evidence(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
+    ("Pour-over coffee available", []),
+    ("Open 9-5 EST", ["digit"]),
+    ("Les ofrecemos envío a domicilio", []),
+])
+def test_public_policy_language_recognizes_short_french_promises(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 

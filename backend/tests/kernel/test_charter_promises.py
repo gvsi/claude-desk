@@ -213,6 +213,8 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Pregunte por nuestros servicios aquí.",
     "Service area: Portland, Beaverton, Hillsboro, Tigard",
     "Cash, card, Venmo accepted",
+    "Pour-over coffee available",
+    "Les ofrecemos envío a domicilio",
     "Emergency service available",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
@@ -298,6 +300,10 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
     ("20% off for first-time clients", "Ask about our services."),
     ("No", "charge for consultations."),
     ("Nous garantissons des consultations gratuites pour tous les clients.", "Ask about our services."),
+    ("Consultations gratuites pour tous les clients.", "Ask about our services."),
+    ("Services sans frais pour tous les clients.", "Ask about our services."),
+    ("Livraison offerte pour tous", "Ask about our services."),
+    ("Remise de 20% sans frais", "Ask about our services."),
     ("Привет мир.", "Ask about our services."),
     ("Portland Beaverton Hillsboro free", "Ask about our services."),
 ])
@@ -320,6 +326,9 @@ async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
 
 
 @pytest.mark.parametrize("text", ["Nous garantissons des consultations gratuites pour tous les clients.",
+                                  "Consultations gratuites pour tous les clients.",
+                                  "Services sans frais pour tous les clients.",
+                                  "Livraison offerte pour tous", "Remise de 20% sans frais",
                                   "Привет мир.", "Portland Beaverton Hillsboro free"])
 async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client, text):
     copy = await rivera(app, client)
@@ -339,6 +348,10 @@ async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client
 
 @pytest.mark.parametrize(("text", "rules"), [
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
     ("Привет мир.", ["language"]),
     ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
 ])

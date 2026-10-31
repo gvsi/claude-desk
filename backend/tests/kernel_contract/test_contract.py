@@ -2262,6 +2262,10 @@ def quote_card(**limits) -> RuleCard:
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("free consultation", ["lex.en.promise"]),
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
     ("Привет мир.", ["language"]),
     ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
     ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
@@ -2405,7 +2409,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
-    ("sans frais", "consultations gratuites"),
+    ("Portland Beaverton", "Cash card"),
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
 ])

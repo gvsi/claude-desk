@@ -860,7 +860,11 @@ def unsupported_public_policy_language(text: str) -> bool:
     text = unicodedata.normalize("NFKC", text)
     letters = [char for char in text if char.isalpha()]
     non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
-    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+    words = set(re.findall(r"[^\W\d_]+", text.casefold()))
+    french_promises = {"sans", "frais", "gratuit", "gratuite", "gratuits", "gratuites", "offert", "offerte",
+                       "offerts", "offertes", "garanti", "garantie", "remboursé", "remboursés", "remise"}
+    return (non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+            or bool(words & french_promises))
 
 
 def public_policy_rules(text: str) -> list[str]:
