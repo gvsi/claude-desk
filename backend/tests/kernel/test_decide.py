@@ -1313,7 +1313,7 @@ async def test_deciding_checks_what_it_relies_on_and_fails_closed():
     with pytest.raises(RuntimeError, match="^review_without_action$"):
         await decide._review(None, SimpleNamespace(action=None), [])
     call = SimpleNamespace(subject="A visitor", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
-                           action=None, version_row=None, quotes={})
+                           action=None, version_row=None, quotes={}, adapter=None)
     with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
         decide._reason_plain(call, "allow", None, None)
     evaluation = decide.Evaluation("allow", [], [], None, None, strike=False, needed_review=False)

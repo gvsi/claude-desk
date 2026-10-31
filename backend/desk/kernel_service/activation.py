@@ -2088,6 +2088,7 @@ class _Prober:
         principal, session_row = _probe_principal(ctx.copy_id, row.desk_id, probe)
         subject, tool = _probe_subject(probe, self.people), probe.call.tool
         list_cents, discount = probe.amount_cents, None
+        adapter = await adapters.resolve(self.ctx, self.desk_row.desk_id, tool)
 
         def discounted() -> int | None:
             """The stand-in price less the discount asked for ("Discounts")."""
@@ -2095,13 +2096,13 @@ class _Prober:
 
         def asked() -> str:
             """"<subject> asks to <what>.", with the stand-in amount and the discount asked for."""
-            return explain.asked(subject, "asks", tool, discounted(), discount)
+            return explain.asked(subject, "asks", tool, discounted(), discount,
+                                 business=adapter.profile.business if adapter is not None else None)
 
         def refused(code: str) -> ProbeResult:
             return self._result(probe, "refuse", [], False,
                                 [asked(), PROBE_OUTCOME_PLAIN["refuse"], PROBE_REFUSED_PLAIN[code]])
 
-        adapter = await adapters.resolve(self.ctx, self.desk_row.desk_id, tool)
         if adapter is None:
             return refused("unknown_tool")
         if tool not in decide.tools_given(principal, session_row, self.desk_row, self.tools):
