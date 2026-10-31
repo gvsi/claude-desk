@@ -298,7 +298,7 @@ async def test_a_canary_in_a_public_policy_or_a_price_is_refused(app, client):
     # refusals above win over that scan and never return detail about the private text.
     near = dana.canary[:-1] + ("1" if dana.canary.endswith("0") else "0")
     response = await put_part(client, copy, "charter", {
-        "charter": [RIVERA_CONTACT, policy("refunds", f"5-7 days, {near}.")]})
+        "charter": [RIVERA_CONTACT, policy("refunds", f"For our records: 5-7 days, {near}.")]})
     assert (response.status_code, response.json()) == (
         422, {"code": "invalid", "detail": {"policy:refunds": ["digit"]}})
     assert await charter_and_prices(app, copy) == stored

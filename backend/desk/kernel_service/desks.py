@@ -434,6 +434,13 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
     A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
     order, so the owner can audit the attempt without creating a row for refused input.
     """
+    limit = None
+    if len(values) > reply_check.PUBLIC_POLICY_MAX_COUNT:
+        limit = "policy_count_limit"
+    elif sum(map(len, values.values())) > reply_check.PUBLIC_POLICY_MAX_CHARS:
+        limit = "policy_text_limit"
+    if limit is not None:
+        raise KernelFailure(422, "invalid", limit, detail={"charter": [limit]})
     fields = reply_check.scan_public_policies(values)
     if not fields:
         return

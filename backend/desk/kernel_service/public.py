@@ -162,6 +162,11 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                 continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)
+    # Scan only the policies that survived visibility, currentness and canary filtering,
+    # in the order the visitor receives them. Drop the entire group on refusal so removing
+    # one card cannot create an unchecked promise between its former neighbors.
+    if reply_check.policy_card_violations("", charter):
+        charter = [block for block in charter if block.template != "policy"]
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS

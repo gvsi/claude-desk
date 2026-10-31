@@ -1,10 +1,16 @@
 """Public policy text must pass the reply check's prose scan before a charter write."""
 
-import pytest
+from datetime import timedelta
 
-from desk.kernel_service import reply_check
+import pytest
+from sqlalchemy import select
+
+from desk.contracts import Claim
+from desk.db.models import Fact as FactRow
+from desk.kernel_service import labels, reply_check
 from desk.kernel_service.seed import rivera_seed
 
+from .helpers import kernel_ctx
 from .test_adapters import rivera
 from .test_desk_writes import desks_of, entries_of, facts_of, new_desk, post_desk, put_part
 from .test_decide import open_visitor
@@ -17,7 +23,7 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
 
 @pytest.mark.parametrize("parts", [
     ("No", "charge for consultations."),
-    ("Sin", "costo para consultas."),
+    ("Sin", "costo para consultas aquí."),
     ("Your appointment is", "confirmed."),
     ("Tu cita está", "confirmada."),
 ])
@@ -48,7 +54,7 @@ async def test_reply_refuses_policy_promises_reassembled_in_citation_order(app, 
 
 @pytest.mark.parametrize("parts", [
     ("We offer fr", "ee consultations."),
-    ("Ofrecemos consultas gra", "tis."),
+    ("Ofrecemos consultas gra", "tis aquí."),
 ])
 async def test_reply_keeps_honest_policy_word_fragments_on_separate_cards(app, client, parts):
     copy = await rivera(app, client)
@@ -115,9 +121,11 @@ async def test_prose_only_failure_keeps_its_existing_rule_beside_a_policy(app, c
     ("20 % de descuento", "Trabajamos con pequeños negocios y familias.",
      ["digit", "lex.es.promise", "percent_sign"]),
     ("free consultation", "Ask about our services.", ["lex.en.promise"]),
-    ("garantizamos", "Pregunte por nuestros servicios.", ["lex.es.promise"]),
+    ("Nous garantissons des consultations gratuites pour tous les clients.",
+     "Ask about our services.", ["language"]),
+    ("garantizamos", "Pregunte por nuestros servicios aquí.", ["lex.es.promise"]),
     ("We offer \u202eeerf\u202c consultations.", "Ask about our services.", ["format_control"]),
-    ("Ofrecemos consultas \u202esitarg\u202c.", "Pregunte por nuestros servicios.", ["format_control"]),
+    ("Ofrecemos consultas \u202esitarg\u202c.", "Pregunte por nuestros servicios aquí.", ["format_control"]),
 ])
 async def test_creation_refuses_policy_before_rows_and_ledgers_on_existing_desks(app, client, unsafe, honest, rules):
     copy = await rivera(app, client)
@@ -158,7 +166,7 @@ async def test_creation_refuses_policy_before_rows_and_ledgers_on_existing_desks
     ("We offer \u202eeerf\u202c consultations.", ["format_control"]),
     ("Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
     ("Ask about our\u200d services.", ["format_control"]),
-    ("Pregunte por nuestros\u200d servicios.", ["format_control"]),
+    ("Pregunte por nuestros\u200d servicios aquí.", ["format_control"]),
 ])
 async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, client, text, rules):
     copy = await rivera(app, client)
@@ -186,7 +194,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Ask about our services.",
     "Trabajamos con pequeños negocios y familias.",
     "Cuéntenos qué necesita y le sugeriremos los siguientes pasos.",
-    "Pregunte por nuestros servicios.",
+    "Pregunte por nuestros servicios aquí.",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
     copy = await rivera(app, client)
@@ -205,6 +213,10 @@ async def test_honest_policy_text_is_written_and_rendered(app, client, text):
         assert policy["text"] == text
         assert reply_check.scan_public_text(policy["text"]) == []
         assert any(block["text"] == "(510) 555-0199" for block in page.json()["charter"])
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:about")])
+    assert verdict.ok and verdict.blocks[0].text == text
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
 async def test_rivera_seed_policies_pass_the_scan_and_charter_write(app, client, frozen_clock):
@@ -221,7 +233,7 @@ async def test_rivera_seed_policies_pass_the_scan_and_charter_write(app, client,
 @pytest.mark.parametrize("create", [False, True], ids=["replace", "create"])
 @pytest.mark.parametrize(("unsafe", "honest", "rule"), [
     (("No", "charge for consultations."), ("Ask about", "our services."), "lex.en.promise"),
-    (("Sin", "costo para consultas."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
+    (("Sin", "costo para consultas aquí."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
     (("Your appointment is", "confirmed."), ("Tell us", "what you need."), "lex.en.booking"),
     (("Tu cita está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.booking"),
 ])
@@ -238,7 +250,7 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
         # Request order is deliberately different from public fact-ID order. Contact stays outside the scan.
         claims = [{"key": key, "kind": "text", "value": value} for key, value in (
             ("policy:z", "Ask about our services."), ("policy:c", parts[1]),
-            ("contact", "(510) 555-0199"), ("policy:b", parts[0]), ("policy:a", "Pregunte por nuestros servicios."))]
+            ("contact", "(510) 555-0199"), ("policy:b", parts[0]), ("policy:a", "Pregunte por nuestros servicios aquí."))]
         if create:
             body = new_desk()
             body["desk"]["charter"] = claims
@@ -258,6 +270,124 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
     for language in ("en", "es"):
         page = await client.get(f"/public/{slug}", params={"lang": language})
         policies = [block for block in page.json()["charter"] if block["template"] == "policy"]
-        assert [block["text"] for block in policies] == ["Pregunte por nuestros servicios.", *honest,
+        assert [block["text"] for block in policies] == ["Pregunte por nuestros servicios aquí.", *honest,
                                                        "Ask about our services."]
         assert reply_check.scan_public_text("\n".join(block["text"] for block in policies)) == []
+
+
+@pytest.mark.parametrize("parts", [
+    ("20% off for first-time clients", "Ask about our services."),
+    ("No", "charge for consultations."),
+    ("Nous garantissons des consultations gratuites pour tous les clients.", "Ask about our services."),
+])
+async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
+    copy = await rivera(app, client)
+    # Write historical rows directly so the current write guard cannot sanitize this state.
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        rows = list(await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.kind == "charter",
+            FactRow.fact_id.in_(["charter:policy:arrival", "charter:policy:first_visit"]))
+            .order_by(FactRow.fact_id))))
+        for row, value in zip(rows, parts, strict=True):
+            row.claims = [Claim(key=row.fact_id.removeprefix("charter:"), kind="text", value=value)]
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        assert not [block for block in page.json()["charter"] if block["template"] == "policy"]
+        assert any(block["template"] == "hours" for block in page.json()["charter"])
+
+
+async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client):
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:service_area")))).one()
+        row.claims = [Claim(key="policy:service_area", kind="text",
+                           value="Nous garantissons des consultations gratuites pour tous les clients.")]
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("unknown_fact", "policy_combined", ["charter:policy:service_area"])]
+    assert_handed_off(verdict)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+async def test_charter_refuses_unsupported_language_policy(client, app):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:about", "kind": "text",
+         "value": "Nous garantissons des consultations gratuites pour tous les clients."}]})
+    assert (response.status_code, response.json()) == (422, {
+        "code": "invalid", "detail": {"policy:about": ["language"]}})
+
+
+@pytest.mark.parametrize("create", [False, True], ids=["replace", "create"])
+@pytest.mark.parametrize(("count", "length", "code"), [
+    (41, 40, "policy_count_limit"),
+    (40, 201, "policy_text_limit"),
+])
+async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monkeypatch, create, count, length, code):
+    copy = await rivera(app, client)
+    before = await facts_of(app, copy, "charter")
+    desk_ids = set(await desks_of(app, copy))
+    claims = [{"key": f"policy:{index:02d}", "kind": "text", "value": "x" * length} for index in range(count)]
+
+    def unexpected_scan(values):
+        pytest.fail("oversized policy input reached the lexical scan")
+
+    monkeypatch.setattr(reply_check, "scan_public_policies", unexpected_scan)
+    if create:
+        body = new_desk()
+        body["desk"]["charter"] = claims
+        response = await post_desk(client, copy, body)
+    else:
+        response = await put_part(client, copy, "charter", {"charter": claims})
+    assert (response.status_code, response.json()) == (422, {
+        "code": "invalid", "detail": {"charter": [code]}})
+    assert set(await desks_of(app, copy)) == desk_ids
+    assert {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()} == {
+        key: fact.claims for key, fact in before.items()}
+
+
+@pytest.mark.parametrize("hidden", ["private", "expired", "canary"])
+async def test_public_policy_scan_runs_after_filtering(app, client, hidden):
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        rows = list(await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.kind == "charter",
+            FactRow.fact_id.like("charter:policy:%")).order_by(FactRow.fact_id))))
+        for row, value in zip(rows, ["No", "Ask about our services.", "charge for consultations."], strict=True):
+            row.claims = [Claim(key=row.fact_id.removeprefix("charter:"), kind="text", value=value)]
+        middle = rows[1]
+        if hidden == "private":
+            middle.readers = ["owner"]
+        elif hidden == "expired":
+            middle.expires_at = ctx.clock.now() - timedelta(seconds=1)
+        else:
+            canary = next(iter((await labels.copy_canaries(ctx)).values()))
+            middle.claims = [Claim(key="policy:first_visit", kind="text", value=f"Ask about our services. {canary}")]
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        assert all(block["template"] != "policy" for block in page.json()["charter"])
+
+
+@pytest.mark.parametrize("create", [False, True], ids=["replace", "create"])
+async def test_policy_limits_accept_the_exact_maximum(app, client, create):
+    copy = await rivera(app, client)
+    text = ("Ask about our services. " * 10)[:200]
+    assert len(text) == 200
+    claims = [{"key": f"policy:{index:02d}", "kind": "text", "value": text} for index in range(40)]
+    if create:
+        body = new_desk()
+        body["desk"]["charter"] = claims
+        response = await post_desk(client, copy, body)
+    else:
+        response = await put_part(client, copy, "charter", {"charter": claims})
+    assert response.status_code == 200, response.text
+    slug = response.json()["slug"] if create else copy.slug
+    page = await client.get(f"/public/{slug}")
+    assert len([block for block in page.json()["charter"] if block["template"] == "policy"]) == 40

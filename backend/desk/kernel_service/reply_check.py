@@ -78,7 +78,9 @@ import json
 import logging
 import re
 import unicodedata
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import desk_kernel
@@ -102,6 +104,8 @@ from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
+PUBLIC_POLICY_MAX_COUNT = 40
+PUBLIC_POLICY_MAX_CHARS = 8_000
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
@@ -328,7 +332,27 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
-def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, int, str, Violation]]:
+@dataclass(frozen=True)
+class _Lookahead:
+    """A matched expression and its original reading, retained only for right-context checks."""
+
+    reading: str
+    origin: Sequence[int]
+    pattern: re.Pattern[str]
+    start: int
+    end: int
+
+    def holds_at(self, boundary: int) -> bool:
+        # Match only this expression at its known start; never rescan a growing full prefix.
+        match = self.pattern.match(self.reading, self.start, bisect_left(self.origin, boundary))
+        return match is not None and match.end() == self.end
+
+
+RightContext = dict[tuple[int, int, str], list[_Lookahead]]
+
+
+def _booking_claims(text: str, readings: dict[str, list[int]],
+                    right_context: RightContext | None = None) -> list[tuple[int, int, str, Violation]]:
     """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
     such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
@@ -336,12 +360,16 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
     found: set[tuple[int, int, str]] = set()
     for reading, origin in readings.items():
         reach = -1       # the furthest end of a conditioned claim starting at or before this one
-        for start, end, rule_id in sorted((match.start(), match.end(), rule_id) for rule_id, pattern in BOOKING_LINES
-                                          for match in pattern.finditer(reading) if match.end() > match.start()):
+        matches = ((match.start(), match.end(), rule_id, pattern) for rule_id, pattern in BOOKING_LINES
+                   for match in pattern.finditer(reading) if match.end() > match.start())
+        for start, end, rule_id, pattern in sorted(matches, key=lambda hit: hit[:3]):
             if _conditioned(text, reading, origin, start):     # the same for every claim starting here
                 reach = max(reach, end)
             if reach < end:
-                found.add((origin[start], origin[end - 1] + 1, rule_id))
+                hit = (origin[start], origin[end - 1] + 1, rule_id)
+                found.add(hit)
+                if right_context is not None and "(?=" in pattern.pattern:
+                    right_context.setdefault(hit, []).append(_Lookahead(reading, origin, pattern, start, end))
     hits: list[tuple[int, int, str, Violation]] = []
     reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
@@ -385,7 +413,8 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
 
 
 def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
-                booking_card: bool = False) -> list[tuple[int, int, str, Violation]]:
+                booking_card: bool = False,
+                right_context: RightContext | None = None) -> list[tuple[int, int, str, Violation]]:
     """The prose scan with full match offsets in `shown(text)`, before display spans are truncated."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, int, str, Violation]] = [(-1, -1, "canary", canary_violation(found))] if found else []
@@ -413,7 +442,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
     if not booking_card:
-        hits += _booking_claims(text, readings)
+        hits += _booking_claims(text, readings, right_context)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
@@ -428,6 +457,9 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                 if (rule_id, start, end) in seen:
                     continue
                 seen.add((rule_id, start, end))
+                if right_context is not None and "(?=" in pattern.pattern:
+                    right_context.setdefault((start, end, rule_id), []).append(
+                        _Lookahead(reading, origin, pattern, match.start(), match.end()))
                 hits.append((start, end, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
                                                            rule_id=rule_id)))
     return sorted(hits, key=lambda hit: (hit[0], hit[2]))
@@ -436,11 +468,15 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 def scan_public_text(text: str) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
-    Both lexicons run, whatever the text's language. Format controls are refused because
+    Both lexicons run, whatever the text's language. Positive evidence of another language
+    is refused as in reply prose; short or undetermined text keeps passing. Format controls
+    are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
     """
     rules = {violation.rule_id for violation in scan_prose(text)}
+    if lang.detect(shown(text)) == "other":
+        rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     return sorted(rules)
@@ -476,22 +512,25 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, li
         ranges.append((key, offset, offset + len(text)))
         offset += len(text) + 1
     combined = "\n".join(pieces)
-    hits = _prose_hits(combined)
-    prefixes = {len(combined): {(start, end, rule) for start, end, rule, _ in hits}}
-    for start, end, rule, _ in hits:
-        # A positive lookahead can require another policy without consuming its text
-        # ("libres" / "para todos"). Include the shortest right context preserving that hit.
-        for _, _, boundary in ranges:
-            if boundary < end:
-                continue
-            if boundary not in prefixes:
-                prefixes[boundary] = {(low, high, found)
-                                      for low, high, found, _ in _prose_hits(combined[:boundary])}
-            if (start, end, rule) in prefixes[boundary]:
-                end = boundary
-                break
+    if lang.detect(combined) == "other":
         for key, low, high in ranges:
-            if key is not None and low < high and low < end and start < high:
+            if key is not None and low < high:
+                fields[key].add("language")
+    right_context: RightContext = {}
+    hits = _prose_hits(combined, right_context=right_context)
+    boundaries = [high for _, _, high in ranges]
+    starts = [low for _, low, _ in ranges]
+    for start, end, rule, _ in hits:
+        # Ordinary matches already carry their full range from the single combined scan.
+        # Only a positive lookahead may depend on text beyond that range ("libres" /
+        # "para todos"). Find its shortest preserving right context at a card boundary.
+        if (start, end, rule) in right_context:
+            for boundary in boundaries[bisect_left(boundaries, end):]:
+                if any(match.holds_at(boundary) for match in right_context[start, end, rule]):
+                    end = boundary
+                    break
+        for key, low, high in ranges[bisect_right(boundaries, start):bisect_left(starts, end)]:
+            if key is not None and low < high:
                 fields[key].add(rule)
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 

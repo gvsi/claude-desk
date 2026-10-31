@@ -1766,7 +1766,7 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
     ("Ask about our services.", []),
     ("Trabajamos con pequeños negocios y familias.", []),
     ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
-    ("Pregunte por nuestros servicios.", []),
+    ("Pregunte por nuestros servicios aquí.", []),
 ])
 def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
@@ -1775,7 +1775,7 @@ def test_scan_public_text(text, rules):
 @pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
                                      "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
                                      "\u00ad", "\ufeff", "\U000e0001"])
-@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios."])
+@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios aquí."])
 def test_public_text_refuses_format_controls(control, honest):
     assert reply_check.scan_public_text(honest) == []
     assert reply_check.scan_public_text(honest + control) == ["format_control"]
@@ -1790,6 +1790,8 @@ def test_public_text_refuses_format_controls(control, honest):
      {key: ["lex.en.promise"] for key in ("policy:b", "policy:c")}),
     ({"policy:a": "Once your appointment is", "policy:b": "confirmed."}, {}),
     ({"policy:a": "Tu cita está", "policy:b": "pendiente."}, {}),
+    ({"policy:a": "quedó hecha", "policy:b": "la reserva", "policy:c": "Pregunte aquí."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
     ({"policy:a": "libres", "policy:b": "para todos"},
      {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
     ({"policy:a": "You are free to", "policy:b": "all clients"},
@@ -1797,3 +1799,43 @@ def test_public_text_refuses_format_controls(control, honest):
 ])
 def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
     assert reply_check.scan_public_policies(values) == fields
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("We work with small businesses and families.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("OK", []),
+    ("No", []),
+    ("", []),
+])
+def test_public_policy_language_matches_reply_prose(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+def test_public_policy_language_checks_the_combined_rendering():
+    parts = {"policy:a": "sans frais", "policy:b": "consultations gratuites"}
+    assert all(reply_check.scan_public_text(value) == [] for value in parts.values())
+    assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
+
+
+
+@pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
+def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
+    from time import perf_counter
+
+    # Forty policies totaling exactly 8,000 characters, with many ordinary lexical hits.
+    values = {f"policy:{index:02d}": (phrase * 8)[:200] for index in range(40)}
+    scanned_lengths = []
+    scan = reply_check._prose_hits
+
+    def counted(text, *args, **kwargs):
+        scanned_lengths.append(len(text))
+        return scan(text, *args, **kwargs)
+
+    monkeypatch.setattr(reply_check, "_prose_hits", counted)
+    start = perf_counter()
+    assert reply_check.scan_public_policies(values) == {key: ["lex.en.promise"] for key in values}
+    elapsed = perf_counter() - start
+    assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
+    assert elapsed < 0.75
