@@ -51,3 +51,28 @@ export const ToolPage: Story = {
     expectComputed(separators[0] as Element, { color: 'rgba(250, 249, 245, 0.6)' });
   },
 };
+
+/** A name the voice rules would flag if it were the trail's own words: its initials are in capitals. */
+const MARKED_NAME = 'JJ Okafor';
+
+export const MarkedName: Story = {
+  name: 'A name marked as theirs',
+  args: {
+    items: [{ label: 'Customers', href: '/people' }, { label: <span data-copy="user">{MARKED_NAME}</span> }],
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a trail with a name someone chose in it. A label can be a node, so a screen marks a customer’s or a business’s name as user text; the nearest board is N-Conn-05-Refund.',
+  },
+  play: async ({ canvas }) => {
+    // breadcrumb_name_is_user_text: the page's label holds the name, marked as theirs.
+    const nav = canvas.getByRole('navigation', { name: 'Breadcrumb' });
+    const current = nav.querySelector('[aria-current="page"]');
+    await expect(current).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
+    const marked = current?.querySelector('[data-copy="user"]');
+    await expect(marked).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
+    await expect(within(nav).getByRole('link', { name: 'Customers' })).toHaveAttribute('href', '/people');
+    await expect(nav).toHaveTextContent(`Customers/${MARKED_NAME}`);
+  },
+};

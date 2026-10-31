@@ -68,7 +68,7 @@ export const NoRulesJustForThem: Story = {
   play: async ({ canvas }) => {
     // no_rules_says_so: a quiet line in place of the card, and the way to add one on Rules.
     const section = canvas.getByRole('region', { name: 'Rules for Dana Whitfield' });
-    const line = within(section).getByText('No rules just for Dana Whitfield.');
+    const line = within(section).getByText((_, el) => el?.tagName === 'P' && el.textContent === 'No rules just for Dana Whitfield.');
     expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)' });
     await expect(within(section).queryByRole('list')).toBeNull();
     await expect(within(section).getByRole('link', { name: 'Change them on Rules' })).toBeVisible();
@@ -187,5 +187,45 @@ export const LongRuleNarrow: Story = {
       }
       await expect(box.right).toBeLessThanOrEqual(row.getBoundingClientRect().right - 16 + 0.5);
     }
+  },
+};
+
+/** A name the voice rules would flag if it were the component's own words: its initials are in capitals. */
+const MARKED_NAME = 'JJ Okafor';
+
+export const MarkedName: Story = {
+  name: 'A name marked as theirs',
+  args: {
+    name: MARKED_NAME,
+    rules: [
+      {
+        key: 'rv-jj-saturday',
+        title: 'Book a visit',
+        rule: { card_id: 'rv-jj-saturday', mode: 'ask', reason: 'Saturday visits wait for you to say yes.' },
+        words: [{ field: 'hours', text: 'Saturdays 9:00 am to 1:00 pm' }],
+      },
+    ],
+  },
+  parameters: { canvasNote: `${NOTE} The person's name is theirs, marked as user text inside the component's words.` },
+  play: async ({ canvas }) => {
+    // person_name_is_user_text: "Rules for" is the component's copy; the name in it is marked as theirs.
+    const section = canvas.getByRole('region', { name: `Rules for ${MARKED_NAME}` });
+    const heading = within(section).getByRole('heading', { level: 2, name: `Rules for ${MARKED_NAME}` });
+    const marked = heading.querySelectorAll('[data-copy="user"]');
+    await expect(marked).toHaveLength(1);
+    await expect(marked[0]).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
+    await expect(heading).toHaveTextContent(new RegExp(`^Rules for ${MARKED_NAME}$`));
+  },
+};
+
+export const MarkedNameNoRules: Story = {
+  name: 'A name marked as theirs, no rules',
+  args: { name: MARKED_NAME, rules: [] },
+  parameters: { canvasNote: `${NOTE} With no rules, the line names the person, marked as user text.` },
+  play: async ({ canvas }) => {
+    const line = canvas.getByText((_, el) => el?.tagName === 'P' && el.textContent === `No rules just for ${MARKED_NAME}.`);
+    const marked = line.querySelectorAll('[data-copy="user"]');
+    await expect(marked).toHaveLength(1);
+    await expect(marked[0]).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
   },
 };

@@ -10,7 +10,7 @@
 ## What the consumer provides
 
 - `label`: the list's name, the same as the heading over it ("Ready-made words").
-- `items`: each block's `title` ("Google profile") and its `text`, exactly as it is copied. The words are the screen's, with the Desk's link and the AI disclosure in them.
+- `items`: each block's `title` ("Google profile") and its `text`, exactly as it is shown and copied. The words are the screen's, with the Desk's link and the AI disclosure in them. When they hold a name someone chose (the business's, the owner's), pass `text` as a node with each name in its own `<span data-copy="user">`; Copy then copies the words as they read, as plain text.
 - `onCopy`, which writes one block's words to the clipboard. The screen owns the clipboard; a throw or a rejected promise means it couldn't.
 
 ## What it shows
@@ -30,5 +30,5 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `label` | `string` | Required. The list's name. |
-| `items` | `{ title: string; text: string }[]` | Required. |
+| `items` | `{ title: string; text: ReactNode }[]` | Required. `text` is usually a string, copied as it is; as a node, the plain text it reads as is copied. |
 | `onCopy` | `(text: string) => Promise<void> \| void` | Required. |

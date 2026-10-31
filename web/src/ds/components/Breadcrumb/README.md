@@ -14,10 +14,11 @@
 - The last item is the page itself: plain `text-primary` text with `aria-current="page"`.
 - Between items, the boards' "/" in `text-tertiary`, 8 px from each side, `aria-hidden`, so a screen reader hears only the names.
 - A long trail wraps onto a second line rather than scrolling sideways.
+- A name someone chose (a customer's, a business's) in a label is the screen's to mark as user text: pass the label as a node with the name in its own `<span data-copy="user">`. The rest of the trail stays the screen's words.
 
 ## Props
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `items` | `{ label: string; href?: string }[]` | Required, from the top down, ending with the page. An item before the last with no `href` shows as plain text. |
+| `items` | `{ label: ReactNode; href?: string }[]` | Required, from the top down, ending with the page. A label is usually a string; it is a node when it holds a name to mark as user text. An item before the last with no `href` shows as plain text. |
 | `linkComponent` | `ComponentType<RulesLinkProps>` | The app's router link; a plain `<a>` by default. |

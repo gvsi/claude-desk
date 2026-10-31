@@ -76,3 +76,51 @@ export const CopyFailed: Story = {
     await expect(within(voicemail).getByRole('status')).toHaveTextContent(/^Copy didn’t work\. The text is selected, so copy it yourself\.$/);
   },
 };
+
+/** A business and an owner whose names the voice rules would flag if they were the list's own words. */
+const BUSINESS = 'AAA Plumbing';
+const OWNER = 'JJ Okafor';
+const theirs = (name: string) => <span data-copy="user">{name}</span>;
+
+export const MarkedNames: Story = {
+  name: 'Names marked as theirs',
+  args: {
+    items: [
+      {
+        title: 'Email signature',
+        text: <>Need a plumber? Ask {theirs(BUSINESS)} any time at desk.example/aaa (answered by Claude, an AI).</>,
+      },
+      {
+        title: 'Voicemail',
+        text: (
+          <>
+            You’ve reached {theirs(BUSINESS)}. For quotes and bookings, visit desk.example slash aaa, where Claude, an AI, answers any time. For an
+            emergency, leave a message and {theirs(OWNER)} will call you back.
+          </>
+        ),
+      },
+    ],
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Share’s ready-made words for a business whose names have capitals: the words are the screen’s, with each name in them marked as user text.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // copy_list_names_are_user_text: each name inside the words is marked, and Copy copies the words
+    // exactly as they read, names and all, as plain text.
+    const rows = within(canvas.getByRole('list', { name: 'Ready-made words' })).getAllByRole('listitem') as HTMLElement[];
+    const signature = 'Need a plumber? Ask AAA Plumbing any time at desk.example/aaa (answered by Claude, an AI).';
+    const voicemail =
+      'You’ve reached AAA Plumbing. For quotes and bookings, visit desk.example slash aaa, where Claude, an AI, answers any time. For an emergency, leave a message and JJ Okafor will call you back.';
+    const [first, second] = rows as [HTMLElement, HTMLElement];
+    const firstWords = first.querySelector('.cd-copy-list__words');
+    const secondWords = second.querySelector('.cd-copy-list__words');
+    await expect(firstWords).toHaveTextContent(signature, { normalizeWhitespace: false });
+    await expect([...(firstWords?.querySelectorAll('[data-copy="user"]') ?? [])].map((el) => el.textContent)).toEqual([BUSINESS]);
+    await expect([...(secondWords?.querySelectorAll('[data-copy="user"]') ?? [])].map((el) => el.textContent)).toEqual([BUSINESS, OWNER]);
+    await userEvent.click(within(first).getByRole('button', { name: 'Copy Email signature' }));
+    await expect(args.onCopy).toHaveBeenLastCalledWith(signature);
+    await userEvent.click(within(second).getByRole('button', { name: 'Copy Voicemail' }));
+    await expect(args.onCopy).toHaveBeenLastCalledWith(voicemail);
+  },
+};

@@ -9,7 +9,7 @@
 
 ## What the consumer provides
 
-- `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written.
+- `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written, each marked as user text (`data-copy="user"`) inside the card's own words.
 - `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04). It fills a 152 px square, centered. The card never makes, fetches or checks a code. A QR code needs its own light quiet zone to scan, which the web app's code draws; nothing else in the design system is light, so that ground stays inside the code.
 - `language`: the language the card is printed in.
 - `onPrint` to show "Print card" under the card. The screen prints; nothing here does.
@@ -23,7 +23,7 @@
 
 ## Accessibility
 
-- The card is a `figure` named by the business, with who answers as its caption, and `lang` set to its language.
+- The card is a `figure` named by the business, with who answers as its caption, and `lang` set to its language. It takes its name from the business's name as shown (`aria-labelledby`), which is marked as user text, so nothing the business wrote is read as the card's own words.
 - The QR code is the screen's to name ("QR code for desk.example/rivera"); the link is written out under it, so nobody needs to scan it.
 
 ## Props

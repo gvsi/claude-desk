@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { copyResultLine, useCopyText } from '../CopyField/useCopyText.ts';
@@ -8,8 +8,12 @@ import './CopyList.css';
 export interface CopyListItem {
   /** Where the words go: "Google profile", "Email signature", "Voicemail". */
   title: string;
-  /** The words, as they are copied. */
-  text: string;
+  /**
+   * The words, as they are shown and copied. A node when they hold a name someone chose (the
+   * business's, the owner's), so the screen can mark each name as user text:
+   * `<span data-copy="user">`. Copy then copies the words as they read, as plain text.
+   */
+  text: ReactNode;
 }
 
 export interface CopyListProps {
@@ -35,6 +39,11 @@ export function CopyList({ label, items, onCopy }: CopyListProps) {
   );
 }
 
+/** The words to copy: the screen's string as it is, or, for words with marked names in them, the text they read as. */
+function plainWords(text: ReactNode, shown: HTMLElement | null): string {
+  return typeof text === 'string' ? text : (shown?.textContent ?? '');
+}
+
 function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['onCopy'] }) {
   const words = useRef<HTMLParagraphElement>(null);
   const { state, copy } = useCopyText(onCopy);
@@ -50,7 +59,7 @@ function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['
         </p>
       </div>
       <span className="cd-copy-list__copy">
-        <Button variant="secondary" onClick={() => void copy(item.text, words.current)}>
+        <Button variant="secondary" onClick={() => void copy(plainWords(item.text, words.current), words.current)}>
           Copy<span className="cd-sr-only"> {item.title}</span>
         </Button>
       </span>
