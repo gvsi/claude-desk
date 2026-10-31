@@ -1795,10 +1795,13 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
 
 
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date) -> SeedParts:
-    """The Desk's parts from the answers: the public charter (the contact and the service area; never hours, which
-    have their own part), the hours, the price list, the calendar and the notification defaults."""
+    """The Desk's parts from the answers: the public charter (the contact, summary and business policies; never
+    hours, which have their own part), the hours, the price list, the calendar and the notification defaults."""
     charter = [Claim(key=key, kind="text", value=value.strip())
-               for key, value in (("contact", answers.public_contact), ("policy:service_area", answers.service_area))
+               for key, value in (("contact", answers.public_contact), ("policy:about", answers.summary),
+                                  ("policy:service_area", answers.service_area), ("policy:pricing", answers.pricing),
+                                  ("policy:intake", answers.intake), ("policy:after_hours", answers.after_hours),
+                                  ("policy:urgent", answers.urgent), ("policy:how_we_help", answers.how_we_help))
                if value and value.strip()]
     return SeedParts(charter=charter, hours=list(answers.hours), prices=price_items(answers.price_items),
                      calendar=calendar_slots(answers.hours, timezone, today),

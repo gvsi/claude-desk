@@ -56,7 +56,7 @@ from desk.api.prompts import (
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
-from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes, situation
+from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -122,6 +122,30 @@ GOOD_CARDS = [
                   reason="Takes payments up to $300 on its own."),
     RuleCardDraft(applies_to="effect:pay_out", mode="ask", who="anyone", reason="Refunds ask you first."),
 ]
+
+
+def test_seed_parts_publish_policy_claims():
+    fields = {
+        "summary": "  Tax advice for small businesses.  ",
+        "service_area": "  Oakland and Berkeley  ",
+        "pricing": "  Priced per case after a consult.  ",
+        "intake": "  Ask whether the request is personal or business.  ",
+        "after_hours": "  Leave your details for the next business day.  ",
+        "urgent": "  For a filing notice, take the deadline and request a callback.  ",
+        "how_we_help": "  New client intake: Collect the business type and reason for reaching out.  ",
+        "public_contact": "  hello@example.test  ",
+    }
+    keys = {"summary": "policy:about", "public_contact": "contact",
+            **{name: f"policy:{name}" for name in fields if name not in ("summary", "public_contact")}}
+    parts = seed_parts(SetupAnswers(**fields), TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    assert {claim.key: (claim.kind, claim.value) for claim in parts.charter} == {
+        keys[name]: ("text", value.strip()) for name, value in fields.items()}
+    assert len(parts.charter) == len(fields)
+
+    # No empty card is published, including a blank summary or fields the owner never answered.
+    for empty in ({"summary": ""}, {name: " \n " for name in fields}):
+        assert seed_parts(SetupAnswers(**empty), TIMEZONE, business_type="office",
+                          today=date(2026, 10, 31)).charter == []
 
 
 @pytest.fixture
@@ -682,6 +706,10 @@ async def test_proving_timeout_rereads_the_same_draft(app, browser, fake, kernel
     reply = await owner.browser.post(path)
     assert reply.status_code == 202 and monotonic() - started < 2
     assert reply.json() == {"retry": {"path": path, "body": None}}
+    # Putting the Desk's parts can outlast the polling wait; test joining once the gated draft has started.
+    async with asyncio.timeout(10):
+        while not fake.called("POST /policy/draft"):
+            await asyncio.sleep(0.01)
     reply = await owner.browser.post(reply.json()["retry"]["path"])
     assert reply.status_code == 202 and len(fake.called("POST /policy/draft")) == 1
     release.set()

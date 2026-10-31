@@ -1623,6 +1623,65 @@ LIMITS = {"quote_auto_max_cents": 50_000, "discount_auto_max_bp": 10_000, "payme
 LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("discount_auto_max_bp",),
                    "documents_and_payments": ("documents",),
                    "money_limit": ("auto_money_cap_cents", "refunds", "payment_link_auto_max_cents")}
+
+
+def test_business_policy_facts_never_reach_or_change_on_limit_turns(caplog):
+    facts = {"pricing": "Per case after a consult.", "intake": "Ask about the business type.",
+             "urgent": "Take the filing notice and request a callback."}
+    answers = SetupAnswers(summary="Tax advice.", **facts)
+    patch = SetupPatch(**{name: "Changed by a limit turn." for name in facts})
+    interview = desk_setup.Interview(interview_id="setup-1", copy_id="copy-1", desk_id="desk-1",
+                                    business_type="office", step="questions", consent=True, answers=answers,
+                                    transcript=[])
+    for key in LIMIT_QUESTIONS:
+        message = desk_setup._turn_message(interview, key, "Always ask me first.")
+        (block,) = message["content"]
+        text = html.unescape(block["text"])
+        assert all(name not in text and value not in text for name, value in facts.items()), key
+        assert set(facts).isdisjoint(SETUP_TURNS[key].model_fields), key
+        for name in facts:
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]), name: "Changed."})
+        assert desk_setup.merged(answers, patch, key) == answers
+        assert all(f"{key} carried {name}" in caplog.text for name in facts)
+
+
+def test_fact_turns_capture_business_policies_with_bounded_fields():
+    descriptions = {
+        "pricing": 'how the business prices (a fixed menu, "from" prices, or per case after a consult)',
+        "intake": "what to ask a new customer before the owner takes them on",
+        "urgent": "what this business treats as urgent and what to do then",
+    }
+    for key in set(QUESTION_KEYS) - set(LIMIT_QUESTIONS):
+        schema = SETUP_TURNS[key].model_json_schema()
+        assert set(descriptions).issubset(schema["properties"]), key
+        for name, description in descriptions.items():
+            assert schema["properties"][name]["description"] == description
+            assert schema["properties"][name]["maxLength"] == 500
+            assert name in schema["required"]
+        fields = {name: "x" * 500 for name in descriptions}
+        patch = answer_turn(SETUP_TURNS[key], **fields).patch()
+        answers = desk_setup.merged(SetupAnswers(summary="Tax advice."), patch, key)
+        assert answers.model_dump(include=set(descriptions)) == fields
+        for name in descriptions:
+            with pytest.raises(ValidationError, match="at most 500 characters"):
+                answer_turn(SETUP_TURNS[key], **{name: "x" * 501})
+
+    for model in (SetupAnswers, SetupPatch):
+        assert model(summary="Tax advice.").model_dump(include=set(descriptions)) == {
+            name: None for name in descriptions}
+        for name in descriptions:
+            with pytest.raises(ValidationError, match="at most 500 characters"):
+                model(summary="Tax advice.", **{name: "x" * 501})
+    assert SetupAnswers(summary="Tax advice.", how_we_help="x" * 1500).how_we_help == "x" * 1500
+    with pytest.raises(ValidationError, match="at most 1500 characters"):
+        SetupAnswers(summary="Tax advice.", how_we_help="x" * 1501)
+    assert "how_we_help" not in SetupPatch.model_fields
+    assert all("how_we_help" not in output.model_fields for output in SETUP_TURNS.values())
+    assert ('pricing, intake and urgent record what the owner\'s answers and the business\'s own text say about '
+            'how it works, never limits.') in SETUP_TURN_SYSTEM
+
+
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,
          "documents": None, "auto_money_cap_cents": 0, "refunds": None}
 
