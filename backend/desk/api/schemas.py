@@ -89,7 +89,7 @@ SetupStep = Literal["questions", "tools", "rules", "situations", "safety_check",
 
 class DeskSetup(BaseModel):
     """A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
-    Setup finishes when the Desk goes live (step `live`); a Desk whose rules are confirmed but that isn't live yet
+    Setup finishes at its go-live step (step `live`); an interview whose rules are confirmed but that hasn't gone live
     (`preview`) is still unfinished, since going live is setup's last step."""
 
     interview_id: str
@@ -98,7 +98,9 @@ class DeskSetup(BaseModel):
 
 class DeskSummary(BaseModel):
     """One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
-    into it; null once the Desk went live, and for a Desk made outside setup."""
+    into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
+    `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
+    setup."""
 
     desk_id: str
     slug: str

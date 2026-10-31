@@ -78,6 +78,20 @@ async def test_a_setup_is_listed_until_its_desk_goes_live(app, browser, kernel_h
     assert desk_id in listed and list(listed.values()) == [None, None]
 
 
+async def test_answering_turned_on_before_setup_finishes_keeps_the_setup_listed(app, browser, kernel_http, model):
+    # The Answering switch is separate from setup: turned on at the first question, the Desk answers the public, and
+    # its setup, which never went live, is still listed at the step it is at.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    switched = await owner.browser.put(f"/api/owner/desks/{state['desk_id']}/answering", json={"on": True})
+    assert switched.status_code == 200, switched.text
+
+    listed = await owner.browser.get("/api/owner/desks")
+    (desk,) = [desk for business in listed.json() for desk in business["desks"] if desk["desk_id"] == state["desk_id"]]
+    assert (desk["answering"], desk["setup"]) == (True, {"interview_id": state["interview_id"], "step": "questions"})
+    assert (await setups(owner))[state["desk_id"]] == desk["setup"]
+
+
 async def test_a_desk_made_outside_setup_lists_no_setup(app, browser, kernel_http):
     owner = await new_owner(app, browser, kernel_http)
     made = await owner.browser.post("/api/owner/desks", json=new_desk())
