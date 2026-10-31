@@ -29,9 +29,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
+from pydantic import ValidationError
 from sqlalchemy import text as sql
 
-from desk.api import proving
+from desk.api import proving, schemas
 from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.main import _install_error_handlers as install_error_handlers
@@ -52,7 +53,7 @@ from desk.api.prompts import (
     SituationDraft,
 )
 from desk.api.routes import rules as rules_routes
-from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow
+from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
 from desk.api.setup import after_hours_start, calendar_slots, price_items
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import (
@@ -69,6 +70,7 @@ from desk.kernel_api import (
     PolicyDraftRequest,
     PolicyProbeRequest,
     ToolConfirmed,
+    ToolsConfirmRequest,
 )
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
@@ -1343,6 +1345,22 @@ async def test_setup_tool_review_uses_shared_batch_validation(app, browser, fake
     reply = await owner.browser.post(f"/api/owner/policy/{state['desk_id']}/tools/confirm", json=body)
     assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
     assert fake.called("POST /tools/confirm") == []
+
+
+def test_tool_review_body_checks_each_tool_once_without_building_the_kernel_request(monkeypatch):
+    # The browser's batch is held to the rule both bodies share, never by building the kernel's request around a
+    # stand-in Desk ID, so whatever the kernel's request asks of its Desk ID can't refuse every batch.
+    def no_kernel_request(**fields: Any) -> None:
+        raise RuntimeError("the browser's batch built the kernel's request")
+
+    monkeypatch.setattr(schemas, "ToolsConfirmRequest", no_kernel_request)
+    pins = [{"tool": "payments.list_charges", "definition_sha256": "0" * 64},
+            {"tool": "payments.create_refund", "definition_sha256": "1" * 64}]
+    body = ToolsConfirmIn.model_validate({"tools": pins, "enable": True})
+    assert [pin.model_dump() for pin in body.tools] == pins
+    for model, desk in ((ToolsConfirmIn, {}), (ToolsConfirmRequest, {"desk_id": "desk-1"})):
+        with pytest.raises(ValidationError, match="a batch names each tool once"):
+            model.model_validate({**desk, "tools": [pins[0], pins[0]], "enable": False})
 
 
 # Batch tool review on the real policy router and proving tasks, without a database: the owner's context is given and

@@ -59,7 +59,7 @@ from desk.contracts import (
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
-from desk.kernel_api import Health, ToolPin, ToolsConfirmRequest
+from desk.kernel_api import Health, ToolPin, ToolsConfirmRequest, each_tool_once
 from desk.presets import PresetName
 
 
@@ -885,8 +885,8 @@ class ToolsConfirmIn(BaseModel):
     enable: bool
 
     @model_validator(mode="after")
-    def _shared_contract(self) -> Self:
-        ToolsConfirmRequest(desk_id="", tools=self.tools, enable=self.enable)
+    def _each_tool_once(self) -> Self:
+        each_tool_once(self.tools)
         return self
 
 
