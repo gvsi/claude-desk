@@ -225,6 +225,10 @@ export function KnowledgePage() {
       setError(KNOWLEDGE_COPY.emptyNote);
       return;
     }
+    if (new TextEncoder().encode(text).length > MAX_FILE_BYTES) {
+      setError(errorCopy('invalid'));
+      return;
+    }
     void exclusive('note', () => add('note', { source: 'setup', title: titleOf(text), text }));
   };
 
@@ -240,9 +244,17 @@ export function KnowledgePage() {
     void exclusive('file', async () => {
       let text: string;
       try {
-        text = await file.text();
+        text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
       } catch {
         setError(KNOWLEDGE_COPY.unreadable);
+        return;
+      }
+      if (text.includes('\0')) {
+        setError(KNOWLEDGE_COPY.unreadable);
+        return;
+      }
+      if (new TextEncoder().encode(text).length > MAX_FILE_BYTES) {
+        setError(KNOWLEDGE_COPY.tooBig);
         return;
       }
       if (text.trim() === '') {

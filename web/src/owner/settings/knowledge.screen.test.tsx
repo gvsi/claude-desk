@@ -278,6 +278,42 @@ describe('knowledge', () => {
     await expect.element(switchOf(screen)).not.toHaveAttribute('aria-busy', 'true');
   });
 
+  it('knowledge_file_requires_utf8', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
+    await pick(screen, new File([new Uint8Array([0x63, 0x61, 0x66, 0xe9])], 'prices.txt', { type: 'text/plain' }));
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unreadable);
+    expect(posts()).toEqual([]);
+  });
+
+  it('knowledge_file_with_nul_is_unreadable', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
+    await pick(screen, new File(['Prices\0'], 'prices.txt', { type: 'text/plain' }));
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unreadable);
+    expect(posts()).toEqual([]);
+  });
+
+  it('knowledge_oversize_note_counts_utf8_bytes', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    const text = '🔧'.repeat(MAX_FILE_BYTES / 4 + 1);
+    await main(screen).getByRole('textbox', { name: 'A note' }).fill(text);
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent("That didn't go through. Check it and try again.");
+    expect(posts()).toEqual([]);
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue(text);
+  });
+
+  it('knowledge_file_checks_decoded_utf8_bytes', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
+    const bytes = new TextEncoder().encode('🔧'.repeat(MAX_FILE_BYTES / 4 + 1));
+    vi.spyOn(Blob.prototype, 'arrayBuffer').mockResolvedValueOnce(bytes.buffer);
+    await pick(screen, new File(['Prices'], 'prices.txt', { type: 'text/plain' }));
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.tooBig);
+    expect(posts()).toEqual([]);
+  });
+
   it('knowledge_file_too_big_sends_nothing', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
@@ -459,7 +495,7 @@ describe('knowledge', () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
     // The browser can't read the file: it says so, never that the file is empty, and sends nothing.
-    const unreadable = vi.spyOn(Blob.prototype, 'text').mockRejectedValueOnce(new DOMException('The file could not be read.', 'NotReadableError'));
+    const unreadable = vi.spyOn(Blob.prototype, 'arrayBuffer').mockRejectedValueOnce(new DOMException('The file could not be read.', 'NotReadableError'));
     await pick(screen, new File(['# Prices'], 'price-list.md', { type: 'text/markdown' }));
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unreadable);
     expect(unreadable).toHaveBeenCalled();
