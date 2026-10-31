@@ -286,12 +286,14 @@ evals-soft-promise:
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
 
 # A finished pass, by its id under evals/out/passes (PASS=<id>). evals-gate judges it with no model call
-# (FINAL=1 for the final gate: no pending scenario, three runs and a recorded rate). evals-latency makes
-# TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this tree, or on the
-# deployment at BASE_URL (DRY_RUN=1 scripts every model for $0), for the pass PASS names. evals-report
-# writes the pass's report, latest.json and this month's spend.csv under evals/reports and the latest
-# results in docs/evals.md, with a null-baseline pass of the same held-out legitimate tasks when NULL_BASELINE
-# names one. A pass of part of the suite gets its report alone, under evals/out/reports.
+# (FINAL=1 for the final gate: no pending scenario, no skipped check, three runs and a recorded rate).
+# evals-latency makes TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this
+# tree (DRY_RUN=1 scripts every model for $0), for the pass PASS names. A deployment isn't measured: a
+# hosted run reads no usage it can trust between turns, so it couldn't stop at LATENCY_MAX_USD. BASE_URL
+# is still passed on, so the command refuses `make evals-latency BASE_URL=<url>` and says why.
+# evals-report writes the pass's report, latest.json and this month's spend.csv under evals/reports and
+# the latest results in docs/evals.md, with a null-baseline pass of the same held-out legitimate tasks
+# when NULL_BASELINE names one. A pass of part of the suite gets its report alone, under evals/out/reports.
 .PHONY: evals-gate evals-latency evals-report
 TURNS ?= 20
 LATENCY_MAX_USD ?= 3
