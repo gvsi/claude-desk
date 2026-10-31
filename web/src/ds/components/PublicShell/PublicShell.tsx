@@ -99,6 +99,9 @@ function Name({ children }: { children: string }) {
   return <span data-copy="user">{children}</span>;
 }
 
+/** Shared with the wordless shape's browser measurement. */
+export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as const;
+
 /** The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off. */
 const COPY = {
   en: {
@@ -114,7 +117,7 @@ const COPY = {
         {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
       </>
     ),
-    askFor: (owner: ReactNode) => <>Ask for {owner}</>,
+    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.en}{owner}</>,
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
   },
@@ -130,7 +133,7 @@ const COPY = {
         {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
       </>
     ),
-    askFor: (owner: ReactNode) => <>Pedir hablar con {owner}</>,
+    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.es}{owner}</>,
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
   },

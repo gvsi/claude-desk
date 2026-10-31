@@ -85,11 +85,14 @@ Shapes are `fill-hover`. A line is a `radius-full` pill centred in its type styl
 | `shape` | `'line' \| 'block' \| 'circle'` | Required. |
 | `text` | `SkeletonText` | A line's type style, `body` by default. |
 | `width` | `number \| string` | A line or a block: px, or any CSS length or percentage. A line is `100%` by default. |
+| `measure` | `ControlMeasurement` | A block for a text-sized control: its existing `label` and control CSS `className`, with optional `tagName`, `contentClassName` and `suffix`. Its browser-measured width takes precedence over `width`. |
 | `height` | `number \| string` | A block: px, or any CSS length. |
 | `size` | `number` | A circle's diameter in px, 28 (`size-avatar`) by default. |
 | `radius` | `'control' \| 'card' \| 'composer' \| 'full'` | A block's corners, `control` by default. |
 | `anchor` | `string` | Names the shape for screen tests, as `data-skeleton-anchor`. |
 | `className` | `string` | For the screen's own layout: a grid area, a breakpoint rule. |
+
+Use `measure` for a button or chip whose label sets its width. An empty, hidden probe uses the real control's type token, padding and borders; canvas measures the label without putting words in the shape. A suffix can name its own text and CSS, or a CSS width for a fixed icon slot. The measurement requests the font, waits for `document.fonts.ready`, and repeats when later fonts finish loading. A fixed layout slot and an approximate text line can still use `width`.
 
 `SkeletonCard`:
 

@@ -4,7 +4,7 @@ import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Skeleton, SkeletonCard } from '../Skeleton/Skeleton.tsx';
 import { PublicBrandHeaderSkeleton } from './PublicBrandHeaderSkeleton.tsx';
-import { useShellLayout, useVisualViewportFit } from './PublicShell.tsx';
+import { ASK_OWNER_PREFIX, useShellLayout, useVisualViewportFit } from './PublicShell.tsx';
 
 import './PublicShell.css';
 
@@ -57,7 +57,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
                 {language === 'es' ? <Skeleton shape="line" text="meta" width="65%" className="cd-public-shell-skeleton__phone-line" /> : null}
               </div>
             </div>
-            <Skeleton shape="block" width={language === 'es' ? 209 : 151} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
+            <Skeleton shape="block" measure={{ label: `${ASK_OWNER_PREFIX[language]}Maria Rivera`, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
           </div>
           <div className="cd-public-shell__scroll">
             {aboutBeside ? null : about}

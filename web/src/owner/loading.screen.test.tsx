@@ -9,7 +9,7 @@ import { ROUTES } from '../api/routes.ts';
 import type { SetupState } from '../api/views.ts';
 import { retryDelayMs } from '../app/poll.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
-import { Skeleton, SkeletonScreen } from '../ds/index.ts';
+import { Button, Greeting, Skeleton, SkeletonScreen } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -21,6 +21,8 @@ import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nex
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
+import { publicLink } from './customerLink.ts';
+import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
 beforeAll(loadWebFonts);
 
@@ -164,11 +166,15 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
   { name: 'thing-tile-3', page: '.cd-things__item:last-child .cd-things__icon' },
+  { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
+  ...[0, 1, 2, 3].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
   { name: 'public-card', page: '.cd-today-aside > .cd-card:first-child', size: true },
+  { name: 'public-page-action', page: '.cd-today-aside__action > .cd-button', size: true },
+  { name: 'inbox', page: '.cd-owner-inbox > .cd-button', size: true },
   { name: 'week-title', page: '.cd-week__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
@@ -182,11 +188,11 @@ const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner
  * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
  */
 const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'week-title', 'week-bar-0'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'public-page-action', 'inbox', 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
   const under = new Set(phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS);
-  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && name !== 'thing-tile-3').map((anchor) =>
+  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && name !== 'thing-tile-3' && name !== 'thing-action-3').map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
 }
@@ -557,7 +563,22 @@ it('reload_opens_on_the_frames_shape at 390', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+it('today_link_actions_measure_inherited_font_metrics', async () => {
+  const host = document.createElement('div');
+  host.style.letterSpacing = '0.2em';
+  document.body.append(host);
+  const root = createRoot(host);
+  onTestFinished(() => { root.unmount(); host.remove(); });
+  flushSync(() => root.render(<><div data-real-control><Button variant="secondary" href="/d/rivera-plumbing-abc123">Open your public page</Button></div><TodaySkeleton /></>));
+  const real = host.querySelector('[data-real-control] .cd-button')!;
+  const shape = host.querySelector('[data-skeleton-anchor="thing-action-0"]')!;
+  expect(shape.textContent).toBe('');
+  await expect.poll(() => Math.abs(shape.getBoundingClientRect().width - real.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
+});
+
 it('reload_changes_only_the_link_pills_width_once', async () => {
+  // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
+  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'rivera-plumbing-a-new-random-slug';
   const desks = holdReads(ROUTES.desks.path);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
@@ -593,7 +614,19 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
     for (const edge of ['top', 'left', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
-    expect(shape.width).toBe(226);
+    const sizing = document.createElement('div');
+    Object.assign(sizing.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' });
+    sizing.inert = true;
+    document.body.append(sizing);
+    const reference = createRoot(sizing);
+    try {
+      flushSync(() => reference.render(<Greeting text="" link={{ label: publicLink('rivera-plumbing-abc123'), onCopy: () => {} }} />));
+      const fresh = sizing.querySelector('.cd-greeting__link')!.getBoundingClientRect();
+      expect(Math.abs(shape.width - fresh.width), 'the fresh-copy link uses browser font metrics').toBeLessThanOrEqual(2);
+    } finally {
+      reference.unmount();
+      sizing.remove();
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
     expect(landedState).toBe('leaving');
     expect(firstLanded).toEqual(bounds(document.querySelector('.cd-greeting__link')!));

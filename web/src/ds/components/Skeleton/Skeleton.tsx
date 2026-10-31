@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
+import { useControlWidth, type ControlMeasurement } from './useControlWidth.ts';
+
 import '../Card/Card.css';
 import './Skeleton.css';
 
@@ -26,6 +28,8 @@ export interface SkeletonProps {
   text?: SkeletonText;
   /** line and block: px, or any CSS length or percentage. A line defaults to '100%'. */
   width?: number | string;
+  /** block: measure a text-sized control in its real CSS and font, without drawing its label. */
+  measure?: ControlMeasurement;
   /** block: px, or any CSS length. */
   height?: number | string;
   /** circle: the diameter in px (default 28, `size-avatar`). */
@@ -75,13 +79,14 @@ function classes(...names: (string | undefined)[]): string {
  * style's line box, so it shares its top edge with the words that replace it), a block or a circle.
  * It is drawn only, hidden from assistive technology, and carries the sweep of its `SkeletonScreen`.
  */
-export function Skeleton({ shape, text = 'body', width, height, size, radius = 'control', anchor, className }: SkeletonProps) {
+export function Skeleton({ shape, text = 'body', width, measure, height, size, radius = 'control', anchor, className }: SkeletonProps) {
   // The element that paints: a line's pill, or the block or circle itself.
   const painted = useRef<HTMLSpanElement>(null);
+  const controlWidth = useControlWidth(painted, measure);
   // As it mounts, in the frame it is first drawn in: the band at its place, and the sweep in phase.
   useLayoutEffect(() => {
     if (painted.current) placeBands([painted.current]);
-  }, [shape]);
+  }, [shape, width, controlWidth]);
 
   if (shape === 'line') {
     return (
@@ -110,7 +115,7 @@ export function Skeleton({ shape, text = 'body', width, height, size, radius = '
     <span
       ref={painted}
       className={classes('cd-skeleton', 'cd-skeleton--block', `cd-skeleton--radius-${radius}`, className)}
-      style={{ width, height }}
+      style={{ width: controlWidth ?? width, height }}
       aria-hidden="true"
       data-skeleton-anchor={anchor}
     />

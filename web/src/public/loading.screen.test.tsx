@@ -172,6 +172,7 @@ it('setup_preview_ask_moves_once_for_the_owner_name', async () => {
     const real = bounds(button);
     const context = document.createElement('canvas').getContext('2d')!;
     context.font = getComputedStyle(button).font;
+    context.letterSpacing = getComputedStyle(button).letterSpacing === 'normal' ? '0px' : getComputedStyle(button).letterSpacing;
     const ownerNameDifference = context.measureText(`Ask for ${BUSINESS.owner_display_name}`).width
       - context.measureText('Ask for Maria').width;
     expect(ownerNameDifference).toBeGreaterThan(2);
@@ -230,6 +231,7 @@ it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async 
       { name: 'prove-card', page: '.cd-agents-page__cards > section:nth-child(3)', size: true },
       { name: 'connect-card', page: '.cd-agents-page__cards > section:nth-child(4)', size: true },
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
+      { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
       ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > button:nth-child(${i + 1})`, size: true })),
     ],
@@ -330,6 +332,7 @@ it.each(['desktop', 'phone'] as const)('agents_reference_cards_land_in_place_%s'
       { name: 'prove-card', page: '.cd-agents-page__cards > section:nth-child(3)', size: true },
       { name: 'connect-card', page: '.cd-agents-page__cards > section:nth-child(4)', size: true },
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
+      { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
     ],
     open: async () => { await renderRoute(AGENTS, { viewport, pollScale: 100 }); },

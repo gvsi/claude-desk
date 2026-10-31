@@ -1,6 +1,9 @@
 import { Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { publicLink } from '../customerLink.ts';
 
 import './Today.css';
+
+const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control';
 
 /** Line boxes use Today's responsive layout; widths suggest text without drawing any words. */
 function Lines({ count, text = 'meta' }: { count: number | { wide: number; phone: number }; text?: 'meta' | 'body' | 'summary' }) {
@@ -47,7 +50,12 @@ export function TodaySkeleton() {
               shape="block"
               className="cd-today-skeleton__link"
               radius="full"
-              width={226}
+              measure={{
+                label: publicLink('rivera-plumbing-abc123'),
+                className: 'cd-greeting__link cd-type-meta',
+                tagName: 'span',
+                suffix: { className: 'cd-greeting__copy', width: 'calc(var(--size-control) - var(--space-6))' },
+              }}
               height="var(--size-control)"
               anchor="link-pill"
             />
@@ -60,12 +68,12 @@ export function TodaySkeleton() {
               <Lines count={1} />
             </div>
             <div className="cd-things__hide">
-              <Skeleton shape="block" width={100} height="var(--size-control)" />
+              <Skeleton shape="block" measure={{ label: 'Hide this list', className: 'cd-button cd-button--ghost cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="things-hide" />
             </div>
           </div>
           <SkeletonCard padding={16} anchor="things-card">
             <div className="cd-things__list">
-              {[166, 118, 133, 101].map((width, i) => (
+              {['Open your public page', 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
@@ -75,7 +83,7 @@ export function TodaySkeleton() {
                     </div>
                   </div>
                   <div className="cd-things__action">
-                    <Skeleton shape="block" width={width} height="var(--size-control)" />
+                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
                   </div>
                 </div>
               ))}
@@ -164,11 +172,11 @@ export function TodaySkeleton() {
               <Lines count={2} />
             </div>
             <div className="cd-today-aside__action">
-              <Skeleton shape="block" width={166} height="var(--size-control)" />
+              <Skeleton shape="block" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="public-page-action" />
             </div>
           </div>
         </SkeletonCard>
-        <Skeleton shape="block" width={144} height="var(--size-control)" anchor="inbox" />
+        <Skeleton shape="block" measure={{ label: 'Demo inbox', className: BUTTON, contentClassName: 'cd-demo-inbox-sheet__button', suffix: { label: '1', className: 'cd-count-pill cd-type-count' } }} height="var(--size-control)" anchor="inbox" />
         <SkeletonCard padding={16}>
           <div className="cd-week">
             <div className="cd-week__head">

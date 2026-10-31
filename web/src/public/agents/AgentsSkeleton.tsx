@@ -1,4 +1,5 @@
 import { ConceptFooter, PublicBrandHeaderSkeleton, Skeleton, SkeletonCard, type CopyLanguage } from '../../ds/index.ts';
+import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS } from './copy.ts';
 
 import './AgentCardPage.css';
 
@@ -60,7 +61,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
                 </div>
               </div>
               <div className="cd-suggestion-chips">
-                {(language === 'es' ? [191, 307, 192] : [143, 263, 183]).map((width, i) => <Skeleton key={width} shape="block" width={width} height="var(--space-28)" radius="full" anchor={`task-chip-${i}`} />)}
+                {DEMO_TASKS.map((task, i) => <Skeleton key={task} shape="block" measure={{ label: DEMO_TASK_COPY[language][task], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" anchor={`task-chip-${i}`} />)}
               </div>
             </div>
           </SkeletonCard>
@@ -94,7 +95,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
               <Skeleton shape="line" text="meta" width="70%" className="cd-agents-skeleton__phone-line" />
             </div>
             <div className="cd-agents-card__body">
-              <Skeleton shape="block" width={140} height="var(--size-control)" />
+              <Skeleton shape="block" measure={{ label: AGENTS_COPY[language].getDemoKey, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="key-action" />
             </div>
           </SkeletonCard>
         </div>
