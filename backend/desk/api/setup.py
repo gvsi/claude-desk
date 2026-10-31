@@ -820,7 +820,7 @@ def memory_items(drafts: list[MemoryDraft]) -> list[MemoryItem]:
             suffix += 1
         used.add(item_id)
         topics = [topic.strip().lower() for topic in draft.topics if topic.strip()]
-        if not query.intersection(topics + re.findall(r"\w+", draft.title.casefold())):
+        if not query.intersection(topics):
             topics.append("business")
         items.append(MemoryItem(id=item_id, title=draft.title, topics=topics, text=draft.text))
     return items
@@ -839,7 +839,7 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
                                                       items=memory_items(described.memory)),
                                     path={"id": created.desk_id})
         except (KernelFailed, KernelUnavailable) as failure:
-            logger.warning("%s %s", type(failure).__name__, failure.code)
+            logger.warning("the sample memory couldn't be written (%s %s)", type(failure).__name__, failure.code)
     site = website_url(described.website)
     interview = Interview(
         interview_id=interview_id, copy_id=owner.copy_id, desk_id=created.desk_id,

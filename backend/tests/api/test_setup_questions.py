@@ -1269,7 +1269,8 @@ async def test_a_failed_memory_write_reads_an_empty_memory_never_riveras(app, br
                                "text": "I send a photo after every dog walk."}]))
     reply = await owner.browser.post("/api/owner/setup", json=start_body("I run Elm Dog Walking in Oakland."))
     assert reply.status_code == 201, reply.text
-    assert [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"] == [expected]
+    assert [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"] == [
+        f"the sample memory couldn't be written ({expected})"]
     assert not fake.desks[reply.json()["desk_id"]].answering
     await consent(owner, reply.json()["interview_id"], True)
     transcript = (await stored(engine, reply.json()["interview_id"]))["transcript"]
@@ -1312,7 +1313,7 @@ async def test_connected_apps_outside_the_catalog_are_dropped(app, browser, fake
 
 def test_memory_ids_are_built_by_code():
     titles = ["2024 tax season", "123 !!!", "2025 tax season", "Tax season", "Long title " * 10,
-              "Long title " * 10, "HOURS, area!", "Customer habits"]
+              "Long title " * 10, "HOURS, area!", "Customer habits", "İBusiness"]
     drafts = [MemoryDraft(title=title, topics=[" PRICES ", " "] if index == 7 else [], text="My short note.")
               for index, title in enumerate(titles)]
     items = desk_setup.memory_items(drafts)
@@ -1324,10 +1325,11 @@ def test_memory_ids_are_built_by_code():
     query = set(desk_setup.MEMORY_QUERY.split())
     for draft, item in zip(drafts, items, strict=True):
         assert item.title == draft.title and item.text == draft.text
-        assert query.intersection(item.topics + re.findall(r"\w+", item.title.casefold()))
+        assert query.intersection(item.topics)
     assert all(item.topics == ["business"] for item in items[:6])
-    assert items[6].topics == []      # a query word in the title already makes the note findable
+    assert items[6].topics == ["business"]  # title-only matches still need a query topic
     assert items[7].topics == ["prices"]
+    assert items[8].topics == ["business"]  # Unicode title tokenization cannot hide a note
 
 
 async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, kernel_http, model):
