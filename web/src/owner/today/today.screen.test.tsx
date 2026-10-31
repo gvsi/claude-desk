@@ -127,6 +127,29 @@ function holdReads(path: string): { held: () => number; release: () => void } {
 /** The main Desk's Needs you, as the app reads it. */
 const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
+/** Holds the next read of `path` for `ms` before it reaches the mock; later reads go straight on. */
+function delayNextRead(path: string, ms: number): void {
+  let next = true;
+  worker.use(
+    http.get(path, async () => {
+      if (next) {
+        next = false;
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      }
+      return undefined;
+    }),
+  );
+}
+
+/** The owner's loading page, "Opening your Desk", with nothing of the Desk's frame or of Today yet. */
+function expectLoadingPage(): void {
+  const state = document.querySelector('.cd-owner-state');
+  expect(state, "the owner's loading page").not.toBeNull();
+  expect(state!.textContent).toContain('Opening your Desk');
+  expect(document.querySelector('.cd-today')).toBeNull();
+  expect(document.querySelector('nav[aria-label="Main"]')).toBeNull();
+}
+
 /** The Emergencies Desk's Needs you, as the app reads it. */
 const emergenciesNeedsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.emergenciesDeskId);
 
@@ -281,11 +304,10 @@ describe('Today', () => {
   });
 
   it('reload_opens_today_drawn', async () => {
-    // Opened at Today's address, as a reload does: the owner's loading page while the copy's Desks
-    // are read, then Today with its column on the loading line until what it first shows is read,
-    // so its sections never arrive one by one, each pushing the next down. The Desks and Today
-    // answer at once; Needs you is held back. The page this file drew last goes first, so the watch
-    // sees only this one.
+    // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
+    // first shows is read too, and Today then opens drawn: one loading step, never the frame with
+    // Today's own loading line after it. The Desks and Today answer at once; Needs you is held
+    // back. The page this file drew last goes first, so the watch sees only this one.
     await cleanup();
     const pages = watchPages();
     const needsYou = holdReads(needsYouPath);
@@ -295,7 +317,7 @@ describe('Today', () => {
     await expect.poll(() => requests('desks').length).toBeGreaterThan(0);
     // Time for Today to be drawn, had it opened without Needs you.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expectTodayOpening();
+    expectLoadingPage();
 
     // Once Needs you is in, Today opens with every section drawn.
     needsYou.release();
@@ -303,7 +325,21 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-    expect(pages()).toEqual(['loading', 'today opening', 'today']);
+    expect(pages()).toEqual(['loading', 'today']);
+  });
+
+  it('reload_with_slow_reads_shows_one_loading_step', async () => {
+    // As a hosted reload over a slow network reads: the copy's Desks in after 0.7 s, Needs you
+    // after 1.4 s. The owner's loading page alone until both are in, then Today, drawn whole.
+    await cleanup();
+    const pages = watchPages();
+    delayNextRead(ROUTES.desks.path, 700);
+    delayNextRead(needsYouPath, 1_400);
+    const started = performance.now();
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON), { timeout: 4_000 }).toBeVisible();
+    expect(performance.now() - started).toBeGreaterThan(1_400);
+    expect(pages()).toEqual(['loading', 'today']);
   });
 
   it('reload_reads_today_beside_the_desks', async () => {
@@ -342,18 +378,21 @@ describe('Today', () => {
   });
 
   it('today_waits_no_longer_than_a_first_visit', async () => {
-    // A read that runs past the read ahead's 3 s cap doesn't keep Today's column on the loading
-    // line: Today draws what it has, still reading what needs the owner, and the request shows when
-    // its read is in.
+    // A read that runs past the read ahead's 3 s cap doesn't keep the owner on the loading page:
+    // Today draws what it has, at once rather than after a wait of its own, still reading what
+    // needs the owner, and the request shows when its read is in.
+    await cleanup();
+    const pages = watchPages();
     const needsYou = holdReads(needsYouPath);
     const { screen } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(needsYou.held()).toBe(1));
-    await vi.waitFor(expectTodayOpening);
+    expectLoadingPage();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first(), { timeout: 5_000 }).toBeVisible();
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
 
     needsYou.release();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    expect(pages()).toEqual(['loading', 'today without its held request', 'today']);
   });
 
   it('switching_desks_opens_today_drawn', async () => {
@@ -445,6 +484,7 @@ describe('Today', () => {
 
     const needsYou = holdReads(needsYouPath);
     const since = watchTop(sinceLastNightHeading);
+    const pages = watchPages();
     await mainNav(screen).getByRole('link', { name: 'Today' }).click();
     await vi.waitFor(() => expect(needsYou.held()).toBe(1));
     // Time for Today to be drawn, had it opened without Needs you.
@@ -457,6 +497,32 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     expect(since()).toHaveLength(1);
+    // Within the frame, never the owner's loading page: moving between pages keeps Today's own hold.
+    expect(pages().slice(1)).toEqual(['today opening', 'today']);
+  });
+
+  it('today_later_in_a_reloaded_visit_holds_on_its_own', { timeout: 15_000 }, async () => {
+    // The reload's read ahead is spent once Today first opens: opened again later in the visit, from
+    // another page, with Needs you no longer in the app's memory, Today waits for it on its own
+    // loading line, rather than open at once on the reload's long-gone deadline.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    // Past the reload's 3 s.
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+    await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+
+    queryClient.removeQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    const needsYou = holdReads(needsYouPath);
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectTodayOpening();
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('back_to_today_returns_to_its_place_once_drawn', async () => {
@@ -1748,13 +1814,16 @@ describe("Today's Demo inbox", () => {
   });
 
   it('request_link_lands_once_today_has_drawn', async () => {
-    // Needs you is in at once but Today's own read is slow, so the page keeps its column on the
-    // loading line while Needs you is read again and again. The landing waits for the card to be
-    // drawn, rather than spend itself on a page that doesn't show the request yet.
+    // Followed from another page (here Conversations, just reloaded), the link opens Today with
+    // Needs you in at once but Today's own read slow, so the page keeps its column on the loading
+    // line while Needs you is read again and again. The landing waits for the card to be drawn,
+    // rather than spend itself on a page that doesn't show the request yet.
     const held = seededHold();
     const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
-    const { screen } = await renderRoute(requestLink(held.decision_id));
+    const { screen, router } = await renderRoute(CONVERSATIONS);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
     await vi.waitFor(() => expect(todayRead.held()).toBeGreaterThanOrEqual(1));
+    await router.navigate(requestLink(held.decision_id));
     await vi.waitFor(expectTodayOpening);
     await readsMore('needsYou', 3);
     expectTodayOpening();
