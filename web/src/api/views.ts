@@ -302,7 +302,11 @@ export interface HealthOut {
 
 export interface PeopleOut {
   people: { person_id: string; display_name: string; masked_contact: string }[];
-  leads: { lead_id: string; display_name: string; note: string; created_at: string }[];
+  /**
+   * The name and note as the visitor typed them (untrusted; the API types either as missing);
+   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false.
+   */
+  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
 }
 
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */

@@ -258,7 +258,7 @@ interface Activity {
   /** A visitor's or an agent's own words. */
   texts: Happened[];
   bookings: Booking[];
-  leads: (Happened & { leadId: string; displayName: string; note: string })[];
+  leads: (Happened & { leadId: string; displayName: string; note: string | null })[];
   /** Refusals at decide time, and Claude's replies the check stopped. */
   stopped: (Happened & { refId: string; line: string | null })[];
   holds: Happened[];
@@ -568,6 +568,12 @@ export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
     people: [dana, bob].map((person) => ({ person_id: person.personId, display_name: person.name, masked_contact: person.maskedContact })),
     leads: world.leads
       .filter((lead) => lead.deskId === desk.summary.desk_id)
-      .map((lead) => ({ lead_id: lead.leadId, display_name: lead.displayName, note: lead.note, created_at: isoTime(lead.createdAt) })),
+      .map((lead) => ({
+        lead_id: lead.leadId,
+        display_name: lead.displayName,
+        note: lead.note,
+        created_at: isoTime(lead.createdAt),
+        ...(lead.replayed === true ? { replayed: true } : {}),
+      })),
   };
 }

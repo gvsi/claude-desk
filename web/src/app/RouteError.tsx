@@ -1,8 +1,10 @@
 import { useId } from 'react';
+import { useRouteError } from 'react-router';
 
 import { Button, Notice, UNREACHABLE_COPY } from '../ds/index.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { PUBLIC_COPY } from '../public/copy.ts';
+import { NotFound, OutsideTheCopy } from './NotFound.tsx';
 import { StandalonePage } from './StandalonePage.tsx';
 
 export interface RouteErrorProps {
@@ -13,10 +15,12 @@ export interface RouteErrorProps {
 /**
  * What a route shows when its page throws while it draws: the design system's line for something
  * that went wrong on our side, and "Try again", which loads the page afresh. Never the error's
- * message or stack: neither helps a visitor or an owner, and both can name the app's insides.
+ * message or stack: neither helps a visitor or an owner, and both can name the app's insides. A
+ * page whose address names a record outside the copy (`OutsideTheCopy`) gets the not-found screen.
  */
 export function RouteError({ visitor = false }: RouteErrorProps) {
   const titleId = useId();
+  if (useRouteError() instanceof OutsideTheCopy) return <NotFound />;
   const language = visitor ? browserLanguage() : 'en';
   return (
     <StandalonePage labelledBy={titleId} lang={visitor ? language : undefined}>

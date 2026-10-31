@@ -78,6 +78,8 @@ export interface Injection {
   body?: unknown;
   /** Waits this long before answering. */
   delayMs?: number;
+  /** Holds the answer until this settles, so a test decides when a request in flight lands. */
+  until?: Promise<unknown>;
   /** Lets the route apply its change first, then answers with the fault: a write whose answer was lost. */
   afterCommit?: boolean;
 }
@@ -438,6 +440,10 @@ export class MockStore {
     const injection = this.takeInjection(key);
     if (injection?.delayMs !== undefined) {
       await new Promise((resolve) => setTimeout(resolve, injection.delayMs));
+      if (!this.admits(epoch)) return { network: true };
+    }
+    if (injection?.until !== undefined) {
+      await injection.until.catch(() => {});
       if (!this.admits(epoch)) return { network: true };
     }
     // A planted fault answers in the route's place, unless it lets the route commit first.

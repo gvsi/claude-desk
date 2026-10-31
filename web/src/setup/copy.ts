@@ -142,5 +142,8 @@ export const SETUP_COPY = {
     liveSubtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
     open: 'Open',
     goToToday: 'Go to Today',
+    shareIt: 'Share it',
+    shareLoading: 'Loading the card and ready-made words',
+    tryAgain: 'Try again',
   },
 } as const;

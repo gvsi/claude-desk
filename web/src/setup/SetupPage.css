@@ -150,6 +150,14 @@
   border-radius: var(--radius-card);
 }
 
+/* Live: "Share it", then the share kit 12 px under it. */
+.cd-setup-live__share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
 /* Narrower than a laptop: the bar takes two lines, the mark and "Save and exit", then the business
    and the steps, which say where the owner is in one line once they have under 480 px. */
 @media (max-width: 1099.98px) {

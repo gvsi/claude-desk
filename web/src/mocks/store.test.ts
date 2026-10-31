@@ -856,6 +856,20 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it('people_mark_replayed_leads', async () => {
+    // A test adds leads as the kernel keeps them: one from the recorded history, one live.
+    const at = mockStore.world.now();
+    const lead = { deskId, sessionId: 'ses-lead', note: 'Wants a quote to replace a kitchen faucet.', createdAt: at };
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-recorded', displayName: 'Jordan Pike', replayed: true });
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-live', displayName: 'Sam Ortiz' });
+
+    const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
+    const byId = new Map(people.leads.map((row) => [row.lead_id, row]));
+    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
+    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
+    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+  });
+
   it('confirm_tool_takes_the_batch_body', async () => {
     const stripe = ['payments.list_charges', 'payments.create_refund'];
     const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));
@@ -1102,6 +1116,32 @@ describe('deleting a Desk', () => {
 
 describe('planted faults', () => {
   const answering = async () => ((await call('me')).body as CopyOut).desks[0]?.answering;
+
+  it('held_answer_waits_for_its_release', async () => {
+    // A test holds a request in flight and lets it land when it chooses, with no clock involved.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'people', status: 200, until, body: { people: [], leads: [] } });
+    let landed = false;
+    const answer = call('people', { params: { desk_id: deskId } }).then((a) => {
+      landed = true;
+      return a;
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(landed).toBe(false);
+    release();
+    expect(await answer).toEqual({ status: 200, body: { people: [], leads: [] } });
+
+    // One held past the end of its epoch changes nothing and is dropped.
+    let late = () => {};
+    mockStore.inject({ route: 'people', status: 200, until: new Promise<void>((resolve) => (late = resolve)), body: { people: [], leads: [] } });
+    const dropped = mockStore.dispatch('people', { params: { desk_id: deskId }, epoch: mockStore.epoch });
+    mockStore.nextEpoch();
+    late();
+    expect(await dropped).toEqual({ network: true });
+  });
 
   it('injected_fault_applies_once', async () => {
     // A fault answers in the route's place, once, and changes nothing.
