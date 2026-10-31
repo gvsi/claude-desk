@@ -312,6 +312,22 @@ describe('the About documents', () => {
     expect(proposalForThePage(proposal.replace("v1's enforced", 'v1’s enforced'))).toBe(page);
   });
 
+  it('the_exported_pattern_keeps_no_state_for_the_page', () => {
+    // An importer's `test` leaves the global pattern's `lastIndex` past the sentence; the page still finds it once.
+    const proposal = raw('product-proposal.md');
+    const page = proposalForThePage(proposal);
+    try {
+      expect(READERS_SENTENCE.test(proposal)).toBe(true);
+      const moved = READERS_SENTENCE.lastIndex;
+      expect(moved).toBeGreaterThan(0);
+      expect(proposalForThePage(proposal)).toBe(page);
+      // And the page leaves the exported pattern as it found it.
+      expect(READERS_SENTENCE.lastIndex).toBe(moved);
+    } finally {
+      READERS_SENTENCE.lastIndex = 0;
+    }
+  });
+
   it('a_bad_document_names_its_file_and_line', () => {
     const prediction = raw('capability-prediction.md');
     const line = prediction.split('\n').indexOf('## Characteristics') + 1;
