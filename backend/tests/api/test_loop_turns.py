@@ -15,12 +15,13 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
+import desk.api.loop as loop_module
 from desk.api import prompts
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
 from desk.api.model import AnthropicModel, ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
-from desk.api.store import append_message, has_pending
+from desk.api.store import append_message, append_note_once, has_pending
 from desk.api.tools import Caller
 from desk.contracts import AgentAuth
 from desk.events import SseEvent
@@ -37,6 +38,7 @@ from tests.api.fakes import (
 )
 from tests.api.test_model import USAGE as STREAM_USAGE
 from tests.api.test_model import BOUND_ELSEWHERE_TEXT, bad_request, stream_events
+from tests.api.test_secrets_at_rest import at_rest
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 EVENT = TypeAdapter(SseEvent)
@@ -1048,3 +1050,178 @@ async def test_owner_mode_runs_no_turn(api_conn, caller, fake):
     assert model.requests == [] and fake.called("/context/{session_id}") == [] and fake.called("/check_reply") == []
     assert [event.type for event in await events(api_conn, caller.session_id)] == ["turn_end"]
     assert await has_pending(api_conn, caller.session_id)        # the message waits for the hand-back
+
+
+# The turn's language (GitHub issue #121) --------------------------------------------------------------------------
+
+TURN = "POST /sessions/{session_id}/turn"
+CONTEXT = "GET /context/{session_id}?desk_id="
+
+
+async def test_a_turn_sends_its_newest_message_before_any_tool(api_conn, caller, visitor, fake):
+    """The kernel renders a turn's receipts in the session's language, so a turn first tells it the newest visitor
+    message waiting for it, once, before `/context` and before any tool runs: a Spanish turn after an English one
+    gets Spanish receipts, not the last reply's English."""
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help with your drain."))])) == (
+        "done")
+    await said(api_conn, caller, "Hola.")
+    await said(api_conn, caller, "¿Pueden venir mañana a revisar el desagüe?")
+    fake.calls.clear()
+    model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
+                           response(reply("Tengo horarios mañana por la mañana."))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    (sent,) = fake.called(TURN)
+    assert sent.path == f"/sessions/{caller.session_id}/turn" and sent.headers["x-session-token"] == visitor.token
+    assert sent.body == {"generation": 0, "text": "¿Pueden venir mañana a revisar el desagüe?", "desk_id": None}
+    routes = [call.route for call in fake.calls]
+    assert routes.index(TURN) < routes.index(CONTEXT) < routes.index("POST /decide")
+    receipts = [event.visitor_plain for event in await events(api_conn, caller.session_id) if event.type == "receipt"]
+    assert receipts[-1] == "Horarios tomados del calendario de Maria Rivera"
+
+
+async def test_a_turn_with_no_new_visitor_message_sends_nothing(api_conn, caller, fake):
+    """A turn woken by something other than the visitor's words (an owner's whisper, the verification note), with no
+    visitor message Claude hasn't read, has no message to tell the kernel, so the session's language stays as it is;
+    a message Claude already read isn't sent again."""
+    await said(api_conn, caller, "Hola, ¿tienen citas mañana?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Sí, con gusto."))])) == "done"
+    for wake in ("whisper", "note"):
+        if wake == "whisper":
+            await append_message(api_conn, caller.ids, "whisper", text="Offer her the Tuesday slot.")
+        else:
+            await append_note_once(api_conn, caller.ids, NOTES["verified"], wake=True)
+        await api_conn.commit()
+        fake.calls.clear()
+        assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Claro."))])) == "done", wake
+        assert fake.called(TURN) == [] and len(fake.called(CONTEXT)) == 1, wake
+
+
+async def test_text_written_while_the_owner_had_the_chat_sets_the_turns_language(api_conn, caller, fake):
+    """What a visitor writes while the owner has the chat wakes no turn, but Claude reads it in the next one. So when a
+    whisper later wakes that turn, the route gets that text: it is the newest visitor message reaching Claude."""
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help."))])) == "done"
+    fake.set_mode(caller.session_id, "owner")                  # the owner takes over
+    words = "¿Pueden venir mañana a revisar el desagüe?"
+    await append_message(api_conn, caller.ids, "visitor_text", text=words, wake=False)   # as the public route writes it
+    await api_conn.commit()
+    fake.set_mode(caller.session_id, "ai")                     # and hands back
+    await append_message(api_conn, caller.ids, "whisper", text="Offer her the Tuesday slot.")
+    await api_conn.commit()
+    fake.calls.clear()
+    model = ScriptedModel([response(reply("Claro, el martes tenemos un horario."))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    (sent,) = fake.called(TURN)
+    assert sent.body == {"generation": fake.sessions[caller.session_id].generation, "text": words, "desk_id": None}
+    (request,) = model.requests
+    assert html.escape(words, quote=False) in json.dumps(request.messages, ensure_ascii=False)   # Claude reads it now
+
+
+async def test_a_message_sent_mid_turn_goes_to_the_kernel_before_claude_reads_it(api_conn, engine, caller, visitor,
+                                                                                  fake):
+    """The turn tells the kernel its newest message as it starts, but one the visitor sends while it runs (here during
+    a tool call) joins the next model call, so that call is preceded by `/turn` again, with the newer message: what
+    the turn renders from then on speaks its language. One call per newer message, and none when nothing arrived."""
+    words = "Perdón, ¿mejor pueden venir mañana?"
+    model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_friday")),
+                           response(tool_use("native__find_slots", {"days": 1}, id="toolu_tomorrow")),
+                           response(reply("Tengo horarios mañana por la mañana."))])
+    calls_before_turn = []
+
+    async def watch(path: str) -> None:
+        if path == "/decide":
+            if len(model.requests) == 1:                   # the visitor writes again during the first call
+                async with engine.connect() as conn:
+                    await append_message(conn, caller.ids, "visitor_text", text=words)
+                    await conn.commit()
+        else:
+            calls_before_turn.append(len(model.requests))
+
+    await said(api_conn, caller, "Hi, can someone come on Friday?")
+    paths = {"/decide", f"/sessions/{caller.session_id}/turn"}
+    async with KernelHttp("http://fake-kernel", transport=Watching(fake, paths, watch)) as http:
+        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
+
+    assert [call.body["text"] for call in fake.called(TURN)] == ["Hi, can someone come on Friday?", words]
+    assert calls_before_turn == [0, 1]                     # as the turn starts, then before the call that reads it
+    escaped = html.escape(words, quote=False)
+    assert escaped not in json.dumps(model.requests[0].messages, ensure_ascii=False)
+    assert escaped in json.dumps(model.requests[1].messages, ensure_ascii=False)
+    receipts: dict[str, list[str]] = {}
+    for event in await events(api_conn, caller.session_id):
+        if event.type == "receipt":
+            receipts.setdefault(event.decision_id, []).append(event.visitor_plain)
+    friday, tomorrow = receipts.values()
+    assert (friday[-1], tomorrow[-1]) == ("Times read from Maria Rivera's calendar",
+                                          "Horarios tomados del calendario de Maria Rivera")
+
+
+@pytest.mark.parametrize("stop", ["paused", "over_budget"])
+async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_conn, kernel_http, fake, ro_schema,
+                                                                            clock, monkeypatch, stop):
+    """A paused session's turn, and one past today's model budget, hand off with no model call, and the kernel renders
+    that handoff card in the session's language. So the turn sends its newest message first: a Spanish message after
+    an English reply gets the handoff in Spanish (GitHub issue #121). Such a turn sets off no model call for the owner
+    either: the Spanish card queues no translation."""
+    caller = await new_caller(kernel_http, fake, ro_schema)
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help with your drain."))])) == (
+        "done")
+    if stop == "paused":
+        fake.set_mode(caller.session_id, "paused")             # the breaker's third strike
+    else:                                                      # $100 of Opus today, past the $80 daily budget
+        await api_conn.execute(text(
+            "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
+            " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
+            " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        await api_conn.commit()
+    words = "¿Pueden venir mañana a revisar el desagüe?"
+    await said(api_conn, caller, words)
+    fake.calls.clear()
+    model = ScriptedModel()
+    annotated = []
+
+    async def annotations(app, conn, ids, stopped, replied, **limits) -> None:
+        annotated.append((stopped, replied))
+
+    monkeypatch.setattr(loop_module, "defer_turn_annotations", annotations)
+
+    assert await run_turn(api_conn, caller, model, production=stop == "over_budget", clock=clock) == "handoff"
+
+    (sent,) = fake.called(TURN)
+    assert sent.body == {"generation": fake.sessions[caller.session_id].generation, "text": words, "desk_id": None}
+    routes = [call.route for call in fake.calls]
+    assert routes.index(TURN) < routes.index("POST /check_reply") and model.requests == []
+    *_, message, end = await events(api_conn, caller.session_id)
+    assert (message.type, end.type) == ("message", "turn_end")
+    assert [block.text for block in message.blocks] == ["Déjame consultarlo con Maria Rivera."]
+    assert annotated == []
+
+
+async def test_a_turns_message_is_cut_to_the_kernels_limit(api_conn, caller, fake):
+    long = "Hola, necesito ayuda con el desagüe. " * 70
+    assert len(long) > 2000
+    await said(api_conn, caller, long)
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Claro, con gusto."))])) == "done"
+    (sent,) = fake.called(TURN)
+    assert sent.body["text"] == long[:2000]
+
+
+async def test_a_turns_message_goes_only_to_the_kernel(api_conn, caller, fake, db, caplog):
+    """The message a turn sends is the visitor's own, already in the transcript: no log line carries it, and nothing
+    else at rest holds it (no new row, column or job)."""
+    caplog.set_level(logging.DEBUG)
+    words = "¿Tienen una cita mañana por la tarde para el calentador?"
+    await said(api_conn, caller, words)
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Claro, puedo ayudarle con eso."))])) == (
+        "done")
+    (sent,) = fake.called(TURN)
+    assert sent.body["text"] == words
+    assert words not in caplog.text
+    holding = [json.loads(row) for row in at_rest(db).splitlines() if words in row]
+    assert [(row["kind"], row["text"]) for row in holding] == [("visitor_text", words)]
