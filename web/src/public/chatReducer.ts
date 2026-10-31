@@ -11,6 +11,14 @@
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
  * its own (after the visitor confirmed it's them) explains its reply too.
+ *
+ * A row the stream appends (a reply, the owner's words, a line about the chat) arrives `live`, so
+ * it lands once with its receipts one by one; the page says `shown` once it has drawn it, and it is
+ * live no more. Only what arrives while the chat is following the stream lands. The stored
+ * conversation, read at load or after a reload, is never live, and nothing the stream replays adds
+ * a row. After the stream drops or the page comes back, the chat is `catchingUp`: what the stream
+ * sends then happened while it wasn't following, so it draws still, until the provider says the
+ * stream has `caught_up`.
  */
 import type {
   EvDemoInbox,
@@ -57,6 +65,11 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   ownerTyping: OwnerTyping | null;
   /** The highest seq the chat has seen; the stream resumes after it. */
   lastSeq: number;
+  /**
+   * The stream is sending what the chat missed (after it dropped, or the page came back), so the
+   * rows it appends draw still. A read of the stored conversation, or `caught_up`, ends it.
+   */
+  catchingUp: boolean;
   connection: StreamState;
   /** Why the last turn ended without a reply, or `session` when the chat ended. */
   error: EvErrorCode | null;
@@ -80,11 +93,18 @@ export type ChatAction =
   | { type: 'owner_typing_over' }
   /** The visitor sent a message: it shows at once, in its place. */
   | { type: 'sent'; id: string; text: string }
+  /** The page has drawn the rows that arrived live: they are live no more. */
+  | { type: 'shown' }
+  /** The page came back to the chat: the stream it resumes sends what happened meanwhile first. */
+  | { type: 'catching_up' }
+  /** The stream has sent what the chat missed: what it sends now arrives live. */
+  | { type: 'caught_up' }
   /** Its answer was lost, so the chat reads the conversation before saying anything. */
   | { type: 'send_checking'; id: string }
   | { type: 'send_failed'; id: string; failure: SendFailure }
   /** Sent again with "Try again", or found in the conversation after a lost answer. */
   | { type: 'resent'; id: string }
+  /** The stream's state. When it drops (`reconnecting`, `closed`), the chat is catching up. */
   | { type: 'connection'; connection: StreamState }
   /** A visitor route answered 401: the chat's session is gone. */
   | { type: 'ended' }
@@ -97,6 +117,7 @@ export function initialChatState(): ChatState {
     writing: false,
     ownerTyping: null,
     lastSeq: 0,
+    catchingUp: false,
     connection: 'open',
     error: null,
     openHolds: [],
@@ -193,7 +214,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       if (state.seen.has(key)) return { ...state, ownerTyping };
       return {
         ...state,
-        ...addPart(state, { kind: 'reply', row: { kind: 'message', seq, ev }, receipt: receiptFromEvent(ev) }),
+        ...arrived(state, addPart(state, { kind: 'reply', row: { kind: 'message', seq, ev }, receipt: receiptFromEvent(ev) })),
         writing: false,
         ownerTyping,
         seen: new Set(state.seen).add(key),
@@ -214,9 +235,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false };
+      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false };
     case 'owner_left':
-      return { ...state, ...addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } }), writing: false, ownerTyping: null };
+      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false, ownerTyping: null };
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;
@@ -227,6 +248,22 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'error':
       return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
   }
+}
+
+/**
+ * `groups` with its last row, the one the stream just appended, arriving live, unless the chat is
+ * catching up on what it missed.
+ */
+function arrived<G extends RowGroups<ChatItem, ReceiptView>>(state: ChatState, groups: G): G {
+  const last = groups.rows.at(-1);
+  if (last === undefined || state.catchingUp) return groups;
+  return { ...groups, rows: [...groups.rows.slice(0, -1), { ...last, live: true }] };
+}
+
+/** The chat with no row live, the same state when none was. */
+function shown(state: ChatState): ChatState {
+  if (!state.rows.some((row) => row.live === true)) return state;
+  return { ...state, rows: state.rows.map(({ live: _live, ...row }) => row) };
 }
 
 /** The chat with the visitor's message `id` changed by `change`. */
@@ -254,6 +291,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // A chat that ended stays ended; any other error was the last turn's.
       return { ...state, ...addPart(state, { kind: 'turn', row }), error: state.error === 'session' ? 'session' : null };
     }
+    case 'shown':
+      return shown(state);
+    case 'catching_up':
+      return state.catchingUp ? state : { ...state, catchingUp: true };
+    case 'caught_up':
+      return state.catchingUp ? { ...state, catchingUp: false } : state;
     case 'send_checking':
       return withVisitor(state, action.id, (item) => ({ ...item, status: 'checking' }));
     case 'send_failed':
@@ -261,7 +304,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'resent':
       return withVisitor(state, action.id, ({ failure: _failure, ...item }) => ({ ...item, status: 'sent' }));
     case 'connection':
-      return { ...state, connection: action.connection };
+      // The stream resumes after the last seq the chat holds, and sends what it missed first.
+      return { ...state, connection: action.connection, catchingUp: state.catchingUp || action.connection !== 'open' };
     case 'ended':
       return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session' };
     case 'reset':

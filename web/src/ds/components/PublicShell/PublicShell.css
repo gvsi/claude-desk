@@ -33,6 +33,11 @@
   height: 100%;
 }
 
+/* A banner, such as the vision bar, keeps its own height above the header, inside the shell's. */
+.cd-public-shell__banner {
+  flex: none;
+}
+
 /* The brand header (PublicBrandHeader): its own inline-size container, so its gutters and its status
    line follow its own width, inside the shell or on a page of its own. */
 .cd-public-brand {

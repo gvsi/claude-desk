@@ -67,6 +67,11 @@ export interface PublicShellProps {
   footer?: boolean;
   /** The visitor's `Composer`, under the conversation. */
   composer: ReactNode;
+  /**
+   * A full-width line above the brand header, inside the window's height, such as the `VisionBar`
+   * over a vision page. Left out, the brand header is the top of the page.
+   */
+  banner?: ReactNode;
   /** The conversation: a `Transcript` and what goes with it. */
   children: ReactNode;
 }
@@ -143,6 +148,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabi
 /** The shell's parts that its layout measures. */
 function partsOf(shell: HTMLElement) {
   return {
+    banner: shell.querySelector<HTMLElement>(':scope > .cd-public-shell__banner'),
     header: shell.querySelector<HTMLElement>('.cd-public-brand'),
     head: shell.querySelector<HTMLElement>('.cd-public-shell__chat-head'),
     region: shell.querySelector<HTMLElement>('.cd-public-shell__scroll'),
@@ -231,9 +237,9 @@ function uncoverComposer(shell: HTMLElement): void {
  * - **The about column** stands beside the chat from 900 px wide. Until the shell has measured
  *   itself it opens the scroll region, where it takes nothing from the chat's width, so nothing in
  *   the chat (the composer sizing its text box) measures itself at a width the visitor never sees.
- * - **Short** below 520 px tall, or when the brand header, the chat's head, the composer area and
- *   the footer, pinned, would leave the conversation under 120 px; tall again only with 16 px to
- *   spare. The short class is set on the shell directly, in a layout effect, so it is in place
+ * - **Short** below 520 px tall, or when the banner (if any), the brand header, the chat's head,
+ *   the composer area and the footer, pinned, would leave the conversation under 120 px; tall again
+ *   only with 16 px to spare. The short class is set on the shell directly, in a layout effect, so it is in place
  *   before the page's own layout effects run (they run after the shell's) and the page scrolls the
  *   right element from the first render on. React's class for the shell leaves it out, and the
  *   shell puts it back after every render.
@@ -266,7 +272,7 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     // Short or tall, measured with the about column where it now is: a column still beside a chat
     // that has just become too narrow for it would squeeze the chat's head and the composer.
     const fit = (): void => {
-      const { header, head, composer, footer } = partsOf(el);
+      const { banner, header, head, composer, footer } = partsOf(el);
       const height = el.offsetHeight;
       el.style.setProperty('--cd-public-shell-height', `${height}px`);
       if (!short.current) {
@@ -274,6 +280,7 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
         tallPadding.composer = verticalPadding(composer);
       }
       const pinned =
+        heightOf(banner) +
         heightOf(header) +
         heightOf(footer) +
         heightOf(head) - verticalPadding(head) + tallPadding.head +
@@ -311,8 +318,8 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
       }
       uncoverComposer(el);
     });
-    const { header, head, composer } = partsOf(el);
-    for (const part of [el, header, head, composer]) if (part) observer.observe(part);
+    const { banner, header, head, composer } = partsOf(el);
+    for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);
     // The composer taking focus at the top of a short chat comes out from under the chat's head.
     const onFocusIn = () => uncoverComposer(el);
     composer?.addEventListener('focusin', onFocusIn);
@@ -384,7 +391,8 @@ function useColumnScrolls(column: RefObject<HTMLElement | null>, beside: boolean
  * the kernel's open status when the Desk has hours) and the chat's head with its title, the AI
  * disclosure and "Ask for {owner}" at the top; the composer with the concept footer under it at the
  * bottom; and only the conversation's scroll region scrolling between them, so the disclosure never
- * leaves the screen. On a short shell the brand header and the footer scroll with the conversation
+ * leaves the screen. A banner, such as the vision bar, sits above the brand header and is pinned
+ * with it. On a short shell the banner, the brand header and the footer scroll with the conversation
  * and only the chat's head and the composer stay put. The business's charter is an about column at
  * the right, or, when the page is too narrow for it, the start of the conversation's scroll region.
  */
@@ -398,6 +406,7 @@ export function PublicShell({
   aboutLinks,
   footer = true,
   composer,
+  banner,
   children,
 }: PublicShellProps) {
   const copy = COPY[language] ?? COPY.en;
@@ -483,6 +492,7 @@ export function PublicShell({
       className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`}
       lang={language}
     >
+      {banner ? <div className="cd-public-shell__banner">{banner}</div> : null}
       <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">

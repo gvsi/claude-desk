@@ -48,7 +48,7 @@ The header says whether the business is open now, in the kernel's words.
 
 The shell is the window's height (`100dvh`, or `100vh` in a browser without dynamic viewport units), and the document itself never scrolls, as with `AppShell`.
 
-- **Pinned at the top:** the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}".
+- **Pinned at the top:** the `banner`, if any, then the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}".
 - **Pinned at the bottom:** the composer area (`.cd-public-shell__composer`, the `composer`), and the footer under it.
 - **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
 - **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the chat's head with the disclosure is on screen and nothing covers it. Nothing may be added to the page that scrolls it away or covers it, such as content under the composer or a page that scrolls as a whole.
@@ -62,14 +62,14 @@ The shell is the window's height (`100dvh`, or `100vh` in a browser without dyna
 On a short shell, pinning the brand header and the footer as well would leave the conversation a sliver, so they scroll with the conversation and only the chat's head and the composer stay put. The shell is short:
 
 - below 520 px of shell height (a phone on its side, a short phone, a 640 px phone with its on-screen keyboard open), or
-- when the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
+- when the banner (if any), the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
 - It turns tall again only with 16 px more than that to spare, so it can't flap as a draft grows and shrinks at the edge.
 
 The shell decides in a layout effect and sets `cd-public-shell--short` on its root itself (React's class for the shell leaves it out, and the shell puts it back after each render), so it is in place before the page's own layout effects run and the page scrolls the right element from the first render on, as when a chat is reopened.
 
 On a short shell:
 
-- The shell itself scrolls (the document still never does), and its scroll region grows with the conversation. The brand header is at the top of what scrolls, the footer at its end.
+- The shell itself scrolls (the document still never does), and its scroll region grows with the conversation. The banner (if any) and the brand header are at the top of what scrolls, the footer at its end.
 - The chat's head with the disclosure sticks to the top of the shell and the composer area to its bottom, each 8 px tighter at top and bottom, over the app ground. Their ground runs out into the gutters, so the about column passing under them doesn't show beside them.
 - **Keyboard scrolling skips nothing.** The shell's scroll padding is the chat's head's and the composer area's heights (`--cd-public-head-height`, `--cd-public-composer-height`, which the shell writes), so focus and Page Up and Page Down bring things into view between them, not under them. Focus in the chat's head or the composer scrolls nothing: they are always in view.
 - At the top of a chat, the brand header, the chat's head and a composer holding a long draft can be taller than the shell together. The chat's head then stays over the composer, so the composer can never cover the disclosure; when the composer takes focus or grows there, the shell scrolls by the overlap, so the composer comes out from under the chat's head.
@@ -130,6 +130,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
+- `banner`, a full-width line above the brand header, such as the `VisionBar` on the Claude account vision page (N-R2-Vision-ClaudeAccount). It sits inside the shell, at the top of its column, so the page stays the window's height and the composer and footer stay at its foot. It is pinned with the brand header, and on a short shell it scrolls away with it (see "A short shell").
 
 ## Props
 
@@ -144,6 +145,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
 | `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
+| `banner` | `ReactNode` | Above the brand header, inside the window's height; pinned with the header, and scrolls with it on a short shell. |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
 `PublicBrand`, `PublicOpenStatus`, `PUBLIC_SHELL_SCROLLER_EVENT` and `PublicShellScrollerDetail` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.

@@ -105,6 +105,8 @@ interface LongChatOptions {
    * does in a layout effect of its own, which runs after the shell's.
    */
   follow?: boolean;
+  /** A 64 px line above the brand header, as the vision bar is. */
+  banner?: boolean;
 }
 
 /** The element whose scrolling moves `el`: its nearest scrolling ancestor, as the public chat page finds it. */
@@ -122,7 +124,7 @@ function scrollerOfEl(el: Element): Element {
  * didn't hold it. In English or Spanish, whose disclosure is longer, and with the links for
  * people's agents in the about column if asked.
  */
-function LongChat({ language = 'en', links = false, tagline, rows = 80, follow = false }: LongChatOptions) {
+function LongChat({ language = 'en', links = false, tagline, rows = 80, follow = false, banner = false }: LongChatOptions) {
   const page = rivera.publicDesk[language];
   const end = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -138,6 +140,7 @@ function LongChat({ language = 'en', links = false, tagline, rows = 80, follow =
       ownerName={rivera.business.ownerName}
       language={language}
       openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
+      banner={banner ? <div data-testid="banner" style={{ height: 64 }} /> : undefined}
       onAskForOwner={() => {}}
       about={page.charter}
       aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
@@ -906,4 +909,34 @@ it('a_window_crossing_900_in_one_step_settles_without_a_switch', async () => {
   } finally {
     document.removeEventListener('cd-public-shell-scroller', listen);
   }
+});
+
+it('a_banner_sits_above_the_header_and_counts_in_the_fit', async () => {
+  // A banner (the vision bar) is the top of the shell's column: pinned with the brand header while
+  // tall, scrolled away with it while short. Its height counts among the pinned parts, so a phone
+  // with room for the conversation without it (320 x 568) is short with it.
+  const seen = [];
+  for (const size of [[1440, 900], [568, 320], [320, 568]] satisfies Size[]) {
+    await renderLongChat(size, { banner: true });
+    const banner = one('[data-testid="banner"]');
+    const scrolls = scroller();
+    scrolls.scrollTop = 0;
+    const start = { bannerAtTheTop: banner.getBoundingClientRect().top === 0, headerUnderIt: one('.cd-public-brand').getBoundingClientRect().top === banner.getBoundingClientRect().bottom };
+    followTheChat();
+    seen.push({
+      window: named(size),
+      short: isShort(),
+      start,
+      followingBannerInView: inWindow(banner),
+      disclosure: uncovered(disclosureLine()),
+      documentFits: document.documentElement.scrollHeight <= innerHeight,
+      conversationShown: conversationShown() >= 96 ? '96 px or more' : `${conversationShown()} px`,
+    });
+  }
+  const start = { bannerAtTheTop: true, headerUnderIt: true };
+  expect(seen).toEqual([
+    { window: '1440x900', short: false, start, followingBannerInView: true, disclosure: true, documentFits: true, conversationShown: '96 px or more' },
+    { window: '568x320', short: true, start, followingBannerInView: false, disclosure: true, documentFits: true, conversationShown: '96 px or more' },
+    { window: '320x568', short: true, start, followingBannerInView: false, disclosure: true, documentFits: true, conversationShown: '96 px or more' },
+  ]);
 });

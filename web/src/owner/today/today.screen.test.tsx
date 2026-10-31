@@ -6,7 +6,7 @@
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
-import type { RenderResult } from 'vitest-browser-react';
+import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { ROUTES } from '../../api/routes.ts';
@@ -20,6 +20,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { watchFor, watchPages } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -89,6 +90,29 @@ async function expectWaiting(button: Locator, words: string): Promise<void> {
   expect(el.getAttribute('aria-busy')).toBeNull();
   expect(el.querySelector('.cd-button__spinner')).toBeNull();
 }
+
+/**
+ * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
+ * reads waiting, and `release()` sends them on.
+ */
+function holdReads(path: string): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  worker.use(
+    http.get(path, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/** The main Desk's Needs you, as the app reads it. */
+const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
 /** Waits for `key` to be read `n` more times than now. */
 async function readsMore(key: string, n: number): Promise<void> {
@@ -207,6 +231,58 @@ describe('Today', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+  });
+
+  it('reload_opens_today_drawn', async () => {
+    // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
+    // first shows is read, so its sections never arrive one by one, each pushing the next down.
+    // The Desks and Today answer at once; Needs you is held back. The page this file drew last goes
+    // first, so the watch sees only this one.
+    await cleanup();
+    const pages = watchPages();
+    const needsYou = holdReads(needsYouPath);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    await expect.poll(() => requests('today').length).toBeGreaterThan(0);
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(0);
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Since last night' }).elements()).toHaveLength(0);
+
+    // Once Needs you is in, Today opens with every section drawn.
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
+    expect(pages()).toEqual(['loading', 'today']);
+  });
+
+  it('reload_waits_on_today_no_longer_than_a_first_visit', async () => {
+    // A read that runs past the read ahead's 3 s cap doesn't keep the owner on the loading page:
+    // Today opens, still reading what needs the owner, and the request shows when its read is in.
+    const needsYou = holdReads(needsYouPath);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first(), { timeout: 5_000 }).toBeVisible();
+    expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
+
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+  });
+
+  it('switching_desks_opens_today_at_once', async () => {
+    // A Desk the copy's Desks already list opens straight onto its Today, never the loading page.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const sawLoading = watchFor('Opening your Desk');
+    await screen.getByRole('button', { name: 'Switch Desk, current: Main line' }).click();
+    await screen.getByRole('button', { name: 'Emergencies' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toBeVisible();
+    await expect.element(region(screen, 'Since last night')).toBeVisible();
+    expect(sawLoading()).toBe(false);
   });
 
   it('needs_you_read_failure_says_so', async () => {
@@ -538,6 +614,18 @@ describe('Today', () => {
     await expect.element(row).toHaveAttribute('href', `${DESK}/conversations/${preview?.state.session_id ?? ''}`);
     // It's the owner, so the greeting still says no one else is here.
     await expect.element(screen.getByText('Quiet right now.', { exact: true })).toBeVisible();
+  });
+
+  it('unnamed_visitor_reads_visitor_once', async () => {
+    // Dana's chat is live, and she hasn't given her name: the row's name line says "Visitor", and
+    // its status line doesn't say it again, nor shows its dot alone.
+    const { screen } = await renderRoute(TODAY);
+    const row = region(screen, 'Live now').getByRole('link');
+    await expect.element(row).toBeVisible();
+    expect(row.elements()).toHaveLength(1);
+    await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m$/);
+    expect(row.getByText('Visitor', { exact: true }).elements()).toHaveLength(1);
+    expect(row.element().querySelector('.cd-status-dot')).toBeNull();
   });
 
   it('allow_once_executes_and_updates', async () => {
@@ -906,31 +994,8 @@ describe("Today's Demo inbox", () => {
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
 
-  /**
-   * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
-   * reads waiting, and `release()` sends them on.
-   */
-  function holdReads(path: string): { held: () => number; release: () => void } {
-    let waiting = 0;
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    worker.use(
-      http.get(path, async () => {
-        waiting += 1;
-        await released;
-        return undefined;
-      }),
-    );
-    return { held: () => waiting, release };
-  }
-
   /** Two animation frames: long enough for a navigation's transition to be drawn. */
   const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
-  /** The main Desk's Needs you, as the app reads it. */
-  const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
   /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
   function failReads(path: string): { count: () => number; stop: () => void } {

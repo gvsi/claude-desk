@@ -258,7 +258,7 @@ describe('request', () => {
     expect(await Promise.race([plainFailed, Promise.resolve('waiting')])).toBe('waiting');
     expect((await failure(plain, 1)).kind).toBe('network');
 
-    const model = request('setupAnswer', { params: { id: 'i1' }, body: { text: 'Plumbing in Portland' } });
+    const model = request('setupAnswer', { params: { id: 'i1' }, body: { question: 'what_you_do', text: 'Plumbing in Portland' } });
     const modelFailed = model.catch((err: unknown) => err);
     await vi.advanceTimersByTimeAsync(44_999);
     expect(await Promise.race([modelFailed, Promise.resolve('waiting')])).toBe('waiting');

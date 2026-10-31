@@ -354,6 +354,33 @@ export const Embedded: Story = {
   },
 };
 
+/** Under a full-width line, as the vision page for a Claude account draws the vision bar over the public page. */
+export const WithBanner: Story = {
+  args: {
+    banner: (
+      <div role="note" aria-label="Vision" style={{ height: 40, background: 'var(--bg-panel)' }}>
+        Vision
+      </div>
+    ),
+  },
+  parameters: {
+    canvas: 'N-R2-Vision-ClaudeAccount',
+    canvasNote: 'Only the banner’s place is checked here: a 40 px line over the brand header, the page still the window’s height.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // public_shell_banner_over_the_header: first in the shell, full width, then the brand header right under it.
+    const banner = canvas.getByRole('note', { name: 'Vision' });
+    const shell = canvasElement.querySelector<HTMLElement>('.cd-public-shell')!;
+    await expect(shell.firstElementChild?.contains(banner)).toBe(true);
+    await expect(banner.getBoundingClientRect().top).toBe(0);
+    await expect(banner.getBoundingClientRect().width).toBe(document.documentElement.clientWidth);
+    const header = canvas.getByRole('banner');
+    await expect(header.getBoundingClientRect().top).toBe(40);
+    // The banner is inside the window's height, not added to it: the shell stays as tall as the window.
+    await expect(Math.round(shell.getBoundingClientRect().height)).toBe(window.innerHeight);
+  },
+};
+
 export const WithAgentLinks: Story = {
   args: {
     aboutLinks: [

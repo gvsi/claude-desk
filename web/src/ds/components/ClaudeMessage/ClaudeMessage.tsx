@@ -11,6 +11,8 @@ export interface ClaudeMessageProps {
   language: CopyLanguage;
   /** The owner's display name (`owner_display_name`), for the "{owner} said" card label. */
   ownerName: string;
+  /** Vision pages only: each document card's Download goes nowhere (`ReplyCard`'s `inertDownload`). */
+  inertDownload?: boolean;
 }
 
 /**
@@ -18,7 +20,7 @@ export interface ClaudeMessageProps {
  * paragraph, each card block as a typed reply card, in order. No bubble, no avatar and nothing
  * else: the delivered blocks are the whole message.
  */
-export function ClaudeMessage({ blocks, language, ownerName }: ClaudeMessageProps) {
+export function ClaudeMessage({ blocks, language, ownerName, inertDownload = false }: ClaudeMessageProps) {
   return (
     <div className="cd-claude-message" lang={language}>
       {blocks.map((block, index) => {
@@ -33,7 +35,7 @@ export function ClaudeMessage({ blocks, language, ownerName }: ClaudeMessageProp
         }
         // Anything else is a card. A template this build doesn't know shows its text in a
         // plain card, as ReplyCard does for any unknown template.
-        return <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} />;
+        return <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} inertDownload={inertDownload} />;
       })}
     </div>
   );
