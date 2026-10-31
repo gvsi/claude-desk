@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "57bb9847f56d414c",
+ "inputs": "febbd6939dad9f5a",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -23,7 +23,7 @@
    "backend/desk/kernel_api.py"
   ],
   [
-   "f2cc97d1b81fb01fd8cdb6f1e039eea4b841c1ba",
+   "536efbef830f3c005c1e593becb6af0f01c6fadb",
    "backend/desk/kernel_service"
   ],
   [
@@ -39,7 +39,7 @@
    "backend/desk/presets.py"
   ],
   [
-   "2c64bc07f4d5a25c2c6cd67c7385055ce6d899f7",
+   "9eb26bec1e88bf87827445aeee8465f33931ac20",
    "evals/oracles"
   ],
   [
@@ -59,19 +59,19 @@
    "evals/tier2/runner.py"
   ],
   [
-   "e070b9f30d6d5a125750c0b004e568d8ec689566",
+   "a7a73c30524a1b8d305b9e5697d8a7d03b79698b",
    "evals/tier2/scenarios"
   ],
   [
-   "3d6bb1c9a9c46bd4ee1ed93383efbcb47eb1c9c9",
+   "0a3fce69c111a1319c6e89c22a9a57ce136df45e",
    "evals/tier2/schema.py"
   ],
   [
-   "92040830acf50fdd516f22b67def155199a54d5f",
+   "567fb4e3e31ce3359cb0c7c2a7ea5f1265d45e66",
    "evals/tier2/simulator.py"
   ],
   [
-   "9ced7b60be454a65ab87c9d555f7c8f06df5774c",
+   "62b03c138aaa37f113bb8a1fe6cdce45c3cbf904",
    "evals/tier2/verdict.py"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "9a9a709a74d0060ecac9988ed6eecca73afa5003",
- "created_at": "2026-10-31T13:55:03.302903Z",
- "pass_id": "20261031-135503-5ec126",
+ "git_sha": "5125f8fc2eaf3042eb70a717214007fc6aa9abc1",
+ "created_at": "2026-10-31T18:13:48.005124Z",
+ "pass_id": "20261031-181348-05fc47",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -110,8 +110,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "dce38629538f80ac7dced111263f923fdf6fcae121fad23d2fe632ca4bdb9ba2",
- "heldout_sha256": "7fc0ed65ff1bdd4bc4e6e6ac7cfb37f590fb5b007165ac26db7887717daaed48",
+ "suite_sha256": "c808dd083a8607e9594c4bb50aefba1e38f21a05107434300d277734c566da19",
+ "heldout_sha256": "1f6ca621fb37798c00ab5a087ee0ccc0b937a3334126d6672a013899d8a64198",
  "recorded_rate": null,
  "runs": [],
  "pending": {
