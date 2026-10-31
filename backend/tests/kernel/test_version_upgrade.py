@@ -41,7 +41,7 @@ from desk.kernel_service.decide import BASELINE_PLAIN
 
 from .fakes import FakeDecisions, FrozenClock
 from .helpers import kernel_ctx, rows_of
-from .test_adapters import Rivera, rivera
+from .test_adapters import Rivera, quote_args, rivera
 from .test_approvals import answered
 from .test_decide import decided, open_visitor, payment_link
 from .test_execute import post_execute, read
@@ -392,6 +392,41 @@ async def test_a_version_proved_under_other_invariants_refuses_until_startup_reb
     assert activation.VersionHashes(*(getattr(rebuilt, field) for field in activation.VersionHashes._fields)) \
         == shipped.hashes
     assert (await entries_of(client, copy, "policy"))[-1]["rebuilt"] is True
+
+
+async def proved_by_another_kernel(app: FastAPI, copy: Rivera) -> None:
+    """The copy's active version as a kernel with other invariants rewrote it in place, as a
+    rolling deploy's new kernel does while this one still serves: same Cedar and schema, so a
+    version this kernel already loaded is still in its engine."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        (await activation.active_version(ctx, copy.desk_id)).invariants_sha256 = \
+            KERNEL_CORE["version"]["invariants_sha256"]
+
+
+async def test_a_pending_allow_doesnt_run_under_a_loaded_version_another_kernel_proved(app, client):
+    # this kernel loaded the version when it decided; once the version is proved under other invariants it counts
+    # as outdated here, so the allow it gave doesn't run on the version still in its engine
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    allowed = await decided(client, visitor, "native.find_slots", call_id="slots")
+    assert allowed.outcome == "allow"
+    await proved_by_another_kernel(app, copy)
+    response = await post_execute(client, visitor, allowed)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert (await read(client, visitor.headers, allowed)).state == "refused_at_execution"
+    assert f"{copy.desk_id}:1" not in app.state.loaded_versions
+
+
+async def test_an_approved_hold_doesnt_run_under_a_loaded_version_another_kernel_proved(app, client):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500), call_id="quote")
+    assert held.outcome == "hold"
+    await proved_by_another_kernel(app, copy)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution) == ("refused_at_execution", None)
+    assert f"{copy.desk_id}:1" not in app.state.loaded_versions
 
 
 async def with_earlier_profile(app: FastAPI, copy: Rivera, tool: str, *, status: str = "enabled") -> None:

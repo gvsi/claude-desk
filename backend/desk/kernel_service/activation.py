@@ -577,11 +577,14 @@ class LoadedVersions:
 
     def use(self, row: PolicyVersionRow) -> list[str]:
         """Makes sure `row` is loaded and marks it most recent; returns the load errors (empty
-        means its keys decide). Loading past the cap drops the least recently used version."""
+        means its keys decide). Loading past the cap drops the least recently used version. A
+        version loaded earlier that is now outdated (another kernel proved it in place under other
+        invariants, its Cedar and schema unchanged) goes through `load_version` again, which drops
+        it, so a decision or an execution never runs on it from the cache."""
         key = version_key(row.desk_id, row.version)
         loaded = (row.cedar_sha256, row.schema_sha256)
         with self._lock:
-            if self._recent.get(key) == loaded:
+            if self._recent.get(key) == loaded and not outdated(row):
                 self._recent.move_to_end(key)
                 return []
             errors = load_version(self.engine, row)       # replaces what the keys held, or drops them
