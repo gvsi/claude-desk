@@ -50,6 +50,7 @@ export const ChenPayments: Story = {
     await expect(rows).toHaveLength(2);
     for (const [index, tool] of args.tools.entries()) {
       const row = rows[index] as HTMLElement;
+      expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
       await expect(within(row).getByText(tool.name)).toBeVisible();
       await expect(within(row).getByText(tool.description)).toBeVisible();
       await expect(within(row).getByText('Covered by your always-on rule: No money moves without your rule or a signed limit')).toBeVisible();

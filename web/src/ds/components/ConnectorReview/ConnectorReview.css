@@ -1,5 +1,5 @@
 /* ConnectorReview: the 44 px tile, centered on the serif title and its lead line, the card of tools
-   (each under a hairline, the first too, and padded 14 px above and below: its name at weight 520, its line and what covers it in secondary meta, and its
+   (separated by hairlines and padded 14 px above and below: its name at weight 520, its line and what covers it in secondary meta, and its
    outcome at the right), then Turn it on, Cancel and the hint on one line. Each tool lays out by
    its own width: under 640 px its outcome sits on its own line under its words. */
 
@@ -64,6 +64,9 @@
 .cd-connector-review__tool {
   container: cd-connector-review-tool / inline-size;
   padding: var(--space-14) 0;
+}
+
+.cd-connector-review__tool + .cd-connector-review__tool {
   border-top: 1px solid var(--line-hairline);
 }
 
