@@ -40,7 +40,7 @@ Shapes are `fill-hover`. A line is a `radius-full` pill centred in its type styl
 - A line is as wide as its row unless it is given a `width`.
 - A block takes its `width`, its `height` and its corners: `radius-control` by default, or `radius-card`, `radius-composer` or `radius-full`.
 - A circle is `size-avatar` across unless it is given a `size`.
-- `SkeletonCard` is `Card`'s own classes: the 1 px `line-card` border, `fill-card`, `radius-card` and Card's padding, 20, 16 or 0. Cards keep their real border and fill.
+- `SkeletonCard` is `Card`'s own classes: the 1 px `line-card` border, `fill-card`, `radius-card` and Card's padding, 20, 16 or 0. Cards keep their real border and fill. As with `Card`, a card with no padding holds rows that pad themselves (12 px by 16 px for a connector section's), so the hairlines between them run edge to edge; never bare shapes against its border.
 
 ## The sweep
 
@@ -60,11 +60,12 @@ Shapes are `fill-hover`. A line is a `radius-full` pill centred in its type styl
 | `data-state` | When | What it does |
 | --- | --- | --- |
 | `waiting` | while loading, for `SKELETON_DELAY_MS` (200 ms) after it mounts | Laid out in flow and invisible, so it already holds the part's space and nothing under it moves when it shows. The status is empty, so a fast load says nothing, as it shows nothing. |
-| `shown` | after the wait; or at once when it mounts inside a region whose layer is shown or leaving (a hand-off) | The shapes show and sweep. The status holds the loading words. |
+| `shown` | after the wait; or at once when it mounts inside a region whose layer is shown or leaving, or in the commit that region's shown shapes go at once under reduced motion (a hand-off) | The shapes show and sweep. The status holds the loading words. |
 | `leaving` | the load ended while the shapes showed | The part draws in flow, and the layer lies over it at the same top-left on `bg-app` and fades out on `motion-fast` with `motion-ease`. It rests at opacity 0, so a layer whose fade can't run is invisible at once, and pointer events pass through it to the part. It goes when its own fade ends or is cancelled, or after a fallback timer if neither comes. |
 | (no layer) | the load ended during the wait, or under reduced motion, or it was never loading | The part alone, at once, with no fade. |
 
 - If `loading` turns true again, the region goes back to `waiting`.
+- A hand-off lasts while the outer layer fades, or under reduced motion for the commit the part lands in. A region that mounts in the part later, with no shapes on screen, waits as usual.
 - There is no minimum time on screen: a load that ends just after the wait shows the shapes briefly, and the fade softens it.
 - The body is `aria-busy="true"` only while loading. The region takes `position: relative` only while leaving, so it never changes how the part lays out its own positioned children.
 

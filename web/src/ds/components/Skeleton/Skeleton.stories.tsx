@@ -73,6 +73,32 @@ const CARDS: readonly { padding: 0 | 16 | 20; label: string }[] = [
 /** One row of the contact sheet: its label, and its shape in the same row of the region. */
 const ROW_STYLE = { display: 'flex', alignItems: 'center', minHeight: 64 } as const;
 
+/** A card's row of the contact sheet, tall enough for the card of rows. */
+const CARD_ROW_STYLE = { ...ROW_STYLE, minHeight: 152 } as const;
+
+/** The lines the cards hold: two in each padded card, two in each of the card of rows' two rows. */
+const CARD_LINES = 2 + 2 + 4;
+
+/**
+ * A row in a card of rows: it pads itself, 12 px by 16 px as a connector section's rows do, and
+ * every row after the first sits under a hairline that runs to the card's edges.
+ */
+function CardRow({ first = false, children }: { first?: boolean; children: ReactNode }) {
+  return (
+    <div
+      className="story-card-row"
+      style={{
+        display: 'grid',
+        gap: 'var(--space-2)',
+        padding: 'var(--space-12) var(--space-16)',
+        borderTop: first ? undefined : '1px solid var(--line-hairline)',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * The shapes, one per row, each named at its left. The names sit outside the region, since a
  * skeleton draws no words of its own; both columns use the same rows, so each name sits by its shape.
@@ -103,7 +129,7 @@ function ContactSheet() {
           </p>
         ))}
         {CARDS.map(({ padding, label }) => (
-          <p key={padding} className="cd-type-caption" style={{ ...ROW_STYLE, minHeight: 120, margin: 0, color: 'var(--text-secondary)' }}>
+          <p key={padding} className="cd-type-caption" style={{ ...CARD_ROW_STYLE, margin: 0, color: 'var(--text-secondary)' }}>
             {label}
           </p>
         ))}
@@ -119,10 +145,25 @@ function ContactSheet() {
               </div>
             ))}
             {CARDS.map(({ padding }) => (
-              <div key={padding} style={{ ...ROW_STYLE, minHeight: 120 }}>
+              <div key={padding} style={CARD_ROW_STYLE}>
                 <SkeletonCard padding={padding} anchor={`card-${padding}`} className="story-skeleton-card">
-                  <Skeleton shape="line" text="section" width={160} />
-                  <Skeleton shape="line" text="caption" width={240} />
+                  {padding === 0 ? (
+                    <>
+                      <CardRow first>
+                        <Skeleton shape="line" text="control" width={160} />
+                        <Skeleton shape="line" text="caption" width={240} />
+                      </CardRow>
+                      <CardRow>
+                        <Skeleton shape="line" text="control" width={130} />
+                        <Skeleton shape="line" text="caption" width={210} />
+                      </CardRow>
+                    </>
+                  ) : (
+                    <>
+                      <Skeleton shape="line" text="section" width={160} />
+                      <Skeleton shape="line" text="caption" width={240} />
+                    </>
+                  )}
                 </SkeletonCard>
               </div>
             ))}
@@ -205,9 +246,26 @@ export const Shapes: Story = {
       await expect(card.classList.contains('story-skeleton-card')).toBe(true);
     }
 
+    // skeleton_card_of_rows_pads_its_rows: with no padding, the card holds rows that pad themselves,
+    // 12 px by 16 px as a connector section's rows do, so the hairline between them runs edge to edge.
+    const ofRows = anchored(canvasElement, 'card-0');
+    const inner = ofRows.getBoundingClientRect();
+    const rows = [...ofRows.querySelectorAll<HTMLElement>(':scope > .story-card-row')];
+    await expect(rows).toHaveLength(2);
+    for (const [i, row] of rows.entries()) {
+      const box = row.getBoundingClientRect();
+      await expect([box.left, box.right]).toEqual([inner.left + 1, inner.right - 1]);
+      const first = row.querySelector<HTMLElement>('.cd-skeleton-line')?.getBoundingClientRect();
+      const last = [...row.querySelectorAll<HTMLElement>('.cd-skeleton-line')].at(-1)?.getBoundingClientRect();
+      if (!first || !last) throw new Error(`row ${i} of the card of rows holds no lines`);
+      const hairline = i === 0 ? 0 : 1;
+      await expect([first.left - box.left, first.top - box.top - hairline, box.bottom - last.bottom]).toEqual([16, 12, 12]);
+      expectComputed(row, i === 0 ? { borderTopWidth: '0px' } : { borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+    }
+
     // Every shape paints fill-hover, and every shape is hidden from assistive technology.
     const painted = [...canvasElement.querySelectorAll<HTMLElement>('.cd-skeleton')];
-    await expect(painted.length).toBe(LINES.length + 1 + BLOCKS.length + 1 + 2 + CARDS.length * 2);
+    await expect(painted.length).toBe(LINES.length + 1 + BLOCKS.length + 1 + 2 + CARD_LINES);
     for (const shape of painted) expectComputed(shape, { backgroundColor: FILL_HOVER });
     const shapes = [...canvasElement.querySelectorAll<HTMLElement>(SHAPE_ROOTS)];
     await expect(shapes.length).toBe(painted.length + CARDS.length);
@@ -231,10 +289,21 @@ function Later({ after, children }: { after: number; children: ReactNode }) {
   return shown ? children : null;
 }
 
-/** A row of Things to try: its icon tile, its title and line, and its next step at the right. */
-function ThingRow({ anchor }: { anchor?: string }) {
+/**
+ * A row of Things to try: its icon tile, its title and line, and its next step at the right. It pads
+ * itself, and every row after the first sits under a hairline that runs to the card's edges.
+ */
+function ThingRow({ anchor, first = false }: { anchor?: string; first?: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-12)', padding: 'var(--space-14) var(--space-16)' }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-12)',
+        padding: 'var(--space-14) var(--space-16)',
+        borderTop: first ? undefined : '1px solid var(--line-hairline)',
+      }}
+    >
       <Skeleton shape="block" width={32} height={32} anchor={anchor} />
       <div style={{ display: 'grid', gap: 'var(--space-2)', flex: 1, minWidth: 0 }}>
         <Skeleton shape="line" text="control" width="45%" />
@@ -264,7 +333,7 @@ function TodayHead() {
           <Skeleton shape="line" text="meta" width={150} />
         </div>
         <SkeletonCard padding={0}>
-          <ThingRow anchor="first-tile" />
+          <ThingRow anchor="first-tile" first />
           <ThingRow />
           <ThingRow />
           <ThingRow />

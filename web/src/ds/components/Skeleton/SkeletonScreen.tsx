@@ -72,9 +72,14 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
   // The phase follows `loading` in the same render it changes in, so no commit ever draws the part
   // and a layer that no longer belongs to it.
   const [wasLoading, setWasLoading] = useState(loading);
+  // Shapes that showed and went at once, under reduced motion, still hand off: a region that mounts
+  // in the part in that same commit continues them, as it would during the fade.
+  const [handingOff, setHandingOff] = useState(false);
   if (loading !== wasLoading) {
+    const next = nextPhase(phase, loading);
     setWasLoading(loading);
-    setPhase(nextPhase(phase, loading));
+    setPhase(next);
+    setHandingOff(next === 'none' && (phase === 'shown' || phase === 'leaving'));
   }
   const region = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -101,6 +106,11 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
     };
   }, [hasLayer]);
 
+  // The hand-off lasts for the commit the part lands in; a region that mounts later waits as usual.
+  useEffect(() => {
+    if (handingOff) setHandingOff(false);
+  }, [handingOff]);
+
   useEffect(() => {
     if (phase !== 'waiting') return;
     const timer = setTimeout(() => setPhase('shown'), SKELETON_DELAY_MS);
@@ -126,7 +136,7 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
 
   const regionClass = ['cd-skeleton-screen', phase === 'leaving' ? 'cd-skeleton-screen--leaving' : undefined, className];
   return (
-    <AroundPhase.Provider value={phase}>
+    <AroundPhase.Provider value={handingOff ? 'shown' : phase}>
       <div ref={region} className={regionClass.filter(Boolean).join(' ')}>
         <p role="status" className="cd-sr-only" lang={lang}>
           {phase === 'shown' ? status : ''}

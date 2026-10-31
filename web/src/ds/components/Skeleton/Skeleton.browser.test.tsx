@@ -1,7 +1,8 @@
 /**
  * The skeleton in Chromium. Under prefers-reduced-motion: reduce, which this project's browser
- * context emulates, the shapes are still, the part replaces them at once with no fade, and a part
- * that loads again waits again. With motion on, the band lines up across shapes at every left edge,
+ * context emulates, the shapes are still, the part replaces them at once with no fade, a region
+ * that takes over from it shows its shapes in that same commit, and a part that loads again waits
+ * again. With motion on, the band lines up across shapes at every left edge,
  * after a resize too, and its edge draws no step (`Skeleton.webkit.test.tsx` runs the same two
  * checks in WebKit).
  */
@@ -13,9 +14,9 @@ import { page } from 'vitest/browser';
 
 import { motion } from '../../test/reducedMotion.ts';
 import { partsOf, regionIn, watchRegion } from '../../test/skeletonRegion.ts';
-import { SWEEP_SHAPES, expectBandLinesUp, expectNoStepAtTheEdge, mountSweep, resizeWindow } from '../../test/skeletonSweep.tsx';
+import { SWEEP_SHAPES, expectBandLinesUp, expectNoStepAtTheEdge, mountSweep, nextFrame, resizeWindow } from '../../test/skeletonSweep.tsx';
 import { Skeleton } from './Skeleton.tsx';
-import meta, { Lands, Sweep } from './Skeleton.stories.tsx';
+import meta, { Continues, Lands, Sweep } from './Skeleton.stories.tsx';
 import { SKELETON_DELAY_MS, SkeletonScreen } from './SkeletonScreen.tsx';
 
 /**
@@ -72,6 +73,65 @@ it('skeleton_leaves_at_once_under_reduced_motion', async () => {
     expect(body.hasAttribute('aria-busy')).toBe(false);
     expect(status.textContent).toBe('');
     expect(getComputedStyle(region).position).toBe('static');
+  } finally {
+    watch.stop();
+  }
+});
+
+it('skeleton_continues_at_once_under_reduced_motion', async () => {
+  expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  // A reload of Customers: the full-page shapes go at once, with no fade, and Customers' own region
+  // shows its shapes in that same commit, so no frame goes without shapes.
+  let firstFrame: { inner: string | undefined; status: string | null; outer: string } | null = null;
+  const root = container();
+  const watch = watchRegion(root, (state) => {
+    const inner = root.querySelectorAll<HTMLElement>('.cd-skeleton-screen')[1];
+    if (!inner || firstFrame) return;
+    const parts = partsOf(inner);
+    firstFrame = { inner: parts.layer?.dataset.state, status: parts.status.textContent, outer: state };
+  });
+  try {
+    await renderBare(Continues, 'Continues', root);
+    await watch.reached('gone', 4000);
+    expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'shown', 'gone']);
+    expect(firstFrame).toEqual({ inner: 'shown', status: 'Loading your customers', outer: 'gone' });
+    // It keeps them while the people are read.
+    await new Promise((resolve) => setTimeout(resolve, SKELETON_DELAY_MS));
+    const inner = partsOf(root.querySelectorAll<HTMLElement>('.cd-skeleton-screen')[1] as HTMLElement);
+    expect(inner.layer?.dataset.state).toBe('shown');
+    expect(inner.body.getAttribute('aria-busy')).toBe('true');
+  } finally {
+    watch.stop();
+  }
+});
+
+it('skeleton_hand_off_lasts_one_commit_under_reduced_motion', async () => {
+  // The hand-off is for a region that mounts as the part lands. One that mounts in the part later,
+  // with no shapes on screen, waits as usual, so a fast read there still shows nothing.
+  const root = container();
+  const react = createRoot(root);
+  onTestFinished(() => react.unmount());
+  const shape = <Skeleton shape="line" text="section" width={150} />;
+  const draw = (loading: boolean, later: boolean) =>
+    flushSync(() =>
+      react.render(
+        <SkeletonScreen loading={loading} status="Opening your Desk" skeleton={shape}>
+          {later ? <SkeletonScreen loading status="Loading your customers" skeleton={shape} /> : <h1>Customers</h1>}
+        </SkeletonScreen>,
+      ),
+    );
+  const watch = watchRegion(root);
+  try {
+    draw(true, false);
+    await watch.reached('shown');
+    draw(false, false);
+    await watch.reached('gone');
+    await nextFrame();
+    await nextFrame();
+    draw(false, true);
+    const later = partsOf(root.querySelectorAll<HTMLElement>('.cd-skeleton-screen')[1] as HTMLElement);
+    expect(later.layer?.dataset.state).toBe('waiting');
+    expect(later.status.textContent).toBe('');
   } finally {
     watch.stop();
   }
