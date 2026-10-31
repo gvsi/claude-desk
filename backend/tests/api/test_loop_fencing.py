@@ -447,6 +447,41 @@ async def test_a_recovered_turn_whose_reply_showed_only_as_the_handoff_still_wai
     assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
 
 
+async def test_a_recovery_whose_reply_showed_opens_the_new_prompt_at_once(
+        api_conn, engine, locks, caller, visitor, fake, monkeypatch):
+    """Claude booked and replied in one response, the reply showed, and the worker stopped before the results row.
+    Claude has had its say, so recovering the calls needs no turn of its own: after a deploy that changed the prompt,
+    the visitor's next message opens a fresh context at once, its summary carrying the booking's result."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Book me the earliest visit.")
+    stopped, write = asyncio.Event(), loop.append_tool_results
+
+    async def stop_before_the_results(*args, **kwargs):  # the worker stops (a deploy) after the reply showed
+        stopped.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "append_tool_results", stop_before_the_results)
+    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller)},
+                                                         id="toolu_book"), reply("Booking you in.", id="toolu_say"))])
+    run = asyncio.create_task(pending(caller, model, engine, locks))
+    await asyncio.wait_for(stopped.wait(), 5)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    monkeypatch.setattr(loop, "append_tool_results", write)
+    assert await rows(api_conn, caller.session_id, "delivered", "author", "call_id") == [("claude", "toolu_say")]
+
+    monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+    await said(api_conn, caller, "Is that confirmed?")
+    model = ScriptedModel([response(reply("Your visit is booked."))])
+    assert await pending(caller, model, engine, locks) == "done"
+    (fresh,) = model.requests
+    assert fresh.system == conversation_system(RIVERA) != opened_with and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "claude (shown to the visitor): Booking you in.", "result of native__book: ")
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+    assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
+
+
 async def test_a_carried_result_survives_a_second_fresh_context_before_claude_answers(
         api_conn, engine, locks, caller, visitor, fake, monkeypatch):
     """The fresh context that carried the recovered booking never got an answer (the model was unavailable), and a
