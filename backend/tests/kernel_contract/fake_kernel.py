@@ -1026,7 +1026,8 @@ class PaymentLink:
 @dataclass
 class VersionRecord:
     """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
-    proof and status, the key a repeat of the same draft finds it by, and its money cap (Plan 01b)."""
+    proof and status, the key a repeat of the same draft finds it by, its money cap (Plan 01b), the tools it enables
+    and the profiles it was proved against (`_draft_profiles`)."""
 
     version: int
     parent: int | None
@@ -1037,6 +1038,7 @@ class VersionRecord:
     created_at: datetime
     auto_money_cap_cents: int = 0               # the most its auto money cards take or pay out per action
     enables: tuple[ToolPin, ...] = ()
+    profiles: tuple[tuple[str, str | None], ...] = ()
 
 
 @dataclass
@@ -1504,7 +1506,7 @@ class FakeKernelState:
         return PolicyVersion(desk_id=desk.desk_id, version=record.version, parent_version=record.parent,
                              cards=record.cards, cedar_sha256=sha256_hex(canonical(cards)),
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
-                             profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
+                             profiles_sha256=sha256_hex(canonical(list(record.profiles))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
                              auto_money_cap_cents=record.auto_money_cap_cents, status=record.status, proof=record.proof)
 
@@ -3140,6 +3142,14 @@ class FakeKernelState:
                 for tool, profile in sorted(desk.tools.items()) if (profile.status == "enabled" or tool in enabling)
                 and tool not in covered and not any(f"effect:{effect}" in covered for effect in profile.effects)]
 
+    @staticmethod
+    def _draft_profiles(desk: Desk, enables: tuple[ToolPin, ...] = ()) -> tuple[tuple[str, str | None], ...]:
+        """What a draft is proved against, as the kernel's `current_hashes` takes it: each tool enabled now with its
+        pin, plus the draft's enables at theirs, by tool. Confirming a draft whose tools no longer match is refused."""
+        pins = {tool: profile.definition_sha256 for tool, profile in desk.tools.items() if profile.status == "enabled"}
+        pins.update((pin.tool, pin.definition_sha256) for pin in enables)
+        return tuple(sorted(pins.items()))
+
     def policy_draft(self, request: Request, body: PolicyDraftRequest, *,
                      enables: tuple[ToolPin, ...] = ()) -> PolicyVersion:
         """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
@@ -3158,11 +3168,9 @@ class FakeKernelState:
                 or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
                 for card in body.cards):
             raise Refusal(422, "invalid")
-        enabling = {pin.tool for pin in enables}
-        enabled = tuple(sorted(tool for tool, profile in desk.tools.items()
-                               if profile.status == "enabled" or tool in enabling))
+        profiles = self._draft_profiles(desk, enables)
         key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
-               enabled, cap, tuple(sorted((pin.tool, pin.definition_sha256) for pin in enables)))
+               profiles, cap, tuple(sorted((pin.tool, pin.definition_sha256) for pin in enables)))
         record = next((record for record in desk.versions.values() if record.key == key), None)
         if record is not None and not (record.status == "rejected" and record.proof.timed_out):
             return self._policy_version(desk, record)
@@ -3171,7 +3179,8 @@ class FakeKernelState:
         if record is None:
             record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
                                    cards=[*body.cards, *self._default_cards(desk, body.cards, enables)], status=status,
-                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap, enables=enables)
+                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap, enables=enables,
+                                   profiles=profiles)
             desk.versions[record.version] = record
         else:
             record.status, record.proof = status, proof
@@ -3180,8 +3189,9 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
-        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`), so
-        its money cap becomes the Desk's; anything else is 409, ledgered as refused. An unknown version is 404."""
+        """Activate a proved draft whose parent is still the active version, and whose enables' pins and tools are
+        still those it was proved against, superseding it (ledgered `policy`), so its money cap becomes the Desk's;
+        anything else is 409, ledgered as refused. An unknown version is 404."""
         desk = self._owners_desk(request, body.desk_id)
         record = desk.versions.get(body.version)
         if record is None:
@@ -3193,6 +3203,9 @@ class FakeKernelState:
         if any(pin.tool not in desk.tools
                or pin.definition_sha256 != self._current_tool_pin(desk.tools[pin.tool]) for pin in record.enables):
             self.append(desk, "policy", {"version": record.version, "refused": "pin_changed"})
+            raise Refusal(409, "conflict")
+        if self._draft_profiles(desk, record.enables) != record.profiles:
+            self.append(desk, "policy", {"version": record.version, "refused": "hash_changed"})
             raise Refusal(409, "conflict")
         self._supersede_active(desk)
         for pin in record.enables:

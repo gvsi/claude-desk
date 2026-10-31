@@ -2807,6 +2807,36 @@ async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
         pins[0].tool: "disabled", pins[-1].tool: "needs_review"}
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_a_tool_review_draft_is_refused_once_the_desks_tools_change(kernel, ro_read):
+    # The draft was proved against the tools enabled then plus its own enables; turning another tool off before it is
+    # confirmed changes what it would enable, so the confirm is refused and nothing it enables is turned on.
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    (book,) = ro_read(ro_schema, copy.copy_id, "SELECT tool, definition_sha256 FROM {ro}.tools"
+                                               " WHERE desk_id = %s AND tool = 'native.book'", (created.desk_id,))
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False,
+        tools=[ToolPin(tool=book["tool"], definition_sha256=book["definition_sha256"])]))
+    assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+                                            " AND (source = 'mcp' OR tool = 'native.book')", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {
+        **{profile.tool: "needs_review" for profile in profiles}, "native.book": "disabled"}
+
+
 # The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------
 
 
