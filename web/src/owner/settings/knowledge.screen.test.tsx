@@ -96,6 +96,19 @@ function answered(item: KnowledgeItem, readers: string[]): KnowledgeItem {
 }
 
 describe('knowledge', () => {
+  it('knowledge_fresh_copy_lists_the_public_setup_items', async () => {
+    freezeClock();
+    const { screen } = await renderRoute(KNOWLEDGE, { seed: 'rivera' });
+    const list = main(screen).getByRole('list', { name: 'What I know now' });
+    await expect.element(list).toBeVisible();
+    // Oldest first: the kernel stores the website read, then the price list.
+    expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
+      'Your website, rivera-plumbing.example, read during setupAdded Oct 30Customers can see this',
+      'Price list, from your answers in setupAdded Oct 30Customers can see this',
+    ]);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('knowledge_note_titles_end_at_a_word_within_60_characters', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     const field = main(screen).getByRole('textbox', { name: 'A note' });
@@ -140,11 +153,11 @@ describe('knowledge', () => {
     // Once added, the field clears; pressing Add again asks for words without posting a duplicate.
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
     const list = main(screen).getByRole('list', { name: 'What I know now' });
-    await expect.poll(() => list.getByRole('listitem').elements().length).toBe(1);
+    await expect.poll(() => list.getByRole('listitem').elements().length).toBe(3);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.emptyNote);
     expect(posts()).toHaveLength(1);
-    expect(list.getByRole('listitem').elements()).toHaveLength(1);
+    expect(list.getByRole('listitem').elements()).toHaveLength(3);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Customers can see it: the same item posted again, public; the line no longer says only you can.
@@ -361,7 +374,7 @@ describe('knowledge', () => {
     expect(main(screen).getByText(KNOWLEDGE_COPY.keptPrivate, { exact: true }).query()).toBeNull();
     expect(reads()).toBe(3);
     // The list says so too: the late, cancelled read doesn't overwrite it.
-    const row = () => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').element().textContent;
+    const row = () => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').filter({ hasText: NOTE_TITLE }).element().textContent;
     await expect.poll(() => row()?.endsWith('Customers can see this')).toBe(true);
   });
 
@@ -420,6 +433,7 @@ describe('knowledge', () => {
 
   it('knowledge_lists_what_i_know', async () => {
     freezeClock();
+    mockStore.world.knowledge.clear();
     // What the Desk knows, oldest first: one customers can see, one the owner keeps private, and one
     // the kernel keeps to the owner, whose title and words the list withholds.
     know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Rivera Plumbing fixes leaks and drains around Oakland.' }, ['public'], 4);
@@ -456,7 +470,8 @@ describe('knowledge', () => {
   });
 
   it('knowledge_list_loads_fails_and_is_left_out_when_empty', async () => {
-    // Nothing known yet: no list at all, only the way to add something.
+    // A copy with its items removed: no list at all, only the way to add something.
+    mockStore.world.knowledge.clear();
     const empty = await renderRoute(KNOWLEDGE);
     await expect.element(main(empty.screen).getByRole('region', { name: 'Add something' })).toBeVisible();
     await expect.poll(() => mockStore.requests.filter((r) => r.key === 'knowledge').length).toBeGreaterThan(0);
@@ -487,6 +502,7 @@ describe('knowledge', () => {
 
   it('knowledge_matches_its_board', async () => {
     freezeClock();
+    mockStore.world.knowledge.clear();
     know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Leaks and drains.' }, ['public'], 4);
     know({ item_id: 'note-forced', source: 'setup', title: 'A gate code', text: 'A gate code.' }, ['owner'], 3, true);
     const screen = await addNote();

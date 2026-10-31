@@ -590,7 +590,7 @@ export function rulesView(desk: DeskRecord): RulesView {
 export function knowledgeList(world: MockWorld, deskId: string): KnowledgeListItem[] {
   return [...world.knowledge.values()]
     .filter((stored) => stored.deskId === deskId)
-    .sort((a, b) => a.createdAt - b.createdAt)
+    .sort((a, b) => a.createdAt - b.createdAt || a.item.item_id.localeCompare(b.item.item_id))
     .map(({ item, createdAt, forced }) => ({ ...item, title: forced ? null : item.title, text: forced ? null : item.text, created_at: isoTime(createdAt) }));
 }
 

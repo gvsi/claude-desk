@@ -1293,6 +1293,7 @@ describe('rules and tools', () => {
   });
 
   it('knowledge_answers_what_the_kernel_keeps', async () => {
+    mockStore.world.knowledge.clear();
     const note: KnowledgeItem = {
       item_id: 'note-0f2c',
       source: 'setup',
