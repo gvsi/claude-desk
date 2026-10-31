@@ -45,9 +45,15 @@ PROFILE = ToolProfile(
     input_schema=BookArgs.model_json_schema(), status="enabled")
 
 
-async def find_slot(ctx: KernelCtx, desk_id: str, slot_id: str) -> CalendarSlot | None:
-    return (await ctx.db.scalars(ctx.repo.scoped(select(CalendarSlot).where(
-        CalendarSlot.desk_id == desk_id, CalendarSlot.slot_id == slot_id)))).one_or_none()
+async def find_slot(ctx: KernelCtx, desk_id: str, slot_id: str, *, lock: bool = False) -> CalendarSlot | None:
+    """The Desk's slot by its ID; with `lock`, held `FOR SHARE` (the adapter's own row, `repo.py`
+    step 10), so the owner's calendar write, which takes the slots `FOR UPDATE`, can't drop or move
+    it until the booking commits."""
+    query = ctx.repo.scoped(select(CalendarSlot).where(
+        CalendarSlot.desk_id == desk_id, CalendarSlot.slot_id == slot_id))
+    if lock:
+        query = query.with_for_update(read=True)
+    return (await ctx.db.scalars(query)).one_or_none()
 
 
 async def commit_booking(ctx: KernelCtx, action: NormalizedAction, slot: CalendarSlot, *,
@@ -114,7 +120,7 @@ class BookAdapter:
         re-check, or that another booking took, fails it before anything is written."""
         ctx = xctx.ctx
         now = ctx.clock.now()
-        slot = await find_slot(ctx, action.desk_id, args.slot_id)
+        slot = await find_slot(ctx, action.desk_id, args.slot_id, lock=True)
         if slot is None or slot.starts_at != action.starts_at or slot.starts_at <= now:
             raise AdapterFailure("slot_changed")
         label = labels.new_fact_label(xctx.session_row)

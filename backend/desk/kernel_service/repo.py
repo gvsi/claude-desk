@@ -32,8 +32,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    or a Desk's deletion, voids theirs in one;
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
    `POST /knowledge` upserts;
-10. an adapter's own rows, which its hooks lock or write (a booking, a handoff; Plan 01c's
-    mandates), after whatever of steps 4 to 9 the same transaction takes;
+10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
+    books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
+    4 to 9 the same transaction takes;
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
     a handoff expires its own, an hours write rewrites the Desk's;
@@ -41,7 +42,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
     reads it `FOR SHARE`).
 
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
-any of these, and a write to the business its row after the Desk's. Closing a handoff does too: it
+any of these, and a write to the business its row after the Desk's. The calendar write then takes
+the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
+of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.

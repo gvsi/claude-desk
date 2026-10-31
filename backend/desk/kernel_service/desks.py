@@ -482,10 +482,13 @@ async def put_prices(ctx: KernelCtx, desk_row: Desk, body: DeskPricesRequest) ->
 async def put_calendar(ctx: KernelCtx, desk_row: Desk, body: DeskCalendarRequest) -> list[str]:
     """The Desk's calendar slots, replaced. A slot that is booked, or that a booking waiting to run
     names (an `allowed`, `held` or `approved` decision), stays as it is: dropping or moving it is
-    409 `conflict`."""
+    409 `conflict`. The slots are taken `FOR UPDATE` in ID order before that check (`repo.py` step
+    10, after the Desk row), and a booking's T2 takes its slot `FOR SHARE`, so a booking either
+    commits before the check sees it or waits for this write and finds its slot as the write left
+    it."""
     unique(slot.slot_id for slot in body.calendar_slots)
     rows = {row.slot_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(CalendarSlot).where(
-        CalendarSlot.desk_id == desk_row.desk_id)))}
+        CalendarSlot.desk_id == desk_row.desk_id).order_by(CalendarSlot.slot_id).with_for_update()))}
     wanted = {slot.slot_id: slot for slot in body.calendar_slots}
     for slot_id in await _spoken_for(ctx, desk_row.desk_id) & set(rows):
         slot = wanted.get(slot_id)

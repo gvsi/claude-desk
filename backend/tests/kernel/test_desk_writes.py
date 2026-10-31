@@ -9,6 +9,7 @@ sessions verified at the old one, and a deleted Desk's sessions close while its 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
 """
 
+import asyncio
 import json
 import re
 from datetime import time
@@ -20,7 +21,7 @@ from sqlalchemy import select
 
 from desk.contracts import (ApprovalResult, BusinessSeed, CalendarSlot, Claim, DemoInboxEntry, DeskSeed, HoursWindow,
                             NotificationDefaults, PriceItem, SeedDocument, SeedPerson, SessionCreated)
-from desk.db.models import (ActorSession, Business, Desk, Document, Execution, Fact, LedgerEntry, NotificationPref,
+from desk.db.models import (ActorSession, Booking, Business, Desk, Document, Execution, Fact, LedgerEntry, NotificationPref,
                              Person, PolicyVersion, Quote, Tool, VerificationChallenge)
 from desk.db.models import CalendarSlot as SlotRow
 from desk.db.models import Decision as DecisionRow
@@ -30,10 +31,11 @@ from desk.kernel_api import DeskCreated, DeskUpdated, DocumentCreated, PublicDes
 from desk.kernel_service import activation, adapters, auth, desks, verification
 from desk.presets import PRESETS
 
-from .helpers import active_version_number, rows_of
+from .helpers import active_version_number, connections_of, rows_of, until_waiting
 from .test_adapters import Rivera, book, rivera, visitor_of
 from .test_context import context_of, get_context, tools
 from .test_decide import PASS, Visitor, decided, open_visitor
+from .test_execute import post_execute
 from .test_verification import api_rows, check, code_in, entry_of, started
 
 LOPEZ_BUSINESS = BusinessSeed(name="Lopez Electric", owner_display_name="Ana Lopez", timezone="America/Chicago")
@@ -555,6 +557,43 @@ async def test_calendar_keeps_booked_and_pending_slots(app, client, reviewer):
     await answered(client, copy, held.decision_id, "deny_once")
     await updated(client, copy, "calendar", without("S-20261102-0800", "S-20261102-1000"))
     assert "S-20261102-1000" not in {slot.slot_id for slot in await rows_of(app, copy.copy_id, select(SlotRow))}
+
+
+async def test_a_booking_decided_during_a_calendar_write_waits_for_it_and_finds_its_slot_gone(app, client, reviewer,
+                                                                                               monkeypatch):
+    """The calendar write takes the Desk's slots before it checks which are spoken for, and a
+    booking's T2 takes its slot before it books it, so a booking decided after the write's check
+    waits for the write and finds its slot gone: no booking outlives its slot."""
+    copy, visitor = await visitor_of(app, client)
+    slot_id = "S-20261102-1400"
+    slots = [slot_body(slot) for slot in await rows_of(app, copy.copy_id, select(SlotRow).order_by(SlotRow.slot_id))]
+    checked, proceed = asyncio.Event(), asyncio.Event()
+    spoken_for = desks._spoken_for
+
+    async def paused(ctx, desk_id):
+        found = await spoken_for(ctx, desk_id)
+        checked.set()
+        await proceed.wait()
+        return found
+
+    monkeypatch.setattr(desks, "_spoken_for", paused)
+    replacing = asyncio.create_task(put_part(client, copy, "calendar", {
+        "calendar_slots": [slot for slot in slots if slot["slot_id"] != slot_id]}))
+    await asyncio.wait_for(checked.wait(), timeout=5)
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, slot_id)
+    assert allowed.state == "allowed"
+    with connections_of(app) as pids:
+        executing = asyncio.create_task(post_execute(client, visitor, allowed))
+        await until_waiting(app, executing, pids, "kernel.calendar_slots")
+    assert not executing.done()                          # the booking waits for the write's slots
+    proceed.set()
+    replaced = await asyncio.wait_for(replacing, timeout=5)
+    assert replaced.status_code == 200, replaced.text
+    booking = await asyncio.wait_for(executing, timeout=5)
+    assert (booking.status_code, booking.json()["state"]) == (200, "failed"), booking.text
+    assert await rows_of(app, copy.copy_id, select(Booking).where(Booking.slot_id == slot_id)) == []
+    assert slot_id not in {slot.slot_id for slot in await rows_of(app, copy.copy_id, select(SlotRow))}
 
 
 async def test_business_and_charter_validate(app, client):

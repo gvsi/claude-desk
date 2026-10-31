@@ -24,18 +24,18 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import Connection
 
 from desk.contracts import Decision, ExecResult, NormalizedAction
-from desk.db.models import DemoInboxEntry, PolicyVersion
+from desk.db.models import CalendarSlot, DemoInboxEntry, PolicyVersion
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import demo_inbox, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
-from .helpers import activate_cards, kernel_ctx, ledger_rows
-from .test_adapters import visitor_of
+from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
+from .test_adapters import book, visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
 from .test_compiler import card
-from .test_decide import decided, desk_with, open_visitor, owner_decide, set_mode
-from .test_desk_writes import updated
+from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode
+from .test_desk_writes import slot_body, updated
 from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
 from .test_lead_tools import callback, handoff_done
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
@@ -45,7 +45,7 @@ from .test_verification import check, code_in, entry_of, started
 # The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
 # for an adapter's own rows.
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
-              "payment_links", "document_links", "documents", "handoffs", "facts", "ledger_heads")
+              "payment_links", "document_links", "documents", "calendar_slots", "handoffs", "facts", "ledger_heads")
 _LOCKING = re.compile(
     r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
     r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
@@ -443,3 +443,26 @@ async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
     # the handoff (an adapter's own row), its fact, and the close, ledgered
     assert log.transactions == [["desks", "handoffs", "facts", "ledger_heads"]]
     assert all(in_lock_order(tables[1:]) for tables in log.transactions)
+
+
+async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
+    copy, visitor = await visitor_of(app, client)
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, "S-20261102-1400")
+    assert allowed.state == "allowed"
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2 takes the slot it books (an adapter's own row) after the session, decision and execution
+    t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
+    assert len(t2) == 1 and t2[0][:3] == ["sessions", "decisions", "executions"], log.transactions
+    assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
+
+
+async def test_a_calendar_write_runs_in_the_lock_order(app, client):
+    copy, _ = await visitor_of(app, client)
+    slots = [slot_body(slot) for slot in await rows_of(app, copy.copy_id, select(CalendarSlot)
+                                                       .order_by(CalendarSlot.slot_id))]
+    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
+        await updated(client, copy, "calendar", {"calendar_slots": slots[1:]})
+    # an owner's write to the Desk's data: the Desk row first, then the Desk's slots, then the entry
+    assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
