@@ -970,6 +970,7 @@ def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratc
         insert("inbox-after", "challenge-1")
         with pytest.raises(psycopg.errors.CheckViolation):
             insert("inbox-unnamed", None)
+        scratch.migrate(command.downgrade, INBOX_CHALLENGE_REVISION)   # the revisions after it go down first
         scratch.migrate(command.stamp, before)              # the revision runs again over what it added
         scratch.migrate(command.upgrade, INBOX_CHALLENGE_REVISION)
         assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'demo_inbox_challenge_id_check'"
