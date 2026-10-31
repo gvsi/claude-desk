@@ -8100,6 +8100,13 @@
             "type": "array",
             "title": "Charter"
           },
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Auto Money Cap Cents",
+            "default": 0
+          },
           "hours": {
             "items": {
               "$ref": "#/components/schemas/HoursWindow"
@@ -9973,6 +9980,11 @@
           "review_thresholds_version": {
             "type": "integer",
             "title": "Review Thresholds Version"
+          },
+          "auto_money_cap_cents": {
+            "type": "integer",
+            "title": "Auto Money Cap Cents",
+            "default": 0
           },
           "status": {
             "type": "string",
