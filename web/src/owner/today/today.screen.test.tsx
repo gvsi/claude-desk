@@ -92,6 +92,13 @@ async function heldItems(): Promise<NeedsYouItem[]> {
   return (answer.body as NeedsYouItem[]).filter((item) => item.decision != null);
 }
 
+/** Everything the mock's Needs you holds for the main Desk now. */
+async function needsYouRead(): Promise<NeedsYouItem[]> {
+  const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
+  return answer.body as NeedsYouItem[];
+}
+
 /** The seeded hold as the kernel has it now. */
 function seededHold(): Decision {
   const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === SEEDED_REASON);
@@ -1743,6 +1750,26 @@ describe('Today', () => {
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
     await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true }), { timeout: 2_000 }).toBeVisible();
     expect(wants.elements()).toHaveLength(1);
+  });
+
+  it('callback_without_a_kind_keeps_its_line', async () => {
+    // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
+    // says when Maria will call back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const withoutKind = (await needsYouRead()).map((item) => {
+      if (item.handoff == null) return item;
+      const handoff = { ...item.handoff };
+      delete handoff.kind;
+      return { ...item, handoff };
+    });
+    expect(withoutKind.filter((item) => item.handoff != null).map((item) => item.handoff && 'kind' in item.handoff)).toEqual([false]);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: withoutKind });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants.getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
   });
 
   it('allow_person_above_the_limit_says_so', async () => {
