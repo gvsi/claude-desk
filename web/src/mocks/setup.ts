@@ -80,6 +80,9 @@ interface Interview {
   state: SetupState;
   /** CPA descriptions use the consultant fixture; other descriptions keep the scripted run. */
   consultant: boolean;
+  cardsEnabled: boolean;
+  proposals: ProposalCard[];
+  moneyOptedIn: boolean;
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
@@ -94,8 +97,10 @@ interface Interview {
   draftVersion: number | null;
   /** The next answer turn runs long and commits only when a test lets it (`holdNextAnswer`). */
   holdNext: boolean;
+  holdDecision: boolean;
+  decisionDone: (() => void) | null;
   /** An answer turn still running: the API refuses another answer until it commits. */
-  running: { text: string } | null;
+  running: { text: string; ownerStored?: boolean } | null;
   /** Consent runs in the background when a test holds it; its result lands on a later GET. */
   holdConsent: boolean;
   consentResult: 'landed' | 'failed' | null;
@@ -117,6 +122,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 /** Cards are opt-in per response; filtering never removes the interview's stored proposals. */
 const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => ({
   ...interview.state,
+  pending_card: query?.get('cards') === '1' ? interview.state.pending_card ?? null : null,
   messages: interview.state.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
 });
 
@@ -306,6 +312,14 @@ export function capFromAnswer(text: string): number {
   if (!match?.[1]) return 0;
   const dollars = Number(match[1].replace(/,/g, ''));
   return Number.isSafeInteger(dollars) ? Math.min(dollars * 100, MONEY_CAP_MAX_CENTS) : 0;
+}
+
+/** Only an explicit owner amount on the isolated CPA money turn changes its cap. */
+function consultantCap(text: string): number {
+  const amount = /^(?:up to\s+)?\$?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/i.exec(text.trim());
+  if (!amount?.[1]) return 0;
+  const cents = Number(amount[1].replace(/,/g, '')) * 100 + Number((amount[2] ?? '').padEnd(2, '0'));
+  return Number.isSafeInteger(cents) && cents <= MONEY_CAP_MAX_CENTS ? cents : 0;
 }
 
 /**
@@ -515,33 +529,33 @@ function consultantProposals(): ProposalCard[] {
   const jobs: JobProposal[] = [
     {
       job: 'schedule', title: 'Book a free intro consult', autonomy: 'auto',
-      why: 'New clients can find a time without a string of emails.',
-      how: 'Offer a free intro consult in your available times and book the time the client chooses.',
-      can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro consult', minutes: 20 },
+      why: 'New clients pick a time for their free consult without emailing back and forth.',
+      how: 'The Desk offers open times, books the one the person picks and sends you the details.',
+      can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Intro consult', minutes: 20 },
     },
     {
-      job: 'intake', title: 'New client intake', autonomy: 'auto',
-      why: 'You have the basics before the first conversation.',
-      how: 'Ask about the return and any tax notices, then save the answers for your team.',
+      job: 'intake', title: 'Take new-client details', autonomy: 'auto',
+      why: 'You know who’s coming and what they need before the consult starts.',
+      how: 'Before it books, the Desk asks three questions and puts the answers on the booking.',
       can_do_today: true,
-      config: { block: 'intake', questions: ['Is this a personal or business return?', 'Which tax years do you need help with?', 'Have you heard from the IRS or the state?'] },
+      config: { block: 'intake', questions: ['Is this for you, your business, or both?', 'Which tax years or months need work?', 'Do you use bookkeeping software today?'] },
     },
     {
-      job: 'payment', title: 'Collect a retainer', autonomy: 'ask',
-      why: 'Clients can pay the agreed retainer without waiting for an email.',
-      how: 'Send a payment link for the engagement retainer under the money rules you approve.',
+      job: 'payment', title: 'Take a retainer for new work', autonomy: 'ask',
+      why: 'Once you’ve priced the work, the client can pay the retainer right away, so it starts sooner.',
+      how: 'The Desk sends the client a payment link for the retainer you set.',
       can_do_today: true, config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: null },
     },
     {
-      job: 'status', title: "Where's my return?", autonomy: 'ask',
-      why: 'Clients know how to ask for an update.',
-      how: 'Take the client’s details and question so a person on your team can reply. Live return status is coming later.',
+      job: 'status', title: 'Answer “Where’s my return?”', autonomy: 'ask',
+      why: 'Clients ask where their return stands, most of all in March and April.',
+      how: 'For now the Desk takes the client’s name and question, and you reply.',
       can_do_today: false, config: null,
     },
   ];
   const connectors: ConnectorProposal[] = [
-    { app: 'google_calendar', label: 'Google Calendar', why: 'Keep consult times in the calendar your team uses.', connectable: false },
-    { app: 'stripe', label: 'Stripe', why: 'Collect retainers through payment links under your rules.', connectable: true },
+    { app: 'stripe', label: 'Stripe', why: 'Clients pay the retainer by card, and the money goes to your Stripe account.', connectable: true },
+    { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: false },
   ];
   const fields = [
     ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
@@ -550,57 +564,73 @@ function consultantProposals(): ProposalCard[] {
   return fields.map((proposal) => ({ ...proposal, proposal_id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, state: 'proposed' }));
 }
 
+/** Signed board words, shared by all fixture paths. */
+export const CPA_COPY = {
+  opening: [
+    'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping for individuals and small businesses in San Jose. New clients start with a free 20-minute consult, and you price each engagement after it.',
+    'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now. We’ll take them one at a time, and you can change anything later.',
+  ],
+  first: 'First, who do you work with most? I’ll lead with that when people ask what you do.',
+  clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
+  consult: 'Got it. Want me to book free 20-minute intro consults? People pick an open time, and you get the details.',
+  intake: 'Done: the Desk books intro consults on its own. Next, should it ask new clients three questions before their consult, so you know what they need?',
+  retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
+  stripe: 'Good. Stripe can take those retainers by card. Connect it?',
+  optIn: 'Got it. One thing about money: with no amount set, I ask you before every payment. If you’d like, you can set an amount I take on my own, now or later in Rules.',
+  optChoices: ['Ask me before every payment', 'Set an amount now'],
+  money: "What's the most I should take or pay out without asking you?",
+  moneyChoices: ['Always ask me first', 'Up to $100', 'Up to $250', 'Up to $500'],
+  documents: "Can I send customers their own documents, like invoices, once they've confirmed who they are?",
+  documentChoices: ['Always ask me first', 'Send documents to verified customers', 'Never send documents'],
+  quoteChoices: ['Always ask me first', 'Up to $250', 'Up to $500', 'Up to $1,000'],
+  discountChoices: ['No discounts without asking me', 'Up to 5%', 'Up to 10%'],
+  rest: 'Here’s the rest, as I’d set it up.',
+  closing: [
+    'That’s everything I need, Linda. Here’s how your Desk will work.',
+    'It books free 20-minute intro consults and asks new clients three questions first. Once you’ve priced the work, it sends the retainer link, and it asks you before every payment. Questions about where a return stands come to you for now, and Google Calendar can join once it’s in this demo.',
+    'A few conversations it’s ready for:',
+    'Someone asks if you can do their 2025 return and their LLC’s books. The Desk explains the free consult, asks its three questions and books a time.',
+    'A client you’ve priced asks how to pay. The Desk asks you first, then sends them the retainer link.',
+    'Someone asks where their return is. The Desk takes their name and question and tells them you’ll reply.',
+    'Next, check the tools these jobs use.',
+  ],
+} as const;
+const choicesOf = (words: readonly string[]): Choice[] => words.map((text) => ({ text, recommended: false }));
+
 function openConsultant(interview: Interview): void {
-  say(interview, 'claude', `${interview.business} handles tax returns and bookkeeping for individuals and small businesses. Clients most often reach out to get started, arrange a consult, or ask where their return stands. Here are the jobs I suggest for your Desk.`);
-  for (const card of consultantProposals()) interview.state.messages.push({ role: 'claude', text: '', choices: [], card });
+  for (const text of CPA_COPY.opening) say(interview, 'claude', text);
   interview.state.question = 'what_you_do';
-  say(interview, 'claude', 'Which clients should I help get started first?', [
-    { text: 'Individuals and small businesses', recommended: true },
-    { text: 'Individuals only', recommended: false },
-    { text: 'Small businesses only', recommended: false },
-  ]);
+  say(interview, 'claude', CPA_COPY.first, choicesOf(CPA_COPY.clients));
 }
 
-/** Contact comes before hours; quote/discount topics are skipped and a money maximum is optional. */
-const CONSULTANT_TOPICS: readonly QuestionKey[] = ['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments'];
-
-/** Only an exact offered answer grants automatic booking; other text asks the owner. */
-const CONSULTANT_BOOKING_CHOICES: ReadonlyMap<string, 'auto' | 'ask'> = new Map([
-  ['Weekdays during office hours', 'auto'],
-  ['Ask us to confirm each time', 'ask'],
-]);
-
-/** Document permission is separate from payments, which continue to ask the owner. */
-const CONSULTANT_DOCUMENT_CHOICES: ReadonlyMap<string, 'auto' | 'ask'> = new Map([
-  ['Always ask me first', 'ask'],
-  ['Send verified clients their own documents; ask before payments', 'auto'],
-]);
-
-/** Code-owned limit wording; exact choice words are pending Giovanni's sign-off. */
-const CONSULTANT_LIMITS = {
-  documents_and_payments: {
-    text: "Can I send customers their own documents, like invoices, once they've confirmed who they are? And up to what amount can I send a payment link without asking you?",
-    choices: [...CONSULTANT_DOCUMENT_CHOICES.keys()],
-  },
-} as const;
-
-function askConsultant(interview: Interview, question: QuestionKey): void {
-  interview.state.question = question;
-  if (question === 'documents_and_payments') {
-    const limit = CONSULTANT_LIMITS[question];
-    say(interview, 'claude', limit.text, limit.choices.map((text) => ({ text, recommended: false })));
-  } else if (question === 'contact_and_after_hours') {
-    say(interview, 'claude', 'When clients write after hours, how should I handle their questions?', [
-      { text: 'Take their details for the next business day', recommended: true },
-      { text: 'Ask them to contact us during office hours', recommended: false },
-    ]);
-  } else if (question === 'hours_and_area') {
-    say(interview, 'claude', 'When should I offer intro consults for your San Jose clients?',
-      [...CONSULTANT_BOOKING_CHOICES.keys()].map((text, index) => ({ text, recommended: index === 0 })));
+/** One proposal per turn; an older client is never left waiting on a hidden card. */
+function nextConsultant(interview: Interview): void {
+  const shown = new Set(interview.state.messages.flatMap(({ card }) => card ? [card.proposal_id] : []));
+  const next = interview.cardsEnabled ? interview.proposals.find((card) => !shown.has(card.proposal_id)) : undefined;
+  interview.state.pending_card = next?.proposal_id ?? null;
+  if (next) {
+    interview.state.question = null;
+    const job = next.job;
+    const intro = job?.job === 'schedule' ? CPA_COPY.consult
+      : job?.job === 'intake' && interview.proposals[0]?.job?.autonomy === 'auto' && interview.proposals[0]?.state === 'accepted' ? CPA_COPY.intake
+      : job?.job === 'payment' ? CPA_COPY.retainer
+      : next.connector?.app === 'stripe' ? CPA_COPY.stripe
+      : job?.how ?? next.connector!.why;
+    say(interview, 'claude', intro);
+    interview.state.messages.push({ role: 'claude', text: '', choices: [], card: next });
+  } else {
+    interview.state.question = 'money_limit';
+    say(interview, 'claude', CPA_COPY.optIn, choicesOf(CPA_COPY.optChoices));
   }
 }
 
 function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
+  if (interview.consultant) {
+    const shown = new Set(interview.state.messages.flatMap(({ card }) => card ? [card.proposal_id] : []));
+    for (const card of interview.proposals) if (!shown.has(card.proposal_id)) {
+      interview.state.messages.push({ role: 'claude', text: '', choices: [], card });
+    }
+  }
   // Optional money maximums stay uncovered until finishing; an unanswered maximum always asks.
   if (!interview.covered.has('money_limit')) interview.capCents = 0;
   for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
@@ -609,8 +639,22 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     card.state = card.job?.config?.block === 'purpose_payment' && card.job.config.amount_cents === null ? 'declined' : 'accepted';
   }
   interview.state.question = null;
+  interview.state.pending_card = null;
   if (interview.consultant) {
-    say(interview, 'claude', 'Your plan: help clients arrange an intro consult, gather new client intake, and handle retainer requests under the rules you approve. Return-status questions take their details for your team to reply. For example: “I need help with a business return” starts intake; “Can we talk about my taxes?” starts a consult request; “Where is my return?” leaves a question for your team.');
+    const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
+    const has = (kind: JobProposal['job']) => jobs.some(({ job }) => job === kind);
+    const standard = ['schedule', 'intake', 'payment', 'status'].every((kind) => has(kind as JobProposal['job']))
+      && jobs.filter(({ job }) => job === 'schedule' || job === 'intake').every(({ autonomy }) => autonomy === 'auto')
+      && jobs.find(({ job }) => job === 'payment')?.autonomy === 'ask' && interview.capCents === 0;
+    const closing = standard ? CPA_COPY.closing : [
+      CPA_COPY.closing[0],
+      ...jobs.map(({ title, how }) => `${title}: ${how}`),
+      ...(has('schedule') && has('intake') ? [CPA_COPY.closing[2], CPA_COPY.closing[3]] : []),
+      ...(has('payment') ? [CPA_COPY.closing[4]] : []),
+      ...(has('status') ? [CPA_COPY.closing[5]] : []),
+      CPA_COPY.closing[6],
+    ];
+    say(interview, 'claude', closing.join('\n\n'));
   } else if (suggestions) {
     say(interview, 'claude', `Your plan for ${interview.business}: answer from what you have shared and take customer details. Any limit you have not answered asks you first. For example: “Can you help with this?” leaves a request; “When can we talk?” asks for a time.`);
   }
@@ -649,14 +693,40 @@ export function holdNextConsent(world: MockWorld, interviewId: string): (outcome
   };
 }
 
+/** For tests: a pending decision returns 202 and completes when released. */
+export function holdNextDecision(world: MockWorld, interviewId: string): () => void {
+  const interview = interviewsOf(world).get(interviewId);
+  if (!interview) throw new Error(`no setup interview ${interviewId}`);
+  interview.holdDecision = true;
+  return () => {
+    if (!interview.decisionDone) throw new Error('no decision is running');
+    interview.decisionDone();
+    interview.decisionDone = null;
+    interview.state.busy = false;
+  };
+}
+
 /**
  * An answer turn, committed: the owner's words, then Claude's follow-up on the same question when
  * the answer leaves it open, else the next question (or the end of the questions). Only the money
  * limit's own answer sets the limit.
  */
-function applyAnswer(world: MockWorld, interview: Interview, text: string): void {
+function applyAnswer(world: MockWorld, interview: Interview, text: string, ownerStored = false): void {
   const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
-  say(interview, 'owner', text.trim());
+  if (!ownerStored) say(interview, 'owner', text.trim());
+  if (interview.state.pending_card) {
+    const card = interview.proposals.find((card) => card.proposal_id === interview.state.pending_card)!;
+    const payment = card.job?.config?.block === 'purpose_payment' ? card.job.config : null;
+    // A bare owner-entered amount prices this job only; it never answers the money-limit turn.
+    if (payment && /^\$?\d[\d,]*(?:\.\d{1,2})?$/.test(text.trim())) {
+      const cents = consultantCap(text);
+      if (cents > 0 || /^(?:\$)?0(?:\.0{1,2})?$/.test(text.trim())) payment.amount_cents = cents;
+    }
+    const unpriced = payment?.amount_cents === null;
+    card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(text.trim()) ? 'declined' : 'accepted';
+    nextConsultant(interview);
+    return;
+  }
   if (FOLLOW_UP_TRIGGER.test(text)) {
     say(interview, 'claude', FOLLOW_UP);
     return;
@@ -666,13 +736,22 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string): void
     interview.covered.add(question);
     interview.answers[question] = text.trim();
   }
-  if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);
+  if (interview.state.question === 'money_limit') interview.capCents = interview.consultant ? consultantCap(text) : capFromAnswer(text);
   if (interview.consultant) {
-    interview.covered.add('quote_limit');
-    interview.covered.add('discounts');
-    const next = CONSULTANT_TOPICS.find((topic) => !interview.covered.has(topic));
-    if (next) askConsultant(interview, next);
-    else finishQuestions(world, interview);
+    if (question === 'what_you_do') nextConsultant(interview);
+    else if (question === 'money_limit' && !interview.moneyOptedIn && text.trim() === CPA_COPY.optChoices[1]) {
+      interview.moneyOptedIn = true;
+      interview.capCents = 0;
+      interview.covered.delete('money_limit');
+      delete interview.answers.money_limit;
+      say(interview, 'claude', CPA_COPY.money, choicesOf(CPA_COPY.moneyChoices));
+    } else {
+      if (!interview.moneyOptedIn) {
+        interview.capCents = 0;
+        delete interview.answers.money_limit;
+      }
+      finishQuestions(world, interview);
+    }
     return;
   }
   const next = SETUP_QUESTIONS[at + 1];
@@ -696,7 +775,8 @@ export function holdNextAnswer(world: MockWorld, interviewId: string): () => voi
     const turn = interview.running;
     if (turn === null) throw new Error('no answer turn is running');
     interview.running = null;
-    applyAnswer(world, interview, turn.text);
+    applyAnswer(world, interview, turn.text, turn.ownerStored);
+    interview.state.busy = false;
   };
 }
 
@@ -728,8 +808,8 @@ function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDr
     if (!interview.consultant && !interview.usedSuggestions) return rule;
     // An unanswered or skipped limit never inherits the scripted run's automatic permission.
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
-    if (rule.applies_to === 'native.release_document' && (CONSULTANT_DOCUMENT_CHOICES.get(interview.answers.documents_and_payments ?? '') ?? 'ask') === 'ask') return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
-    if (rule.applies_to === 'native.book' && (CONSULTANT_BOOKING_CHOICES.get(interview.answers.hours_and_area ?? '') ?? 'ask') === 'ask') return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
+    if (rule.applies_to === 'native.release_document' && interview.answers.documents_and_payments !== CPA_COPY.documentChoices[1]) return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
+    if (rule.applies_to === 'native.book' && !interview.proposals.some(({ state, job }) => state === 'accepted' && job?.job === 'schedule' && job.autonomy === 'auto')) return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
     if (rule.applies_to === 'effect:pay_out' && interview.answers.money_limit === undefined) return { ...rule, mode: 'ask', reason: 'Refunds ask you first.' };
     return rule;
   });
@@ -779,6 +859,9 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
   const interview: Interview = {
     consultant: /\b(?:CPA|accountants?|tax returns?)\b/i.test(text),
+    cardsEnabled: false,
+    proposals: consultantProposals(),
+    moneyOptedIn: false,
     covered: new Set(),
     answers: {},
     usedSuggestions: false,
@@ -788,6 +871,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
       slug: desk.summary.slug,
       step: 'questions',
       consent: null,
+      pending_card: null,
       busy: false,
       question: null,
       messages: [
@@ -806,6 +890,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     capCents: 0,
     draftVersion: null,
     holdNext: false,
+    holdDecision: false,
+    decisionDone: null,
     running: null,
     holdConsent: false,
     consentResult: null,
@@ -914,6 +1000,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview } = found;
     if (interview.state.busy) return { status: 202, body: stateOf(interview, req.query) };
     if (interview.state.consent != null) return CONFLICT;
+    interview.cardsEnabled = req.query?.get('cards') === '1';
     interview.state.consent = allow;
     say(interview, 'owner', allow ? 'Yes, use it' : "No, I'll type it");
     if (interview.holdConsent) {
@@ -929,19 +1016,27 @@ export const SETUP_ROUTES: ServedRoutes = {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
     const body = isRecord(req.body) ? req.body : {};
-    const { text, question } = body;
+    const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
-    if (typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question)) return INVALID;
+    const cardAnswer = question === null && typeof card === 'string' && card !== '';
+    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question))) return INVALID;
     const { interview } = found;
     const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
-    if (interview.state.step !== 'questions' || at === -1 || question !== interview.state.question) return CONFLICT;
+    if (interview.state.step !== 'questions' || interview.state.busy) return CONFLICT;
+    if (cardAnswer ? card !== interview.state.pending_card : at === -1 || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
     if (interview.holdNext) {
       // A turn that runs long: it commits later, when the test lets it.
       interview.holdNext = false;
       interview.running = { text };
+      if (interview.consultant) {
+        say(interview, 'owner', text.trim());
+        interview.running.ownerStored = true;
+        interview.state.busy = true;
+        return { status: 202, body: stateOf(interview, req.query) };
+      }
       return ok(stateOf(interview, req.query));
     }
     applyAnswer(sv.world, interview, text);
@@ -959,7 +1054,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview } = found;
     const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
     if (!proposal) return NOT_FOUND;
-    if (interview.state.step !== 'questions' || interview.running !== null) return CONFLICT;
+    if (interview.state.step !== 'questions' || interview.state.busy || interview.running !== null) return CONFLICT;
     const body = isRecord(req.body) ? req.body : {};
     if (req.malformed || typeof body.accept !== 'boolean') return INVALID;
     if (Object.keys(body).some((key) => !['accept', 'title', 'amount_cents', 'autonomy'].includes(key))) return INVALID;
@@ -979,19 +1074,31 @@ export const SETUP_ROUTES: ServedRoutes = {
     )) return INVALID;
     if (body.accept && proposal.job?.config?.block === 'purpose_payment'
       && proposal.job.config.amount_cents === null && !hasAmount) return fail(422, 'amount_required');
-    proposal.state = body.accept ? 'accepted' : 'declined';
-    if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
-    if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
-    if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
+    const apply = () => {
+      proposal.state = body.accept ? 'accepted' : 'declined';
+      if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
+      if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
+      if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
+      if (interview.state.pending_card === proposal.proposal_id) nextConsultant(interview);
+    };
+    if (interview.holdDecision) {
+      interview.holdDecision = false;
+      interview.decisionDone = apply;
+      interview.state.busy = true;
+      return { status: 202, body: stateOf(interview, req.query) };
+    }
+    apply();
     return ok(stateOf(interview, req.query));
   },
   setupSuggestions(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
     const { interview } = found;
-    if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
+    if (interview.state.step !== 'questions' || interview.state.consent === null || interview.state.busy || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
     interview.usedSuggestions = true;
+    say(interview, 'owner', 'Use your suggestions');
+    say(interview, 'claude', CPA_COPY.rest);
     finishQuestions(sv.world, interview, true);
     return ok(stateOf(interview, req.query));
   },

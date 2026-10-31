@@ -9,7 +9,7 @@ import type { PublicDesk } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { BusinessOut, CopyOut, RulesDraft, SetupState, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
-import { holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
+import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -89,377 +89,220 @@ async function setupState(key: RouteKey, id: string, body?: unknown, proposal_id
   return answer.body as SetupState;
 }
 
+/** Advance through the real fixture to a pending job/app or the optional money turn. */
+async function cpaAt(kind: string): Promise<SetupState> {
+  let state = await startState();
+  state = await setupState('setupConsent', state.interview_id, { allow: true });
+  state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Both, about evenly' });
+  while (state.pending_card) {
+    const card = state.messages.at(-1)!.card!;
+    if ((card.job?.job ?? card.connector?.app) === kind) return state;
+    state = await setupState('setupProposal', state.interview_id, { accept: card.job?.job !== 'payment' }, card.proposal_id);
+  }
+  return state;
+}
+
 describe('setup consultant run and decisions', () => {
-  it('maps_each_document_choice_to_rules_and_asks_for_unrecognised_answers', async () => {
-    for (const [text, mode] of [
-      ['Always ask me first', 'ask'],
-      ['Send verified clients their own documents; ask before payments', 'auto'],
-      ['We will decide later', 'ask'],
-    ] as const) {
-      let state = await startState();
-      state = await setupState('setupConsent', state.interview_id, { allow: false });
-      while (state.question !== 'documents_and_payments') state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: state.messages.at(-1)!.choices[0]!.text });
-      expect(state.messages.at(-1)!.choices.map((choice) => choice.text)).toEqual(['Always ask me first', 'Send verified clients their own documents; ask before payments']);
-      state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
-      if (state.step === 'questions') await setupState('setupSuggestions', state.interview_id, {});
-      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
-      const draft = result.body as RulesDraft;
-      expect(draft.cards.filter((card) => card.applies_to === 'native.release_document').map((card) => card.mode), text).toEqual([mode]);
-      const money = draft.cards.filter((card) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(card.applies_to));
-      expect(money.length).toBeGreaterThan(0);
-      expect(money.every((card) => card.mode === 'ask')).toBe(true);
-      expect(draft.auto_money_cap_cents).toBe(0);
-    }
+  it('a_read_without_cards_never_names_a_hidden_pending_card', async () => {
+    const state = await cpaAt('schedule');
+    const response = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
+    expect(response).toMatchObject({ status: 200, body: { pending_card: null } });
+    if ('network' in response) throw new Error('read failed');
+    expect((response.body as SetupState).messages.some(({ card }) => card)).toBe(false);
   });
 
-  it('maps_each_booking_choice_to_rules_and_asks_for_unrecognised_answers', async () => {
-    for (const [text, modes] of [
-      ['Weekdays during office hours', ['auto', 'ask']],
-      ['Ask us to confirm each time', ['ask', 'ask']],
-      ['We will decide later', ['ask', 'ask']],
-    ] as const) {
-      let state = await startState();
-      state = await setupState('setupConsent', state.interview_id, { allow: false });
-      while (state.question !== 'hours_and_area') state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: state.messages.at(-1)!.choices[0]!.text });
-      expect(state.messages.at(-1)!.choices.map((choice) => choice.text)).toEqual(['Weekdays during office hours', 'Ask us to confirm each time']);
-      state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
-      await setupState('setupSuggestions', state.interview_id, {});
-      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
-      expect((result.body as RulesDraft).cards.filter((card) => card.applies_to === 'native.book').map((card) => card.mode), text).toEqual(modes);
-    }
-  });
-
-  it('starts_payment_amounts_null_and_requires_an_owner_amount_to_accept_them', async () => {
-    const start = await startState();
-    let state = await setupState('setupConsent', start.interview_id, { allow: true });
-    const payment = state.messages.find(({ card }) => card?.job?.job === 'payment')!.card!;
-    expect(payment.job?.config).toMatchObject({ block: 'purpose_payment', amount_cents: null });
-    const params = { id: state.interview_id, proposal_id: payment.proposal_id };
-    for (const body of [{ accept: true }, { accept: true, title: 'Retainer' }, { accept: true, autonomy: 'ask' }]) {
-      expect(await mockStore.dispatch('setupProposal', { params, body })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
-      expect(await setupState('setup', state.interview_id)).toEqual(state);
-    }
-    state = await setupState('setupProposal', state.interview_id, { accept: false }, payment.proposal_id);
-    expect(state.messages.find(({ card }) => card?.proposal_id === payment.proposal_id)?.card?.state).toBe('declined');
-    expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
-    for (const amount_cents of [0, 50_000]) {
-      state = await setupState('setupProposal', state.interview_id, { accept: true, amount_cents, autonomy: 'ask' }, payment.proposal_id);
-      expect(state.messages.find(({ card }) => card?.proposal_id === payment.proposal_id)?.card).toMatchObject({ state: 'accepted', job: { autonomy: 'ask', config: { amount_cents } } });
-      expect(await setupState('setupProposal', state.interview_id, { accept: true }, payment.proposal_id)).toEqual(state);
-    }
-  });
-
-  it('declines_unpriced_payments_at_both_endings_and_preserves_prior_decisions', async () => {
-    for (const ending of ['answer', 'suggestions'] as const) {
-      for (const amount_cents of [null, 0, 50_000]) {
-        let state = await startState();
-        state = await setupState('setupConsent', state.interview_id, { allow: false });
-        const cards = state.messages.flatMap(({ card }) => card ? [card] : []);
-        const schedule = cards.find((card) => card.job?.job === 'schedule')!;
-        const status = cards.find((card) => card.job?.job === 'status')!;
-        const payment = cards.find((card) => card.job?.job === 'payment')!;
-        await setupState('setupProposal', state.interview_id, { accept: false }, status.proposal_id);
-        if (amount_cents !== null) await setupState('setupProposal', state.interview_id, { accept: true, amount_cents }, payment.proposal_id);
-        state = await setupState('setupProposal', state.interview_id, { accept: true, title: 'Intro call', autonomy: 'ask' }, schedule.proposal_id);
-        const before = state.messages.flatMap(({ card }) => card ? [card] : []);
-        if (ending === 'suggestions') state = await setupState('setupSuggestions', state.interview_id, {});
-        else while (state.question !== null) state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Yes' });
-        expect(state.step).toBe('tools');
-        const after = state.messages.flatMap(({ card }) => card ? [card] : []);
-        expect(after.map((card) => card.state)).toEqual(['accepted', 'accepted', amount_cents === null ? 'declined' : 'accepted', 'declined', 'accepted', 'accepted']);
-        expect(after.map(({ state: _state, ...card }) => card)).toEqual(before.map(({ state: _state, ...card }) => card));
-        expect((await setupState('setup', state.interview_id)).messages).toEqual(state.messages);
-      }
-    }
-  });
-
-  it('proposes_job_autonomy_and_applies_only_valid_accepted_autonomy_changes', async () => {
-    const start = await startState();
-    const state = await setupState('setupConsent', start.interview_id, { allow: true });
-    const cards = state.messages.flatMap(({ card }) => card ? [card] : []);
-    const jobs = cards.flatMap(({ job }) => job ? [job] : []);
-    expect(jobs.map((job) => job.autonomy)).toEqual(['auto', 'auto', 'ask', 'ask']);
-    for (const { config } of jobs) if (config?.block === 'typed_booking') {
-      expect(config.minutes).toBeGreaterThanOrEqual(15);
-      expect(config.minutes).toBeLessThanOrEqual(60);
-    }
-    const schedule = cards.find((card) => card.job?.job === 'schedule')!;
-    const changed = await setupState('setupProposal', state.interview_id, { accept: true, autonomy: 'ask' }, schedule.proposal_id);
-    expect(changed.messages.find(({ card }) => card?.proposal_id === schedule.proposal_id)?.card).toMatchObject({ state: 'accepted', job: { autonomy: 'ask' } });
-    for (const body of [{ accept: false, autonomy: 'auto' }, { accept: true, autonomy: 'sometimes' }, { accept: true, autonomy: null }]) {
-      expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: schedule.proposal_id }, body })).toMatchObject({ status: 422 });
-      expect(await setupState('setup', state.interview_id)).toEqual(changed);
-    }
-    const connector = cards.find((card) => card.connector)!;
-    expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: connector.proposal_id }, body: { accept: true, autonomy: 'auto' } })).toMatchObject({ status: 422 });
-  });
-
-  it('serves_cards_only_with_exact_opt_in_on_all_five_setup_state_routes', async () => {
-    for (const key of ['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'] as const) {
-      for (const cards of [undefined, '0', 'true', '1']) {
-        let state = await startState();
-        const id = state.interview_id;
-        if (key !== 'setupConsent') state = await setupState('setupConsent', id, { allow: true });
-        const proposal_id = state.messages.find((message) => message.card?.job?.job === 'schedule')?.card?.proposal_id ?? '';
-        const body = key === 'setupConsent' ? { allow: true }
-          : key === 'setupAnswer' ? { question: state.question, text: 'Individuals only' }
-          : key === 'setupProposal' ? { accept: true } : key === 'setupSuggestions' ? {} : undefined;
-        const answer = await mockStore.dispatch(key, { params: { id, proposal_id }, query: cards === undefined ? {} : { cards }, body });
-        expect(answer).toMatchObject({ status: 200 });
-        if ('network' in answer || answer.status !== 200) throw new Error('setup must answer');
-        const full = await setupState('setup', id);
-        expect(full.messages.filter((message) => message.card)).toHaveLength(6);
-        expect(answer.body).toEqual({ ...full, messages: full.messages.filter((message) => cards === '1' || message.card === null) });
-      }
-    }
-  });
-
-  it('leaves_optional_money_maximums_unasked_and_finishes_at_ask_first', async () => {
-    for (const ending of ['answer', 'suggestions'] as const) {
-      let state = await startState();
-      state = await setupState('setupConsent', state.interview_id, { allow: false });
-      const topics = [];
-      while (state.question !== null) {
-        topics.push(state.question);
-        expect(state.question).not.toBe('money_limit');
-        expect(topics.length).toBeLessThanOrEqual(4);
-        expect(await mockStore.dispatch('setupAnswer', { params: { id: state.interview_id }, body: { question: 'money_limit', text: 'Up to $500' } })).toMatchObject({ status: 409 });
-        state = ending === 'suggestions' ? await setupState('setupSuggestions', state.interview_id, {})
-          : await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Up to $500' });
-      }
-      expect(state.step).toBe('tools');
-      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
-      const draft = result.body as RulesDraft;
-      expect(draft.auto_money_cap_cents).toBe(0);
-      const money = draft.cards.filter((card) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(card.applies_to));
-      expect(money.length).toBeGreaterThan(0);
-      expect(money.every((card) => card.mode === 'ask')).toBe(true);
-      expect(state.messages.some((message) => message.text.includes("What's the most I should take or pay out"))).toBe(false);
-    }
-  });
-
-  it('suggestions_also_close_a_scripted_run_and_preserve_an_answered_money_limit', async () => {
+  it('suggestions_preserve_a_scripted_runs_answered_money_limit', async () => {
     let state = await startState('Rivera Plumbing. We fix leaks.');
     state = await setupState('setupConsent', state.interview_id, { allow: false });
     for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', state.interview_id, { question, text: question === 'money_limit' ? 'Up to $500' : 'Yes' });
     state = await setupState('setupSuggestions', state.interview_id, {});
     expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
-    expect(state.messages.at(-2)).toMatchObject({ role: 'claude' });
-    expect(state.messages.at(-2)?.text).toMatch(/plan/i);
-    expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 50_000 } });
+    expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 50000 } });
   });
 
-  it('refuses_new_actions_before_consent_during_a_turn_and_after_questions', async () => {
-    let state = await startState();
-    const id = state.interview_id;
-    expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} })).toMatchObject({ status: 409 });
-    state = await setupState('setupConsent', id, { allow: true });
-    const proposal_id = state.messages.find((message) => message.card)!.card!.proposal_id;
-    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id: 'p-ffffffffffff' }, body: { accept: true } })).toMatchObject({ status: 404 });
-    for (const body of [null, [], { text: 'yes' }]) expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body })).toMatchObject({ status: 422 });
-    for (const key of ['setupProposal', 'setupSuggestions'] as const) {
-      expect(await mockStore.dispatch(key, { params: { id, proposal_id }, body: key === 'setupProposal' ? { accept: true } : {}, malformed: true })).toMatchObject({ status: 422 });
-      expect(await mockStore.dispatch(key, { params: { id: 'missing', proposal_id }, body: {} })).toMatchObject({ status: 404 });
+  it('both_finish_paths_connect_only_accepted_stripe_and_leave_its_tools_needing_review', async () => {
+    for (const ending of ['answer', 'suggestions']) for (const accept of [true, false]) {
+      let state = await cpaAt('stripe');
+      const id = state.interview_id;
+      state = await setupState('setupProposal', id, { accept }, state.pending_card!);
+      const tools = () => mockStore.world.desk(state.desk_id)!.tools.filter(({ tool }) => tool.startsWith('payments.'));
+      expect(tools()).toHaveLength(0);
+      if (ending === 'suggestions') state = await setupState('setupSuggestions', id, {});
+      else {
+        state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
+        state = await setupState('setupAnswer', id, { question: state.question, text: 'Ask me before every payment' });
+      }
+      expect(state.step).toBe('tools');
+      expect(tools().map(({ tool, status, review_reason }) => [tool, status, review_reason])).toEqual(accept ? [['payments.list_charges', 'needs_review', 'new'], ['payments.create_refund', 'needs_review', 'new']] : []);
+      if (accept) { await mockStore.dispatch('setupConnect', { params: { id }, body: { server: 'mock_payments' } }); expect(tools()).toHaveLength(2); }
     }
-    const release = holdNextAnswer(mockStore.world, id);
-    await setupState('setupAnswer', id, { question: state.question, text: 'Individuals only' });
-    expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} })).toMatchObject({ status: 409 });
-    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, body: { accept: true } })).toMatchObject({ status: 409 });
-    release();
+  });
+
+  it('keeps_old_clients_on_words_and_always_serves_message_defaults', async () => {
+    for (const cards of [undefined, '0', 'true', '1']) {
+      let state = await startState();
+      const id = state.interview_id;
+      const query: Record<string, string> = cards === undefined ? {} : { cards };
+      const consent = await mockStore.dispatch('setupConsent', { params: { id }, query, body: { allow: false } });
+      if ('network' in consent) throw new Error('consent failed');
+      state = consent.body as SetupState;
+      expect(state.pending_card).toBeNull();
+      const answered = await mockStore.dispatch('setupAnswer', { params: { id }, query, body: { question: state.question, text: 'Both, about evenly' } });
+      if ('network' in answered) throw new Error('answer failed');
+      state = answered.body as SetupState;
+      expect(state.messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 1 : 0);
+      if (cards !== '1') expect(state.pending_card).toBeNull();
+      for (const message of state.messages) { expect(message).toHaveProperty('choices'); expect(message).toHaveProperty('card'); }
+      const finished = await mockStore.dispatch('setupSuggestions', { params: { id }, query, body: {} });
+      expect(finished).toMatchObject({ status: 200, body: { step: 'tools', pending_card: null } });
+      if ('network' in finished) throw new Error('finish failed');
+      expect((finished.body as SetupState).messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 6 : 0);
+    }
+  });
+
+  it('the_closing_plan_never_offers_a_declined_unpriced_payment', async () => {
+    let state = await cpaAt('intake');
+    state = await setupState('setupSuggestions', state.interview_id, {});
+    expect(state.messages.at(-2)?.text).not.toMatch(/retainer|payment link/i);
+    expect(state.messages.at(-2)?.text).toContain('Here’s how your Desk will work.');
+  });
+
+  it('a_typed_payment_amount_prices_only_that_job_and_never_grants_money_permission', async () => {
+    let state = await cpaAt('payment');
+    const payment = state.pending_card!;
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: payment, text: '$750.00' });
+    expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card).toMatchObject({ state: 'accepted', job: { config: { amount_cents: 75000 } } });
+    await setupState('setupSuggestions', state.interview_id, {});
+    const response = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+    expect(response).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
+    if ('network' in response) throw new Error('draft failed');
+    expect((response.body as RulesDraft).cards.filter(({ applies_to }) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(applies_to)).every(({ mode }) => mode === 'ask')).toBe(true);
+  });
+
+  it('preserves_atomic_validation_amount_requirements_and_replaceable_decisions', async () => {
+    let state = await cpaAt('payment');
+    const id = state.interview_id;
+    const proposal_id = state.pending_card!;
+    const params = { id, proposal_id };
+    for (const body of [null, [], {}, { accept: 'yes' }, { accept: true, unknown: 1 }, { accept: false, title: 'Changed' }, { accept: false, amount_cents: 0 }, { accept: false, autonomy: 'auto' }, { accept: true, autonomy: 'sometimes' }, ...['', ' ', 'x'.repeat(61), null, 42].map((title) => ({ accept: true, title })), ...[-1, 1000001, 0.5, null, '100'].map((amount_cents) => ({ accept: true, amount_cents }))]) {
+      expect(await mockStore.dispatch('setupProposal', { params, body }), JSON.stringify(body)).toMatchObject({ status: 422 });
+      expect(await setupState('setup', id)).toEqual(state);
+    }
+    expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
+    for (const amount_cents of [0, 1000000]) {
+      state = await setupState('setupProposal', id, { accept: true, title: 'Updated retainer', autonomy: 'ask', amount_cents }, proposal_id);
+      expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card).toMatchObject({ state: 'accepted', job: { title: 'Updated retainer', autonomy: 'ask', config: { amount_cents } } });
+    }
+    state = await setupState('setupProposal', id, { accept: false }, proposal_id);
+    expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card?.state).toBe('declined');
+    const connectorState = await cpaAt('stripe');
+    for (const body of [{ accept: true, title: 'Renamed' }, { accept: true, amount_cents: 0 }, { accept: true, autonomy: 'auto' }]) {
+      expect(await mockStore.dispatch('setupProposal', { params: { id: connectorState.interview_id, proposal_id: connectorState.pending_card! }, body })).toMatchObject({ status: 422 });
+    }
+    const schedule = state.messages.find(({ card }) => card?.job?.job === 'schedule')!.card!;
+    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id: schedule.proposal_id }, body: { accept: true, amount_cents: 0 } })).toMatchObject({ status: 422 });
+    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id: 'missing' }, body: { accept: true } })).toMatchObject({ status: 404 });
     await setupState('setupSuggestions', id, {});
-    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, body: { accept: true } })).toMatchObject({ status: 409 });
+    expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 409 });
     expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} })).toMatchObject({ status: 409 });
     mockStore.reset('rivera', { signedIn: false });
-    for (const key of ['setupProposal', 'setupSuggestions'] as const) expect(await mockStore.dispatch(key, { params: { id, proposal_id }, body: {} })).toMatchObject({ status: 401 });
+    expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 401 });
   });
 
-  it('connects_only_accepted_stripe_at_either_transition_to_tools_needing_review', async () => {
-    for (const ending of ['answer', 'suggestions'] as const) {
-      for (const decision of ['accepted', 'declined', 'proposed'] as const) {
-        let state = await startState();
-        state = await setupState('setupConsent', state.interview_id, { allow: true });
-        const stripe = state.messages.find((message) => message.card?.connector?.app === 'stripe')!.card!;
-        const calendar = state.messages.find((message) => message.card?.connector?.app === 'google_calendar')!.card!;
-        await setupState('setupProposal', state.interview_id, { accept: true }, calendar.proposal_id);
-        if (decision !== 'proposed') await setupState('setupProposal', state.interview_id, { accept: decision === 'accepted' }, stripe.proposal_id);
-        const tools = () => mockStore.world.desk(state.desk_id)!.tools.filter((tool) => tool.tool.startsWith('payments.'));
-        expect(tools()).toEqual([]);
-        if (ending === 'suggestions') state = await setupState('setupSuggestions', state.interview_id, {});
-        else while (state.question !== null) state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: state.messages.at(-1)!.choices[0]!.text });
-        expect(state.step).toBe('tools');
-        expect(tools().map((tool) => [tool.tool, tool.status, tool.review_reason])).toEqual(decision !== 'declined' ? [
-          ['payments.list_charges', 'needs_review', 'new'], ['payments.create_refund', 'needs_review', 'new'],
-        ] : []);
-        expect(mockStore.world.desk(state.desk_id)!.policy.auto_money_cap_cents).toBe(0);
-        if (decision !== 'declined') {
-          await mockStore.dispatch('setupConnect', { params: { id: state.interview_id }, body: { server: 'mock_payments' } });
-          expect(tools()).toHaveLength(2);
-        }
-      }
-    }
-  });
-
-  it('suggestions_finish_remaining_topics_with_facts_unchanged_and_unanswered_limits_asking', async () => {
-    let state = await startState();
-    state = await setupState('setupConsent', state.interview_id, { allow: false });
-    state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Individuals only' });
-    const before = structuredClone(state);
-    const about = mockStore.world.desks.find((desk) => desk.summary.desk_id === state.desk_id)!;
-    const publicBefore = setupPublicDesk(mockStore.world, about, 'en');
-    state = await setupState('setupSuggestions', state.interview_id, {});
-    expect(state.step).toBe('tools');
-    expect(state.question).toBeNull();
-    expect(state.messages.slice(0, before.messages.length)).toEqual(before.messages.map((message) => (
-      message.card?.state === 'proposed' ? {
-        ...message,
-        card: { ...message.card, state: message.card.job?.job === 'payment' ? 'declined' : 'accepted' },
-      } : message
-    )));
-    expect(state.messages).toHaveLength(before.messages.length + 2);
-    expect(state.messages.at(-2)?.text).toMatch(/Your plan:/);
-    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
-    expect(setupPublicDesk(mockStore.world, about, 'en')).toEqual(publicBefore);
-    const draft = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-    expect(draft).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
-    if ('network' in draft || draft.status !== 200) throw new Error('setupRules must answer');
-    const cards = (draft.body as import('../api/views.ts').RulesDraft).cards;
-    expect(cards.filter((card) => ['native.quote', 'native.release_document', 'effect:charge', 'effect:pay_out'].includes(card.applies_to)).every((card) => card.mode === 'ask')).toBe(true);
-  });
-
-  it('rejects_invalid_proposal_changes_atomically', async () => {
-    const start = await startState();
-    const state = await setupState('setupConsent', start.interview_id, { allow: true });
-    const cards = state.messages.flatMap((message) => message.card ? [message.card] : []);
-    const payment = cards.find((card) => card.job?.job === 'payment')!;
-    const bodies: unknown[] = [
-      {}, null, [], { accept: 'yes' }, { accept: true, unknown: 1 },
-      { accept: false, title: 'Changed' }, { accept: false, amount_cents: 0 },
-      ...['', '  ', 'x'.repeat(61), null, 42].map((title) => ({ accept: true, title })),
-      ...[-1, 1_000_001, 0.5, null, '100'].map((amount_cents) => ({ accept: true, amount_cents })),
-    ];
-    for (const body of bodies) {
-      expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: payment.proposal_id }, body }), JSON.stringify(body)).toMatchObject({ status: 422 });
-      expect(await setupState('setup', state.interview_id)).toEqual(state);
-    }
-    for (const card of cards.filter((card) => card !== payment)) {
-      expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: card.proposal_id }, body: { accept: true, amount_cents: 0 } })).toMatchObject({ status: 422 });
-    }
-    const connector = cards.find((card) => card.kind === 'connector')!;
-    expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: connector.proposal_id }, body: { accept: true, title: 'Renamed' } })).toMatchObject({ status: 422 });
-    for (const amount_cents of [0, 1_000_000]) {
-      const changed = await setupState('setupProposal', state.interview_id, { accept: true, title: '😀'.repeat(60), amount_cents }, payment.proposal_id);
-      expect(changed.messages.find((message) => message.card?.proposal_id === payment.proposal_id)?.card?.job?.config).toMatchObject({ amount_cents });
-    }
-  });
-
-  it('accepts_changes_and_replaces_an_earlier_proposal_decision', async () => {
-    const start = await startState();
-    let state = await setupState('setupConsent', start.interview_id, { allow: true });
-    const retainer = state.messages.find((message) => message.card?.job?.job === 'payment')!.card!;
-    state = await setupState('setupProposal', state.interview_id, { accept: true, title: 'Updated retainer', amount_cents: 75_000 }, retainer.proposal_id);
-    expect(state.messages.find((message) => message.card?.proposal_id === retainer.proposal_id)?.card).toMatchObject({
-      state: 'accepted', job: { title: 'Updated retainer', config: { amount_cents: 75_000 } },
-    });
-    state = await setupState('setupProposal', state.interview_id, { accept: false }, retainer.proposal_id);
-    expect(state.messages.find((message) => message.card?.proposal_id === retainer.proposal_id)?.card?.state).toBe('declined');
-    state = await setupState('setupProposal', state.interview_id, { accept: true }, retainer.proposal_id);
-    expect(state.messages.find((message) => message.card?.proposal_id === retainer.proposal_id)?.card?.state).toBe('accepted');
-    const calendar = state.messages.find((message) => message.card?.connector?.app === 'google_calendar')!.card!;
-    state = await setupState('setupProposal', state.interview_id, { accept: true }, calendar.proposal_id);
-    expect(state.messages.find((message) => message.card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
-    expect((await setupState('setup', state.interview_id)).messages).toEqual(state.messages);
-  });
-
-  it('leads_cpa_topics_skips_quote_and_discount_limits_and_closes_before_tools', async () => {
-    let state = await startState();
-    state = await setupState('setupConsent', state.interview_id, { allow: false });
-    expect(state.messages.some((message) => message.role === 'tool_label')).toBe(false);
-    const topics = [];
-    while (state.question !== null) {
-      topics.push(state.question);
-      expect(topics.length).toBeLessThanOrEqual(4);
-      const choices = state.messages.at(-1)!.choices;
-      expect(choices.length).toBeGreaterThanOrEqual(2);
-      expect(choices.length).toBeLessThanOrEqual(4);
-      const recommended = choices.filter((choice) => choice.recommended);
-      if (['quote_limit', 'discounts', 'documents_and_payments', 'money_limit'].includes(state.question)) {
-        expect(recommended).toHaveLength(0);
-      } else {
-        expect(recommended.length).toBeLessThanOrEqual(1);
-        if (recommended.length > 0) expect(choices[0]?.recommended).toBe(true);
-      }
-      expect(choices.every((choice) => [...choice.text].length <= 80)).toBe(true);
-      const text = choices[0]!.text;
+  it('only_sets_money_from_the_opted_in_isolated_turn_and_never_from_unrelated_numbers', async () => {
+    for (const [text, cap] of [['Always ask me first', 0], ['Up to $100', 10000], ['Up to $250', 25000], ['Up to $500', 50000], ['I file 2026 returns', 0], ['-500', 0], ['$10,001', 0], ['$250.50', 25050]] as const) {
+      let state = await cpaAt('money');
+      expect(state.messages.at(-1)?.choices.every(({ recommended }) => !recommended)).toBe(true);
+      state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Set an amount now' });
+      expect(state.messages.at(-1)?.text).toBe("What's the most I should take or pay out without asking you?");
+      expect(state.messages.at(-1)?.choices.map(({ text }) => text)).toEqual(['Always ask me first', 'Up to $100', 'Up to $250', 'Up to $500']);
       state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
-      expect(state.messages.filter((message) => message.role === 'owner').at(-1)?.text).toBe(text);
+      expect(state.step).toBe('tools');
+      const response = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+      expect(response, text).toMatchObject({ status: 200, body: { auto_money_cap_cents: cap } });
     }
-    expect(topics).toEqual(['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments']);
-    expect(state.step).toBe('tools');
-    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
-    expect(state.messages.at(-2)?.text).toMatch(/plan.*consult.*intake.*retainer/i);
-    expect(state.messages.at(-2)?.text).toContain('“');
-    const draft = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-    expect(draft).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
+    let state = await cpaAt('money');
+    state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Ask me before every payment' });
+    expect(state.messages.some(({ text }) => text === "What's the most I should take or pay out without asking you?")).toBe(false);
+    expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
   });
 
-  it('opens_the_cpa_run_with_understanding_six_stable_cards_and_a_fact_question', async () => {
+  it('holds_decisions_and_card_answers_as_202_busy_and_refuses_concurrent_mutations', async () => {
+    for (const action of ['decision', 'answer'] as const) {
+      let state = await cpaAt('schedule');
+      const id = state.interview_id;
+      const proposal_id = state.pending_card!;
+      const release = action === 'decision' ? holdNextDecision(mockStore.world, id) : holdNextAnswer(mockStore.world, id);
+      const response = await mockStore.dispatch(action === 'decision' ? 'setupProposal' : 'setupAnswer', {
+        params: { id, proposal_id }, query: { cards: '1' }, body: action === 'decision' ? { accept: true } : { question: null, card: proposal_id, text: 'Yes' },
+      });
+      expect(response).toMatchObject({ status: 202, body: { busy: true, pending_card: proposal_id } });
+      if (action === 'answer' && !('network' in response)) expect((response.body as SetupState).messages.at(-1)).toMatchObject({ role: 'owner', text: 'Yes' });
+      expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, body: { accept: false } })).toMatchObject({ status: 409 });
+      expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} })).toMatchObject({ status: 409 });
+      expect(await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: null, card: proposal_id, text: 'No' } })).toMatchObject({ status: 409 });
+      release();
+      state = await setupState('setup', id);
+      expect(state.busy).toBe(false);
+      expect(state.pending_card).not.toBe(proposal_id);
+      expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card?.state).toBe('accepted');
+    }
+  });
+
+  it('typed_card_answers_name_exactly_one_target_and_never_accept_an_unpriced_payment', async () => {
+    let state = await cpaAt('schedule');
+    const id = state.interview_id;
+    const pending = state.pending_card;
+    for (const body of [{ question: null, text: 'Yes' }, { question: 'what_you_do', card: pending, text: 'Yes' }, { question: null, card: 'p-unknown', text: 'Yes' }]) {
+      const response = await mockStore.dispatch('setupAnswer', { params: { id }, body });
+      expect(response).toMatchObject({ status: expect.any(Number) });
+      expect('status' in response && response.status >= 400).toBe(true);
+      expect(await setupState('setup', id)).toEqual(state);
+    }
+    state = await setupState('setupAnswer', id, { question: null, card: pending, text: 'Yes, please' });
+    expect(state.messages.find(({ card }) => card?.proposal_id === pending)?.card?.state).toBe('accepted');
+    state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
+    const payment = state.pending_card;
+    state = await setupState('setupAnswer', id, { question: null, card: payment, text: 'Yes, please' });
+    expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card?.state).toBe('declined');
+    expect(state.messages.filter(({ role }) => role === 'owner').at(-1)?.text).toBe('Yes, please');
+  });
+
+  it('suggestions_record_the_owner_and_finish_all_leftovers_with_safe_unpriced_payments', async () => {
+    let state = await cpaAt('intake');
+    const before = structuredClone(state);
+    state = await setupState('setupSuggestions', state.interview_id, {});
+    expect(state).toMatchObject({ step: 'tools', question: null, pending_card: null });
+    const extra = state.messages.slice(before.messages.length);
+    expect(extra[0]).toMatchObject({ role: 'owner', text: 'Use your suggestions' });
+    expect(extra[1]).toMatchObject({ role: 'claude', text: 'Here’s the rest, as I’d set it up.' });
+    expect(state.messages.flatMap(({ card }) => card ? [card.state] : [])).toEqual(['accepted', 'accepted', 'declined', 'accepted', 'accepted', 'accepted']);
+    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
+    expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
+  });
+
+  it('asks_one_thing_per_turn_and_keeps_stable_cards_and_earlier_decisions', async () => {
     let state = await startState();
-    expect(state.messages.every((message) => message.card === null)).toBe(true);
     state = await setupState('setupConsent', state.interview_id, { allow: true });
-    const read = state.messages.findIndex((message) => message.text === MEMORY_LABEL);
-    const opening = state.messages.slice(read + 1);
-    expect(opening).toHaveLength(8);
-    expect(opening[0]?.text).toMatch(/tax returns.*bookkeeping.*individuals.*small businesses/i);
-    expect(opening[0]?.text).toMatch(/clients.*(?:ask|reach out)/i);
-    const cards = opening.slice(1, -1).map((message) => message.card!);
-    expect(cards.map((card) => card.job?.job ?? card.connector?.app)).toEqual(['schedule', 'intake', 'payment', 'status', 'google_calendar', 'stripe']);
-    expect(cards.map((card) => [card.state, card.kind])).toEqual([
-      ['proposed', 'job'], ['proposed', 'job'], ['proposed', 'job'], ['proposed', 'job'], ['proposed', 'connector'], ['proposed', 'connector'],
-    ]);
-    expect(cards[0]?.job).toMatchObject({ title: 'Book a free intro consult', config: { block: 'typed_booking', appointment_type: 'Free intro consult', minutes: 20 }, can_do_today: true });
-    expect(cards[1]?.job).toMatchObject({ title: 'New client intake', config: { block: 'intake', questions: ['Is this a personal or business return?', 'Which tax years do you need help with?', 'Have you heard from the IRS or the state?'] }, can_do_today: true });
-    expect(cards[2]?.job).toMatchObject({ title: 'Collect a retainer', config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: null }, can_do_today: true });
-    expect(cards[3]?.job).toMatchObject({ title: "Where's my return?", config: null, can_do_today: false });
-    expect(cards[4]?.connector).toMatchObject({ app: 'google_calendar', connectable: false });
-    expect(cards[5]?.connector).toMatchObject({ app: 'stripe', connectable: true });
-    for (const card of cards) {
-      expect(card.proposal_id).toMatch(/^p-[0-9a-f]{12}$/);
-      expect(card.job === null).toBe(card.kind === 'connector');
-      expect(card.connector === null).toBe(card.kind === 'job');
-      expect([...(card.job?.why ?? card.connector!.why)].length).toBeLessThanOrEqual(200);
-      if (card.job) {
-        expect([...card.job.title].length).toBeLessThanOrEqual(60);
-        expect([...card.job.how].length).toBeLessThanOrEqual(300);
-      }
+    expect(state.messages.some(({ card }) => card)).toBe(false);
+    expect(state).toMatchObject({ pending_card: null, question: 'what_you_do' });
+    state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Both, about evenly' });
+    const ids = [];
+    for (const kind of ['schedule', 'intake', 'payment', 'status', 'stripe', 'google_calendar']) {
+      const pending = state.messages.at(-1)!.card!;
+      expect(pending.job?.job ?? pending.connector?.app).toBe(kind);
+      expect(pending.proposal_id).toMatch(/^p-[0-9a-f]{12}$/);
+      expect(state).toMatchObject({ pending_card: pending.proposal_id, question: null });
+      expect(state.messages.at(-1)!.choices).toEqual([]);
+      ids.push(pending.proposal_id);
+      const owners = state.messages.filter(({ role }) => role === 'owner').length;
+      state = await setupState('setupProposal', state.interview_id, { accept: kind !== 'payment' }, pending.proposal_id);
+      expect(state.messages.filter(({ role }) => role === 'owner')).toHaveLength(owners);
+      expect(state.messages.find(({ card }) => card?.proposal_id === pending.proposal_id)?.card?.state).toBe(kind === 'payment' ? 'declined' : 'accepted');
     }
-    expect(new Set(cards.map((card) => card.proposal_id)).size).toBe(6);
-    for (const message of opening.slice(1, -1)) expect(message).toMatchObject({ role: 'claude', text: '', choices: [] });
-    expect(state.question).toBe('what_you_do');
-    expect(opening.at(-1)?.choices).toHaveLength(3);
-    expect(opening.at(-1)?.choices[0]?.recommended).toBe(true);
-    const reread = await setupState('setup', state.interview_id);
-    expect(reread).toEqual(state);
-    for (const message of state.messages) {
-      expect(message).toHaveProperty('choices');
-      expect(message).toHaveProperty('card');
-    }
-  });
-
-  it('serves_defaults_on_every_scripted_message_without_changing_the_run', async () => {
-    let state = await startState('Rivera Plumbing. We fix leaks.');
-    expect(state.messages[0]).toMatchObject({ choices: [], card: null });
-    state = await setupState('setupConsent', state.interview_id, { allow: true });
-    expect(state.messages.at(-1)?.text).toBe(SETUP_QUESTIONS[0]?.text);
-    for (const question of SETUP_QUESTIONS) {
-      expect(state.question).toBe(question.key);
-      state = await setupState('setupAnswer', state.interview_id, { question: question.key, text: 'Yes' });
-    }
-    expect(state.step).toBe('tools');
-    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
-    for (const message of state.messages) expect(message).toMatchObject({ choices: [], card: null });
+    expect(new Set(ids).size).toBe(6);
+    expect(state.messages.at(-1)?.choices.map(({ text }) => text)).toEqual(['Ask me before every payment', 'Set an amount now']);
+    expect(await setupState('setup', state.interview_id)).toEqual(state);
   });
 });
 
