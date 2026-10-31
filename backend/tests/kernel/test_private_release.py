@@ -33,6 +33,7 @@ from .test_compiler import card
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import updated
 from .test_execute import executed, read
+from .test_link_completion import rv_link
 from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
@@ -246,6 +247,21 @@ async def test_a_session_may_read_its_own_persons_fact_as_itself(app, client, re
     result = await executed(client, visitor, allowed)
 
     assert (result.state, [fact.fact_id for fact in result.facts]) == ("succeeded", ["quote:own-1"])
+
+
+async def test_a_payment_link_for_a_verified_person_is_the_sessions_own(app, client, reviewer):
+    """The payments plan's link adapter, `native.payment_link`, declares that it releases no private
+    data, and meets that exception for real: Dana's link, made in her verified session, is labelled
+    for that session and for her, its record owner, so the execution that holds it to its word
+    lets it through."""
+    copy = await rivera(app, client)
+    dana = await confirmed(client, copy, DANA)
+    link = await rv_link(app, client, reviewer, copy, dana)                  # its execution succeeded
+    assert link.customer_id.startswith("person:")
+    dana_id = link.customer_id.removeprefix("person:")
+    [fact] = await rows_of(app, copy.copy_id, select(FactRow).where(FactRow.fact_id == f"payment_link:{link.link_id}"))
+    assert (fact.readers, fact.record_owner) == (["owner", f"session:{dana.session_id}", f"person:{dana_id}"],
+                                                 dana_id)
 
 
 async def verified_fake_desk(app, client, fake: FakeAdapter, cards):
