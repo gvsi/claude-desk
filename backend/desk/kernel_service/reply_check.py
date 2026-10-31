@@ -475,7 +475,7 @@ def scan_public_text(text: str) -> list[str]:
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
     """
     rules = {violation.rule_id for violation in scan_prose(text)}
-    if lang.detect(shown(text)) == "other":
+    if lang.positive_other_language(shown(text)):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
@@ -512,7 +512,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, li
         ranges.append((key, offset, offset + len(text)))
         offset += len(text) + 1
     combined = "\n".join(pieces)
-    if lang.detect(combined) == "other":
+    if lang.positive_other_language(combined):
         for key, low, high in ranges:
             if key is not None and low < high:
                 fields[key].add("language")

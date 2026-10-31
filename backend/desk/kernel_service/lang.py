@@ -83,6 +83,15 @@ def detect(text: str) -> Detected:
     of another language than of English (leaving out the English ones it writes too, `EN_SHARED`)
     and at least as many as of Spanish, or four or more words with no marker of any language;
     `none` for no words, a tie between English and Spanish, or a few unmarked words ("OK")."""
+    return _detect(text, unmarked_is_other=True)
+
+
+def positive_other_language(text: str) -> bool:
+    """Another script or leading other-language markers, without guessing from unmarked words."""
+    return _detect(text, unmarked_is_other=False) == "other"
+
+
+def _detect(text: str, *, unmarked_is_other: bool) -> Detected:
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
     if not words:
@@ -100,7 +109,7 @@ def detect(text: str) -> Detected:
     if other > en - shared and other >= es:
         return "other"
     if en == es == 0:
-        return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"
+        return "other" if unmarked_is_other and len(words) >= MIN_UNMARKED_WORDS else "none"
     if en == es:
         return "none"
     return "en" if en > es else "es"

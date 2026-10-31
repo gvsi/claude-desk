@@ -1805,16 +1805,22 @@ def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
     ("We work with small businesses and families.", []),
     ("Trabajamos con pequeños negocios y familias.", []),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", []),
+    ("Cash, card, Venmo accepted", []),
+    ("Emergency service available", []),
+    ("Emergency service available weekends", ["lex.en.date"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("Привет мир.", ["language"]),
     ("OK", []),
     ("No", []),
     ("", []),
 ])
-def test_public_policy_language_matches_reply_prose(text, rules):
+def test_public_policy_language_requires_positive_evidence(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 
 def test_public_policy_language_checks_the_combined_rendering():
-    parts = {"policy:a": "sans frais", "policy:b": "consultations gratuites"}
+    parts = {"policy:a": "nous the", "policy:b": "vous la y"}
     assert all(reply_check.scan_public_text(value) == [] for value in parts.values())
     assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
 

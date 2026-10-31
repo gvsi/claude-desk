@@ -2260,11 +2260,13 @@ def quote_card(**limits) -> RuleCard:
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
-    ("free consultation", ["language", "lex.en.promise"]),
+    ("free consultation", ["lex.en.promise"]),
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
-    ("20 % de descuento", ["digit", "language", "lex.es.promise", "percent_sign"]),
+    ("Привет мир.", ["language"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
     ("We offer \u202eeerf\u202c consultations.", ["format_control"]),
-    ("Ofrecemos consultas \u202esitarg\u202c.", ["format_control", "language"]),
+    ("Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
 ])
 async def test_charter_public_promise_refusal_keeps_fields_and_rules(kernel, ro_read, text, rules):
     http, schema, _ = kernel
@@ -2402,18 +2404,28 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
     assert verdict.signature and all(block.template != "policy" for block in verdict.blocks)
 
 @pytest.mark.kernel_plan("01b")
-async def test_policy_combined_language_refusal_preserves_undetermined_fragments(kernel):
-    http, _, _ = kernel
+@pytest.mark.parametrize("parts", [
+    ("sans frais", "consultations gratuites"),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
+     "Emergency service available"),
+])
+async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
+    http, schema, _ = kernel
     copy = await new_copy(http)
     owner = http.owner(copy.owner_token)
     path = {"id": copy.desk_ids[0]}
-    # Each short fragment is undetermined; together there is enough evidence to refuse.
-    claims = [Claim(key="policy:a", kind="text", value="sans frais"),
-              Claim(key="policy:b", kind="text", value="consultations gratuites")]
-    with pytest.raises(KernelFailed) as failure:
-        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path=path)
-    assert (failure.value.status, failure.value.code, failure.value.detail) == (422, "invalid", {
-        "policy:a": ["language"], "policy:b": ["language"]})
+    claims = [Claim(key=f"policy:{index}", kind="text", value=text) for index, text in enumerate(parts)]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path=path)
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "policy"] == list(parts)
+    visitor = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                       clauses=[Clause(template="policy", fact_id=f"charter:{claim.key}") for claim in claims])
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == list(parts)
+    assert verdict.signature
 
 
 async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):

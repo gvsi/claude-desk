@@ -855,27 +855,12 @@ PUBLIC_POLICY_PATTERNS = (
 )
 
 
-# Function words distinguish short undetermined policy fragments from a longer unmarked group.
-PUBLIC_POLICY_MARKERS = frozenset("""
-about after ahora ahí al all also am an and any aquí are at ayudar ayudo be been before being bueno
-but by call can claro con could cual cuando cuál cuándo cómo del did does donde down día dónde el
-enseguida entonces eres es esa ese eso esto estoy está están estás for from get gracias gusto hacer
-had hasta have hay hello help her here hi him his hola how i if in into is it its just know la las
-let like listo lo look los may might more must muy my más necesito need not now nuestra nuestro of
-off on only or our out perfecto pero please puede puedo quedó quiero qué see she should some soy su
-sure sus sí también te tengo than thank thanks that the their them then there these they this those
-ti tiene to too tu tus un una unas unos until up us usted ustedes very want was we were what when
-where which who whom why will with would y ya yes yo you your
-""".split())
-
-
 def unsupported_public_policy_language(text: str) -> bool:
-    """Mirror the contract's other-language and unmarked-fragment examples."""
+    """Mirror positive other-language evidence; unmarked names and lists keep passing."""
     text = unicodedata.normalize("NFKC", text)
-    words = re.findall(r"[^\W\d_]+", text.lower())
-    return detect_language(text) == "other" or (
-        len(words) >= 4 and not PUBLIC_POLICY_MARKERS.intersection(words)
-        and not any(mark in text for mark in "ñ¿¡"))
+    letters = [char for char in text if char.isalpha()]
+    non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
+    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
 
 
 def public_policy_rules(text: str) -> list[str]:

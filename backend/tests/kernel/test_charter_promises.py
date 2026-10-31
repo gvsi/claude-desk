@@ -195,6 +195,9 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Trabajamos con pequeños negocios y familias.",
     "Cuéntenos qué necesita y le sugeriremos los siguientes pasos.",
     "Pregunte por nuestros servicios aquí.",
+    "Service area: Portland, Beaverton, Hillsboro, Tigard",
+    "Cash, card, Venmo accepted",
+    "Emergency service available",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
     copy = await rivera(app, client)
@@ -279,6 +282,8 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
     ("20% off for first-time clients", "Ask about our services."),
     ("No", "charge for consultations."),
     ("Nous garantissons des consultations gratuites pour tous les clients.", "Ask about our services."),
+    ("Привет мир.", "Ask about our services."),
+    ("Portland Beaverton Hillsboro free", "Ask about our services."),
 ])
 async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
     copy = await rivera(app, client)
@@ -298,14 +303,16 @@ async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
         assert any(block["template"] == "hours" for block in page.json()["charter"])
 
 
-async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client):
+@pytest.mark.parametrize("text", ["Nous garantissons des consultations gratuites pour tous les clients.",
+                                  "Привет мир.", "Portland Beaverton Hillsboro free"])
+async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client, text):
     copy = await rivera(app, client)
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
             FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:service_area")))).one()
         row.claims = [Claim(key="policy:service_area", kind="text",
-                           value="Nous garantissons des consultations gratuites pour tous les clients.")]
+                           value=text)]
     visitor = await open_visitor(client, copy)
     verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
     assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
@@ -314,13 +321,18 @@ async def test_policy_only_reply_refuses_legacy_unsupported_language(app, client
     verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
-async def test_charter_refuses_unsupported_language_policy(client, app):
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("Привет мир.", ["language"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+])
+async def test_charter_refuses_unsupported_language_policy(client, app, text, rules):
     copy = await rivera(app, client)
     response = await put_part(client, copy, "charter", {"charter": [
         {"key": "policy:about", "kind": "text",
-         "value": "Nous garantissons des consultations gratuites pour tous les clients."}]})
+         "value": text}]})
     assert (response.status_code, response.json()) == (422, {
-        "code": "invalid", "detail": {"policy:about": ["language"]}})
+        "code": "invalid", "detail": {"policy:about": rules}})
 
 
 @pytest.mark.parametrize("create", [False, True], ids=["replace", "create"])
