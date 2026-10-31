@@ -8,7 +8,7 @@ import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanst
 import { useEffect, useState } from 'react';
 
 import { request } from '../api/http.ts';
-import { SETUP_STEPS, type BusinessOut, type CopyOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
+import { SETUP_STEPS, type BusinessOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
@@ -248,18 +248,17 @@ function furtherSetup(cached: DeskSetup | null, carried: { interview_id: string;
 
 /**
  * A Desk's setup interview as setup holds it now (its Desk, its id and its step), carried into the
- * copy's Desks read here, the businesses and the copy (`me`), whose `setup` names it, so the next
- * page that reads them, Today, names the step at once, while a read of them is slow and after one
- * fails. A read of them still out, which may have been answered before the step moved on, is let go
- * first; the carried step only ever moves the Desk's setup forward (`furtherSetup`); then they are
- * read again in the background, so the API stays the source. Resolves once the carried step is
+ * copy's Desks read here (the businesses), whose `setup` names it, so the next page that reads
+ * them, Today, names the step at once, while a read of them is slow and after one fails. A read of
+ * them still out, which may have been answered before the step moved on, is let go first; the
+ * carried step only ever moves the Desk's setup forward (`furtherSetup`); then they and the copy
+ * are read again in the background, so the API stays the source. Resolves once the carried step is
  * written, without waiting for that read.
  */
 export async function carrySetup(queryClient: QueryClient, state: { desk_id: string; interview_id: string; step: SetupStep }): Promise<void> {
-  await Promise.all([queryClient.cancelQueries({ queryKey: DESKS_KEY }), queryClient.cancelQueries({ queryKey: ME_KEY })]);
+  await queryClient.cancelQueries({ queryKey: DESKS_KEY });
   const carried = (desk: DeskSummary): DeskSummary => (desk.desk_id === state.desk_id ? { ...desk, setup: furtherSetup(desk.setup, state) } : desk);
   queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((business) => ({ ...business, desks: business.desks.map(carried) })));
-  queryClient.setQueryData<CopyOut>(ME_KEY, (now) => (now === undefined ? now : { ...now, desks: now.desks.map(carried) }));
   void invalidateCopy(queryClient);
 }
 
