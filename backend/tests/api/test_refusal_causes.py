@@ -1,5 +1,7 @@
 """Safety causes use only the kernel's exact reason/check codes and deciding policy IDs."""
 
+import re
+from pathlib import Path
 from typing import get_args
 
 import pytest
@@ -7,6 +9,7 @@ from pydantic import ValidationError
 
 from desk.api.owner_reads import refusal_cause
 from desk.api.schemas import Attempt, RefusalCause
+from desk.kernel_service import decide
 
 
 @pytest.mark.parametrize(("summary", "policies", "expected"), [
@@ -21,8 +24,8 @@ from desk.api.schemas import Attempt, RefusalCause
         ("no_such_quote", "quote_unpayable"), ("quote_paid", "quote_unpayable"), ("quote_paying", "quote_unpayable"),
         ("no_such_charge", "no_such_charge"), ("not_refundable", "not_refundable"),
         ("no_such_document", "no_such_document"), ("not_verified", "not_verified"),
-        ("no_mandate", "agent_limit"), ("mandate_exhausted", "agent_limit"),
-        ("not_an_agent_with_a_mandate", "agent_limit"),
+        ("no_mandate", None), ("mandate_exhausted", None),
+        ("not_an_agent_with_a_mandate", None),
     ]],
     ({}, ["F.never.card"], "owner_rule"),
     *[({}, [policy], cause) for policy, cause in [
@@ -102,3 +105,22 @@ def test_plain_deny_requires_no_cards(decision_id):
     row = {"decision_id": "decision", "policy_ids": [], "card_ids": ["unmapped-card"]}
     assert refusal_cause(row, entry, verified=False) is None
     assert refusal_cause({**row, "card_ids": []}, entry, verified=False) == "no_rule"
+
+
+def test_refusal_reasons_track_kernel_early_refusals():
+    from desk.api.owner_reads import REFUSAL_REASONS
+
+    assert set(decide.REFUSED_PLAIN) - {"adapter_refused"} == set(REFUSAL_REASONS)
+
+
+def test_baseline_causes_cover_every_refusing_policy():
+    from desk.api.owner_reads import BASELINE_CAUSES
+
+    baseline = Path(__file__).resolve().parents[3] / "kernel/cedar/baseline.cedar"
+    ids = {f"B.{policy}" for policy in re.findall(r'@id\("([^"]+)"\)', baseline.read_text())}
+    never_decides_refusal = {
+        # The evaluation path converts this auto-set cap into a hold for owner approval.
+        "B.auto_money_cap": "Auto money cap produces a hold rather than a refused decision.",
+    }
+    assert set(BASELINE_CAUSES).isdisjoint(never_decides_refusal)
+    assert ids == set(BASELINE_CAUSES) | set(never_decides_refusal)

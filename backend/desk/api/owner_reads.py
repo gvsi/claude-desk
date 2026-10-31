@@ -243,6 +243,26 @@ class Stopped(Timed):
     cause: RefusalCause | None = None
 
 
+REFUSAL_REASONS: dict[str, RefusalCause] = {
+    "paused": "paused", "unknown_tool": "tool_not_available", "not_given": "tool_not_available",
+    "invalid_args": "incomplete_request", "no_active_version": "no_rules",
+    "version_unloadable": "rules_unchecked", "version_outdated": "rules_unchecked",
+    "evaluation_error": "rules_unchecked",
+}
+REFUSAL_CHECKS: dict[str, RefusalCause] = {
+    "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
+    "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
+    "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
+    "no_such_document": "no_such_document", "not_verified": "not_verified",
+}
+# In precedence order, after any owner never card. The private-data cause also requires an unverified session.
+BASELINE_CAUSES: dict[str, RefusalCause] = {
+    "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
+    "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
+    "B.agent_charge_within_mandate": "agent_limit", "B.money_has_amount": "no_amount",
+}
+
+
 def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCause | None:
     """A refused decision's cause, from its row and the already-read kernel-built `decide` entry.
 
@@ -267,8 +287,6 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
       not_verified                                   not_verified          Not verified yet
-      no_mandate, mandate_exhausted,
-        not_an_agent_with_a_mandate                   agent_limit           Over the agent's spending limit
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk
@@ -294,31 +312,12 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
         return None
     if "reason" in summary:
         if summary["reason"] == "adapter_refused":
-            checks: dict[str, RefusalCause] = {
-                "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
-                "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
-                "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
-                "no_such_document": "no_such_document", "not_verified": "not_verified",
-                "no_mandate": "agent_limit", "mandate_exhausted": "agent_limit",
-                "not_an_agent_with_a_mandate": "agent_limit",
-            }
-            return checks.get(summary.get("check"))
-        reasons: dict[str, RefusalCause] = {
-            "paused": "paused", "unknown_tool": "tool_not_available", "not_given": "tool_not_available",
-            "invalid_args": "incomplete_request", "no_active_version": "no_rules",
-            "version_unloadable": "rules_unchecked", "version_outdated": "rules_unchecked",
-            "evaluation_error": "rules_unchecked",
-        }
-        return reasons.get(summary["reason"])
+            return REFUSAL_CHECKS.get(summary.get("check"))
+        return REFUSAL_REASONS.get(summary["reason"])
     policies = row["policy_ids"]
     if any(policy.startswith("F.never.") for policy in policies):
         return "owner_rule"
-    baselines: dict[str, RefusalCause] = {
-        "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
-        "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
-        "B.agent_charge_within_mandate": "agent_limit", "B.money_has_amount": "no_amount",
-    }
-    for policy, cause in baselines.items():
+    for policy, cause in BASELINE_CAUSES.items():
         if policy in policies:
             # Verification never reverts; unverified now proves unverified at decision time.
             # A verified person's refusal may instead mean the record belongs to someone else.
