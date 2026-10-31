@@ -17,6 +17,7 @@
   - `reason`: the decision's `reason_plain`. It is written once, at decide time, so it explains only that receipt.
   - `cardBelow`: the request's `ApprovalCard` is drawn right under this receipt's row.
 - `drawCheck` for an executed booking or a paid link. The sage check draws once, and only when the receipt is handled.
+- Nothing for a reply that arrives live: under a `TranscriptRow` with `live`, the receipt lands on its own `motion-stagger` beat, its dot growing from half size with it and its check drawing as it lands. Its words, order and dot color don't change. Under reduced motion it shows at once.
 
 ## The line
 
