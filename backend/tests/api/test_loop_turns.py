@@ -1082,9 +1082,9 @@ async def test_a_turn_sends_its_newest_message_before_any_tool(api_conn, caller,
 
 
 async def test_a_turn_with_no_new_visitor_message_sends_nothing(api_conn, caller, fake):
-    """A turn woken by something other than the visitor's words (an owner's whisper, the verification note) has no
-    message to tell the kernel, so the session's language stays as it is; a message Claude already read isn't sent
-    again."""
+    """A turn woken by something other than the visitor's words (an owner's whisper, the verification note), with no
+    visitor message Claude hasn't read, has no message to tell the kernel, so the session's language stays as it is;
+    a message Claude already read isn't sent again."""
     await said(api_conn, caller, "Hola, ¿tienen citas mañana?")
     assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Sí, con gusto."))])) == "done"
     for wake in ("whisper", "note"):
@@ -1096,6 +1096,29 @@ async def test_a_turn_with_no_new_visitor_message_sends_nothing(api_conn, caller
         fake.calls.clear()
         assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Claro."))])) == "done", wake
         assert fake.called(TURN) == [] and len(fake.called(CONTEXT)) == 1, wake
+
+
+async def test_text_written_while_the_owner_had_the_chat_sets_the_turns_language(api_conn, caller, fake):
+    """What a visitor writes while the owner has the chat wakes no turn, but Claude reads it in the next one. So when a
+    whisper later wakes that turn, the route gets that text: it is the newest visitor message reaching Claude."""
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help."))])) == "done"
+    fake.set_mode(caller.session_id, "owner")                  # the owner takes over
+    words = "¿Pueden venir mañana a revisar el desagüe?"
+    await append_message(api_conn, caller.ids, "visitor_text", text=words, wake=False)   # as the public route writes it
+    await api_conn.commit()
+    fake.set_mode(caller.session_id, "ai")                     # and hands back
+    await append_message(api_conn, caller.ids, "whisper", text="Offer her the Tuesday slot.")
+    await api_conn.commit()
+    fake.calls.clear()
+    model = ScriptedModel([response(reply("Claro, el martes tenemos un horario."))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    (sent,) = fake.called(TURN)
+    assert sent.body == {"generation": fake.sessions[caller.session_id].generation, "text": words, "desk_id": None}
+    (request,) = model.requests
+    assert html.escape(words, quote=False) in json.dumps(request.messages, ensure_ascii=False)   # Claude reads it now
 
 
 async def test_a_turns_message_is_cut_to_the_kernels_limit(api_conn, caller, fake):

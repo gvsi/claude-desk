@@ -683,12 +683,13 @@ async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
 
 
 async def latest_said(conn: AsyncConnection, session_id: str) -> str | None:
-    """The text of the session's newest pending visitor or agent message: the words that woke its turn, whose
-    language the turn tells the kernel (`loop`). None when no such message waits (a whisper, an action update or
-    the verification note woke the turn)."""
+    """The text of the newest visitor or agent message the session's next model call places in its context (the rows
+    `_pending` finds), whether or not it woke the turn: text written while the owner had the chat wakes nothing, yet
+    reaches Claude with the next turn. The turn tells the kernel its language (`loop`). None when no such message
+    waits (only a whisper, an action update or a note does)."""
     return (await conn.execute(select(MESSAGES.c.text).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(("visitor_text", "agent_text")),
-        MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake, NOT_REPLAYED)
+        MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None), NOT_REPLAYED)
         .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
 
 

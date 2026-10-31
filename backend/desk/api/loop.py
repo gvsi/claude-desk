@@ -248,11 +248,11 @@ class _Turn:
 
     async def _start(self) -> TurnOutcome | None:
         """Tell the kernel the turn's language before any tool runs (GitHub issue #121): the newest visitor or agent
-        message that woke the turn (`store.latest_said`), cut to `TURN_TEXT_MAX`, goes to
-        `POST /sessions/{session_id}/turn`, and the kernel keeps the language it detects as the session's, which the
-        turn's receipts and the reply check's fallback then speak. A turn woken by anything else sends nothing. The
-        text is untrusted and goes only to the kernel's detector: nothing here logs or keeps it. How the turn ends
-        when the kernel refuses, as it would on `/context` (`_failed`), else None."""
+        message reaching Claude this turn (`store.latest_said`), whether or not it woke the turn, cut to
+        `TURN_TEXT_MAX`, goes to `POST /sessions/{session_id}/turn`, and the kernel keeps the language it detects as
+        the session's, which the turn's receipts and the reply check's fallback then speak. A turn with no such
+        message sends nothing. The text is untrusted and goes only to the kernel's detector: nothing here logs or
+        keeps it. How the turn ends when the kernel refuses, as it would on `/context` (`_failed`), else None."""
         conn, caller = self.conn, self.caller
         said = await latest_said(conn, caller.session_id)
         await conn.commit()
