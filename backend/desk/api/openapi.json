@@ -9983,6 +9983,8 @@
           },
           "auto_money_cap_cents": {
             "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
             "title": "Auto Money Cap Cents",
             "default": 0
           },

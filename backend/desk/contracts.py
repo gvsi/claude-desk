@@ -320,7 +320,7 @@ class PolicyVersion(BaseModel):
                                           # each with its definition_sha256, no status or pending fields
     invariants_sha256: str                # the invariant files, the check list and the desk-prove version
     review_thresholds_version: int
-    auto_money_cap_cents: int = 0         # this version's money cap, compiled and proved at; the active version's is the Desk's cap (Plan 01b)
+    auto_money_cap_cents: int = Field(0, ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)  # this version's money cap, compiled and proved at; the active version's is the Desk's cap (Plan 01b)
     status: Literal["draft", "proved", "rejected", "active", "superseded"]
     proof: ProofReport | None = None
 
