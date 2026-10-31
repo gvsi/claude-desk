@@ -186,8 +186,8 @@ describe('format', () => {
     const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
     // The boards' words: the days as the owner says them, then the times.
-    expect(parts(WEEKDAYS)).toEqual({ days: 'Weekdays', times: '8:00 am to 6:00 pm' });
-    expect(parts(['sat'], '09:00:00', '13:00:00')).toEqual({ days: 'Saturdays', times: '9:00 am to 1:00 pm' });
+    expect(parts(WEEKDAYS)).toEqual({ days: 'Weekdays', times: '8:00 am to 6:00 pm', allDay: false });
+    expect(parts(['sat'], '09:00:00', '13:00:00')).toEqual({ days: 'Saturdays', times: '9:00 am to 1:00 pm', allDay: false });
     expect(parts(['sun']).days).toBe('Sundays');
     expect(parts(['sun', 'sat']).days).toBe('Weekends');
     expect(parts([...WEEKDAYS, 'sat', 'sun']).days).toBe('Every day');
@@ -213,6 +213,18 @@ describe('format', () => {
     // Settings joins several windows with no comma after the days.
     const opening = [parts(WEEKDAYS), parts(['sat'], '09:00:00', '13:00:00')].map(({ days, times }) => `${days} ${times}`).join(', ');
     expect(opening).toBe('Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm');
+  });
+
+  it('hours_parts_say_when_a_window_is_all_day', () => {
+    const parts = (start: string, end: string) => hoursParts({ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start, end } as HoursWindow);
+    // Midnight to midnight, and only that, is all day, so a caller needn't read the words.
+    expect(parts('00:00:00', '00:00:00')).toEqual({ days: 'Weekdays', times: 'all day', allDay: true });
+    expect(parts('00:00', '00:00')).toMatchObject({ allDay: true });
+    expect(parts('08:00:00', '00:00:00')).toMatchObject({ times: '8:00 am to midnight', allDay: false });
+    expect(parts('00:00:00', '18:00:00')).toMatchObject({ times: 'midnight to 6:00 pm', allDay: false });
+    expect(parts('00:00:00', '23:59:00')).toMatchObject({ allDay: false });
+    // A time that can't be read is never all day.
+    expect(parts('24:00:00', '00:00:00')).toMatchObject({ times: '24:00:00 to midnight', allDay: false });
   });
 
   it('format_hours_joins_its_parts', () => {

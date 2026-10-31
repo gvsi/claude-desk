@@ -275,15 +275,16 @@ function timeOfDay(time: string): string | null {
  * A window's two parts, in the business's own local times (a window carries no time zone of its
  * own): its days ("Weekdays", "Saturdays", "Mondays, Wednesdays and Fridays", `daysWords`) and its
  * times ("8:00 am to 6:00 pm", or "all day" from midnight to midnight). An end at 00:00 is midnight,
- * the day's end. A time that can't be read is shown as it came. Settings joins them with a space
- * ("Weekdays 8:00 am to 6:00 pm"); `formatHours` with a comma.
+ * the day's end. A time that can't be read is shown as it came. `allDay` is true exactly when the
+ * window runs from midnight to midnight, so a caller needn't compare `times` with its words.
+ * Settings joins them with a space ("Weekdays 8:00 am to 6:00 pm"); `formatHours` with a comma.
  */
-export function hoursParts(w: HoursWindow): { days: string; times: string } {
+export function hoursParts(w: HoursWindow): { days: string; times: string; allDay: boolean } {
   const days = daysWords(w.days);
   const start = timeOfDay(w.start);
   const end = timeOfDay(w.end);
-  if (start === 'midnight' && end === 'midnight') return { days, times: 'all day' };
-  return { days, times: `${start ?? w.start} to ${end ?? w.end}` };
+  if (start === 'midnight' && end === 'midnight') return { days, times: 'all day', allDay: true };
+  return { days, times: `${start ?? w.start} to ${end ?? w.end}`, allDay: false };
 }
 
 /** A rule's hours in the boards' words: "Weekdays, 8:00 am to 6:00 pm", "Saturdays, 9:00 am to 1:00 pm", "Every day, all day". */
