@@ -1684,6 +1684,48 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
   });
 
+  it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
+    // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
+    // card still comes first, and the button drops under the words, from their left edge, as Today's
+    // other rows do. Nothing scrolls sideways at either width.
+    const state = await deskAtRules();
+    const parts = (screen: RenderResult) => {
+      const card = region(screen, 'Finish setting up Okafor Plumbing');
+      return {
+        card: card.element().getBoundingClientRect(),
+        // The "Not live yet" line, the words' first.
+        status: (card.getByText('Not live yet', { exact: true }).element().closest('p') ?? document.body).getBoundingClientRect(),
+        line: card.getByText(/^Your answers are saved\./).element().getBoundingClientRect(),
+        button: card.getByRole('link', { name: 'Continue setup' }).element().getBoundingClientRect(),
+        // The steps as drawn: the row, or under 480 px of its own width the one line that says where it is.
+        steps: (card.getByRole('list', { name: 'Setup steps' }).element().parentElement ?? document.body).getBoundingClientRect(),
+        things: screen.getByRole('heading', { level: 2, name: 'Things to try' }).element().getBoundingClientRect(),
+      };
+    };
+
+    const laptop = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(region(laptop.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    const wide = parts(laptop.screen);
+    expect(wide.button.left).toBeGreaterThanOrEqual(wide.line.right);
+    expect(Math.abs(wide.button.top - wide.status.top)).toBeLessThanOrEqual(1);
+    expect(wide.steps.top).toBeGreaterThanOrEqual(Math.max(wide.line.bottom, wide.button.bottom));
+    expect(wide.card.bottom).toBeLessThanOrEqual(wide.things.top);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(`/app/${state.desk_id}/today`, { viewport: 'phone' });
+    await expect.element(region(phone.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    const narrow = parts(phone.screen);
+    expect(narrow.card.bottom).toBeLessThanOrEqual(narrow.things.top);
+    expect(narrow.button.top).toBeGreaterThanOrEqual(narrow.line.bottom);
+    expect(Math.abs(narrow.button.left - narrow.line.left)).toBeLessThanOrEqual(1);
+    expect(narrow.steps.top).toBeGreaterThanOrEqual(narrow.button.bottom);
+    expect(narrow.button.right).toBeLessThanOrEqual(narrow.card.right);
+    const main = phone.screen.getByRole('main').element();
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(phone.screen.container, { owner: true });
+  });
+
   it('a_live_desk_has_no_setup_card', async () => {
     // The seeded copy's Desk is live and was made without setup: Today has no card, and Things to try stays.
     const { screen } = await renderRoute(TODAY);

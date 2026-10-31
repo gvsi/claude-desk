@@ -82,6 +82,15 @@
   flex: none;
 }
 
+/* On a phone "Continue setup" drops under the words, from their left edge, as Things to try's next
+   steps do. */
+@media (max-width: 639.98px) {
+  .cd-continue-setup__head {
+    flex-direction: column;
+    gap: var(--space-12);
+  }
+}
+
 /* Things to try */
 
 .cd-things {
