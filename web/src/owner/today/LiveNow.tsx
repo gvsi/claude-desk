@@ -28,7 +28,7 @@ export function LiveNow({ live }: LiveNowProps) {
             <ConversationListItem
               name={whoLabel(s)}
               time={formatClock(s.last_activity, business.timezone)}
-              status={conversationStatus(s, s.outcome_counts.held ?? 0)}
+              status={conversationStatus(s, s.outcome_counts.held ?? 0) ?? undefined}
               href={conversationPath(desk.desk_id, s.session_id)}
             />
           </li>

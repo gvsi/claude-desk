@@ -8,8 +8,11 @@ export interface ConversationListItemProps {
   name: string;
   /** When it started or last moved, as the screen writes it: "12:04 pm". */
   time: string;
-  /** The conversation's state: a tone for the dot and the words that say the same, "Needs you". */
-  status: { tone: StatusTone; text: string };
+  /**
+   * The conversation's state: a tone for the dot and the words that say the same, "Needs you".
+   * Left out when the name already says all there is ("Visitor"), so the row doesn't say it twice.
+   */
+  status?: { tone: StatusTone; text: string };
   /** The conversation's page. */
   href: string;
   /** The conversation open beside the list: marked `aria-current` on the selected fill. */
@@ -20,8 +23,9 @@ export interface ConversationListItemProps {
 
 /**
  * One conversation in a list: who it is with and when on the first line, its status as a dot and
- * words on the second, with the Recorded tag at its end when the conversation was replayed. The
- * whole row is one link to the conversation. Put each in a list item.
+ * words on the second, with the Recorded tag at its end when the conversation was replayed. With
+ * no status and no tag there is no second line. The whole row is one link to the conversation.
+ * Put each in a list item.
  */
 export function ConversationListItem({ name, time, status, href, current = false, recorded = false }: ConversationListItemProps) {
   return (
@@ -32,11 +36,17 @@ export function ConversationListItem({ name, time, status, href, current = false
         </span>
         <span className="cd-conversation-item__time cd-type-caption">{time}</span>
       </span>
-      <span className="cd-conversation-item__status cd-type-caption">
-        <StatusDot tone={status.tone} />
-        <span className="cd-conversation-item__status-text">{status.text}</span>
-        {recorded ? <RecordedTag className="cd-conversation-item__recorded" /> : null}
-      </span>
+      {status !== undefined || recorded ? (
+        <span className="cd-conversation-item__status cd-type-caption">
+          {status !== undefined ? (
+            <>
+              <StatusDot tone={status.tone} />
+              <span className="cd-conversation-item__status-text">{status.text}</span>
+            </>
+          ) : null}
+          {recorded ? <RecordedTag className="cd-conversation-item__recorded" /> : null}
+        </span>
+      ) : null}
     </a>
   );
 }

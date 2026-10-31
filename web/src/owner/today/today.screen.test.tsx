@@ -538,6 +538,18 @@ describe('Today', () => {
     await expect.element(screen.getByText('Quiet right now.', { exact: true })).toBeVisible();
   });
 
+  it('unnamed_visitor_reads_visitor_once', async () => {
+    // Dana's chat is live, and she hasn't given her name: the row's name line says "Visitor", and
+    // its status line doesn't say it again, nor shows its dot alone.
+    const { screen } = await renderRoute(TODAY);
+    const row = region(screen, 'Live now').getByRole('link');
+    await expect.element(row).toBeVisible();
+    expect(row.elements()).toHaveLength(1);
+    await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m$/);
+    expect(row.getByText('Visitor', { exact: true }).elements()).toHaveLength(1);
+    expect(row.element().querySelector('.cd-status-dot')).toBeNull();
+  });
+
   it('allow_once_executes_and_updates', async () => {
     const { screen } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
