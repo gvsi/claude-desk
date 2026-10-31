@@ -5,45 +5,57 @@
  * it, so the three agree. It reads the rules and decides nothing: the kernel decides every request.
  *
  * It follows the kernel's rule compiler (`backend/desk/kernel_service/compiler.py`; the master
- * plan's "Coverage and overlap") for each of three visitors, with the rules for them:
+ * plan's "Coverage and overlap") for each visitor the rules can tell apart, with the rules for
+ * them (`_who`, lines 354-366):
  * - a stranger: rules for anyone;
  * - a verified customer: rules for anyone and for verified customers;
- * - a record's owner: those and rules for record owners, only on a tool whose records have an
+ * - a record's owner: those and rules for record owners, only on a tool whose records can have an
  *   owner (`hasRecordOwner`). Elsewhere a rule for record owners is for no one, since the kernel
- *   matches it only when the resource's owner is the visitor (`_who`, line 360).
- * Rules for one person or one agent are left out: they never say what happens for anyone else.
+ *   matches it only when the resource's owner is the visitor (line 360);
+ * - each person a rule names (`who: "person"`), with that rule and their others: a verified
+ *   customer, since only a session `/verify/check` bound to them carries their `person_id`, which
+ *   makes it verified (`backend/desk/kernel_service/sessions.py` lines 21-24). Where records can
+ *   have an owner, a named person is read twice, as the owner of the record a request is about and
+ *   as someone else's customer, since which records are theirs is the kernel's to know, not the
+ *   rules'; the more permissive counts;
+ * - each agent a rule names (`who: "agent"`), with its rules on top of those of each standing
+ *   above, a person's included: an agent gets the rules of the visitor with its standing, since an
+ *   agent's session is verified once `/verify/check` binds it to a person (the same lines).
+ * An agent no rule names gets the rules of the visitor with its standing, and no more.
  *
  * For one visitor at one moment:
  * - a never rule on the tool or on one of its effects refuses: it is a forbid (lines 541-542);
  * - else an automatic permit runs, unless an ask rule at the same or a higher rank, or another
- *   permit at a higher rank, covers the tool for that visitor (`_exclusions`, lines 498-501). A
- *   tool's own rule ranks above a shared one (`specificity`, `backend/desk/always_on.py` lines 32-39).
- *   The reviewer's check, when a rule has one, counts as passed;
+ *   permit at a higher rank, covers the tool for that visitor (`_exclusions`, lines 498-501). The
+ *   rank is the kernel's `specificity` (`backend/desk/always_on.py` lines 32-39): a rule for one
+ *   person or agent above one for a group, then a tool's own rule above a shared one. The
+ *   reviewer's check, when a rule has one, counts as passed;
  * - a permit is one automatic rule on the tool, one on the tool's only effect, or, on a tool with
- *   several effects, one automatic shared rule for each effect together (`_autos`, lines 440-461,
- *   and `_combinations`, lines 218-228), and it runs only while every one of its rules' hours holds
- *   (`_limits`, line 480);
+ *   several effects, one automatic shared rule for each effect together, all at one rank (`_autos`,
+ *   lines 440-461, and `_combinations`, lines 218-228), and it runs only while every one of its
+ *   rules' hours holds (`_limits`, line 480);
  * - else it asks (an ask rule, a permit's hold twin, or the default ask).
  *
  * The always-on baseline (`kernel/cedar/baseline.cedar`) forbids in every decision, whatever the
- * rules say; its line numbers follow. Two of its rules change what runs for one of the three
+ * rules say; its line numbers follow. Three of its rules change what runs for one of these
  * visitors, and are read here:
  * - `private_data_record_owner` (lines 18-24): private data goes only to a verified visitor whose
  *   record it is (`principal.verified && context.record_owner_match`, which
- *   `backend/desk/kernel_service/decide.py` sets at line 129). So a tool with the `private_data` effect refuses a stranger and a verified customer
- *   who isn't the owner, and runs, if at all, only for the record's owner;
+ *   `backend/desk/kernel_service/decide.py` sets at line 129). So a tool with the `private_data`
+ *   effect refuses every visitor but the record's owner, a named person read as one included;
+ * - `no_agent_pay_out` (lines 38-43): an agent never pays money out, so a tool with the `pay_out`
+ *   effect refuses every agent, whatever its rules say;
  * - `money_has_amount` (lines 58-68): money always moves an amount above zero, and a permit on a
- *   money tool requires the amount to be within its bound (`_limits` in `compiler.py`, lines 475-477), so a permit
- *   up to $0 on a tool that charges or pays out never runs.
- * The others change nothing these three visitors can run:
+ *   money tool requires the amount to be within its bound (`_limits` in `compiler.py`, lines
+ *   475-477), so a permit up to $0 on a tool that charges or pays out never runs.
+ * The others change nothing these visitors can run:
  * - `same_copy` (lines 10-16): every session acts on its own copy's records;
  * - `recipient_owner_or_verified_contact` (lines 26-36), with verification codes going only to the
  *   contact on record: an adapter sets a recipient only to `owner` or `verified_contact`
- *   (`backend/desk/kernel_service/adapters/base.py`, line 67), and no rule can change Confirm it's them
- *   (`changes_always_on`, `backend/desk/always_on.py` lines 49-69);
- * - `no_agent_pay_out` and `agent_charge_within_mandate` (lines 38-56): they bind agents only, and
- *   an agent is held to the rules for anyone that a stranger is, so it never runs more than one;
- *   the signed limit only narrows what an agent runs within them;
+ *   (`backend/desk/kernel_service/adapters/base.py`, line 67), and no rule can change Confirm it's
+ *   them (`changes_always_on`, `backend/desk/always_on.py` lines 49-69);
+ * - `agent_charge_within_mandate` (lines 45-56): an agent gets the rules of the visitor with its
+ *   standing, and this forbid only narrows what it runs, to the signed limit it holds;
  * - `auto_money_cap` (lines 70-83): every automatic money rule in a version is within its payment
  *   limit (`validate_cards`, `compiler.py` lines 334-336; `lower_to_cap`, `backend/desk/money_cap.py`
  *   lines 29-52), so the payment limit never stops a permit its own limit lets run.
@@ -63,8 +75,9 @@
  * its own, as the kernel reads a request's local day and minute.
  *
  * The outcome is the most permissive over visitors and stretches of the week: automatic, then ask
- * me first, then never, an automatic one at its largest limit. When every visitor is refused, it
- * names the never rule that refuses the one the baseline doesn't.
+ * me first, then never, an automatic one at its largest limit. Visitors are read stranger first,
+ * so where readings tie, the outcome names the stranger's rule. When every visitor is refused, it
+ * names a never rule that refuses one the baseline doesn't.
  */
 import { MONEY_EFFECTS, type RuleCard } from '../../api/contracts.ts';
 import type { RuleMode, RulesTool } from '../../ds/index.ts';
@@ -82,12 +95,50 @@ export interface ToolOutcome {
   rule?: RuleCard;
 }
 
-/** The visitors a tool's outcome is read for, each with the groups of people the rules for them name. */
-const VISITORS = [
-  { who: new Set<RuleCard['who']>(['anyone']), ownersOnly: false },
-  { who: new Set<RuleCard['who']>(['anyone', 'verified']), ownersOnly: false },
-  { who: new Set<RuleCard['who']>(['anyone', 'verified', 'record_owner']), ownersOnly: true },
-] as const;
+/**
+ * A visitor a tool's outcome is read for: their standing (verified or not, and whether the record a
+ * request is about is theirs), and the person and the agent they are, when a rule names them.
+ */
+interface Visitor {
+  verified: boolean;
+  owner: boolean;
+  personId: string | null;
+  agentKey: string | null;
+}
+
+/** Whether `card` is for `visitor`, as the kernel's `_who` reads it (`compiler.py` lines 354-366). */
+function isFor(card: RuleCard, visitor: Visitor): boolean {
+  switch (card.who) {
+    case 'anyone':
+      return true;
+    case 'verified':
+      return visitor.verified;
+    case 'record_owner':
+      return visitor.verified && visitor.owner;
+    case 'person':
+      return visitor.personId !== null && card.person_id === visitor.personId;
+    case 'agent':
+      return visitor.agentKey !== null && card.agent_key_id === visitor.agentKey;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Every visitor `covering`'s rules tell apart, stranger first: a stranger, a verified customer, a
+ * record's owner where `owned`, and each person a rule names as a verified customer and, where
+ * `owned`, as the record's owner; then all of them again as each agent a rule names.
+ */
+function visitorsFor(covering: readonly RuleCard[], owned: boolean): Visitor[] {
+  const people = [...new Set(covering.flatMap((card) => (card.who === 'person' && card.person_id != null ? [card.person_id] : [])))];
+  const agents = [...new Set(covering.flatMap((card) => (card.who === 'agent' && card.agent_key_id != null ? [card.agent_key_id] : [])))];
+  const asCustomer = (personId: string | null): Omit<Visitor, 'agentKey'>[] => [
+    { verified: true, owner: false, personId },
+    ...(owned ? [{ verified: true, owner: true, personId }] : []),
+  ];
+  const standings: Omit<Visitor, 'agentKey'>[] = [{ verified: false, owner: false, personId: null }, ...asCustomer(null), ...people.flatMap(asCustomer)];
+  return [null, ...agents].flatMap((agentKey) => standings.map((standing) => ({ ...standing, agentKey })));
+}
 
 /** A rule on an effect group (`effect:charge`), which every tool with that effect shares. */
 const isShared = (card: RuleCard) => card.applies_to.startsWith('effect:');
@@ -95,8 +146,11 @@ const isShared = (card: RuleCard) => card.applies_to.startsWith('effect:');
 /** The baseline's refusal: no rule of the owner's gives it, so it names none. */
 const REFUSED: ToolOutcome = { mode: 'never', limitCents: null };
 
-/** The kernel's rank of a rule for a group of people: a tool's own rule above a shared one. */
-const rank = (card: RuleCard) => (isShared(card) ? 0 : 1);
+/** A rule for one person or one agent. */
+const named = (card: RuleCard) => card.who === 'person' || card.who === 'agent';
+
+/** The kernel's rank of a rule (`specificity`): one for a person or agent above one for a group, then a tool's own above a shared one. */
+const rank = (card: RuleCard) => (named(card) ? 2 : 0) + (isShared(card) ? 0 : 1);
 
 /** An automatic permit: one rule, or shared rules for each of the tool's effects together, at one rank. */
 interface Permit {
@@ -166,18 +220,24 @@ function oneOfEach(lists: readonly (readonly RuleCard[])[]): RuleCard[][] {
   return lists.reduce<RuleCard[][]>((combos, list) => combos.flatMap((combo) => list.map((card) => [...combo, card])), [[]]);
 }
 
+/** The ranks a shared rule can have: for one person or agent, or for a group. */
+const SHARED_RANKS: readonly number[] = [2, 0];
+
 /**
  * The tool's automatic permits among `rules` (`_autos`): each automatic rule on the tool; each
  * automatic shared rule on its effect when that is the tool's only effect; and on a tool with
- * several effects, each set of one automatic shared rule per effect.
+ * several effects, each set of one automatic shared rule per effect, all at one rank.
  */
 function permitsFor(tool: RulesTool, rules: readonly RuleCard[]): Permit[] {
   const autos = rules.filter((card) => card.mode === 'auto');
-  const own = autos.filter((card) => card.applies_to === tool.tool).map((card): Permit => ({ rules: [card], rank: 1 }));
+  const own = autos.filter((card) => card.applies_to === tool.tool).map((card): Permit => ({ rules: [card], rank: rank(card) }));
   // In the compiler's order (`sorted(effects)`), so a tie reads by the same rule.
   const effects = [...new Set(tool.effects)].sort();
-  const perEffect = effects.map((effect) => autos.filter((card) => card.applies_to === `effect:${effect}`));
-  const shared = effects.length === 0 ? [] : oneOfEach(perEffect).map((combo): Permit => ({ rules: combo, rank: 0 }));
+  const shared = SHARED_RANKS.flatMap((level) => {
+    if (effects.length === 0) return [];
+    const perEffect = effects.map((effect) => autos.filter((card) => card.applies_to === `effect:${effect}` && rank(card) === level));
+    return oneOfEach(perEffect).map((combo): Permit => ({ rules: combo, rank: level }));
+  });
   return [...own, ...shared];
 }
 
@@ -209,19 +269,19 @@ export function toolOutcome(tool: RulesTool, cards: readonly RuleCard[]): ToolOu
     (card) => card.is_default !== true && (card.applies_to === tool.tool || tool.effects.some((effect) => card.applies_to === `effect:${effect}`)),
   );
   const moments = weekMoments(covering.filter((card) => card.mode === 'auto'));
-  const owned = hasRecordOwner(tool.tool);
   // The baseline's `private_data_record_owner`: only the record's owner gets private data.
   const privateData = tool.effects.includes('private_data');
+  // The baseline's `no_agent_pay_out`: no agent pays money out.
+  const paysOut = tool.effects.includes('pay_out');
   // The baseline's `money_has_amount`: money moves only in an amount above zero.
   const money = tool.effects.some((effect) => MONEY_EFFECTS.has(effect));
   let best: ToolOutcome | undefined;
-  for (const visitor of VISITORS) {
-    if (visitor.ownersOnly && !owned) continue;
-    if (privateData && !visitor.ownersOnly) {
+  for (const visitor of visitorsFor(covering, hasRecordOwner(tool.tool))) {
+    if ((privateData && !(visitor.verified && visitor.owner)) || (paysOut && visitor.agentKey !== null)) {
       if (replaces(REFUSED, best)) best = REFUSED;
       continue;
     }
-    const rules = covering.filter((card) => visitor.who.has(card.who));
+    const rules = covering.filter((card) => isFor(card, visitor));
     const byRank = [...rules].sort((a, b) => rank(b) - rank(a));
     const never = byRank.find((card) => card.mode === 'never');
     const asks = byRank.filter((card) => card.mode === 'ask');

@@ -774,10 +774,14 @@ describe('rule drafts', () => {
       ['turned-on:native.payment_link', 'auto', '$300'],
       ['turned-on:native.charge_mandate', 'ask', undefined],
     ]);
-    // A rule for one person, or for some hours only, doesn't decide for anyone: the tool still asks.
-    const forDana = { ...ruleCards['rv-link'], who: 'person' as const, person_id: DANA.personId };
-    const partial = changeRows(draftFromVersion(version(7, [...noPayments, forDana]), version(8, [...noPayments, forDana]), turnedOn.slice(0, 1)), PEOPLE, TOOLS);
-    expect(partial.map((row) => row.after?.mode)).toEqual(['ask']);
+    // A rule for one person runs for her, so the tool turns on at "Automatic" in her rule's words.
+    const forDana: RuleCard = { ...ruleCards['rv-link'], card_id: 'card-dana-links', who: 'person', person_id: DANA.personId, reason: 'Dana pays by link up to $300.' };
+    const linkOn = (cards: RuleCard[]) => changeRows(draftFromVersion(version(7, cards), version(8, cards), turnedOn.slice(0, 1)), PEOPLE, TOOLS)[0]?.after;
+    expect(linkOn([...noPayments, forDana])).toEqual({ mode: 'auto', limit: '$300', reason: forDana.reason, words: ruleWords(forDana, PEOPLE) });
+    // At the same limit as the rule for anyone, the row reads by that rule; above it, by hers.
+    expect(linkOn([...noPayments, ruleCards['rv-link'], forDana])).toMatchObject({ mode: 'auto', limit: '$300', reason: ruleCards['rv-link'].reason });
+    const danaMore: RuleCard = { ...forDana, card_id: 'card-dana-links-450', max_amount_cents: 45_000, reason: 'Dana pays by link up to $450.' };
+    expect(linkOn([...noPayments, ruleCards['rv-link'], danaMore])).toMatchObject({ mode: 'auto', limit: '$450', reason: danaMore.reason });
 
     // The outcome follows precedence, not the first rule listed. A never rule always wins: an
     // automatic Refund rule beside "never send money out" turns Refund on at Never.
@@ -865,6 +869,27 @@ describe('rule drafts', () => {
         ],
         mode: 'auto',
         limit: '$300',
+      },
+      {
+        name: "Dana's own rule above the rule for anyone runs up to hers",
+        tool: 'native.payment_link',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-dana-links', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: DANA.personId, max_amount_cents: 45_000 })],
+        mode: 'auto',
+        limit: '$450',
+      },
+      {
+        name: "Dana's own automatic refunds outrank the ask for record owners",
+        tool: 'payments.create_refund',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-dana-refunds', applies_to: 'payments.create_refund', mode: 'auto', who: 'person', person_id: DANA.personId, max_amount_cents: 18_000 })],
+        mode: 'auto',
+        limit: '$180',
+      },
+      {
+        name: "an agent's rule runs for the agent",
+        tool: 'native.payment_link',
+        cards: [...without('rv-link'), rivera.sharedChargeCard],
+        mode: 'auto',
+        limit: '$20',
       },
       {
         name: 'shared rules whose hours never meet never run together',

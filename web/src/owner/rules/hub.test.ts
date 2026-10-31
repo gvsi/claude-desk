@@ -260,12 +260,12 @@ describe('the Rules hub', () => {
     desk().policy.cards = desk().policy.cards.filter((c) => c.applies_to !== 'native.quote');
     const bare = hubSections(rulesView(desk()), people()).flatMap((s) => s.tools).find((t) => t.key === 'native.quote');
     expect(bare).toMatchObject({ summary: 'No rule yet', mode: 'ask' });
-    // Only a rule for one person: everyone else is asked about.
+    // Only a rule for one person: it runs for her, so Book a visit reads automatic.
     const dana = view([rivera.personalBookingCard]);
     desk().policy.cards = desk().policy.cards.filter((c) => !c.card_id.startsWith('rv-book'));
     const book = hubSections(rulesView(desk()), people()).flatMap((s) => s.tools).find((t) => t.key === 'native.book');
     expect(dana.active.cards.some((c) => c.card_id === 'rv-dana-book')).toBe(true);
-    expect(book).toMatchObject({ summary: 'Dana Whitfield', mode: 'ask' });
+    expect(book).toMatchObject({ summary: 'Dana Whitfield', mode: 'auto' });
   });
 
   it('summary_is_the_most_that_runs_for_some_visitor', () => {
@@ -348,6 +348,61 @@ describe('the Rules hub', () => {
     const chargesVerified = card({ card_id: 'card-charges-verified', applies_to: 'payments.list_charges', mode: 'auto', who: 'verified', reason: 'Verified customers see charges.' });
     const chargesOwnerAsk = card({ card_id: 'card-charges-owner-ask', applies_to: 'payments.list_charges', mode: 'ask', who: 'record_owner', reason: 'Customers ask to see their charges.' });
     expect(hubTool(view([chargesVerified, chargesOwnerAsk]), 'payments.list_charges')).toMatchObject({ summary: '2 rules', mode: 'ask' });
+  });
+
+  it('named_people_and_agents_are_visitors_too', () => {
+    // A rule for one person or one agent names a visitor of their own, who gets it on top of the
+    // rules their standing gives them, so what runs for them counts too. "Allow only for this
+    // person, always" drafts such a rule, at the held amount. Dana's own rule up to $450 beside
+    // Payment link's $300 for anyone: her links up to $450 run.
+    const dana = rivera.people.dana.personId;
+    const danaLinks = card({ card_id: 'card-dana-links', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: dana, max_amount_cents: 45_000, reason: 'Dana pays by link up to $450.' });
+    expect(hubTool(view([danaLinks]), 'native.payment_link')).toMatchObject({ mode: 'auto', limit: '$450' });
+    // Refund asks the record's owner first, but Dana's own automatic rule up to $180 outranks that
+    // for her: her refunds up to $180 run.
+    const danaRefunds = card({
+      card_id: 'card-dana-refunds',
+      applies_to: 'payments.create_refund',
+      mode: 'auto',
+      who: 'person',
+      person_id: dana,
+      max_amount_cents: 18_000,
+      reason: 'Refunds to Dana up to $180 go through.',
+    });
+    expect(hubTool(view([danaRefunds]), 'payments.create_refund')).toMatchObject({ mode: 'auto', limit: '$180' });
+  });
+
+  it('agent_rules_run_for_their_agents', () => {
+    // An agent's rule names a visitor too, at the standing its session has. Without Payment link's
+    // own rule, the demo agent's rule on every tool that charges money runs up to $20.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== 'rv-link');
+    expect(hubTool(view([rivera.sharedChargeCard]), 'native.payment_link')).toMatchObject({ mode: 'auto', limit: '$20' });
+    // An agent never pays money out, whatever its rules say: the agent's automatic Refund rule runs
+    // for no one, and Refund still asks the record's owner first.
+    const agentRefunds = card({
+      card_id: 'card-agent-refunds',
+      applies_to: 'payments.create_refund',
+      mode: 'auto',
+      who: 'agent',
+      agent_key_id: rivera.sharedChargeCard.agent_key_id,
+      max_amount_cents: 5_000,
+      reason: 'The assistant refunds up to $50.',
+    });
+    expect(hubTool(view([agentRefunds]), 'payments.create_refund')).toMatchObject({ mode: 'ask' });
+  });
+
+  it('a_named_rule_never_reads_stricter_than_the_group', () => {
+    // A rule for one person or agent says what happens for them alone: one that refuses, or runs
+    // less, leaves the outcome where everyone else's rules put it.
+    const dana = rivera.people.dana.personId;
+    const danaNever = card({ card_id: 'card-dana-links-never', applies_to: 'native.payment_link', mode: 'never', who: 'person', person_id: dana, reason: 'No links for Dana.' });
+    expect(hubTool(view([danaNever]), 'native.payment_link')).toMatchObject({ mode: 'auto', limit: '$300' });
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== danaNever.card_id);
+    const danaNarrow = card({ ...danaNever, card_id: 'card-dana-links-100', mode: 'auto', max_amount_cents: 10_000, reason: 'Dana pays by link up to $100.' });
+    expect(hubTool(view([danaNarrow]), 'native.payment_link')).toMatchObject({ mode: 'auto', limit: '$300' });
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== danaNarrow.card_id);
+    const agentNever = card({ ...rivera.sharedChargeCard, card_id: 'card-agent-charges-never', mode: 'never', max_amount_cents: null, reason: 'The assistant takes no payments.' });
+    expect(hubTool(view([agentNever]), 'native.payment_link')).toMatchObject({ mode: 'auto', limit: '$300' });
   });
 
   it('money_moves_only_in_an_amount_above_zero', () => {
