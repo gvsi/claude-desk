@@ -423,10 +423,10 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     in this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429
     `rate_limited` until the oldest one's hour ends.
 
-    One rule for failures, as when starting setup: a request that fails before anything is made (refused by the limit
-    or the budget, or the kernel refused to mint the agent with a 4xx) frees its key, so the same request can be sent
-    again. Once the kernel may have minted the agent (no answer came back, or a 5xx) or the run started, the key keeps
-    the run however it ends, a failed one too, and a new click sends a new key."""
+    A request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the
+    agent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent
+    (no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a
+    new click sends a new key."""
     state = runtime(request).started()
     key = body.idempotency_key
     async with state.agents.admissions.admitting(ctx.ids.copy_id, key):

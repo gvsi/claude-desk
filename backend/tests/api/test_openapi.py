@@ -119,20 +119,22 @@ def test_path_parameters_are_named_after_their_resource():
 
 
 def test_the_keyed_starts_document_their_answers():
-    # The web reads these: the answers a keyed start or send can give, the one failure rule both follow, and that
-    # setup's messages open at Claude's consent question, the owner's description not shown back.
+    # The web reads these: the answers a keyed start or send can give, each one's own rule for when its key is freed or
+    # kept, and that setup's messages open at Claude's consent question, the owner's description not shown back.
     document = export_openapi()
     start = document["paths"]["/api/owner/setup"]["post"]
     send = document["paths"]["/api/public/desks/{slug}/send_agent"]["post"]
     assert {"404", "409", "422", "429", "503"} <= set(start["responses"])
     assert {"409", "422", "429", "503"} <= set(send["responses"])
-    for operation in (start, send):
-        assert "One rule for failures" in operation["description"]
-    assert "a repeat that finds the key never counts" in send["description"]
-    # What the start shares with the send is when a key is freed or kept; only the start answers `key_spent`.
-    sentences = " ".join(start["description"].split()).split(". ")
-    (shared,) = [sentence for sentence in sentences if "as when sending the built-in agent" in sentence]
-    assert "key_spent" not in shared and "key_spent" not in send["description"]
-    assert any("key_spent" in sentence for sentence in sentences)
-    described = " ".join(document["components"]["schemas"]["SetupState"]["description"].split())
+    starting, sending = (" ".join(operation["description"].split()) for operation in (start, send))
+    assert "a repeat that finds the key never counts" in sending
+    # The rules differ, so neither claims the other's: a kernel 4xx frees the send's key, while the start's key keeps
+    # its outcome once the Desk was asked for, whatever the kernel answered. Only the start answers `key_spent`.
+    for described in (starting, sending):
+        assert not any(claim in described for claim in ("One rule for failures", "as when sending", "as when starting",
+                                                         "as sending the agent"))
+    assert "the kernel refused to mint the agent with a 4xx) frees its key" in sending
+    assert "the key keeps the outcome whatever the kernel answered, a refusal too" in starting
+    assert "key_spent" in starting and "key_spent" not in sending
+    described =" ".join(document["components"]["schemas"]["SetupState"]["description"].split())
     assert "start at Claude's consent question" in described and "isn't shown back" in described
