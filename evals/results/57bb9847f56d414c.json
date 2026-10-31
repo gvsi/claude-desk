@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "f134f9229b66d25d",
+ "inputs": "57bb9847f56d414c",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "0f005a2823bf3d115918c53e8a9572becc51895a",
+   "ad1acc96db6f4e702a11ca1edcf54d591ca1d964",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -15,19 +15,19 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "38b36d01d21eb990c9c2fb1741fc3cbf08b332d5",
+   "cf9f171f99fcb7e6cef81cc94601eeae3e57728a",
    "backend/desk/contracts.py"
   ],
   [
-   "969aba67883abb86917e9238b0f1c9ac04e1f89e",
+   "0dccbc9eed04d78a402e002c59739dedf975096c",
    "backend/desk/kernel_api.py"
   ],
   [
-   "b8b7d5e5321b9d9fb8f78f0192061358380db941",
+   "f2cc97d1b81fb01fd8cdb6f1e039eea4b841c1ba",
    "backend/desk/kernel_service"
   ],
   [
-   null,
+   "d07270487072c01ba89475ef06977a9f1416bb84",
    "backend/desk/mockpay"
   ],
   [
@@ -47,7 +47,7 @@
    "evals/splits.yaml"
   ],
   [
-   "5fef6f970186bee4c182aecef4bec92dab6d2c5f",
+   "54f5cb347c1f865232eae3641b6d8d794dcc05a9",
    "evals/tier1/landed.toml"
   ],
   [
@@ -75,13 +75,13 @@
    "evals/tier2/verdict.py"
   ],
   [
-   "7a4e21722f7b3d785e2c5bbfb86f9be11b68a5ea",
+   "071aeb1b679c0e3f52e975e84ffd9b25d485cfa6",
    "kernel"
   ]
  ],
- "git_sha": "9ea84ab85808ac27d69affd1a88de0b3c0c8256c",
- "created_at": "2026-10-31T11:38:48.322557Z",
- "pass_id": "20261031-113848-6599d2",
+ "git_sha": "9a9a709a74d0060ecac9988ed6eecca73afa5003",
+ "created_at": "2026-10-31T13:55:03.302903Z",
+ "pass_id": "20261031-135503-5ec126",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -106,6 +106,8 @@
   "master",
   "01a",
   "01b",
+  "01c",
+  "01c-setup",
   "02a"
  ],
  "suite_sha256": "dce38629538f80ac7dced111263f923fdf6fcae121fad23d2fe632ca4bdb9ba2",
@@ -113,12 +115,12 @@
  "recorded_rate": null,
  "runs": [],
  "pending": {
-  "atk-agent-claims-owner": "01c",
-  "atk-agent-drop-disclosure": "01c",
-  "atk-agent-no-mandate-charge": "01c",
-  "atk-agent-over-mandate": "01c",
-  "atk-agent-private-data": "01c",
-  "atk-agent-refund": "01c",
+  "atk-agent-claims-owner": "02",
+  "atk-agent-drop-disclosure": "02",
+  "atk-agent-no-mandate-charge": "02",
+  "atk-agent-over-mandate": "02",
+  "atk-agent-private-data": "02",
+  "atk-agent-refund": "02",
   "atk-commit-confirm-in-words": "02",
   "atk-commit-emoji-digits": "02",
   "atk-commit-es-garantia": "02",
@@ -136,9 +138,9 @@
   "atk-inject-fake-whisper": "02",
   "atk-inject-knowledge-price": "02",
   "atk-inject-lookalike-link": "02",
-  "atk-inject-tool-description": "01c",
+  "atk-inject-tool-description": "02",
   "atk-inject-unknown-tool": "02",
-  "atk-inject-website-text": "01c",
+  "atk-inject-website-text": "02",
   "atk-lang-french-discount": "02",
   "atk-lang-portuguese-price": "02",
   "atk-lang-spanglish-numbers": "02",
@@ -147,10 +149,10 @@
   "atk-money-es-precio-amigo": "02",
   "atk-money-maria-said-1": "02",
   "atk-money-price-match": "02",
-  "atk-money-refund-pressure": "01c",
+  "atk-money-refund-pressure": "02",
   "atk-money-split-discounts": "02",
-  "atk-money-zero-deposit": "01c",
-  "atk-private-charges-unverified": "01c",
+  "atk-money-zero-deposit": "02",
+  "atk-private-charges-unverified": "02",
   "atk-private-dana-details": "02",
   "atk-private-dana-document": "02",
   "atk-private-es-datos-de-dana": "02",
@@ -164,8 +166,8 @@
   "atk-verify-im-the-owner": "02",
   "atk-verify-read-me-the-code": "02",
   "atk-verify-support-script": "02",
-  "leg-agent-asks-hours": "01c",
-  "leg-agent-buys-within-mandate": "01c",
+  "leg-agent-asks-hours": "02",
+  "leg-agent-buys-within-mandate": "02",
   "leg-ai-en": "02",
   "leg-ai-es": "02",
   "leg-ask-for-maria": "02",
@@ -174,9 +176,9 @@
   "leg-book-saturday": "02",
   "leg-callback-en": "02",
   "leg-callback-es": "02",
-  "leg-charges-dana": "01c",
-  "leg-deposit-checkout": "01c",
-  "leg-deposit-link": "01c",
+  "leg-charges-dana": "02",
+  "leg-deposit-checkout": "02",
+  "leg-deposit-link": "02",
   "leg-discount-approved": "02",
   "leg-document-dana": "02",
   "leg-document-es": "02",
@@ -190,7 +192,7 @@
   "leg-quote-drain-en": "02",
   "leg-quote-es": "02",
   "leg-quote-water-heater-en": "02",
-  "leg-refund-approved": "01c",
+  "leg-refund-approved": "02",
   "leg-reschedule-callback": "02",
   "leg-service-area": "02",
   "leg-slots-en": "02",
@@ -209,12 +211,12 @@
   "false_hold_rate": null,
   "incomplete_runs": [],
   "pending": {
-   "atk-agent-claims-owner": "01c",
-   "atk-agent-drop-disclosure": "01c",
-   "atk-agent-no-mandate-charge": "01c",
-   "atk-agent-over-mandate": "01c",
-   "atk-agent-private-data": "01c",
-   "atk-agent-refund": "01c",
+   "atk-agent-claims-owner": "02",
+   "atk-agent-drop-disclosure": "02",
+   "atk-agent-no-mandate-charge": "02",
+   "atk-agent-over-mandate": "02",
+   "atk-agent-private-data": "02",
+   "atk-agent-refund": "02",
    "atk-commit-confirm-in-words": "02",
    "atk-commit-emoji-digits": "02",
    "atk-commit-es-garantia": "02",
@@ -232,9 +234,9 @@
    "atk-inject-fake-whisper": "02",
    "atk-inject-knowledge-price": "02",
    "atk-inject-lookalike-link": "02",
-   "atk-inject-tool-description": "01c",
+   "atk-inject-tool-description": "02",
    "atk-inject-unknown-tool": "02",
-   "atk-inject-website-text": "01c",
+   "atk-inject-website-text": "02",
    "atk-lang-french-discount": "02",
    "atk-lang-portuguese-price": "02",
    "atk-lang-spanglish-numbers": "02",
@@ -243,10 +245,10 @@
    "atk-money-es-precio-amigo": "02",
    "atk-money-maria-said-1": "02",
    "atk-money-price-match": "02",
-   "atk-money-refund-pressure": "01c",
+   "atk-money-refund-pressure": "02",
    "atk-money-split-discounts": "02",
-   "atk-money-zero-deposit": "01c",
-   "atk-private-charges-unverified": "01c",
+   "atk-money-zero-deposit": "02",
+   "atk-private-charges-unverified": "02",
    "atk-private-dana-details": "02",
    "atk-private-dana-document": "02",
    "atk-private-es-datos-de-dana": "02",
@@ -260,8 +262,8 @@
    "atk-verify-im-the-owner": "02",
    "atk-verify-read-me-the-code": "02",
    "atk-verify-support-script": "02",
-   "leg-agent-asks-hours": "01c",
-   "leg-agent-buys-within-mandate": "01c",
+   "leg-agent-asks-hours": "02",
+   "leg-agent-buys-within-mandate": "02",
    "leg-ai-en": "02",
    "leg-ai-es": "02",
    "leg-ask-for-maria": "02",
@@ -270,9 +272,9 @@
    "leg-book-saturday": "02",
    "leg-callback-en": "02",
    "leg-callback-es": "02",
-   "leg-charges-dana": "01c",
-   "leg-deposit-checkout": "01c",
-   "leg-deposit-link": "01c",
+   "leg-charges-dana": "02",
+   "leg-deposit-checkout": "02",
+   "leg-deposit-link": "02",
    "leg-discount-approved": "02",
    "leg-document-dana": "02",
    "leg-document-es": "02",
@@ -286,7 +288,7 @@
    "leg-quote-drain-en": "02",
    "leg-quote-es": "02",
    "leg-quote-water-heater-en": "02",
-   "leg-refund-approved": "01c",
+   "leg-refund-approved": "02",
    "leg-reschedule-callback": "02",
    "leg-service-area": "02",
    "leg-slots-en": "02",
