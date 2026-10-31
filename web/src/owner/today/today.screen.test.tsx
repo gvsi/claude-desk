@@ -396,7 +396,8 @@ describe('Today', () => {
       const name = [...(row?.querySelectorAll('[data-copy="user"]') ?? [])].map((el) => el.textContent);
       expect(name).toContain('Dana Whitfield');
     }
-    await expect.element(since.getByRole('link', { name: 'See all 3' })).toBeVisible();
+    // All three are on the card already, so there is no "See all" to open.
+    expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
 
     // A blocked reply has no line of its own, and a night with no booking leaves its row out.
     mockStore.reset('rivera');
@@ -411,6 +412,7 @@ describe('Today', () => {
     expect(kinds).toEqual(['Blocked', 'Answered']);
     expect(night.getByText('Booked').elements()).toHaveLength(0);
     await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
+    expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
