@@ -8,6 +8,11 @@ asserts that the kernel app (`desk.kernel_service.app`) registers each one, or t
 kernel plan that adds it. It also fails when a pending route is registered or isn't called by the API at all, so the
 list only shrinks as kernel plans land.
 
+What it can't see is a route's branches: it checks that the kernel registers a route, not that the route takes every
+request the API sends it. As this test lands, the kernel on `main` refuses the agent branch of `POST /sessions` and of
+`GET /whoami?session_id=`, which plan 01c adds, and the preview branch of `POST /sessions`, which plan 01b adds
+(`desk/kernel_service/sessions.py`).
+
 Whichever lands second of this test and a kernel plan's PR (01b, 01c) updates `PENDING_KERNEL_ROUTES`: the later
 change takes out the entries the kernel on `main` serves by then.
 """
