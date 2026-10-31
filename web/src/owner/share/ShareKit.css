@@ -74,11 +74,17 @@
   }
 }
 
-/* Print card: while the page is marked, only the card reaches paper, at the page's top left, in
-   dark ink on the paper's light ground, as the QR code's own quiet zone is. */
+/* Print card: while the page is marked, only the card reaches paper, on one page, at its top left,
+   in dark ink on the paper's light ground, as the QR code's own quiet zone is. The rest of the app
+   is hidden and takes no room, so it adds no blank pages for the card to repeat on. */
 @media print {
   :root[data-print-only='share-card'] body * {
     visibility: hidden;
+  }
+
+  :root[data-print-only='share-card'] #root {
+    height: 0;
+    overflow: hidden;
   }
 
   :root[data-print-only='share-card'] .cd-share-kit__card figure,

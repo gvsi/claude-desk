@@ -389,6 +389,15 @@ describe('share', () => {
     const words = screen.getByRole('list', { name: 'Ready-made words' });
     await expect.element(screen.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
 
+    // The link card 24 px under the header, the printable card and the words 24 px under it, side by side.
+    const header = screen.container.querySelector('.cd-page-header')?.getBoundingClientRect();
+    const linkBox = link.element().getBoundingClientRect();
+    const cardBox = screen.getByRole('figure').element().getBoundingClientRect();
+    expect(Math.round(linkBox.top - (header?.bottom ?? 0))).toBe(24);
+    expect(Math.round(cardBox.top - linkBox.bottom)).toBe(24);
+    expect(Math.round(cardBox.width)).toBe(300);
+    expect(Math.round(words.element().getBoundingClientRect().left - cardBox.right)).toBe(32);
+
     // The frame with Share current, its cards in the card look, and Tab through the link's two
     // buttons, Print card, then the words.
     await expectOwnerBoard(screen.container, {

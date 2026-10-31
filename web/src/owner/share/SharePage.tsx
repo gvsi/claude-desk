@@ -8,6 +8,8 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ShareKit } from './ShareKit.tsx';
 
+import './SharePage.css';
+
 export function SharePage() {
   const { business, desk } = useOwnerDesk();
   return (

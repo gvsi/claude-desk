@@ -1,0 +1,7 @@
+/* Share (N-Run2-Share): the share kit 24 px under the page's header. */
+.cd-share-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  min-width: 0;
+}
