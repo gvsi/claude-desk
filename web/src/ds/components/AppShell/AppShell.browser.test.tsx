@@ -572,3 +572,93 @@ it('a_long_page_glides_at_most_200_blocks', async () => {
   const last = container.querySelectorAll('[data-row]')[999] as HTMLElement;
   expect(last.getAnimations()).toHaveLength(0);
 });
+
+/** Where an element is drawn: its box's left and top. */
+const at = (el: Element) => {
+  const box = el.getBoundingClientRect();
+  return { left: Math.round(box.left * 10) / 10, top: Math.round(box.top * 10) / 10 };
+};
+
+it('a_turned_or_3d_block_lands_in_place', async () => {
+  // A glide is converted only through scaling and moving. A block that is turned, or under a box
+  // with a perspective (in 3D), takes no glide: on the first frame it is already where the new
+  // layout puts it, never somewhere else.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  const turnedPage = (
+    <div>
+      <div style={{ aspectRatio: '8 / 1' }} />
+      <div data-testid="turned" style={{ transform: 'rotate(30deg)' }}>
+        <div data-testid="turned-child">Quotes</div>
+      </div>
+      <div data-testid="deep" style={{ perspective: '500px' }}>
+        <div data-testid="deep-child" style={{ transform: 'translateZ(100px)' }}>
+          Bookings
+        </div>
+      </div>
+    </div>
+  );
+  const parts = ['turned', 'turned-child', 'deep', 'deep-child'].map((id) => () => container.querySelector(`[data-testid="${id}"]`) as HTMLElement);
+  // Within the page, which glides sideways as a whole and carries every block with it.
+  const inPage = (el: Element) => {
+    const { left, top } = at(el);
+    return { left: Math.round((left - content().getBoundingClientRect().left) * 10) / 10, top };
+  };
+  act(() => root.render(shellWithPanel(false, () => {}, turnedPage)));
+  for (const open of [true, false]) {
+    act(() => root.render(shellWithPanel(open, () => {}, turnedPage)));
+    holdAll(0);
+    expect(parts.map((part) => part().getAnimations().length), `${open ? 'opening' : 'closing'}: no glide`).toEqual([0, 0, 0, 0]);
+    const first = parts.map((part) => inPage(part()));
+    holdAll(null);
+    expect(first, `${open ? 'opening' : 'closing'}: already in the new layout`).toEqual(parts.map((part) => inPage(part())));
+  }
+});
+
+it('a_block_drawn_outside_its_box_is_judged_on_its_own', async () => {
+  // A block whose own box is out of sight can draw what is in it in sight: unless it clips what is
+  // inside it, what it draws in sight still glides from where it was.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  // Far below the window, drawn 1,900 px up into it: the reflow above moves it up 24 px on opening.
+  const farPage = (
+    <div>
+      <div style={{ aspectRatio: '8 / 1' }} />
+      <div style={{ marginTop: '2000px' }}>
+        <div data-testid="drawn-up" style={{ transform: 'translateY(-1900px)' }}>
+          Quotes
+        </div>
+      </div>
+    </div>
+  );
+  const drawnUp = () => container.querySelector('[data-testid="drawn-up"]') as HTMLElement;
+  act(() => root.render(shellWithPanel(false, () => {}, farPage)));
+  const closed = at(drawnUp()).top;
+  expect(closed).toBeGreaterThan(0);
+  expect(closed).toBeLessThan(LAPTOP.height);
+  act(() => root.render(shellWithPanel(true, () => {}, farPage)));
+  holdAll(0);
+  expect(Math.abs(at(drawnUp()).top - closed), 'drawn up into sight: the first frame').toBeLessThanOrEqual(0.5);
+  holdAll(null);
+
+  // Out of sight above the window when the panel is open, and in sight once it has closed: its
+  // box is out of sight both times, and it still glides into sight from where it was.
+  const intoSight = (
+    <div>
+      <div style={{ aspectRatio: '1 / 1' }} />
+      <div style={{ marginTop: '300px' }}>
+        <div data-testid="into-sight" style={{ height: '20px', transform: 'translateY(-1188px)' }} />
+      </div>
+    </div>
+  );
+  const into = () => container.querySelector('[data-testid="into-sight"]') as HTMLElement;
+  act(() => root.render(shellWithPanel(true, () => {}, intoSight)));
+  holdAll(null);
+  const opened = at(into()).top;
+  expect(opened + 20).toBeLessThanOrEqual(0);
+  act(() => root.render(shellWithPanel(false, () => {}, intoSight)));
+  holdAll(0);
+  expect(Math.abs(at(into()).top - opened), 'into sight: the first frame').toBeLessThanOrEqual(0.5);
+  holdAll(null);
+  expect(at(into()).top).toBeGreaterThan(0);
+});

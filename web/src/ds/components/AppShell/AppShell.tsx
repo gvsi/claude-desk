@@ -224,11 +224,39 @@ function seenOf(content: Element): { top: number; bottom: number } {
   return { top: Math.max(0, frame.top), bottom: Math.min(window.innerHeight, frame.bottom) };
 }
 
+/** Whether an element clips what is inside it to its own box, so nothing of it is drawn outside. */
+function clipsContents(style: CSSStyleDeclaration): boolean {
+  return style.overflowX !== 'visible' || style.overflowY !== 'visible' || /\b(?:paint|strict|content)\b/.test(style.contain);
+}
+
+/**
+ * How much an element stretches what is inside it vertically, when it only scales and moves it.
+ * Null when it turns or skews it, works in 3D or sets a perspective: a glide is never converted
+ * through those, so such a block, and what is in it, land in place.
+ */
+function stretchOf(style: CSSStyleDeclaration): number | null {
+  if (style.perspective !== 'none' || style.rotate !== 'none') return null;
+  const depth = style.translate === 'none' ? undefined : style.translate.trim().split(/\s+/)[2];
+  if (depth !== undefined && Number.parseFloat(depth) !== 0) return null;
+  let stretch = 1;
+  if (style.scale !== 'none') {
+    const [sx = 1, sy = sx, sz = 1] = style.scale.trim().split(/\s+/).map(Number.parseFloat);
+    if (sz !== 1) return null;
+    stretch *= sy;
+  }
+  if (style.transform !== 'none') {
+    const matrix = new DOMMatrix(style.transform);
+    if (!matrix.is2D || matrix.b !== 0 || matrix.c !== 0) return null;
+    stretch *= matrix.d;
+  }
+  return stretch;
+}
+
 /**
  * Where each element under `content`, down to `BLOCK_DEPTH`, is drawn now, moves under way
- * included. Every block in sight or within a window's height of it is measured, so whether one can
- * be seen moving is decided once it has been measured again after the change (`blockShifts`); only
- * what is further away than that, which no change of width brings into sight, is not looked into.
+ * included. Whether one can be seen moving is decided once it has been measured again after the
+ * change (`blockShifts`). Only a block further than a window's height from sight that also clips
+ * what is in it to its box is not looked into: nothing of it can be brought into sight.
  */
 function blocksOf(content: Element | null): Map<Element, BlockBox> {
   const blocks = new Map<Element, BlockBox>();
@@ -240,98 +268,59 @@ function blocksOf(content: Element | null): Map<Element, BlockBox> {
     for (const child of Array.from(parent.children)) {
       const box = child.getBoundingClientRect();
       blocks.set(child, { top: box.top, bottom: box.bottom, width: box.width, height: box.height });
-      if (box.bottom > seen.top - reach && box.top < seen.bottom + reach) visit(child, depth + 1);
+      const far = box.bottom <= seen.top - reach || box.top >= seen.bottom + reach;
+      if (!far || !clipsContents(getComputedStyle(child))) visit(child, depth + 1);
     }
   };
   visit(content, 1);
   return blocks;
 }
 
-/** An angle as CSS writes it ("45deg", "0.5turn"), in degrees. */
-function degrees(angle: string): number {
-  const value = Number.parseFloat(angle);
-  if (angle.endsWith('grad')) return value * 0.9;
-  if (angle.endsWith('rad')) return (value * 180) / Math.PI;
-  if (angle.endsWith('turn')) return value * 360;
-  return value;
-}
-
-/**
- * How an element's own `rotate`, `scale` and `transform` turn and stretch what is inside it (its
- * `translate` only moves it, so it is left out): the map from its children's coordinates to its own.
- */
-function ownLinear(el: Element): DOMMatrix {
-  const style = getComputedStyle(el);
-  const linear = new DOMMatrix();
-  if (style.rotate && style.rotate !== 'none') {
-    const parts = style.rotate.trim().split(/\s+/);
-    const angle = degrees(parts.pop() ?? '0');
-    const [x, y, z] = parts.length === 3 ? parts.map(Number) : parts[0] === 'x' ? [1, 0, 0] : parts[0] === 'y' ? [0, 1, 0] : [0, 0, 1];
-    linear.rotateAxisAngleSelf(x, y, z, angle);
-  }
-  if (style.scale && style.scale !== 'none') {
-    const [sx = 1, sy = sx, sz = 1] = style.scale.trim().split(/\s+/).map(Number.parseFloat);
-    linear.scaleSelf(sx, sy, sz);
-  }
-  if (style.transform && style.transform !== 'none') linear.multiplySelf(new DOMMatrix(style.transform));
-  return linear;
-}
-
-/**
- * A move of `y` on screen, as a `translate` inside ancestors whose transforms map it by `linear`:
- * so a block inside a scaled or turned box still moves by `y` on screen. Null where they flatten it.
- */
-function inLocal(linear: DOMMatrix, y: number): { x: number; y: number } | null {
-  if (linear.isIdentity) return { x: 0, y };
-  const inverse = linear.inverse();
-  const from = inverse.transformPoint(new DOMPoint(0, 0));
-  const to = inverse.transformPoint(new DOMPoint(0, y));
-  const moved = { x: to.x - from.x, y: to.y - from.y };
-  return Number.isFinite(moved.x) && Number.isFinite(moved.y) ? moved : null;
-}
-
 /**
  * The blocks of the page that its new width moved up or down, and the `translate` that puts each
- * back where it was drawn: its own move on screen, less what the blocks around it carry it, in the
- * coordinates its ancestors' transforms set. Measured with nothing moving, before any move starts.
+ * back where it was drawn: its own move on screen, less what the blocks around it carry it, divided
+ * by how much the boxes around it scale it. Measured with nothing moving, before any move starts.
  * - A block whose width or height changed laid its children out anew, so they are looked at too,
- *   even when it kept its height (a fill page's column); one that kept its size moved them with it.
+ *   even when it kept its height (a fill page's column). So are those of a block that moved but
+ *   doesn't glide, each on its own. One that glides and kept its size carries them with it.
  * - An element with no box of its own (`display: contents`) passes its children through.
- * - A block out of sight both before and after can't be seen moving: it, and what is in it, land in
- *   place. That is decided from where each was measured, before and after.
+ * - A block that is turned, skewed, in 3D or sets a perspective, or is inside one, lands in place.
+ * - A block out of sight both before and after can't be seen moving and lands in place, decided
+ *   once it has been measured both times. What is in it is still judged on its own, as it may be
+ *   drawn outside its box, unless it clips what is inside it to its box.
  * - At most `LIFT_CAP` blocks; past it, the rest land in place.
  */
-function blockShifts(content: Element, before: Map<Element, BlockBox>): { block: Element; x: number; y: number }[] {
+function blockShifts(content: Element, before: Map<Element, BlockBox>): { block: Element; y: number }[] {
   const seen = seenOf(content);
   const unseen = (top: number, bottom: number) => bottom <= seen.top || top >= seen.bottom;
-  const shifts: { block: Element; x: number; y: number }[] = [];
-  const walk = (parent: Element, carried: number, linear: DOMMatrix, depth: number) => {
+  const shifts: { block: Element; y: number }[] = [];
+  const walk = (parent: Element, carried: number, stretch: number, depth: number) => {
     if (depth > BLOCK_DEPTH) return;
     for (const child of Array.from(parent.children)) {
       if (shifts.length >= LIFT_CAP) return;
       const was = before.get(child);
       if (!was) continue;
       if (child.getClientRects().length === 0) {
-        walk(child, carried, linear, depth + 1);
+        walk(child, carried, stretch, depth + 1);
         continue;
       }
+      const style = getComputedStyle(child);
+      const own = stretchOf(style);
+      if (own === null) continue;
       const box = child.getBoundingClientRect();
-      if (unseen(was.top, was.bottom) && unseen(box.top, box.bottom)) continue;
+      const out = unseen(was.top, was.bottom) && unseen(box.top, box.bottom);
+      if (out && clipsContents(style)) continue;
       const shift = was.top - box.top - carried;
       let applied = 0;
-      if (Math.abs(shift) >= 0.5) {
-        const by = inLocal(linear, shift);
-        if (by) {
-          shifts.push({ block: child, ...by });
-          applied = shift;
-        }
+      if (!out && Math.abs(shift) >= 0.5 && stretch !== 0) {
+        shifts.push({ block: child, y: shift / stretch });
+        applied = shift;
       }
-      if (Math.abs(was.width - box.width) >= 0.5 || Math.abs(was.height - box.height) >= 0.5) {
-        walk(child, carried + applied, linear.multiply(ownLinear(child)), depth + 1);
-      }
+      const resized = Math.abs(was.width - box.width) >= 0.5 || Math.abs(was.height - box.height) >= 0.5;
+      if (resized || Math.abs(shift - applied) >= 0.5) walk(child, carried + applied, stretch * own, depth + 1);
     }
   };
-  walk(content, 0, new DOMMatrix(), 1);
+  walk(content, 0, 1, 1);
   return shifts;
 }
 
@@ -408,8 +397,8 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     // Where the new width moved blocks up or down (a subtitle taking a second line), measured
     // before anything moves. Each glides from where it was drawn on its `translate`, which moves it
     // outside its own transform, added to any translate it has.
-    this.lifts = blockShifts(content, snapshot.blocks).map(({ block, x, y }) =>
-      block.animate([{ translate: `${x}px ${y}px` }, { translate: '0px 0px' }], { ...timing, composite: 'add' }),
+    this.lifts = blockShifts(content, snapshot.blocks).map(({ block, y }) =>
+      block.animate([{ translate: `0px ${y}px` }, { translate: '0px 0px' }], { ...timing, composite: 'add' }),
     );
     const shift = first - content.getBoundingClientRect().left;
     if (Math.abs(shift) >= 0.5) {

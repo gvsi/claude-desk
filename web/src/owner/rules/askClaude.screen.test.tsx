@@ -121,6 +121,7 @@ describe('ask claude', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
     await expect.element(panel).toBeVisible();
+    expect(jumps(closed), 'opening').toEqual([]);
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
     await settled(screen.container);
     const opened = tops();
