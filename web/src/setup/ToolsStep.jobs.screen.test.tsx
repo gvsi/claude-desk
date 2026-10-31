@@ -8,6 +8,7 @@ import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { SETUP_COPY } from './copy.ts';
 
 async function interviewAtTools() {
   const started = await mockStore.dispatch('startSetup', { body: {
@@ -85,6 +86,7 @@ it('omits unknown and malformed business rows and keeps the Tools step usable', 
     { ...intro, tool: { toString: 'not a function' } },
   ], connectable: [] } });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await expect.element(screen.getByText(SETUP_COPY.tools.empty, { exact: true })).toBeVisible();
   await expect.element(screen.getByRole('heading', { name: 'What Claude can use' })).toBeVisible();
   await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
   expect(screen.getByRole('region', { name: 'Your Desk’s jobs' }).elements()).toHaveLength(0);
