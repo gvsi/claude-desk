@@ -1675,15 +1675,17 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         return session
 
-    def session_call(self, request: Request, session_id: str, desk_id: str | None = None) -> tuple[Session, Desk]:
+    def session_call(self, request: Request, session_id: str, desk_id: str | None = None, *,
+                     seen: bool = True) -> tuple[Session, Desk]:
         """The first three "Session state responses" rows for a call naming `session_id`: the session token must
         hash to it, or an agent's signature authenticate it (401); an owner names its own session and a `desk_id` of
-        its copy (else 404); closed is 409."""
+        its copy (else 404); closed is 409. Without `seen` the call doesn't count as the session's activity
+        (`_check_open`)."""
         if self._signed_by_agent(request):
             session = self._agent(request, session_id)
             if desk_id is not None:
                 raise Refusal(422, "invalid")   # desk_id is for owner sessions only
-            self._check_open(session)
+            self._check_open(session, seen=seen)
             return session, self.desks[session.desk_id]
         if request.headers.get("x-owner-session") is not None:
             copy, owner = self.owner_of(request)
@@ -1699,7 +1701,7 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         if desk_id is not None:
             raise Refusal(422, "invalid")       # desk_id is for owner sessions only
-        self._check_open(session)
+        self._check_open(session, seen=seen)
         return session, self.desks[session.desk_id]
 
     # Agents ----------------------------------------------------------------------------------------
@@ -1863,16 +1865,18 @@ class FakeKernelState:
         remaining = self._remaining(session)
         return remaining is not None and action.amount_cents is not None and action.amount_cents <= remaining
 
-    def _check_open(self, session: Session) -> None:
+    def _check_open(self, session: Session, *, seen: bool = True) -> None:
         """The session is open (a visitor's or an agent's closes after 24 hours idle), else 409 `closed`, ledgered
-        `auth` on its Desk."""
+        `auth` on its Desk; then, with `seen`, it was active now. The turn route passes `seen=False`, as the kernel's
+        does: starting a turn keeps no idle conversation open."""
         if session.closed_at is None and session.kind != "owner" and self.now - session.last_seen > IDLE_LIMIT:
             session.closed_at = session.last_seen + IDLE_LIMIT
             self._put_session(session)
         if session.closed_at is not None:
             raise self._refused(self.desks.get(session.desk_id or ""), 409, "closed", "closed",
                                 session_id=session.session_id)
-        session.last_seen = self.now
+        if seen:
+            session.last_seen = self.now
 
     @staticmethod
     def _check_generation(session: Session, generation: int) -> None:
@@ -2077,11 +2081,12 @@ class FakeKernelState:
         """A turn starts (GitHub issue #121): the language `detect_language` finds in its newest visitor or agent
         message becomes the session's, or the one on record stays when it finds neither English nor Spanish (English
         for a session with none). The text is read for that alone, never kept, mirrored or ledgered, and a repeat
-        detects again and changes nothing else. Over the contract's `TURN_TEXT_CHARS` is 422 `invalid`, then the
-        session checks: 401, 404, 409 `closed`, a stale generation 409 `stale_generation`."""
+        detects again and changes nothing else, not even the session's activity (`seen=False`). Over the contract's
+        `TURN_TEXT_CHARS` is 422 `invalid`, then the session checks: 401, 404, 409 `closed`, a stale generation 409
+        `stale_generation`."""
         if len(body.text) > TURN_TEXT_CHARS:
             raise Refusal(422, "invalid")
-        session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id)
+        session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id, seen=False)
         self._check_generation(session, body.generation)
         detected = detect_language(body.text)
         if detected in ("en", "es") and detected != session.last_language:
