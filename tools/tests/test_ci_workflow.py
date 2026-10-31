@@ -376,8 +376,8 @@ CHECKS = {
             "--", "make", "kernel-contract",
         ],
     ],
-    # The same gate arguments as test_gate, with this pull request's base instead of main.
-    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$PR_BASE_SHA"]],
+    # The same gate arguments as test_gate, with a base selected for the workflow event.
+    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
     "web tests": [
         ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
         [
@@ -422,15 +422,17 @@ def test_gated_jobs_go_through_the_gate():
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
     tier2_gate = CHECKS["tier 2 results"][0]
-    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$PR_BASE_SHA"]
+    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
-    # Tier 2 runs on pull requests, against the exact base commit of the tested merge.
+    # Tier 2 checks pull requests against main and main pushes against the previous main commit.
     tier2 = job_named("tier 2 results")
-    assert tier2["if"] == "github.event_name == 'pull_request'"
+    assert "if" not in tier2
     assert tier2["steps"][0]["with"]["fetch-depth"] == 0
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
-    assert results["env"] == {"PR_BASE_SHA": "${{ github.event.pull_request.base.sha }}"}
-    assert results["run"].endswith('make evals-results-check BASE="$PR_BASE_SHA"')
+    assert results["env"] == {
+        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && 'origin/main' || 'HEAD~1' }}",
+    }
+    assert results["run"].endswith('make evals-results-check BASE="$RESULTS_BASE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 

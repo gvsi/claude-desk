@@ -146,7 +146,6 @@ jobs:
 
   tier2:
     name: tier 2 results
-    if: github.event_name == 'pull_request'
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
@@ -159,8 +158,8 @@ jobs:
           build: false
       - name: Check the tier 2 results
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$PR_BASE_SHA"
+          RESULTS_BASE: ${{ github.event_name == 'pull_request' && 'origin/main' || 'HEAD~1' }}
+        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
 
   web:
     name: web tests
