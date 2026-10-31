@@ -22,6 +22,7 @@ import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
+import { retryAfterMs } from '../app/poll.ts';
 import { setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
@@ -73,6 +74,28 @@ async function interviewAtPreview(description = DESCRIPTION): Promise<SetupState
   const { state } = await interviewAtSafety(description);
   await mockStore.dispatch('setupConfirm', { params: { id: state.interview_id } });
   return state;
+}
+
+/** The page's real timers, kept before any test fakes them. */
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+/** Polls `check` in real time until it passes: unlike `expect.poll`, it never moves fake timers on. */
+async function until(check: () => void, timeoutMs = 5_000): Promise<void> {
+  const start = performance.now();
+  for (;;) {
+    try {
+      check();
+      return;
+    } catch (err) {
+      if (performance.now() - start > timeoutMs) throw err;
+    }
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
+  }
+}
+
+/** Lets the page's code queued behind a timer that just fired run: a few microtasks, no time. */
+async function microtasks(): Promise<void> {
+  for (let n = 0; n < 5; n += 1) await Promise.resolve();
 }
 
 /** The idempotency key of each start the page sent, in order. */
@@ -248,16 +271,40 @@ describe('setup', () => {
     }
   });
 
-  it('start_under_way_is_sent_again_with_its_key', async () => {
+  it('start_under_way_waits_its_retry_after_then_is_sent_again_with_its_key', async () => {
     // The API answers that a start with this key is still under way (409 `in_progress`): the page
-    // waits its `retry_after` (2 s when it names none; scaled here with the polls) and sends the
-    // same start again, with the same key, until the interview comes.
-    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    // sends the same start again, with the same key, only once the answer's `retry_after` has passed
+    // (2 s when it names none; both scaled here with the polls), until the interview comes. The
+    // page's clock moves only when the test moves it, and the test counts the page's own sends,
+    // which go out the moment it sends them.
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 5 } });
     mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress' } });
     const { screen } = await renderRoute('/app/setup');
     const desks = mockStore.world.desks.length;
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const posts = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith('/api/owner/setup') && init?.method === 'POST').length;
+    const answers: boolean[] = [];
+    onTestFinished(observeRequests((outcome) => (outcome.key === 'startSetup' ? answers.push(outcome.ok) : undefined)));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await screen.getByRole('button', { name: 'Start' }).click();
+    for (const [seconds, sent] of [
+      [5, 1],
+      [2, 2],
+    ] as const) {
+      // The page has read its `sent`th answer, an `in_progress`, and acted on it.
+      await until(() => expect(answers).toHaveLength(sent));
+      expect(posts(), `before the ${seconds} s wait`).toBe(sent);
+      vi.advanceTimersByTime(retryAfterMs(seconds) - 1);
+      await microtasks();
+      expect(posts(), `1 ms before ${seconds} s`).toBe(sent);
+      vi.advanceTimersByTime(1);
+      await microtasks();
+      expect(posts(), `at ${seconds} s`).toBe(sent + 1);
+    }
+    await until(() => expect(answers).toEqual([false, false, true]));
+    vi.useRealTimers();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     const sent = requests('startSetup').map((r) => r.body);
     expect(sent).toHaveLength(3);
