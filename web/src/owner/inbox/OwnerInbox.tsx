@@ -9,11 +9,12 @@
  *
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
- * the sheet opens and every few seconds while it is open, and not from the moment it closes. While
- * that first read is out, the button's place says the inbox is opening; if it fails, the inbox's
- * title says it couldn't be opened, with "Try again". A later read that fails says the same under
- * the sheet's button, and inside the sheet while it is open, where the page behind is out of reach,
- * so the entries read before never pass for current.
+ * the sheet opens and every few seconds while it is open, and sends no new read from the moment it
+ * closes (a read already out finishes, with its one retry). While that first read is out, the
+ * button's place says the inbox is opening; if it fails, the inbox's title says it couldn't be
+ * opened, with "Try again". A later read that fails says the same under the sheet's button, and
+ * inside the sheet while it is open, where the page behind is out of reach, so the entries read
+ * before never pass for current.
  */
 import { focusManager, useQueries, useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -41,7 +42,8 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
   // Whether the sheet is open, as the sheet says each time it opens or closes. `openNow` changes the
   // moment it says so, before Today draws the change. The poll and a return to the tab or the
-  // network ask it, so one that comes while the close is still being drawn reads nothing.
+  // network ask it, so the inbox sends no new read from the moment it closes, not even one that
+  // comes while the close is still being drawn (a read already out finishes, with its one retry).
   const [open, setOpen] = useState(false);
   const openNow = useRef(false);
   const openChanged = (next: boolean) => {
