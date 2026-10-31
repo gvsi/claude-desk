@@ -33,6 +33,118 @@ PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
 QUOTE_CARD = "$180.00\nDrain clearing\nGood until Monday, November 2, 9:04 am"
 
 
+@pytest.mark.parametrize("flagged", [False, True], ids=["passing", "blocked"])
+@pytest.mark.parametrize("change", ["remove", "contact", "person", "assurance"])
+async def test_person_removed_while_soft_check_sleeps_loses_private_card(app, client, reviewer, flagged, change,
+                                                                      monkeypatch):
+    from .test_desk_writes import updated
+    from .test_release_document import DANA, confirmed
+    from .test_payments_adapters import person_of
+    from .helpers import kernel_ctx
+    from desk.db.models import Fact as FactRow
+    from sqlalchemy import select
+    from desk.kernel_service import reply_check
+    from .test_reply_check import post_check
+    from .test_decide import set_session
+
+    copy, _ = await visitor_of(app, client)
+    visitor = await confirmed(client, copy, DANA)
+    quote = await own_quote(client, visitor)
+    person = await person_of(app, copy, "dana")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.fact_id == quote.fact_id)))).one()
+        row.readers = [f"person:{person}"]
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
+
+    async def slow_model(data, *, timeout_s=None):
+        asked.set()
+        await answer.wait()
+        return await soft_promise(data, timeout_s=timeout_s)
+
+    reviewer.soft_promise = slow_model
+    finalized, finalize = [], reply_check.finalize
+
+    async def capture(*args, **kwargs):
+        verdict = await finalize(*args, **kwargs)
+        finalized.append(verdict)
+        return verdict
+
+    monkeypatch.setattr(reply_check, "finalize", capture)
+    checking = asyncio.create_task(post_check(client, visitor, "Here is your quote.", [clause("quote", quote.fact_id)]))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        if change == "remove":
+            await asyncio.wait_for(updated(client, copy, "people", {"remove": ["dana"]}), 5)
+        elif change == "contact":
+            await asyncio.wait_for(updated(client, copy, "people", {"upsert": [
+                {"ref": "dana", "display_name": "Dana Whitfield", "contact": "dana.new@example.net"}]}), 5)
+        else:
+            await set_session(app, copy, visitor.session_id, **({"person_id": None} if change == "person"
+                                                              else {"assurance": "none"}))
+    finally:
+        answer.set()
+    response = await asyncio.wait_for(checking, 5)
+    if change == "assurance":
+        assert response.status_code == 200, response.text
+    else:
+        assert (response.status_code, response.json()) == (409, {"code": "closed"})
+    [verdict] = finalized
+    assert_handed_off(verdict)
+    assert all(block.fact_id != quote.fact_id for block in verdict.blocks)
+
+
+@pytest.mark.parametrize("change", ["readers", "status", "expiry"])
+@pytest.mark.parametrize("flagged", [False, True], ids=["passing", "blocked"])
+@pytest.mark.parametrize("keep_other", [False, True], ids=["last-card", "another-card"])
+async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_clock, change, flagged, keep_other):
+    from desk.db.models import Fact as FactRow
+    from sqlalchemy import select
+    from .helpers import kernel_ctx
+    from .test_handoff_card import quote_and_payment
+    from .test_reply_check import public_key, verify_verdict
+
+    copy, visitor = await visitor_of(app, client)
+    clauses = await quote_and_payment(client, reviewer, visitor)
+    if not keep_other:
+        clauses = clauses[:1]
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
+
+    async def slow_model(data, *, timeout_s=None):
+        asked.set()
+        await answer.wait()
+        return await soft_promise(data, timeout_s=timeout_s)
+
+    reviewer.soft_promise = slow_model
+    checking = asyncio.create_task(checked(client, visitor, "Here is your quote.", clauses))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+                FactRow.fact_id == clauses[0]["fact_id"])))).one()
+            if change == "readers":
+                row.readers = ["owner"]
+            elif change == "status":
+                row.status = "expired"
+            else:
+                row.expires_at = frozen_clock.now()
+    finally:
+        answer.set()
+    verdict = await asyncio.wait_for(checking, 5)
+    assert not verdict.ok
+    if flagged and keep_other:
+        assert [(b.template, b.fact_id) for b in verdict.blocks] == [("payment_link", clauses[1]["fact_id"])]
+    else:
+        assert_handed_off(verdict)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
 async def test_soft_promise_request_shape():
     data = SoftPromiseInput(language="en", prose="Here is your quote.", cards=["$180.00\nDrain clearing"])
     client = FakeAnthropicClient(model_message(PASSES, model=HAIKU, input_tokens=900, cached_tokens=0,
@@ -136,7 +248,8 @@ async def test_a_promise_beyond_the_cards_is_blocked(app, client, reviewer):
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
 
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("soft_promise", "soft.promise", prose[:40])]
-    assert_handed_off(verdict)
+    assert not verdict.ok
+    assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
     # the check read the prose and the card's text, and nothing else
     assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=prose, cards=[QUOTE_CARD])]
     # its usage is on the reply's ledger entry
@@ -319,13 +432,18 @@ async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client
 REPLY_HERE = "Maria Rivera will reply here."   # backed only by an open handoff's card
 
 
-async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, client, reviewer):
+@pytest.mark.parametrize("card_template", [None, "quote", "payment_link"])
+async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, client, reviewer, card_template):
     """The open handoff is read without a lock, so the model never holds one, and the owner may
     mark it done while the model reads the draft. A reply the model then passes on the card's
     strength isn't shown: with the handoff gone nothing backs the card's words, so the reply fails
     as the check would have failed it without the card, and the handoff card in its place opens
     a new handoff."""
     copy, visitor = await visitor_of(app, client)
+    from .test_handoff_card import quote_and_payment
+    clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
+               if card_template else [])
+    card_texts = [b.text for b in (await checked(client, visitor, "", clauses)).blocks] if clauses else []
     assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
     [first] = await handoffs_of(app, copy)
     asked, answer, shown = asyncio.Event(), asyncio.Event(), []
@@ -338,10 +456,10 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
         return await soft_promise(data, timeout_s=timeout_s)                          # and passes the prose
 
     reviewer.soft_promise = slow_model
-    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE))
+    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE, clauses))
     try:
         await asyncio.wait_for(asked.wait(), 5)
-        assert shown == [[HANDOFF_CARD["en"]]]                   # the model reads the open handoff's card
+        assert shown == [[*card_texts, HANDOFF_CARD["en"]]]       # its own card plus the open handoff's backing
         response = await asyncio.wait_for(handoff_done(client, first.handoff_id, copy.owner), 5)
         assert response.status_code == 200, response.text       # the check holds nothing the owner waits for
     finally:
@@ -350,10 +468,15 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
 
     assert [(v.kind, v.span, v.rule_id) for v in verdict.violations] == [
         ("soft_promise", REPLY_HERE, "soft.handoff_closed")]
-    assert_handed_off(verdict)                                   # the prose isn't shown; the card is
+    if card_template:
+        assert [(b.template, b.fact_id) for b in verdict.blocks] == [(card_template, clauses[0]["fact_id"])]
+        assert [(r.handoff_id, r.status) for r in await handoffs_of(app, copy)] == [(first.handoff_id, "done")]
+    else:
+        assert_handed_off(verdict)
     statuses = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
-    [second] = [handoff_id for handoff_id in statuses if handoff_id != first.handoff_id]
-    assert statuses == {first.handoff_id: ("card", "done"), second: ("card", "open")}
+    if not card_template:
+        [second] = [handoff_id for handoff_id in statuses if handoff_id != first.handoff_id]
+        assert statuses == {first.handoff_id: ("card", "done"), second: ("card", "open")}
     [entry] = (await reply_entries(app, copy))[-1:]
     assert (entry.seq, entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (
         verdict.ledger_seq, False, ["soft.handoff_closed"])
@@ -395,12 +518,16 @@ async def test_the_handoff_a_reply_leans_on_is_held_until_it_is_recorded(app, cl
     assert kinds[-2:] == [("reply", None), ("desk_data", "handoffs")]       # the verdict first, then the mark
 
 
-async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app, client, reviewer):
+@pytest.mark.parametrize("card_template", [None, "quote", "payment_link"])
+async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app, client, reviewer, card_template):
     """A call-back request may run while the model reads a reply that leans on the open card
     handoff, and close that handoff to open its own. A call-back backs nothing, so the reply fails
     as the check would have failed it without the card, and its handoff card opens no second
     handoff: the call-back is the session's open one."""
     copy, visitor = await visitor_of(app, client)
+    from .test_handoff_card import quote_and_payment
+    clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
+               if card_template else [])
     assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
     [card] = await handoffs_of(app, copy)
     asked, answer = asyncio.Event(), asyncio.Event()
@@ -412,7 +539,7 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
         return await soft_promise(data, timeout_s=timeout_s)
 
     reviewer.soft_promise = slow_model
-    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE))
+    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE, clauses))
     try:
         await asyncio.wait_for(asked.wait(), 5)
         decision = await decided(client, visitor, "native.request_callback", CALLBACK)
@@ -422,7 +549,10 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     verdict = await asyncio.wait_for(checking, 5)
 
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("soft_promise", "soft.handoff_closed")]
-    assert_handed_off(verdict)
+    if card_template:
+        assert [(b.template, b.fact_id) for b in verdict.blocks] == [(card_template, clauses[0]["fact_id"])]
+    else:
+        assert_handed_off(verdict)
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
     assert rows.pop(card.handoff_id) == ("card", "done")
     assert list(rows.values()) == [("callback", "open")]

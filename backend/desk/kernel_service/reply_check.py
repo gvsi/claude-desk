@@ -47,9 +47,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
    each check one pooled connection, across both tries. A reply that passes with the handoff's
    card is checked again in step 7.
-6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
-   handoff clause, in the reply's language, or no block at all for a first attempt the API
-   rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
+6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
+   keeps checked cards alone, without a cited handoff; any other failure, or no card to keep,
+   shows only the handoff clause. A first attempt the API rewrites (`final` false, every
+   violation one a rewrite can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while the
    model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
@@ -109,6 +110,8 @@ NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one nu
 NO_CANARIES = labels.NO_CANARIES
 logger = logging.getLogger(__name__)
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
+PROSE_ONLY = frozenset({"number_in_prose", "promise_word", "soft_promise", "uncertain_language",
+                        "check_unavailable"})
 
 # ---- Prose ----------------------------------------------------------------------------------------
 
@@ -559,6 +562,50 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
+def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
+                   language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
+    """Keep checked cards alone for prose-only failures; all other failures hand off."""
+    if violations and all(violation.kind in PROSE_ONLY for violation in violations):
+        kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
+        if kept:
+            return kept
+    return [handoff(language, desk)]
+
+
+async def recheck_cards(ctx: KernelCtx, session_row: SessionRow,
+                        blocks: Sequence[RenderedBlock]) -> tuple[list[RenderedBlock], list[Violation]]:
+    """Re-read card entitlements and currency after holding the session row, before signing.
+
+    The explicit lock also covers a repeated check whose frozen last-seen value caused no UPDATE.
+    Fact rows are refreshed in one query, rather than using the earlier ORM identity-map values.
+    No model call runs under this lock; the draft's generation remains unchanged for its signature.
+    """
+    cards = [block for block in blocks if block.kind == "card" and block.fact_id is not None]
+    if not cards:
+        return list(blocks), []
+    current = await _lock_session(ctx, session_row)
+    rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == session_row.desk_id, FactRow.fact_id.in_([card.fact_id for card in cards]))
+        .execution_options(populate_existing=True)))}
+    readers, now = labels.session_readers(current), ctx.clock.now()
+    kept, refused = [], []
+    for block in blocks:
+        if block not in cards:
+            kept.append(block)
+            continue
+        clause = Clause(template=block.template, fact_id=block.fact_id)
+        row = rows.get(block.fact_id)
+        if current.closed_at is not None or (row is not None and not labels.can_read(row.readers, readers)):
+            refused.append(_clause_violation(clause, "unentitled_fact", "not_a_reader"))
+        elif row is None:
+            refused.append(_clause_violation(clause, "unknown_fact", "no_such_fact"))
+        elif not render.TEMPLATES[block.template].current(labels.fact_of(row), now):
+            refused.append(_clause_violation(clause, "stale_fact", "not_current"))
+        else:
+            kept.append(block)
+    return kept, refused
+
+
 async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft, *,
                       final: bool = True) -> ReplyVerdict:
     """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check"). `final` is
@@ -598,7 +645,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         found, usage = await soft_promises(ctx, language, prose, backing)
         violations += found
     if violations:
-        blocks = [handoff(language, desk)]
+        blocks = blocked_blocks(cards, violations, language, desk)
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
@@ -679,8 +726,13 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
-    (`soft.handoff_closed`) and the handoff card in the prose's place, which then opens a new
-    handoff.
+    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards alone; with
+    none to keep it substitutes the handoff card, which may open a new handoff.
+
+    Cards on passing and blocked drafts are rechecked under the session lock before signing:
+    closed_at, person and assurance are read afresh, then all cited facts' readers, status and
+    expiry in one query. A blocked draft drops cards that no longer pass. A passing draft whose
+    backing card was withdrawn fails with that clause's refusal, so none of its prose is shown.
 
     When the verdict of Claude's draft shows the handoff card and the visitor will see it, the
     session's owner handoff is opened next, before the ledger head (`open_card_handoff`), and
@@ -700,7 +752,15 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     if handoff_backed and not violations and not await handoff_still_open(ctx, session_row):
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
-        blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
+        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+    if author == "claude":
+        blocks, refused = await recheck_cards(ctx, session_row, blocks)
+        if refused:
+            # A passing draft may have relied on a card just withdrawn: none of its prose is safe
+            # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
+            if not violations:
+                violations = refused
+            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
     if author == "claude" and not shown:
         blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
@@ -761,7 +821,8 @@ async def _lock_session(ctx: KernelCtx, session_row: SessionRow):
     takes, read as columns (its generation, kind, assurance and person), so the row the request
     read keeps the generation the verdict is signed at."""
     return (await ctx.db.execute(ctx.repo.scoped(
-        select(SessionRow.generation, SessionRow.kind, SessionRow.assurance, SessionRow.person_id).where(
+        select(SessionRow.session_id, SessionRow.generation, SessionRow.kind, SessionRow.assurance,
+               SessionRow.person_id, SessionRow.closed_at).where(
             SessionRow.session_id == session_row.session_id).with_for_update(key_share=True)))).one()
 
 

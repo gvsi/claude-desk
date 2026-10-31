@@ -3,7 +3,8 @@
 A draft from Claude is guarded prose plus typed clauses. The kernel scans the prose in English and
 Spanish for numbers, money, percentages, dates and promise words, renders each clause from
 a fact the session may read, in the reply's language, and answers with a signed, ledgered verdict:
-the prose and cards when everything passed, else only the handoff clause.
+the prose and cards when everything passed, checked cards alone when only the prose failed,
+and the handoff clause when no card can be kept.
 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with
 the facts made the way a conversation makes them: a quote, open times and a booking decided and
@@ -377,7 +378,8 @@ async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
     verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
                                                                           "quarter")]
-    assert_handed_off(verdict)
+    assert not verdict.ok
+    assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
     assert reviewer.soft_inputs == []
 
 
@@ -1017,7 +1019,11 @@ async def test_a_booking_claim_without_a_booking_card_is_blocked(app, client, re
         verdict = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("promise_word", f"lex.{language}.booking", span)], clauses
-        assert_handed_off(verdict, language)
+        if clauses:
+            assert not verdict.ok
+            assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
+        else:
+            assert_handed_off(verdict, language)
     assert reviewer.soft_inputs == []
 
 
@@ -1573,14 +1579,16 @@ async def public_key(client: httpx.AsyncClient) -> str:
     return (await client.get("/health")).json()["public_key_hex"]
 
 
-async def test_a_failed_check_returns_a_signed_handoff(app, client):
+async def test_failed_checks_sign_the_kept_cards_or_handoff(app, client):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     key = await public_key(client)
     english = await checked(client, visitor, "That will be $180.", [clause("quote", quote.fact_id)])
     spanish = await checked(client, visitor, "Le hago el cincuenta por ciento de descuento, con gusto.")
-    for verdict, language in ((english, "en"), (spanish, "es")):
-        assert_handed_off(verdict, language)                              # neither the prose nor the card
+    assert not english.ok and english.violations
+    assert [(b.template, b.fact_id) for b in english.blocks] == [("quote", quote.fact_id)]
+    assert_handed_off(spanish, "es")
+    for verdict in (english, spanish):
         verify_verdict(key, visitor.session_id, verdict)
     entries = await reply_entries(app, copy)
     assert [(entry.seq, entry.event.ref_id, entry.event.summary["ok"], entry.event.summary["language"])
