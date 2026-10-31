@@ -9,13 +9,8 @@ import { expectComputed } from '../test/expectComputed.ts';
 import { AgentsCard, AgentsFrame, brandOf } from './parts.tsx';
 import { expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.ts';
 
-/** The built-in agent's signed mandate, as `POST /agents/demo` returns it. */
-const mandate = rivera.demoAgentIssued.mandate;
-
-/** Stands in for the web app's `formatCents`: these amounts are whole dollars. */
-function dollars(cents: number): string {
-  return `$${cents / 100}`;
-}
+/** The agents page's static words for the built-in agent's limit; the panel's story checks them against the seed's mandate. */
+const LIMIT = { perCharge: '$20', total: '$100', duration: 'One hour', source: 'Signed limit from Alex Kim’s demo wallet' } as const;
 
 /** The tasks to send the agent on, as the board words them (the web app's `DEMO_TASK_COPY`). */
 const TASKS = ['Book the earliest visit', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
@@ -34,13 +29,7 @@ function AgentsSend() {
         </div>
       </AgentsCard>
       <AgentsCard title="Send an agent" lead="A built-in agent visits Rivera Plumbing for Alex Kim. It’s simulated.">
-        <SignedLimitPanel
-          perChargeCents={mandate.per_charge_cents}
-          totalCents={mandate.total_cents}
-          formatCents={dollars}
-          duration="One hour"
-          source="Signed limit from Alex Kim’s demo wallet"
-        />
+        <SignedLimitPanel {...LIMIT} language="en" />
         <SuggestionChips label="Tasks for the agent" suggestions={TASKS} onPick={fn()} />
       </AgentsCard>
     </AgentsFrame>
@@ -57,7 +46,7 @@ const meta = {
     canvas: 'N-R2-Agents-03-Send',
     canvasNote: [
       'Signed on 2026-10-30.',
-      'Sending the built-in agent: its signed spending limit is SignedLimitPanel, from the seed’s mandate ($20 a charge, $100 in all, for one hour), on the card’s own fill as the board nests it; the tasks are SuggestionChips.',
+      'Sending the built-in agent: its signed spending limit is SignedLimitPanel, with the page’s words for the seed’s mandate ($20 a charge, $100 in all, for one hour), on the card’s own fill as the board nests it; the tasks are SuggestionChips.',
       'The column, the cards and the demo key’s button are page layout the web app (plan 04) owns, composed as on the agents page’s other boards.',
     ].join(' '),
   },

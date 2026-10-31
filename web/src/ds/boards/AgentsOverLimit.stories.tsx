@@ -12,13 +12,8 @@ import { proseBlock, rivera } from '../fixtures/index.ts';
 import { AgentsCard, AgentsFrame, brandOf } from './parts.tsx';
 import { expectConversationType, expectFooter, expectReceiptsUnderMessages } from './spec.ts';
 
-/** The built-in agent's signed mandate, as `POST /agents/demo` returns it. */
-const mandate = rivera.demoAgentIssued.mandate;
-
-/** Stands in for the web app's `formatCents`: these amounts are whole dollars. */
-function dollars(cents: number): string {
-  return `$${cents / 100}`;
-}
+/** The agents page's static words for the built-in agent's limit; the panel's story checks them against the seed's mandate. */
+const LIMIT = { perCharge: '$20', total: '$100', duration: 'One hour', source: 'Signed limit from Alex Kim’s demo wallet' } as const;
 
 /** The kernel's line for the charge it refused, as the board writes it: the visitor's `visitor_plain`. */
 const REFUSED = 'Refused: over the signed limit for this agent';
@@ -28,13 +23,7 @@ function AgentsOverLimit() {
   return (
     <AgentsFrame brand={brandOf(rivera.publicDesk.en)}>
       <AgentsCard title="Send an agent" lead="Try to pay more than its limit" holdsCards>
-        <SignedLimitPanel
-          perChargeCents={mandate.per_charge_cents}
-          totalCents={mandate.total_cents}
-          formatCents={dollars}
-          duration="One hour"
-          source="Signed limit from Alex Kim’s demo wallet"
-        />
+        <SignedLimitPanel {...LIMIT} language="en" />
         <Transcript label="Agent run">
           <TranscriptRow>
             <AgentMessage agentName="Alex Kim’s assistant" signed title="Try to pay more than its limit" meta="Request 1" />

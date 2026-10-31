@@ -1,41 +1,37 @@
+import type { CopyLanguage } from '../Notice/errorCopy.ts';
+import { SIGNED_LIMIT_COPY } from './signedLimitCopy.ts';
+
 import './SignedLimitPanel.css';
 
 export interface SignedLimitPanelProps {
-  /** The most one charge can be, in whole cents: the signed mandate's `per_charge_cents`. */
-  perChargeCents: number;
-  /** The most its charges can add up to, in whole cents: the signed mandate's `total_cents`. */
-  totalCents: number;
-  /**
-   * Writes an amount in cents as the page writes money: the web app's `formatCents` ("$20",
-   * "$40.50"). The design system formats no money itself.
-   */
-  formatCents: (cents: number) => string;
-  /** How long the limit lasts, from the mandate's lifetime, in the page's words: "One hour". */
+  /** The most one charge can be, in the page's words: "$20". The mandate's `per_charge_cents`. */
+  perCharge: string;
+  /** The most its charges can add up to, in the page's words: "$100". The mandate's `total_cents`. */
+  total: string;
+  /** How long the limit lasts, in the page's words: "One hour". The mandate's lifetime. */
   duration: string;
   /** Whose wallet signed it, in the page's words: "Signed limit from Alex Kim’s demo wallet". */
   source: string;
-}
-
-/** True for an amount the panel can show exactly: a whole number of cents, zero or more. */
-function isWholeCents(cents: number): boolean {
-  return Number.isInteger(cents) && cents >= 0;
+  /** The page's language: the panel's own words and its `lang`. */
+  language: CopyLanguage;
 }
 
 /**
  * A visiting agent's signed spending limit: what one charge can be, what its charges can add up to,
- * how long the limit lasts, and whose wallet signed it.
- * Every amount is the mandate's own whole cents, written by the page's formatter; an amount that
- * isn't whole cents draws no panel at all, so no limit is ever shown that the mandate doesn't hold.
+ * how long the limit lasts, and whose wallet signed it. Every value is the page's own static words
+ * for the signed mandate, never Claude's; the panel only lays them out. A blank value draws no
+ * panel at all, so it never shows part of a limit.
  */
-export function SignedLimitPanel({ perChargeCents, totalCents, formatCents, duration, source }: SignedLimitPanelProps) {
-  if (!isWholeCents(perChargeCents) || !isWholeCents(totalCents)) return null;
+export function SignedLimitPanel({ perCharge, total, duration, source, language }: SignedLimitPanelProps) {
+  if ([perCharge, total, duration, source].some((value) => value.trim() === '')) return null;
+  const copy = SIGNED_LIMIT_COPY[language];
   const terms: [string, string][] = [
-    ['Per charge', formatCents(perChargeCents)],
-    ['In total', formatCents(totalCents)],
-    ['For', duration],
+    [copy.perCharge, perCharge],
+    [copy.total, total],
+    [copy.duration, duration],
   ];
   return (
-    <section className="cd-signed-limit" aria-label="Signed limit">
+    <section className="cd-signed-limit" aria-label={copy.region} lang={language}>
       <dl className="cd-signed-limit__terms">
         {terms.map(([name, value]) => (
           <div key={name} className="cd-signed-limit__term">

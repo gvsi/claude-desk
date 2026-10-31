@@ -129,6 +129,7 @@ export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
 export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
 export { SignedLimitPanel, type SignedLimitPanelProps } from './components/SignedLimitPanel/SignedLimitPanel.tsx';
+export { SIGNED_LIMIT_COPY } from './components/SignedLimitPanel/signedLimitCopy.ts';
 
 // Knowledge
 export { KnowledgeList, type KnowledgeListProps, type KnowledgeRowView } from './components/KnowledgeList/KnowledgeList.tsx';
