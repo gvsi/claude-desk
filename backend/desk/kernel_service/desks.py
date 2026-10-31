@@ -56,7 +56,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, clock, labels, ledger, payments
+from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
@@ -214,25 +214,36 @@ def tool_row(copy_id: str, desk_id: str, profile: ToolProfile) -> Tool:
                 definition_sha256=pinned, profile=enabled, profile_sha256=pinned)
 
 
-async def add_native_tools(ctx: KernelCtx, desk_id: str) -> list[str]:
-    """Gives the Desk the registered native tools it has no `tools` row for (one created before
-    they were registered), enabled as `create_desk` writes them, in the caller's transaction under
-    the Desk row's lock, as an owner's write takes it, and ledgered `desk_data` `{part: "tools",
-    refs}`. A row the Desk has stays as it is, whatever its status. Returns the tools added, by
-    name; [] when it has them all, or when the Desk is deleted, and then nothing is written."""
+async def update_native_tools(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """Brings the Desk's native tools up to date with the registered ones: gives it each it has no
+    `tools` row for (one created before it was registered), enabled as `create_desk` writes them,
+    and points each row an earlier kernel wrote with another profile at the registered one, its
+    status kept, as the owner's confirm of the tool points it (`mcp_pins.pin_row`). In the caller's
+    transaction under the Desk row's lock, as an owner's write takes it, then the native rows
+    `FOR UPDATE` in tool order, and ledgered `desk_data` `{part: "tools", refs}`. Returns the tools
+    added or changed, by name; [] when every one is current, or when the Desk is deleted, and then
+    nothing is written."""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one()
     if desk_row.deleted_at is not None:              # deleted since it was found: it gets nothing
         return []
-    have = set((await ctx.db.scalars(ctx.repo.scoped(select(Tool.tool).where(Tool.desk_id == desk_id)))).all())
-    missing = [profile for profile in adapters.registered_profiles(source="native") if profile.tool not in have]
-    if not missing:
+    registered = adapters.registered_profiles(source="native")
+    have = {row.tool: row for row in (await ctx.db.scalars(ctx.repo.scoped(
+        select(Tool).where(Tool.desk_id == desk_id, Tool.tool.in_([profile.tool for profile in registered]))
+        .order_by(Tool.tool).with_for_update().execution_options(populate_existing=True)))).all()}
+    missing = [profile for profile in registered if profile.tool not in have]
+    stale = [profile.tool for profile in registered
+             if profile.tool in have and have[profile.tool].profile_sha256 != mcp_pins.native_pin(profile.tool)]
+    if not missing and not stale:
         return []
     ctx.db.add_all(tool_row(desk_row.copy_id, desk_id, profile) for profile in missing)
+    for tool in stale:
+        row = have[tool]
+        mcp_pins.pin_row(row, tool, mcp_pins.native_pin(tool), status=row.status, review_reason=row.review_reason)
     await ctx.db.flush()
-    added = sorted(profile.tool for profile in missing)
-    await ledger_desk_data(ctx, desk_row, {"part": "tools", "refs": added})
-    return added
+    changed = sorted([*(profile.tool for profile in missing), *stale])
+    await ledger_desk_data(ctx, desk_row, {"part": "tools", "refs": changed})
+    return changed
 
 
 def hours_claim(hours: Sequence[HoursWindow]) -> Claim:
@@ -963,8 +974,13 @@ def open_window_status(hours: Sequence[HoursWindow], tz: tzinfo, now: datetime) 
 
 
 async def enabled_profiles(ctx: KernelCtx, desk_id: str) -> list[ToolProfile]:
-    """The profiles of the Desk's enabled tools, by tool name, from its `tools` rows. A row without
-    a profile gives Claude nothing to call, so it is left out."""
-    rows = await ctx.db.scalars(ctx.repo.scoped(
-        select(Tool).where(Tool.desk_id == desk_id, Tool.status == "enabled").order_by(Tool.tool)))
-    return [row.profile.model_copy(update={"status": "enabled"}) for row in rows if row.profile is not None]
+    """The profiles of the Desk's enabled tools, by tool name, from its `tools` rows (`enabled_of`)."""
+    return enabled_of(await ctx.db.scalars(ctx.repo.scoped(
+        select(Tool).where(Tool.desk_id == desk_id, Tool.status == "enabled").order_by(Tool.tool))))
+
+
+def enabled_of(rows: Iterable[Tool]) -> list[ToolProfile]:
+    """The profiles of the enabled ones of a Desk's `tools` rows, in their order. A row without a
+    profile gives Claude nothing to call, so it is left out."""
+    return [row.profile.model_copy(update={"status": "enabled"})
+            for row in rows if row.status == "enabled" and row.profile is not None]
