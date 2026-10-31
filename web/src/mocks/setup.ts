@@ -107,9 +107,9 @@ const NO_OWNER = fail(401, 'no_owner_session');
 const NOT_FOUND = fail(404, 'not_found');
 const INVALID = fail(422, 'invalid');
 const CONFLICT = fail(409, 'conflict');
-/** A keyed start still starting: send it again in two seconds, as the API's `START_RETRY_S`. */
+/** A start still starting: send it again in two seconds, as the API's `START_RETRY_S`. */
 const IN_PROGRESS = fail(409, 'in_progress', { retry_after: 2 });
-/** A keyed start that ended with its Desk unknown: only a new key starts again. */
+/** A start that ended with its Desk unknown: only a new key starts again. */
 const KEY_SPENT = fail(409, 'key_spent');
 /** A start that outlasted the proxy in front of the API, which answered for it while it ran on. */
 const TIMED_OUT = fail(504, 'timeout');
@@ -585,7 +585,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
 }
 
 /**
- * The starts that came with a client key (plan 02b), per copy: each start's body without the key, and
+ * The starts by their client key (plan 02b), per copy: each start's body without the key, and
  * what it made: its interview's id, null while it is still starting, or `spent` when it ended with
  * its Desk unknown, so the key can't start anything again. `pending` keeps a held start's words
  * until the test ends it.
@@ -608,11 +608,11 @@ function setupKeysOf(world: MockWorld): { starts: Map<string, KeyedStart>; holdN
 }
 
 /**
- * For tests: the next start with a client key runs long, as a model turn or a slow kernel can. Its
- * own answer is lost (a 504 from the proxy in front), a repeat with its key is 409 `in_progress`
- * meanwhile, and it ends when the returned function says how: `made` its interview and Desk;
- * `freed` its key, having failed before the Desk was asked for, so the same request starts again;
- * or `spent` its key, its Desk unknown, so a repeat is 409 `key_spent`.
+ * For tests: the next start runs long, as a model turn or a slow kernel can. Its own answer is
+ * lost (a 504 from the proxy in front), a repeat with its key is 409 `in_progress` meanwhile, and
+ * it ends when the returned function says how: `made` its interview and Desk; `freed` its key,
+ * having failed before the Desk was asked for, so the same request starts again; or `spent` its
+ * key, its Desk unknown, so a repeat is 409 `key_spent`.
  */
 export function holdNextStart(world: MockWorld): (outcome: 'made' | 'freed' | 'spent') => void {
   const keys = setupKeysOf(world);

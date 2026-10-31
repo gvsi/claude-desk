@@ -1839,9 +1839,9 @@ describe('idempotency keys', () => {
   });
 
   it('held_setup_start_answers_in_progress_until_it_ends', async () => {
-    // A keyed start that runs long: its own answer is lost (a 504 from the proxy in front), and a
-    // repeat with its key meanwhile is 409 `in_progress` with `retry_after` 2 s. Once it has made
-    // the Desk, a repeat answers its interview, and only one Desk was made.
+    // A start that runs long: its own answer is lost (a 504 from the proxy in front), and a repeat
+    // with its key meanwhile is 409 `in_progress` with `retry_after` 2 s. Once it has made the Desk,
+    // a repeat answers its interview, and only one Desk was made.
     const start = (key: string) => call('startSetup', { body: { description: 'Rivera Plumbing. I fix leaks.', timezone: 'UTC', idempotency_key: key } });
     const desks = mockStore.world.desks.length;
     let end = holdNextStart(mockStore.world);

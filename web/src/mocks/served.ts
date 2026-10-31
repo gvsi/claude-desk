@@ -106,7 +106,7 @@ export interface ErrorBody {
   cancel_reason?: CancelReason | null;
   /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
   draft?: RulesDraft;
-  /** Seconds to wait before sending again: a keyed setup start's 409 `in_progress`. */
+  /** Seconds to wait before sending again: a setup start's 409 `in_progress`. */
   retry_after?: number;
 }
 
