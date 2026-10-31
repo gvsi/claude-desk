@@ -182,6 +182,44 @@ describe('gen-api', () => {
     await expect(generate(doc(schemas), {})).rejects.toThrow(/contracts\.schema\.json: has no \$defs/);
   });
 
+  it('contract_names_keep_the_contract_shape', async () => {
+    // A schema under a contract's name with another shape fails, rather than being swapped for the contract.
+    const other = { ...CONTRACTS.$defs.Decision, properties: { decision_id: { type: 'integer', title: 'Decision Id' } } };
+    await expect(generateApi(doc({ Thing: THING, Item: ITEM, Decision: other }), CONTRACTS)).rejects.toThrow(
+      /schema Decision differs from the contract of the same name/,
+    );
+    // A property named like an annotation is still a property.
+    const extra = { ...CONTRACTS.$defs.Decision, properties: { ...CONTRACTS.$defs.Decision.properties, description: { type: 'string' } } };
+    await expect(generateApi(doc({ Thing: THING, Item: ITEM, Decision: extra }), CONTRACTS)).rejects.toThrow(
+      /schema Decision differs from the contract of the same name/,
+    );
+
+    // Titles, descriptions, defaults and how a reference is spelled may differ: the shape is the same.
+    const review = (score) => ({ type: 'object', properties: { score }, required: [] });
+    const contracts = {
+      $defs: {
+        Decision: {
+          ...CONTRACTS.$defs.Decision,
+          properties: { ...CONTRACTS.$defs.Decision.properties, review: { $ref: '#/$defs/Review' } },
+        },
+        Review: { ...review({ type: 'number', title: 'Score', default: 0 }), title: 'Review' },
+      },
+    };
+    const served = {
+      Thing: THING,
+      Item: ITEM,
+      Decision: {
+        ...contracts.$defs.Decision,
+        description: 'One decision.',
+        properties: { ...contracts.$defs.Decision.properties, review: ref('Review') },
+      },
+      Review: review({ type: 'number', title: 'How sure', description: 'From 0 to 1.', default: 1 }),
+    };
+    const text = await generateApi(doc(served), contracts);
+    expect(text).toContain("import type { Decision } from './contracts.ts';");
+    expect(text).not.toMatch(/^export (?:interface|type) (?:Decision|Review)\b/m);
+  });
+
   it('command_check_fails_when_stale_or_missing', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'gen-api-'));
     made.push(dir);

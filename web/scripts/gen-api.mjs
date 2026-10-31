@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 import { compileDefinitions, prepare } from './gen-contracts.mjs';
 
@@ -35,7 +36,35 @@ function refName(ref) {
   return match[1];
 }
 
-/** The document's component schemas, split into the API's own and the contracts it serves. */
+/** Keywords that say nothing about a schema's shape, left out when two schemas are compared. */
+const ANNOTATIONS = new Set(['title', 'description', 'default']);
+
+/**
+ * A prepared schema as it is compared with another: annotations dropped, and each `$ref` reduced to
+ * the schema name it points at, whether it is spelled `#/components/schemas/Name` (the OpenAPI
+ * document) or `#/$defs/Name` (the contracts schema). Property names are data and all kept.
+ */
+function shapeOf(node) {
+  if (Array.isArray(node)) return node.map(shapeOf);
+  if (node === null || typeof node !== 'object') return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (ANNOTATIONS.has(key)) continue;
+    if (key === '$ref' && typeof value === 'string') {
+      out.$ref = value.replace(/^#\/(?:components\/schemas|\$defs)\//, '');
+    } else if (key === 'properties' && value && typeof value === 'object') {
+      out.properties = Object.fromEntries(Object.entries(value).map(([field, schema]) => [field, shapeOf(schema)]));
+    } else {
+      out[key] = shapeOf(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * The document's component schemas, split into the API's own and the contracts it serves. A schema
+ * under a contract's name must have that contract's shape, since it becomes the contract's import.
+ */
 function splitSchemas(openapi, contracts) {
   const schemas = openapi?.components?.schemas;
   if (!schemas || typeof schemas !== 'object' || Object.keys(schemas).length === 0) fail('has no components.schemas');
@@ -45,7 +74,11 @@ function splitSchemas(openapi, contracts) {
   const own = {};
   for (const [name, schema] of Object.entries(schemas)) {
     if (!TYPE_NAME.test(name)) fail(`schema ${JSON.stringify(name)} is not a type name`);
-    if (!contractNames.has(name)) own[name] = schema;
+    if (!contractNames.has(name)) {
+      own[name] = schema;
+    } else if (!isDeepStrictEqual(shapeOf(prepare(schema)), shapeOf(prepare(defs[name])))) {
+      fail(`schema ${name} differs from the contract of the same name in contracts.schema.json`);
+    }
   }
   return { schemas, own, contractNames };
 }
