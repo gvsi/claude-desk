@@ -2712,7 +2712,7 @@
     "/api/owner/setup/{id}": {
       "get": {
         "summary": "Setup Interview",
-        "description": "The setup interview as it stands.",
+        "description": "The setup interview as it stands, reopening consent when its run was abandoned.",
         "operationId": "owner_setup_interview",
         "parameters": [
           {
@@ -2757,6 +2757,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2783,7 +2793,7 @@
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "The owner's answer to whether Claude may read their Claude memory and website, given once (409 `conflict`\nafter). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,\nneither ever is. Then the first question.",
+        "description": "Store the owner's consent, then read their Claude memory and named website through the kernel on yes, or\nskip both on no. Claude's first question and the read labels land together. Answers 200 when finished within\nthe wait, otherwise 202 with the stored busy interview. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -2817,6 +2827,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -11602,6 +11622,11 @@
             ],
             "title": "Question"
           },
+          "busy": {
+            "type": "boolean",
+            "title": "Busy",
+            "default": false
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/SetupMessage"
@@ -11621,7 +11646,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether Claude is still working on the owner's last message\n(`busy`) and the conversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {

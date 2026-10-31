@@ -599,7 +599,8 @@ class SetupMessage(BaseModel):
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
-    before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+    before consent, while busy and after the last one), whether Claude is still working on the owner's last message
+    (`busy`) and the conversation so far. Its messages start at Claude's consent
     question: the owner's opening description isn't shown back to them."""
 
     interview_id: str
@@ -608,6 +609,7 @@ class SetupState(BaseModel):
     step: SetupStep
     consent: bool | None
     question: QuestionKey | None
+    busy: bool = False
     messages: list[SetupMessage]
 
 

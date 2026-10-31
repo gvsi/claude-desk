@@ -19,6 +19,7 @@ from fastapi import Request, Response
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.agents import DemoAgents
+from desk.api.consent_runs import ConsentRuns
 from desk.api.cookies import OWNER_COOKIE, VISITOR_COOKIE, set_visitor_cookie
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
 from desk.api.metrics import over_daily_budget
@@ -72,6 +73,7 @@ class Runtime:
     a2a_transport: Any = field(default=None, repr=False)      # tests only: the built-in agent's way to the app
     presence: Presence = field(default_factory=Presence)      # who is typing, in this process's memory (Plan 02b)
     proving: Proving = field(default_factory=proving_work)    # the proving routes' running work (Plan 02b)
+    consent_runs: ConsentRuns = field(default_factory=ConsentRuns)
 
     def database(self) -> AsyncEngine:
         if self.engine is None:

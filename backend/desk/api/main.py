@@ -7,7 +7,7 @@ before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADE
 lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
 the turn locks' pool, the run events listener, the turn runner, the built-in agent's client of the public A2A
 endpoint and its runs (`agents.py`), and the job queue with its two workers (`jobs.py`), and closes them in the reverse
-order: the workers' jobs, the owner's rule drafting and proving work still running (`proving.py`), the agent's runs
+order: the workers' jobs, setup's consent runs, the owner's rule drafting and proving work (`proving.py`), the agent's runs
 and the runner's turns first, with the model client it built (never an injected one) last. Building the app sets the
 job queue's loggers (`procrastinate` and its children) to WARNING and filters them (`JobRecords`): Procrastinate names
 each job with its arguments below WARNING and when a job fails, and the resume job's signed decision quotes the
@@ -244,6 +244,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                                 production=settings.production)
             stack.push_async_callback(agents.close)        # before its client, the runner and the pools
             stack.push_async_callback(state.proving.close)  # no proving work outlives the pools it runs on
+            stack.push_async_callback(state.consent_runs.close)
             await stack.enter_async_context(jobs.open_async())
             worker = asyncio.create_task(run_worker(jobs, JobEnv(engine=engine, ro_schema=settings.kernel_ro_schema,
                                                                  clock=state.clock, model=state.model,
