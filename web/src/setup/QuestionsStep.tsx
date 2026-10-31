@@ -89,6 +89,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<CardDecision | null>(null);
+  const [dismissed, setDismissed] = useState<ReadonlySet<number>>(() => new Set());
   const id = state.interview_id;
   const asking = awaitsConsent(state);
   const closing = state.step !== 'questions';
@@ -96,6 +97,14 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const busy = state.busy === true;
   const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
   const blocked = busy || sending !== null || deciding !== null || suggesting || retrying || consenting !== null;
+  const panel = live && !closing && !asking && !dismissed.has(live.index) ? live : null;
+  const closePanel = () => {
+    if (live) setDismissed((previous) => new Set([...previous, live.index]));
+  };
+  const dismissPanel = () => {
+    closePanel();
+    composer.current?.querySelector('textarea')?.focus({ preventScroll: true });
+  };
   useEffect(() => { if (!busy) setDeciding(null); }, [busy]);
   const work = useSetupWork(state, reread);
   const wasBusy = useRef(busy);
@@ -270,6 +279,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       void reread();
       return;
     }
+    closePanel();
     void submit(state.question === null
       ? { question: null, card: state.pending_card!, text, seen: state.messages.length }
       : { question: state.question, text, seen: state.messages.length });
@@ -310,7 +320,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   useLayoutEffect(() => {
     const pane = scroll.current;
     if (pane) pane.scrollTop = pane.scrollHeight;
-  }, [state.messages.length, busy, sending, deciding]);
+  }, [state.messages.length, busy, sending, deciding, panel?.index]);
 
   return (
     <div className="cd-setup-chat" ref={step}>
@@ -320,7 +330,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       <Transcript label={copy.conversation}>
         {state.messages.map((message, index) => (
           <Fragment key={`${index}-${message.role}`}>
-            {isCard(message) ? <ProposalCard proposal={message.card!}
+            {panel?.index === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}
               amountRequired={amountRequired === message.card!.proposal_id}
               failed={decisionFailed?.proposal_id === message.card!.proposal_id}
               onRetry={() => { if (decisionFailed) void decide(decisionFailed); }}
@@ -329,12 +339,6 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
               disabled={blocked || failed !== null}
               onDecision={(decision) => void decide(decision)}
             /> : <Line message={message} />}
-            {message.role === 'claude' && message.choices?.length ? <SetupChoices
-              choices={message.choices}
-              picked={state.messages[index + 1]?.role === 'owner' ? state.messages[index + 1]?.text : undefined}
-              disabled={live?.index !== index || blocked || failed !== null}
-              onChoose={(text) => { returnFocus.current = true; send(text); }}
-            /> : null}
           </Fragment>
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
@@ -357,6 +361,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       ) : null}
       </div></div>
       <div className="cd-setup-dock"><div className="cd-setup-dock__column">
+      {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices}
+        disabled={blocked || failed !== null} onDismiss={dismissPanel}
+        onChoose={(text) => { closePanel(); returnFocus.current = true; send(text); }} /> : null}
       {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : asking && !busy ? (
         <>
           {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}

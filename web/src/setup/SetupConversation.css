@@ -1,16 +1,97 @@
-.cd-setup-choices {
-  --cd-touch-reach-block: calc(var(--space-8) / 2);
+.cd-setup-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: calc(var(--space-20) + var(--space-2));
+  height: calc(var(--space-20) + var(--space-2));
+  padding: 0 var(--space-6);
+  border: 1px solid var(--line-control);
+  border-radius: var(--space-6);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
+.cd-setup-q3__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-12);
+  margin: calc(var(--space-4) * -1) calc(var(--space-6) * -1) var(--space-10) 0;
+}
+
+.cd-setup-q3__question {
+  margin: var(--space-6) 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 25px;
+}
+
+.cd-setup-q3__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 calc(var(--space-8) * -1);
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-q3__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--space-40);
+  padding: 0 var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cd-setup-q3__row.is-active {
+  background: var(--fill-secondary);
+}
+
+.cd-setup-q3__row.is-active .cd-setup-kbd {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.cd-setup-q3__row--other {
+  cursor: text;
+}
+
+.cd-setup-q3__hint {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-8);
-}
-.cd-setup-choices .cd-chip {
-  gap: var(--space-8);
-}
-.cd-setup-choices__rec {
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+  margin: var(--space-12) 0 0;
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
   color: var(--text-secondary);
 }
 
+.cd-setup-q3__hint .cd-setup-kbd {
+  min-width: var(--space-20);
+  height: var(--space-20);
+}
+
+@media (max-width: 639px), (pointer: coarse) {
+  .cd-setup-q3__hint {
+    display: none;
+  }
+}
+
+
+.cd-setup-q3__row--other input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); }
+.cd-setup-q3__row--other input::placeholder { color: var(--text-secondary); }
 .cd-setup-job {
   display: flex;
   flex-direction: column;

@@ -2935,6 +2935,79 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it('dismisses_the_question_with_escape_and_keeps_composer_and_other_words_literal', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('123');
+    await expect.element(box).toHaveValue('123');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await expect.element(panel).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(panel.elements()).toHaveLength(0);
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('123');
+    await expect.element(screen.getByRole('log').getByText(question.text, { exact: true })).toBeVisible();
+    await box.fill('Both, about evenly');
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(panel.elements()).toHaveLength(0);
+  });
+
+  it('sends_the_last_numbered_row_as_free_text', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    (panel.getByRole('list').getByRole('button').first().element() as HTMLElement).focus();
+    await userEvent.keyboard('{ArrowUp}');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await userEvent.keyboard('123 individuals{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: '123 individuals' });
+    expect(panel.elements()).toHaveLength(0);
+  });
+
+  it('moves_picks_and_sends_docked_choices_with_the_keyboard_without_capturing_composer_text', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.element(options.nth(1)).toHaveAttribute('aria-current', 'true');
+    await userEvent.keyboard('3');
+    await expect.element(options.nth(2)).toHaveAttribute('aria-current', 'true');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![2]!.text });
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+  });
+
+  it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    expect(panel.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(screen.getByRole('log').getByText(question.text, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(panel.getByRole('textbox', { name: 'Something else…', exact: true })).toBeVisible();
+    await panel.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.element(screen.getByRole('log').getByText(question.text, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('log').getByText('Both, about evenly', { exact: true })).toBeVisible();
+    expect(screen.getByRole('region', { name: question.text, exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
+  });
+
   it.each(['answer', 'suggestions'] as const)('disables_cards_choices_and_the_dock_during_an_%s_turn', async (action) => {
     const state = await consultantAt('intake');
     const id = state.interview_id;
@@ -2956,7 +3029,7 @@ describe('consultant setup', () => {
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     await expect.element(box).toBeDisabled();
     await expect.element(screen.getByRole('article', { name: 'Take new-client details' }).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
-    await expect.element(screen.getByRole('button', { name: 'Both, about evenly', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeDisabled();
     if (action === 'answer') await expect.poll(() => requests(key).length).toBe(mark + 1);
     release();
@@ -3050,15 +3123,13 @@ describe('consultant setup', () => {
   it('only_the_latest_choices_are_live_and_money_limits_have_no_recommendation', async () => {
     const state = await consultantAt('money');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Both, about evenly' }).elements()).toHaveLength(0);
     await screen.getByRole('button', { name: 'Set an amount now', exact: true }).click();
     await expect.element(screen.getByRole('button', { name: 'Up to $100', exact: true })).toBeEnabled();
-    await expect.element(screen.getByRole('button', { name: 'Set an amount now', exact: true })).toBeDisabled();
-    await expect.element(screen.getByRole('button', { name: 'Set an amount now', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Set an amount now', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Recommended', { exact: true }).elements()).toHaveLength(0);
-    const live = screen.getByRole('group', { name: 'Choices', exact: true }).last();
-    expect(live.getByRole('button').elements()).toHaveLength(4);
-    expect(getComputedStyle(live.element()).getPropertyValue('--cd-touch-reach-block')).not.toBe('');
+    const live = screen.getByRole('region', { name: "What's the most I should take or pay out without asking you?", exact: true });
+    expect(live.getByRole('list').getByRole('button').elements()).toHaveLength(4);
   });
 
   it('shows_coming_later_jobs_and_connectors_without_claiming_they_work', async () => {
@@ -3229,8 +3300,7 @@ describe('consultant setup', () => {
     await choice.click();
     const consult = screen.getByRole('article', { name: 'Book a free intro consult' });
     await expect.element(consult).toBeVisible();
-    await expect.element(choice).toBeDisabled();
-    await expect.element(choice).toHaveAttribute('aria-pressed', 'true');
+    expect(choice.elements()).toHaveLength(0);
     expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'what_you_do', text: 'Both, about evenly' });
     expect([...screen.container.querySelectorAll('.cd-claude-message')].filter((node) => node.textContent === '')).toHaveLength(0);
     await consult.getByRole('button', { name: 'Accept', exact: true }).click();
