@@ -716,14 +716,16 @@ describe('Vision pages against their boards', () => {
       access.querySelector('button') as HTMLElement,
     ]);
 
-    // At the story's width, the page is 1061 px tall, so it fits the story's 1512 by 1061 window
-    // exactly: nothing scrolls, and the footer sits 20 px over the window's foot. Its own height is
-    // measured in a shorter window first: under the 40 px bar, the main area scrolls 1021 px.
+    // As the story draws it, the page fits a window as tall as itself exactly: nothing scrolls, and
+    // the footer sits 20 px over the window's foot. Its height is measured in a shorter window first,
+    // as the main area's scroll height under the 40 px bar, rather than pinned in pixels: lines wrap
+    // with the machine's fonts, so the same page is a few pixels taller or shorter on another one.
     await browserPage.viewport(1512, 900);
     await expect.poll(() => window.innerHeight).toBe(900);
-    expect(page.scrollHeight).toBe(1061 - 40);
-    await browserPage.viewport(1512, 1061);
-    await expect.poll(() => window.innerHeight).toBe(1061);
+    const pageHeight = page.scrollHeight + 40;
+    expect(pageHeight).toBeGreaterThan(900);
+    await browserPage.viewport(1512, pageHeight);
+    await expect.poll(() => window.innerHeight).toBe(pageHeight);
     expect(page.scrollHeight).toBe(page.clientHeight);
     expect(round(window.innerHeight - bottom(footer))).toBe(20);
   });
@@ -809,19 +811,21 @@ describe('Vision pages against their boards', () => {
       main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
     ]);
 
-    // At the story's width, the page is 994 px tall with Dana's last visit in it, so it fits the
-    // story's 1512 by 994 window exactly. The shell is the window's height, so the page's own height
-    // is measured unrolled in a shorter window first: there the conversation scrolls by what the
-    // window lacks. In the story's window, the shell is the page and nothing scrolls.
+    // As the story draws it, the page fits a window as tall as itself, Dana's last visit included.
+    // The shell is the window's height, so the page's own height is measured unrolled in a shorter
+    // window first: there the conversation scrolls by what the window lacks. It isn't pinned in
+    // pixels, since lines wrap with the machine's fonts. In a window that tall, the shell is the
+    // page and nothing scrolls.
     await browserPage.viewport(1512, 900);
     await expect.poll(() => window.innerHeight).toBe(900);
     const shell = one(root, '.cd-public-shell');
     const scroller = one(root, '.cd-public-shell__scroll');
     expect(round(shell.getBoundingClientRect().height)).toBe(900);
-    expect(round(shell.getBoundingClientRect().height) + scroller.scrollHeight - scroller.clientHeight).toBe(994);
-    await browserPage.viewport(1512, 994);
-    await expect.poll(() => window.innerHeight).toBe(994);
-    expect([round(shell.getBoundingClientRect().height), document.documentElement.scrollHeight]).toEqual([994, 994]);
+    const pageHeight = round(shell.getBoundingClientRect().height) + scroller.scrollHeight - scroller.clientHeight;
+    expect(pageHeight).toBeGreaterThan(900);
+    await browserPage.viewport(1512, pageHeight);
+    await expect.poll(() => window.innerHeight).toBe(pageHeight);
+    expect([round(shell.getBoundingClientRect().height), document.documentElement.scrollHeight]).toEqual([pageHeight, pageHeight]);
     expect(scroller.scrollHeight).toBe(scroller.clientHeight);
 
     // Nothing here is live: the download's click goes nowhere, not even to a page of the app or a
