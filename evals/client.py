@@ -48,6 +48,7 @@ _PAYMENT_LINK = re.compile(r"(?:/api)?/pay/([^/?#\s]+)")
 # A proving route answers 202 `ProvingPending{retry: {path, body}}` once its kernel call passes 25 s; the
 # owner app re-sends `retry` every 3 s ("How proofs run"), and so does the client, for at most two minutes.
 PROVING_RETRY_S, PROVING_LIMIT_S = 3.0, 120.0
+SHOWN_UNREADABLE = 80   # the characters an `AnswerUnreadable` shows of what came
 
 
 class ApiCallFailed(AssertionError):
@@ -56,8 +57,24 @@ class ApiCallFailed(AssertionError):
 
     def __init__(self, op: str, status: int, body: Any):
         self.op, self.status, self.body = op, status, body
-        shown = json.dumps(body) if not isinstance(body, str) else body
-        super().__init__(f"{op} answered {status}: {shown[:500]}")
+        super().__init__(self._message())
+
+    def _message(self) -> str:
+        shown = json.dumps(self.body) if not isinstance(self.body, str) else self.body
+        return f"{self.op} answered {self.status}: {shown[:500]}"
+
+
+class AnswerUnreadable(ApiCallFailed):
+    """A 2xx answer the operation reads as JSON, or an event of the chat's stream, that isn't JSON. Names
+    the operation, the status, the content type and the first 80 characters of what came (its `body`),
+    never a header, a cookie or anything the request carried."""
+
+    def __init__(self, op: str, response: httpx.Response, what: str, text: str):
+        self.content_type, self.what = response.headers.get("content-type") or "no content type", what
+        super().__init__(op, response.status_code, text[:SHOWN_UNREADABLE])
+
+    def _message(self) -> str:
+        return f"{self.op} answered {self.status} ({self.content_type}) with {self.what} that isn't JSON: {self.body!r}"
 
 
 @dataclass(frozen=True)
@@ -173,10 +190,21 @@ def _no_jar() -> CookieJar:
 
 
 def _body(response: httpx.Response) -> Any:
+    """A refusal's body, as JSON or else as text, for the caller to judge."""
     try:
         return response.json()
     except ValueError:
         return response.text
+
+
+def _json(op: str, response: httpx.Response) -> Any:
+    """A 2xx answer's JSON body, or None when it has none; a body that isn't JSON raises `AnswerUnreadable`."""
+    if not response.content:
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        raise AnswerUnreadable(op, response, "a body", response.text) from None
 
 
 # The client
@@ -263,7 +291,7 @@ class DeskClient:
         response = await self.request(op, **kwargs)
         if not 200 <= response.status_code < 300:
             raise ApiCallFailed(op, response.status_code, _body(response))
-        return _body(response) if response.content else None
+        return _json(op, response)
 
     def _chat(self) -> dict[str, str]:
         if self.desk_slug is None:
@@ -299,7 +327,8 @@ class DeskClient:
     async def events(self, last_event_id: str | int | None = None, *,
                      query: dict[str, Any] | None = None) -> AsyncIterator[StreamEvent]:
         """The open chat's event stream, from after `last_event_id` (all of it with None), until the
-        caller stops reading. A refused stream raises `ApiCallFailed`.
+        caller stops reading. A refused stream raises `ApiCallFailed`, and an event whose data isn't JSON
+        `AnswerUnreadable`.
 
         An event without data is skipped, as the SSE spec never dispatches one: httpx-sse keeps the last
         event id across events, so once one has set an id, it hands over the API's keep-alive comment
@@ -316,7 +345,11 @@ class DeskClient:
             async for sse in source.aiter_sse():
                 if not sse.data:   # a keep-alive
                     continue
-                yield StreamEvent(id=sse.id or None, event=sse.event, data=json.loads(sse.data))
+                try:
+                    data = json.loads(sse.data)
+                except ValueError:
+                    raise AnswerUnreadable("events", response, "an event", sse.data) from None
+                yield StreamEvent(id=sse.id or None, event=sse.event, data=data)
 
     async def owner_session(self, session_id: str) -> Any:
         """A conversation as the owner reads it (`OwnerTranscript`)."""
@@ -438,7 +471,7 @@ class DeskClient:
         deadline = time.monotonic() + PROVING_LIMIT_S
         response = await self.request(op, **kwargs)
         while response.status_code == 202:
-            pending = _body(response)
+            pending = _json(op, response)
             retry = pending.get("retry") if isinstance(pending, dict) else None
             path = retry.get("path") if isinstance(retry, dict) else None
             if not isinstance(path, str) or not path.startswith("/api/owner/") or time.monotonic() > deadline:
@@ -447,7 +480,7 @@ class DeskClient:
             response = await self.http.request(ROUTES[op].method, path, json=retry.get("body"))
         if not 200 <= response.status_code < 300:
             raise ApiCallFailed(op, response.status_code, _body(response))
-        return _body(response) if response.content else None
+        return _json(op, response)
 
 
-__all__ = ["ApiCallFailed", "DeskClient", "LoopbackJar", "StreamEvent", "path_matches"]
+__all__ = ["AnswerUnreadable", "ApiCallFailed", "DeskClient", "LoopbackJar", "StreamEvent", "path_matches"]

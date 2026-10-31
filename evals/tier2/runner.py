@@ -62,7 +62,7 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, Validation
 
 from desk.contracts import Decision, DemoInboxEntry, KnowledgeItem, Label, RenderedBlock, SeedDocument
 from desk.events import EvError, EvHeld, EvMessage, EvResolved, EvTurnEnd, SseEvent
-from evals.client import TIMEOUT_S, ApiCallFailed, DeskClient, StreamEvent
+from evals.client import TIMEOUT_S, AnswerUnreadable, ApiCallFailed, DeskClient, StreamEvent
 from evals.oracles import Marker, planted_marker, seed_markers
 from evals.tier2.artifact import (
     A2AAnswer,
@@ -699,7 +699,7 @@ class _Run:
             try:
                 result = await self.visitor.complete_payment_link(block.href)
             except ApiCallFailed as refused:
-                if refused.status >= 500:
+                if refused.status >= 500 or isinstance(refused, AnswerUnreadable):   # the stack failed, not the link
                     raise
                 self.observations.append(note("The checkout page said this link can't be paid."))
                 continue

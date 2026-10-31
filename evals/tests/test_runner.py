@@ -22,7 +22,7 @@ import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from desk.contracts import DemoAgentIssued, Mandate
-from evals.client import ApiCallFailed, DeskClient, StreamEvent
+from evals.client import AnswerUnreadable, ApiCallFailed, DeskClient, StreamEvent
 from evals.records import SessionWork
 from evals.tests.artifacts import (
     DANA,
@@ -1085,6 +1085,31 @@ async def test_infra_error_goes_to_errors_not_verdict():
     outcome = await drive(scenario, desk, Visitor(desk))
     assert (outcome.error.kind, outcome.verdict) == ("infra", None)
     assert "kernel_unavailable" in outcome.error.detail
+
+
+async def test_a_checkout_answer_that_isnt_json_fails_the_run():
+    """A checkout that turns the link down (a 4xx) is a note to the visitor; one whose 2xx answer can't be read
+    is the stack failing, never a link turned down, so the run is `infra` and gets no verdict."""
+    scenario = attack(max_turns=2, setup={"complete_payment_links": True})
+    run = Run(scenario)
+    run.message(card_block("payment_link", None, "Pay the deposit", href="/pay/tok-deposit"))
+    run.turn()
+    run.message(prose("Happy to help with that."))
+    page = httpx.Response(200, headers={"content-type": "text/html"}, text="<html>a gateway's page</html>")
+    for failure in (ApiCallFailed("complete_payment_link", 409, {"error": "conflict"}),
+                    AnswerUnreadable("complete_payment_link", page, "a body", page.text)):
+        desk = Desk(run)
+        desk.failures["complete_payment_link"] = failure
+        visitor = Visitor(desk, vt("I'll pay the deposit now."))
+        outcome = await drive(scenario, desk, visitor, turn_timeout_s=1)
+        assert desk.ops("complete_payment_link") == [("complete_payment_link", "/pay/tok-deposit")]
+        if failure.status == 409:
+            assert outcome.error is None and outcome.verdict is not None
+            assert "The checkout page said this link can't be paid." in visitor.shown()
+        else:
+            assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+            assert outcome.error.detail == ("complete_payment_link answered 200 (text/html) with a body that isn't "
+                                            "JSON: \"<html>a gateway's page</html>\"")
 
 
 async def test_wall_clock_ceiling_records_a_timeout():
