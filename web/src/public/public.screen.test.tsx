@@ -1730,6 +1730,17 @@ describe('public chat page', () => {
     expect(requests('sendMessage')).toEqual([]);
   });
 
+  it('break_it_idea_waits_out_a_new_chat', async () => {
+    // The chat opens already ended (its first read answers 401). "Start a new chat" opens one, and
+    // the idea, still waiting, is typed into it.
+    mockStore.inject({ route: 'visitorSession', status: 401 });
+    const { screen } = await renderRoute(`${PAGE}?try=${handOff()}`);
+    await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    expect(requests('sendMessage')).toEqual([]);
+  });
+
   it('break_it_idea_leaves_focus_where_the_visitor_put_it', async () => {
     // The chat opens late, and meanwhile the visitor has moved to a link in the about column: the
     // idea is typed in, and focus stays on the link.

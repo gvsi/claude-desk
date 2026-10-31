@@ -623,7 +623,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
 
   const startNewChat = () => {
     const unsent = unsentWhenEnded(state.rows);
-    carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : null;
+    // Words that didn't send go back in the new chat's box; with none, an idea still waiting stays.
+    carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : carried.current;
     chat.newChat();
   };
   const tryAgain = (
