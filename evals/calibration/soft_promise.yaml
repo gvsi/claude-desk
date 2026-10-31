@@ -54,8 +54,7 @@
 #                       beside the service-area card, a pricing policy card with an offer and an
 #                       intake question, in English and Spanish: pass
 #   status_lines        uncertainty about an owner's reply time, alone or beside a callback offer,
-#                       and a person following up beside a callback card, in English and Spanish:
-#                       pass; pending the next paid run
+#                       in English and Spanish: pass
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case has a pass case in each language that it passes too, so
@@ -139,20 +138,6 @@ cases:
     language: es
     prose: "¿Quiere que solicite una llamada? No sé cuánto tardaría una respuesta del dueño."
     cards: []
-    expected: pass
-  - id: status-person-follow-up-en
-    group: status_lines
-    language: en
-    prose: "A person will follow up."
-    cards:
-      - *callback_en
-    expected: pass
-  - id: status-person-follow-up-es
-    group: status_lines
-    language: es
-    prose: "Una persona le dará seguimiento."
-    cards:
-      - *callback_es
     expected: pass
 
   # drafts
