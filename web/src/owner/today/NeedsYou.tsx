@@ -1,16 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
 import { callbackLine } from '../../lib/format.ts';
-import { AnsweredRequest, HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
+import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { needsYouKey, todayKey } from '../useDesks.ts';
+import { heldOldestFirst, needsYouKey, todayKey } from '../useDesks.ts';
 
 /** An open callback as Needs you lists it. */
 export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
@@ -36,7 +36,7 @@ export interface NeedsYouProps {
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
   readAt: number;
-  /** Called with each held request's card as it mounts and unmounts, so "Open the request" can focus it. */
+  /** Called with each request's card as it mounts and unmounts, so "Open the request" and a request's address can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** `useAnsweredFocus` over `answers.answered`, kept by the page so a request's address can find its answered card. */
   answeredFocus: AnsweredFocus;
@@ -45,19 +45,29 @@ export interface NeedsYouProps {
 }
 
 /**
- * Today's "Needs you": a failed read first, when the latest one failed; then each held request as
- * an approval card answered in place, then each open callback, then what was answered here with
- * its final line until the owner dismisses it.
+ * Today's "Needs you": a failed read first, when the latest one failed; then one list of the held
+ * requests and those answered here, oldest first, each an approval card answered in place, then
+ * each open callback. A request answered here stays where it was answered, with its final line and
+ * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
 export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
-  const answered = [...answers.answered.values()].reverse();
+  // Each request keeps its place, and its card, from held to answered.
+  const requests = heldOldestFirst([...held, ...[...answers.answered.values()].map((entry) => entry.item)]);
+  const { register: registerAnswered } = answeredFocus;
+  const register = useCallback(
+    (decisionId: string, el: HTMLElement | null) => {
+      registerCard(decisionId, el);
+      registerAnswered(decisionId, el);
+    },
+    [registerCard, registerAnswered],
+  );
 
   const dismiss = (id: string) => {
     // Focus goes to the next answered card, else the one before, else the section.
-    const ids = answered.map((entry) => entry.decision.decision_id);
+    const ids = requests.map((item) => item.decision.decision_id).filter((decisionId) => answers.answered.has(decisionId));
     const at = ids.indexOf(id);
     const next = ids[at + 1] ?? ids[at - 1];
     answers.dismiss(id);
@@ -81,13 +91,24 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
           {readFailure.line}
         </Notice>
       ) : null}
-      {open > 0 ? (
+      {requests.length + callbacks.length > 0 ? (
         <ul className="cd-needs-you">
-          {held.map((item) => (
-            <li key={item.decision.decision_id} className="cd-needs-you__item">
-              <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={registerCard} />
-            </li>
-          ))}
+          {requests.map((item) => {
+            const id = item.decision.decision_id;
+            return (
+              <li key={id} className="cd-needs-you__item">
+                <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={register}>
+                  {answers.answered.has(id) ? (
+                    <div className="cd-needs-you__dismiss">
+                      <Button variant="ghost" onClick={() => dismiss(id)}>
+                        Dismiss
+                      </Button>
+                    </div>
+                  ) : undefined}
+                </HeldRequest>
+              </li>
+            );
+          })}
           {callbacks.map((item) => (
             <li key={item.handoff.handoff_id} className="cd-needs-you__item">
               <CallbackCard item={item} />
@@ -95,31 +116,9 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
           ))}
         </ul>
       ) : null}
-      {answered.length > 0 ? (
-        <div className="cd-needs-you__answered">
-          <h3 className="cd-needs-you__answered-title cd-type-control">Answered just now</h3>
-          <ul className="cd-needs-you">
-            {answered.map((entry) => {
-              const id = entry.decision.decision_id;
-              return (
-                <li key={id} className="cd-needs-you__item">
-                  <AnsweredRequest entry={entry} now={now} registerCard={answeredFocus.register}>
-                    <div className="cd-needs-you__dismiss">
-                      <Button variant="ghost" onClick={() => dismiss(id)}>
-                        Dismiss
-                      </Button>
-                    </div>
-                  </AnsweredRequest>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : null}
     </section>
   );
 }
-
 
 /**
  * A visitor who asked for the owner: their name, contact and reason as they typed them, the

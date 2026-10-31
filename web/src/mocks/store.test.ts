@@ -360,6 +360,32 @@ describe('the scripted Desk', () => {
     expect(needsYou).toHaveLength(1);
   });
 
+  it('answer_records_the_kernels_approval', async () => {
+    // As `approvals.py` records an answer it takes: the decision, its action, the answer and the
+    // state it left the request in, `approved` for an allow (its run follows) and `denied` for a deny.
+    await openChat();
+    await send('Can I get 10% off?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).flatMap((item) =>
+      item.decision ? [item.decision] : [],
+    );
+    const [seeded, asked] = held;
+    if (!seeded || !asked) throw new Error('the seed holds one request and the chat another');
+    expect((await call('answer', { params: { decision_id: seeded.decision_id }, body: { answer: 'allow_once' } })).status).toBe(200);
+    expect((await call('answer', { params: { decision_id: asked.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+
+    const ledger = (await call('ledger', { params: { desk_id: deskId } })).body as LedgerPage;
+    const approvals = ledger.entries.filter((e) => e.event.kind === 'approval');
+    expect(approvals.map((e) => [e.event.ref_id, e.event.summary])).toEqual([
+      [seeded.decision_id, { decision_id: seeded.decision_id, action_id: seeded.action?.action_id, answer: 'allow_once', state: 'approved' }],
+      [asked.decision_id, { decision_id: asked.decision_id, action_id: asked.action?.action_id, answer: 'deny_once', state: 'denied' }],
+    ]);
+    expect(seeded.action?.action_id).toEqual(expect.any(String));
+    // The allow's run, as `execute.py` records it: the decision, its action and the state it ran to.
+    const runs = ledger.entries.filter((e) => e.event.kind === 'execute' && e.event.ref_id === seeded.decision_id);
+    expect(runs.map((e) => e.event.summary)).toEqual([{ decision_id: seeded.decision_id, action_id: seeded.action?.action_id, state: 'executed' }]);
+  });
+
   it('held_discount_is_the_one_asked_for', async () => {
     // The held quote carries the percent the visitor named, with its price worked out from the
     // $180.00 list price as the kernel does, and Maria's card says so; once she allows it, the

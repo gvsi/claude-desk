@@ -36,15 +36,24 @@ export const READ_AHEAD_MS = 3_000;
  */
 export const FRESH_MS = READ_AHEAD_MS + 2_000;
 
+export interface UseDesksOptions {
+  /**
+   * Follows the copy's Desks as the owner's frame reads them, and never reads them itself: not on
+   * mount, not on window focus. For a part of a page that needs only what the frame already has.
+   */
+  passive?: boolean;
+}
+
 /**
  * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
  * Desk is read again on mount however fresh it is: only a read made now can say it isn't the owner's.
  */
-export function useDesks(deskId: string) {
+export function useDesks(deskId: string, { passive = false }: UseDesksOptions = {}) {
   return useQuery({
     ...desksQuery(),
     staleTime: FRESH_MS,
     refetchOnMount: (query) => (query.state.data !== undefined && findDesk(query.state.data, deskId) !== null ? true : 'always'),
+    enabled: !passive,
   });
 }
 
