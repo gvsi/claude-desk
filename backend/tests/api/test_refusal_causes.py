@@ -48,7 +48,7 @@ def test_refusal_cause_uses_exact_kernel_codes(summary, policies, expected):
     row = {"policy_ids": policies, "reason_plain": "Your rule says never", "card_ids": ["never-decoy"]}
     entry = {"event": {"kind": "decide", "summary": summary}}
 
-    assert refusal_cause(row, entry) == expected
+    assert refusal_cause(row, entry, verified=False) == expected
 
 
 def test_refusal_cause_is_closed_and_held_requests_have_no_cause():
@@ -67,4 +67,4 @@ def test_refusal_cause_is_closed_and_held_requests_have_no_cause():
 
 
 def test_refusal_without_its_ledger_entry_has_no_cause():
-    assert refusal_cause({"policy_ids": []}, None) is None
+    assert refusal_cause({"policy_ids": []}, None, verified=False) is None

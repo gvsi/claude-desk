@@ -526,7 +526,8 @@ async def read_refusal_cause(api_ro_conn, ro_schema: str, copy: CopyCreated, dec
     ro = KernelRO(api_ro_conn, copy.copy_id, ro_schema)
     row = await ro.one("decisions", decision_id=decision_id)
     entry = await ro.one("ledger_entries", desk_id=copy.desk_ids[0], seq=row["ledger_seq"])
-    return refusal_cause(row, entry)
+    session = await ro.one("sessions", session_id=row["session_id"])
+    return refusal_cause(row, entry, verified=session["verified"])
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1531,7 +1532,7 @@ async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api
     expected = ["B.private_data_record_owner"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
-    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "not_verified"
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) is None
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------

@@ -243,7 +243,7 @@ class Stopped(Timed):
     cause: RefusalCause | None = None
 
 
-def refusal_cause(row: dict, entry: dict | None) -> RefusalCause | None:
+def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCause | None:
     """A refused decision's cause, from its row and the already-read kernel-built `decide` entry.
 
     Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
@@ -271,7 +271,7 @@ def refusal_cause(row: dict, entry: dict | None) -> RefusalCause | None:
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk
-      B.private_data_record_owner                    not_verified          Not verified yet
+      B.private_data_record_owner, unverified only   not_verified          Not verified yet
       B.recipient_owner_or_verified_contact          recipient             Only to you or a contact on record
       B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
       B.agent_charge_within_mandate                  agent_limit           Over the agent's spending limit
@@ -310,6 +310,10 @@ def refusal_cause(row: dict, entry: dict | None) -> RefusalCause | None:
     }
     for policy, cause in baselines.items():
         if policy in policies:
+            # Verification never reverts; unverified now proves unverified at decision time.
+            # A verified person's refusal may instead mean the record belongs to someone else.
+            if policy == "B.private_data_record_owner" and verified:
+                return None
             return cause
     return None if policies else "no_rule"
 
@@ -366,7 +370,8 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
                              line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
                              reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
-                             ledger_seq=row["ledger_seq"], cause=refusal_cause(row, entry)))
+                             ledger_seq=row["ledger_seq"],
+                             cause=refusal_cause(row, entry, verified=sessions[row["session_id"]]["verified"])))
     for entry in ledger:
         event = entry["event"] or {}
         summary = event.get("summary") or {}

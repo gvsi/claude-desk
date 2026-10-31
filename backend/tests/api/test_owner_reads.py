@@ -890,13 +890,18 @@ async def test_safety_cause_from_adapter_check(scene):
 
 
 @pytest.mark.parametrize(("source", "cause"), [
-    ("early_reason", "incomplete_request"), ("baseline", "not_verified"), ("plain_deny", "no_rule"),
+    ("early_reason", "incomplete_request"), ("baseline_verified", None),
+    ("baseline_unverified", "not_verified"), ("plain_deny", "no_rule"),
 ])
 async def test_safety_cause_from_decision_source(scene, monkeypatch, source, cause):
     who = await scene.visitor(local(2026, 10, 29, 19))
     tool, args = "native.book", {}
-    if source == "baseline":
-        scene.fake.verify(who.session_id, "dana")
+    if source.startswith("baseline_"):
+        if source == "baseline_verified":
+            scene.fake.verify(who.session_id, "dana")
+        else:
+            # Exercise the baseline independently of the tool-discovery gate.
+            monkeypatch.setattr(scene.fake, "tools_given", lambda session, desk: ("native.release_document",))
         desk = scene.fake.desks[scene.owner.desk_id]
         person = scene.fake.sessions[who.session_id].person_id
         document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
