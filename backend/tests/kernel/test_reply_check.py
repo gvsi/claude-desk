@@ -200,11 +200,12 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("No doubt about it: no hidden charges.", "lex.en.promise", "no hidden charges"),
     ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
     ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
-    # nor after "worries", "problem", "questions", "set", "exact", "single", "fixed" or "standard",
-    # which pass (below), nor "set" with a hyphen or "up" going on, on the charge and cost line and
-    # the fee line
+    # nor after "worries" or "questions", which pass (below), on the charge and cost line and the
+    # fee line; other words can start a waiver ("standard", "set", "single", "fixed", "exact"), so a
+    # charge, cost or fee after them blocks, failing closed when it states no price
     ("No worries, there's no extra charge.", "lex.en.promise", "no extra charge"),
     ("No problem: no hidden fees.", "lex.en.promise", "no hidden fees"),
+    ("No problem the cost is in the quote below.", "lex.en.promise", "No problem the cost"),
     ("No questions asked, no fee.", "lex.en.promise", "no fee"),
     ("There's no set-up charge.", "lex.en.promise", "no set-up charge"),
     ("There's no set-up fee.", "lex.en.promise", "no set-up fee"),
@@ -212,6 +213,15 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("There's no set up fee.", "lex.en.promise", "no set up fee"),
     ("There's no set up charge.", "lex.en.promise", "no set up charge"),
     ("No set up cost for new customers.", "lex.en.promise", "No set up cost"),
+    ("No standard fees will be charged.", "lex.en.promise", "No standard fees"),
+    ("For seniors there is no standard service charge.", "lex.en.promise", "no standard service charge"),
+    ("No single charge will be applied.", "lex.en.promise", "No single charge"),
+    ("Returning clients pay no fixed fee.", "lex.en.promise", "no fixed fee"),
+    ("You pay no set fee for the first visit.", "lex.en.promise", "no set fee"),
+    ("There's no set cost until Maria sees the leak.", "lex.en.promise", "no set cost"),
+    ("There's no exact cost until Maria sees it.", "lex.en.promise", "no exact cost"),
+    ("There's no fixed fee for repairs.", "lex.en.promise", "no fixed fee"),
+    ("There's no standard charge for that; the quote below has it.", "lex.en.promise", "no standard charge"),
     ("There's no set  up fee.", "lex.en.promise", "no set  up fee"),
     ("There's no extra fee for that.", "lex.en.promise", "no extra fee"),
     ("There's no service fee.", "lex.en.promise", "no service fee"),
@@ -295,23 +305,11 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "No way it costs that much.",
     "No doubt the cost is worth it.",
     "No matter the charges, Maria can help.",
-    # nor do "worries", "problem", "questions", "set", "exact", "single", "fixed" or "standard",
-    # before a charge, a cost or a fee
-    "There's no set cost until Maria sees the leak.",
+    # nor do "worries" or "questions", before a charge, a cost or a fee
     "No worries about cost, the quote below has it.",
     "No questions about cost?",
     "No worries about fees, the quote below has them.",
-    "No problem the cost is in the quote below.",
     "No questions about fees?",
-    "There's no set fee for a job like this.",
-    "There's no exact cost until Maria sees it.",
-    "We have no exact fee for that yet.",
-    "There's no single cost for every leak.",
-    "There's no single fee that fits every job.",
-    "There's no fixed cost for a repair like this.",
-    "There's no fixed fee for repairs.",
-    "There's no standard charge for that; the quote below has it.",
-    "There's no standard fee for a leak.",
     # "no hay", "no tiene" or "no lleva" states no price with more than two words, a stop or the
     # noun before it
     "No tiene que preocuparse por el costo; está en la cotización.",
