@@ -291,6 +291,23 @@ async def test_intake_hold_and_setup_probe_name_the_configured_tool(app, client)
     assert missing.reason_plain.startswith("A stranger asked for something this Desk can't do. ")
 
 
+async def test_intake_hold_quotes_each_answer_separately(app, client):
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake(config={'block': 'intake', 'questions': ['What?', 'Where?']})])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [])
+    visitor = await open_visitor(client, copy)
+    held = await decided(client, visitor, 'desk.new-enquiry', {
+        'name': 'Dana', 'answers': ['Need a consult', 'The “office”']})
+    assert held.outcome == 'hold'
+    assert 'Claude\'s note: “Need a consult”, “The "office"”, “Dana”' in held.reason_plain
+    assert '["' not in held.reason_plain
+
+
 @pytest.mark.parametrize('path', ['approved', 'allow', 'allowed_before_execute'])
 async def test_changed_config_after_authorization_never_executes(app, client, monkeypatch, path):
     from desk.kernel_service import execute
