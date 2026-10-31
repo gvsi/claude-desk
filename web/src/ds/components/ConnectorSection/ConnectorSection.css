@@ -1,4 +1,4 @@
-/* ConnectorSection: a card of link rows that reach its edges. The header (14 px 16 px) names the
+/* ConnectorSection: a card of rows that reach its edges, each a link when it has a page. The header (14 px 16 px) names the
    connector; each tool row (12 px 16 px) sits under a hairline: its name and line on the left, its
    rule words and outcome at the right. It lays itself out by its own width: under 640 px (the
    phone board) the lines and the count go, the tile is 32 px, and each tool's words and then its
@@ -86,7 +86,16 @@
   border-top: 1px solid var(--line-hairline);
 }
 
-.cd-connector-section__tool-link {
+/* A row without a page: no chevron, so the words and the outcome keep the row's right edge. */
+.cd-connector-section__tool--plain {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    'name summary outcome'
+    'description summary outcome';
+}
+
+/* The tool's name, a link to its page or, without one, plain text in the same type. */
+.cd-connector-section__tool-name {
   grid-area: name;
   min-width: 0;
   color: var(--text-primary);
@@ -175,6 +184,14 @@
       'outcome chevron';
     column-gap: var(--space-12);
     padding: var(--space-12) var(--space-14);
+  }
+
+  .cd-connector-section__tool--plain {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'name'
+      'summary'
+      'outcome';
   }
 
   .cd-connector-section__tool-summary {

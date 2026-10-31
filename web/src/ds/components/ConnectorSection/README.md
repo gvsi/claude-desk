@@ -14,11 +14,12 @@
 - `aboveTools`, when given, in a row of its own under the header, padded as a tool row (12 px 16 px, 12 px 14 px on a phone) under a hairline: the screen's line that holds over every rule below it, the payment limit on Payments and Stripe (`MoneyLimit`, N-Conn-19-Ceiling).
 - A row per tool (12 px 16 px, a hairline above): the name in weight 520 over its `description`; at the right its `summary` and the outcome with its dot: `outcomePhrase(mode, limit)` while it is on ("Automatic up to $300; over $300, ask me first" for an auto rule with a limit), held "Needs your review" when its `status` is `needs_review` (or anything this build doesn't know), info "Off" when `disabled`; then `chevron-right`.
 - The tool's name is its link, and the link's overlay covers the row, so the whole row opens the tool's page and draws one focus ring just inside its edge. The link is named "{name}: {summary}, {outcome}. Open", and its line is its description (`aria-describedby`), so the name a screen reader hears starts with the words it shows.
+- **Without links.** While a screen's connector and tool pages aren't built, it leaves out `href` on the section and on each tool. The header and the rows then draw the same words in the same type and spacing, with no link, no tab stop, no "Open" in any name and no chevron, so nothing on the card looks like it opens. A row's words and outcome keep its right edge. Hover and focus belong to linked rows only. See the "Without links" story.
 - It lays out by its own width (a container query): under 640 px (as the first phone Rules board, now archived, drew it) the connector's description and count and each tool's line go, the tile is 32 px with a 17 px mark, the rows pad 12 px 14 px, each tool's `summary` sits under its name, and its outcome on its own line under that, where a long phrase wraps. Nothing scrolls sideways at 320 px.
 
 ## Types and words
 
-- `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href: string }`, one tool on the hub. `mode` and `limit` are the outcome and formatted amount limit of the most general non-default rule that governs it (the default `ask` only when there is none). `description` is what the tool does and its effects; `summary` its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
+- `ToolSummaryView = { key: string; name: string; description: string; summary: string; mode: RuleMode; limit?: string; status: ToolStatus; href?: string }`, one tool on the hub; without `href`, its row has nothing to open. `mode` and `limit` are the outcome and formatted amount limit of the most general non-default rule that governs it (the default `ask` only when there is none). `description` is what the tool does and its effects; `summary` its rule words ("Anyone · No discounts", "2 rules · 1 shared", "Always on").
 - `describeEffects(effects, reversible): string` (in `describeEffects.ts`, also exported) gives a connected tool's effects in the boards' words, for the screen to put after what the tool does. First match wins: `pay_out` "Moves money out."; `charge` "Charges money."; `private_data` "Touches private data."; `send_message` "Sends a message out."; `change` "Changes something."; `read` "Changes nothing.". Then " Can be undone." or " Can't be undone." only when an effect changes something (`change`, `charge`, `pay_out`, `send_message`): a tool that only reads, or reads private data, has no second sentence. A tool with no effect this build knows reads "Changes something.", never as harmless.
 
 ## Props
@@ -26,7 +27,7 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `connector` | `ConnectorView` | Required. |
-| `href` | `string` | The connector's page. |
+| `href` | `string` | The connector's page. Optional: without it, the header has nothing to open. |
 | `tools` | `ToolSummaryView[]` | Required. |
 | `addedNote` | `string` | "Added just now", right after it was added. |
 | `aboveTools` | `ReactNode` | A line between the header and the tool rows, such as the payment limit. |

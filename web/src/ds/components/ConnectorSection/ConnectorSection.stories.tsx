@@ -63,6 +63,47 @@ export const Quotes: Story = {
   },
 };
 
+/** Quotes on a Rules page whose connector and tool pages aren't built: the same rows, nothing to open. */
+const quotesWithoutPages: ConnectorSectionProps = {
+  ...quotes,
+  href: undefined,
+  tools: quotes.tools.map((tool) => ({ ...tool, href: undefined })),
+};
+
+export const WithoutLinks: Story = {
+  name: 'Without links',
+  args: quotesWithoutPages,
+  parameters: {
+    canvasNote:
+      'Not a board of its own: Quotes as N-Conn-12-Chat draws it, for a Rules page whose connector and tool pages are not built yet. Without an href the header and each tool row draw the same words in the same type, with no chevron, no link and no tab stop.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const section = canvas.getByRole('region', { name: 'Quotes' });
+    // Nothing to open: no link, nothing in the tab order, no chevron.
+    await expect(canvas.queryAllByRole('link')).toHaveLength(0);
+    await expect(section.querySelectorAll('a, [tabindex]')).toHaveLength(0);
+    await expect(section.querySelectorAll('.cd-connector-section__chevron')).toHaveLength(0);
+    // The header keeps its words and its 14 px 16 px of padding.
+    const header = section.querySelector<HTMLElement>('.cd-connector-section__header');
+    if (header === null) throw new Error('no header');
+    expectComputed(header, { paddingTop: '14px', paddingLeft: '16px', display: 'flex' });
+    await expect(header).toHaveTextContent('Quotes');
+    await expect(header).toHaveTextContent('1 tool');
+    // The tool's name in the linked row's type and weight, plain, with no overlay over the row.
+    const name = canvas.getByText('Quote');
+    expectComputed(name, { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(getComputedStyle(name, '::after').content).toBe('none');
+    // The words and the outcome still at the row's right edge, where the chevron no longer is.
+    const item = name.closest('li');
+    if (item === null) throw new Error('The tool name is not in its row');
+    const outcome = item.querySelector<HTMLElement>('.cd-connector-section__tool-outcome');
+    if (outcome === null) throw new Error('no outcome');
+    await expect(Math.round(item.getBoundingClientRect().right - outcome.getBoundingClientRect().right)).toBe(16);
+    await expect(canvas.getByText('Anyone · No discounts')).toBeVisible();
+    await expect(canvas.getByText('Automatic')).toBeVisible();
+  },
+};
+
 export const Payments: Story = {
   play: async ({ args, canvas }) => {
     // section_header_and_rows_are_links: the header is one link to the connector's page under
