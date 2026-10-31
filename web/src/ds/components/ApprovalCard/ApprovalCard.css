@@ -285,16 +285,6 @@
   }
 }
 
-.cd-approval-card__progress {
-  margin: var(--space-8) 0 0;
-  color: var(--text-secondary);
-}
-
-/* Empty until an answer is being sent; it stays in place so the change is announced. */
-.cd-approval-card__progress:empty {
-  margin: 0;
-}
-
 .cd-approval-card__error {
   margin-top: var(--space-12);
 }

@@ -150,8 +150,6 @@ interface Settle {
   /** The request as it was held, its chosen side busy and the other waiting, as they were. */
   held: Decision;
   side: Side;
-  /** "Sending your answer" showed under the answers as it left. */
-  sending: boolean;
   /** The dot left held, so it pulses once. */
   pulse: boolean;
   /** `after` came with the answer, so it fades in and its height eases in with the card's. */
@@ -279,7 +277,7 @@ export function ApprovalCard({
       // for reduced motion, when the answered card draws at once. A vision page's inert card never
       // sends an answer, so it never lands one.
       if (!inertAnswers && lock.held.decision_id === decision.decision_id && !showAnswers && !prefersReducedMotion()) {
-        setSettle({ held: lock.held, side: lock.side, sending: lock.pending, pulse: tone !== 'held', afterNew: hasAfter && !lock.hadAfter });
+        setSettle({ held: lock.held, side: lock.side, pulse: tone !== 'held', afterNew: hasAfter && !lock.hadAfter });
       }
       setLock(null);
     } else if (lock.pending === pending && lock.error === error) {
@@ -503,7 +501,8 @@ export function ApprovalCard({
                       })}
                     </div>
                   </div>
-                  <p role="status" className="cd-approval-card__progress cd-type-caption">
+                  {/* Read out, unseen: the busy answer carries the wait, so the card keeps its height until the answer lands. */}
+                  <p role="status" className="cd-sr-only">
                     {pending ? SENDING_LINE : null}
                   </p>
                   {inertAnswers ? <VisionInertLine shown={inertPressed} /> : null}
@@ -577,37 +576,34 @@ function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: R
 function noAnswer(): void {}
 
 /**
- * The answers as they left, in the outgoing layer: the chosen side busy, the other waiting, and
- * "Sending your answer" under them if it showed. The layer is inert and hidden, so none of it can
- * be reached; it draws the last held frame so the crossfade starts from what the owner saw.
+ * The answers as they left, in the outgoing layer: the chosen side busy and the other waiting. The
+ * layer is inert and hidden, so none of it can be reached; it draws the last held frame so the
+ * crossfade starts from what the owner saw.
  */
 function LeavingAnswers({ settle, personName }: { settle: Settle; personName: string | undefined }) {
   return (
-    <>
-      <div className="cd-approval-card__answers">
-        <div className="cd-approval-card__row">
-          {sidesOf(offeredAnswers(settle.held)).map(({ side, answers }) => {
-            const [only] = answers;
-            const single = answers.length === 1 ? only : undefined;
-            return (
-              <div key={side} className="cd-approval-card__side">
-                <Button
-                  variant={SIDES[side].variant}
-                  size="main"
-                  busy={side === settle.side}
-                  waiting={side !== settle.side}
-                  menuOpen={single === undefined ? false : undefined}
-                  onClick={noAnswer}
-                >
-                  {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
+    <div className="cd-approval-card__answers">
+      <div className="cd-approval-card__row">
+        {sidesOf(offeredAnswers(settle.held)).map(({ side, answers }) => {
+          const [only] = answers;
+          const single = answers.length === 1 ? only : undefined;
+          return (
+            <div key={side} className="cd-approval-card__side">
+              <Button
+                variant={SIDES[side].variant}
+                size="main"
+                busy={side === settle.side}
+                waiting={side !== settle.side}
+                menuOpen={single === undefined ? false : undefined}
+                onClick={noAnswer}
+              >
+                {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
+              </Button>
+            </div>
+          );
+        })}
       </div>
-      {settle.sending ? <p className="cd-approval-card__progress cd-type-caption">{SENDING_LINE}</p> : null}
-    </>
+    </div>
   );
 }
 

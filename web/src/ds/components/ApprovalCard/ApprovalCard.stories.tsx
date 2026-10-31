@@ -1187,14 +1187,14 @@ export const SendingStartsWhileOpen: Story = {
 
     // The screen starts sending an answer given elsewhere, say on the same request in its conversation.
     updateScreen(canvasElement, { pending: true });
-    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeVisible());
+    await waitFor(() => expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull());
     // The menu goes, and focus moves to its button, where it waits.
     await expect(canvas.queryByRole('menu')).toBeNull();
     await expect(deny).toHaveFocus();
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(deny).toHaveAttribute('aria-disabled', 'true');
     // No answer was chosen here, so neither button shows the busy spinner: both wait in their busy
-    // colors, and the line under them says what is happening.
+    // colors, and the status region says what is happening.
     for (const button of answerButtons(canvasElement)) {
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('aria-busy');
@@ -1248,10 +1248,13 @@ export const SendingYourAnswer: Story = {
   args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner, the other waits in its busy colors without one, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner and the other waits in its busy colors without one. "Sending your answer" is read out from the status region, unseen, so the card keeps its height until the answer lands.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
+    const card = canvasElement.querySelector<HTMLElement>('.cd-approval-card__card');
+    if (card === null) throw new Error('the card draws its box');
+    const heldHeight = card.getBoundingClientRect().height;
 
     // A click on Deny opens its menu, and a click on Always answers.
     await userEvent.click(deny);
@@ -1272,10 +1275,14 @@ export const SendingYourAnswer: Story = {
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
 
-    // Neither control can be pressed, and a line under them says the answer is being sent.
+    // Neither control can be pressed. The busy button carries the wait: "Sending your answer" is read
+    // out from the status region, visually hidden, so the card's height doesn't change while it's sent.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     await expect(group).toHaveAttribute('aria-busy', 'true');
-    await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
+    const sending = canvas.getByText('Sending your answer');
+    await expect(sending.closest('[role="status"]')).not.toBeNull();
+    await expect(sending.closest('.cd-sr-only')).not.toBeNull();
+    await expect(card.getBoundingClientRect().height).toBe(heldHeight);
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
     // spinner_on_the_chosen_answer: Deny, the side chosen, shows the busy spinner in place of its word
@@ -1343,7 +1350,7 @@ export const DeniedOnTheSecondTry: Story = {
     // A retry waits like any answer, and a second failure re-enables the answers again.
     await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
-    await expect(canvas.getByText('Sending your answer')).toBeVisible();
+    await expect(canvas.getByText('Sending your answer')).toBeInTheDocument();
     await expect(canvas.queryByRole('alert')).toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
     await waitFor(() => expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE));
@@ -1404,7 +1411,7 @@ export const AnswerLands: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
     await expect(args.onAnswer).toHaveBeenCalledWith('allow_once');
-    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeVisible());
+    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeInTheDocument());
     // Allow ends handled, with one pulse.
     await expectLands(canvasElement, rivera.decisions.executed, { line: "You allowed this. It's done.", tone: 'handled', pulse: true });
   },
@@ -1473,7 +1480,7 @@ export const AlwaysLandsWithItsRule: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await userEvent.click(canvas.getByRole('button', { name: 'Deny' }));
     await userEvent.click(within(canvas.getByRole('menu', { name: 'Deny' })).getByRole('menuitem', { name: 'Always' }));
-    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeVisible());
+    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeInTheDocument());
     await expectLands(
       canvasElement,
       { ...heldRefund, state: 'denied' },
