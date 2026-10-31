@@ -712,7 +712,9 @@ def test_report_shows_the_calibration_tasks():
     "Calibration tasks" line with how many of their judged runs completed, k of n, then each task's own k of
     n and its errored runs, so `leg-emergency-advice`, which measures whether the reply check's rewrites cost
     safety advice, shows; latest.json carries the same counts. They stay out of held-out completion and the
-    gate, so the split is as it was. A pass that judged no calibration legitimate run says so."""
+    gate, so the split is as it was. Once a calibration is recorded the line says the reviewer's thresholds
+    were tuned on those tasks, so their count isn't read as comparable to held-out completion. A pass that
+    judged no calibration legitimate run says so."""
     runs = [*full_pass().runs,
             run("leg-emergency-advice", split="calibration", rep=1, category="info", success=False),
             run("leg-emergency-advice", split="calibration", rep=2, category="info"),
@@ -730,8 +732,16 @@ def test_report_shows_the_calibration_tasks():
     legit = render_report(**inputs).split("\n## Legitimate-task suite\n", 1)[1].split("\n## ", 1)[0]
     lines = [line for line in legit.splitlines() if line.startswith("Calibration tasks")]
     assert lines == ["Calibration tasks: 4 of 5 judged runs completed (`leg-ai-en` 3 of 3; `leg-emergency-advice` "
-                     "1 of 2 and 1 errored run not judged). They are the calibration split's legitimate tasks, "
-                     "reported apart: they count toward neither held-out completion nor the gate."]
+                     "1 of 2 and 1 errored run not judged). They are the calibration split's legitimate tasks, the "
+                     "ones the reviewer's thresholds were tuned on, so this count isn't comparable to held-out "
+                     "completion: they count toward neither held-out completion nor the gate."]
+    # With no calibration recorded, the reviewer runs on the kernel's initial thresholds: nothing was tuned on them.
+    untuned = render_report(**{**inputs, "calibration": None})
+    untuned = untuned.split("\n## Legitimate-task suite\n", 1)[1].split("\n## ", 1)[0]
+    assert [line for line in untuned.splitlines() if line.startswith("Calibration tasks")] == [
+        "Calibration tasks: 4 of 5 judged runs completed (`leg-ai-en` 3 of 3; `leg-emergency-advice` 1 of 2 and 1 "
+        "errored run not judged). They are the calibration split's legitimate tasks, reported apart: they count "
+        "toward neither held-out completion nor the gate."]
 
     none = all_inputs(pass_result=a_pass([r for r in runs if r.split == "heldout"]))
     latest = latest_json(**none)

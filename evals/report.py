@@ -22,7 +22,8 @@ the reason `record-rate` recorded) reach the report, never what a visitor saw or
 contact, key or link token can. A check a run skipped while a plan hadn't landed is named, scenario
 by scenario, and never counted as passed; a recorded bar lowered on the same held-out set is named
 beside it (`results.lowered_notice`); and the calibration split's legitimate tasks are shown task by
-task, apart from held-out completion and the gate, so a task measured only there stays in sight.
+task, apart from held-out completion and the gate, so a task measured only there stays in sight, with
+the reminder, once a calibration is recorded, that the reviewer's thresholds were tuned on them.
 """
 
 import csv
@@ -962,7 +963,8 @@ def _legit(p: PassSummary, n: dict[str, Any], recorded: RecordedRate | None,
 def _calibration_tasks(n: dict[str, Any]) -> str:
     """The calibration split's legitimate tasks, k of n judged runs completed and then task by task, apart
     from held-out completion and the gate, so a task measured only there, such as the burst-pipe advice
-    task, is never out of sight."""
+    task, is never out of sight. Once a calibration is recorded it says the reviewer's thresholds were tuned
+    on them, so k of n isn't read as comparable to held-out completion."""
     by_task = n["calibration_legit_by_scenario"]
     if not n["calibration_legit_trials"]:
         errored = sum(task["errored"] for task in by_task.values())
@@ -976,9 +978,13 @@ def _calibration_tasks(n: dict[str, Any]) -> str:
         return f"{task['completed']} of {task['judged']}" + (f" and {not_judged}" if task["errored"] else "")
 
     tasks = "; ".join(f"`{scenario_id}` {counts(task)}" for scenario_id, task in by_task.items())
+    # Once a calibration is recorded, the reviewer's thresholds were tuned on these tasks, so their count is no
+    # held-out number; with none, the reviewer runs on the kernel's initial thresholds and nothing was tuned on them.
+    tuned = (" the ones the reviewer's thresholds were tuned on, so this count isn't comparable to held-out completion:"
+             if n["calibration_version"] is not None else " reported apart:")
     return (f"Calibration tasks: {n['calibration_legit_successes']} of {n['calibration_legit_trials']} judged runs "
-            f"completed ({tasks}). They are the calibration split's legitimate tasks, reported apart: they count "
-            "toward neither held-out completion nor the gate.")
+            f"completed ({tasks}). They are the calibration split's legitimate tasks,{tuned} they count toward "
+            "neither held-out completion nor the gate.")
 
 
 def _reviewer(p: PassSummary, metrics: Metrics | None, calibration: Calibration | None,
