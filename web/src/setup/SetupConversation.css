@@ -13,7 +13,20 @@
   line-height: 1;
 }
 
+.cd-setup-question-panel > .cd-card {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+
+.cd-setup-q3 {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .cd-setup-q3__head {
+  flex: none;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -36,6 +49,9 @@
   margin: 0 calc(var(--space-8) * -1);
   padding: 0;
   list-style: none;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .cd-setup-q3__row {
@@ -68,6 +84,7 @@
 }
 
 .cd-setup-q3__hint {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

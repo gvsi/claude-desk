@@ -33,7 +33,16 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       const otherInput = target instanceof HTMLInputElement;
       const move = (index: number) => {
         setActive(index);
-        root.current?.querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')[index]?.focus({ preventScroll: true });
+        const control = root.current?.querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')[index];
+        control?.focus({ preventScroll: true });
+        const list = root.current?.querySelector<HTMLElement>('.cd-setup-q3__list');
+        const row = control?.closest('.cd-setup-q3__row');
+        if (list && row) {
+          const bounds = list.getBoundingClientRect();
+          const rect = row.getBoundingClientRect();
+          if (rect.top < bounds.top) list.scrollTop += rect.top - bounds.top;
+          else if (rect.bottom > bounds.bottom) list.scrollTop += rect.bottom - bounds.bottom;
+        }
       };
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -50,7 +59,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
     return () => document.removeEventListener('keydown', keydown);
   }, [active, choices, disabled, onChoose, onDismiss, other]);
   return (
-    <Card as="section" label={question} padding={16}>
+    <div className="cd-setup-question-panel"><Card as="section" label={question} padding={16}>
       <div className="cd-setup-q3" ref={root}>
         <div className="cd-setup-q3__head">
           <p className="cd-setup-q3__question cd-type-reply">{question}</p>
@@ -79,6 +88,6 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
           <kbd className="cd-setup-kbd cd-type-meta">Esc</kbd> {copy.typeInstead}
         </p>
       </div>
-    </Card>
+    </Card></div>
   );
 }

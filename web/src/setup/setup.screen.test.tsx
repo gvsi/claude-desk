@@ -3059,6 +3059,51 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
   });
 
+  it('caps_long_phone_questions_and_scrolls_every_choice_inside_the_panel_by_touch_and_keys', async () => {
+    const state = await consultantAt();
+    const question = state.messages.at(-1)!;
+    question.text = 'Which clients and services should your Desk help with first? '.repeat(6).slice(0, 300);
+    question.choices = ['Individuals', 'Small businesses', 'New clients', 'Existing clients'].map((text) => ({ text: `${text}: ${'WWWWWWWWWW '.repeat(8)}`.slice(0, 80), recommended: false }));
+    mockStore.inject({ route: 'setup', status: 200, body: state });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    const list = panel.element().querySelector<HTMLElement>('.cd-setup-q3__list')!;
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true }).element();
+    const inView = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    };
+    expect(panel.element().getBoundingClientRect().height).toBeLessThanOrEqual(window.innerHeight * 0.6 + 1);
+    expect(inView(box)).toBe(true);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    const rows = [...list.querySelectorAll<HTMLElement>('.cd-setup-q3__row')];
+    const insideList = (row: HTMLElement) => {
+      const outer = list.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1;
+    };
+    // Scroll only the options, as a finger would, including the last "Something else" row.
+    for (const row of rows) {
+      list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      await expect.poll(() => insideList(row)).toBe(true);
+      expect(inView(box)).toBe(true);
+    }
+    list.scrollTop = 0;
+    rows[0]!.focus({ preventScroll: true });
+    for (let index = 1; index < rows.length; index += 1) {
+      await userEvent.keyboard('{ArrowDown}');
+      await expect.poll(() => insideList(rows[index]!)).toBe(true);
+      expect(rows[index]!.contains(document.activeElement)).toBe(true);
+      expect(inView(box)).toBe(true);
+    }
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.poll(() => insideList(rows[0]!)).toBe(true);
+    await userEvent.keyboard('4');
+    await expect.poll(() => insideList(rows[3]!)).toBe(true);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
