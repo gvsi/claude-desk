@@ -45,11 +45,11 @@ export const FIRST_SETTINGS_SECTION = SETTINGS_SECTIONS[0]?.path ?? '';
  * On a phone, SubNav is one line across the page over a hairline, and the page under it.
  */
 export function SettingsLayout() {
-  const context = useOwnerDesk();
+  const { desk } = useOwnerDesk();
   const { pathname } = useLocation();
   // Its sections have no heading of their own, so each one's tab is Settings'.
   useDocumentTitle(inApp(TITLE));
-  const base = `/app/${encodeURIComponent(context.desk.desk_id)}/settings`;
+  const base = `/app/${encodeURIComponent(desk.desk_id)}/settings`;
   const items: SubNavItem[] = SETTINGS_SECTIONS.map(({ key, label, path }) => ({ key, label, href: `${base}/${path}` }));
   // The segment after `settings`: the section the owner is on.
   const segment = pathname.split('/')[4] ?? '';
@@ -64,7 +64,7 @@ export function SettingsLayout() {
             <SubNav label={TITLE} items={items} current={current} linkComponent={RouterLink} />
           </div>
           <div className="cd-settings__content">
-            <Outlet context={context} />
+            <Outlet />
           </div>
         </div>
         <footer className="cd-settings__footer">

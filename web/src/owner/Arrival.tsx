@@ -8,7 +8,7 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { DESKS_KEY, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
+import { DESKS_KEY, dropTheOldInbox, forgetReadAhead, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -57,12 +57,16 @@ export function Arrival() {
   const asked = useRef<Promise<CopyOut> | null>(null);
   // Whether this page is still shown: the owner may leave it while Today is read ahead.
   const shown = useRef(true);
+  // The Desk whose Today this page has read ahead, if any. Left before that Today opened, the page
+  // forgets the read ahead, so a later Today of that Desk isn't taken for this visit's.
+  const readAheadFor = useRef<string | null>(null);
   useEffect(() => {
     shown.current = true;
     return () => {
       shown.current = false;
+      if (readAheadFor.current !== null) forgetReadAhead(queryClient, readAheadFor.current);
     };
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     let live = true;
@@ -78,6 +82,7 @@ export function Arrival() {
           return;
         }
         setOpening(true);
+        readAheadFor.current = deskId;
         await readAhead(queryClient, deskId);
         if (live) void navigate(todayPath(deskId), { replace: true });
       },
@@ -101,8 +106,10 @@ export function Arrival() {
     const first = copy.desks[0];
     if (!first) return false;
     if (!shown.current) return true;
+    await dropTheOldInbox(queryClient);
     await invalidateCopy(queryClient);
     if (!shown.current) return true;
+    readAheadFor.current = first.desk_id;
     await readAhead(queryClient, first.desk_id);
     if (shown.current) setLeavingTo(first.desk_id);
     return true;
