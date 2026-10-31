@@ -213,6 +213,11 @@ export class MockWorld {
   readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /**
+   * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
+   * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
+   */
+  readonly deletedDesks = new Set<string>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -290,11 +295,13 @@ export class MockWorld {
 
   /**
    * Takes `desk` out of the copy, as deleting a Desk does: its public link and its owner pages
-   * answer not found from now on, and so do its chats, which reach it by its slug.
+   * answer not found from now on, and so do its chats, which reach it by its slug. Its id is kept
+   * in `deletedDesks`, so what names one of its chats is refused as closed.
    */
   deleteDesk(desk: DeskRecord): void {
     const index = this.desks.indexOf(desk);
     if (index !== -1) this.desks.splice(index, 1);
+    this.deletedDesks.add(desk.summary.desk_id);
   }
 
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */

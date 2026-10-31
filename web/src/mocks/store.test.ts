@@ -989,6 +989,41 @@ describe('deleting a Desk', () => {
     mockStore.reset('rivera_two_desks');
     expect(await desks()).toEqual([deskId, RIVERA.emergenciesDeskId]);
   });
+
+  it('deleted_desk_chats_answer_closed', async () => {
+    // A chat on the main Desk with a callback request in it, and the seeded hold, when the Desk goes.
+    mockStore.reset('rivera_two_desks');
+    const { session } = await openChat();
+    await send('Can you call me back?');
+    await drain();
+    const handoff = [...mockStore.world.handoffs.values()].find((record) => record.handoff.session_id === session.session_id);
+    const held = [...mockStore.world.decisions.values()].find((record) => record.deskId === deskId && record.decision.state === 'held');
+    if (!handoff || !held) throw new Error('the chat has a callback request and the Desk a hold');
+    const record = mockStore.visitorSession(slug);
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+
+    // Whatever an owner tab still open on it sends about its chats, a decision or a callback request
+    // in them is refused as the kernel refuses a deleted Desk's: 409 `closed`, and nothing changes.
+    const closed = { status: 409, body: { error: 'kernel', code: 'closed' } };
+    const params = { session_id: session.session_id };
+    const at = { params, body: { generation: session.generation } };
+    for (const key of ['takeover', 'handback', 'resume', 'ownerTyping'] as const) expect(await call(key, at), key).toEqual(closed);
+    for (const kind of ['whisper', 'say']) expect(await call('ownerMessage', { params, body: { text: 'Still there?', kind } }), kind).toEqual(closed);
+    expect(await call('conversation', { params })).toEqual(closed);
+    expect(await call('decision', { params: { decision_id: held.decision.decision_id } })).toEqual(closed);
+    expect(await call('handoffDone', { params: { handoff_id: handoff.handoff.handoff_id } })).toEqual(closed);
+    expect(record?.state).toEqual(session);
+    expect(record?.items.map((item) => item.kind)).not.toContain('whisper');
+    expect(handoff.handoff.status).toBe('open');
+    expect(held.decision.state).toBe('held');
+
+    // The copy's other Desk's chats still take them.
+    const emergencies = mockStore.world.desk(RIVERA.emergenciesDeskId);
+    if (!emergencies) throw new Error('the copy has its other Desk');
+    const other = mockStore.world.addSession(emergencies);
+    const otherAt = { params: { session_id: other.state.session_id }, body: { generation: other.state.generation } };
+    expect((await call('takeover', otherAt)).status).toBe(200);
+  });
 });
 
 describe('planted faults', () => {
