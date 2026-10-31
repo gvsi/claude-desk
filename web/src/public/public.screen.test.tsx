@@ -178,7 +178,7 @@ describe('public chat page', () => {
 
     // Prices and dates reach a visitor only in cards; Claude's own words carry none.
     for (const bad of ['It is $180', 'Good until Tuesday', 'el sábado', 'en noviembre', 'at 2 pm']) expect(bad).toMatch(PRICE_OR_DATE);
-    expect("Maria will text you when she's on her way.").not.toMatch(PRICE_OR_DATE);
+    expect("You're all set. Here's your visit.").not.toMatch(PRICE_OR_DATE);
     const prose = [...screen.container.querySelectorAll('.cd-claude-message__prose')].map((p) => p.textContent ?? '');
     expect(prose.length).toBeGreaterThanOrEqual(6);
     for (const text of prose) expect(text, text).not.toMatch(PRICE_OR_DATE);
