@@ -1,7 +1,14 @@
-/* Share (N-Run2-Share): the share kit 24 px under the page's header. */
+/* Share (N-Run2-Share): the share kit 24 px under the page's header, 16 px on a phone
+   (N-Run2-Share-Phone). */
 .cd-share-page {
   display: flex;
   flex-direction: column;
   gap: var(--space-24);
   min-width: 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-share-page {
+    gap: var(--space-16);
+  }
 }

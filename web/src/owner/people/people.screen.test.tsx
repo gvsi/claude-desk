@@ -5,7 +5,7 @@
  */
 import QRCode from 'qrcode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
@@ -17,7 +17,8 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
-import { expectTabOrder } from '../../ds/boards/spec.ts';
+import { SPEC, expectTabOrder } from '../../ds/boards/spec.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
@@ -483,9 +484,14 @@ describe('share', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Share' })).toBeVisible();
     await expect.element(screen.getByText('Put your Desk where customers already look for you.', { exact: true })).toBeVisible();
 
-    // The Desk's own public link, from its slug: copied whole, and opened in a new tab.
+    // The Desk's own public link, from its slug, as the board writes it: plainly, as people type it,
+    // with Copy link the page's one primary button. It is copied whole, and opens in a new tab.
     const link = screen.getByRole('region', { name: 'Your link' });
-    await expect.element(link.getByText(url, { exact: true })).toBeVisible();
+    const shown = link.getByText(displayLink(url), { exact: true });
+    await expect.element(shown).toBeVisible();
+    expectComputed(shown.element() as HTMLElement, { fontSize: '15px', fontWeight: '520' });
+    expect(link.element().querySelector('[data-copy="code"]')).toBeNull();
+    expectComputed(link.getByRole('button', { name: 'Copy link' }).element() as HTMLElement, SPEC.primary);
     const open = link.getByRole('link', { name: /^Open/ });
     const words = screen.getByRole('list', { name: 'Ready-made words' });
     await expect.element(screen.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
@@ -516,6 +522,12 @@ describe('share', () => {
     await link.getByRole('button', { name: 'Copy link' }).click();
     await expect.element(link.getByText(copyResultLine('copied'), { exact: true })).toBeVisible();
     expect(writeText).toHaveBeenLastCalledWith(url);
+    // A copy that didn't work selects the link as shown and says so.
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) } });
+    await link.getByRole('button', { name: 'Copy link' }).click();
+    await expect.element(link.getByText(copyResultLine('failed', { what: 'link' }), { exact: true })).toBeVisible();
+    expect(window.getSelection()?.toString()).toBe(displayLink(url));
+    const copies = stubClipboard();
 
     // The printable card: the business, the QR code for the link, the link as people type it, and
     // who answers there.
@@ -531,7 +543,7 @@ describe('share', () => {
     const blocks = SHARE_COPY(business, owner, url);
     expect(words.getByRole('listitem').elements().map((row) => row.querySelector('.cd-copy-list__words')?.textContent)).toEqual(blocks.map((b) => b.text));
     await words.getByRole('button', { name: 'Copy Voicemail' }).click();
-    expect(writeText).toHaveBeenLastCalledWith(blocks[2]?.text);
+    expect(copies).toHaveBeenLastCalledWith(blocks[2]?.text);
 
     // The website embed is coming later: no code to copy.
     const later = screen.getByText('Website embed', { exact: true }).element().closest('.cd-share-kit__later') as HTMLElement;
@@ -550,6 +562,70 @@ describe('share', () => {
     expect(marked).toBe('share-card');
     expect(document.documentElement.hasAttribute('data-print-only')).toBe(false);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('print_card_prints_the_card_alone', async () => {
+    const { screen } = await renderRoute(`${DESK}/share`);
+    await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
+    // Found now: hidden on paper, they leave the accessibility tree.
+    const card = screen.getByRole('figure').element() as HTMLElement;
+    const title = screen.getByRole('heading', { level: 1, name: 'Share' }).element();
+    const printButton = screen.getByRole('button', { name: 'Print card' }).element();
+    // On paper: about 720 px of printable width, with Print card's mark on the page.
+    await page.viewport(720, 900);
+    await cdp().send('Emulation.setEmulatedMedia', { media: 'print' });
+    document.documentElement.setAttribute('data-print-only', 'share-card');
+    try {
+      // The card alone, at its own 300 px, centred, in dark ink on its light ground.
+      const box = card.getBoundingClientRect();
+      expect(Math.round(box.width)).toBe(300);
+      expect(Math.round(box.left)).toBe(Math.round((document.documentElement.clientWidth - 300) / 2));
+      expect(getComputedStyle(card).visibility).toBe('visible');
+      expect(getComputedStyle(card).backgroundColor).toBe('rgb(250, 249, 245)');
+      expect(getComputedStyle(card).printColorAdjust).toBe('exact');
+      expect(getComputedStyle(title).visibility).toBe('hidden');
+      expect(getComputedStyle(printButton).visibility).toBe('hidden');
+      // A white sheet, even with background graphics on: no dark page under the card.
+      expect(getComputedStyle(document.documentElement).colorScheme).toBe('light');
+      expect(getComputedStyle(document.body).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(document.documentElement).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    } finally {
+      document.documentElement.removeAttribute('data-print-only');
+      await cdp().send('Emulation.setEmulatedMedia', { media: '' });
+    }
+    // Without the mark, printing the page leaves it as it is.
+    await cdp().send('Emulation.setEmulatedMedia', { media: 'print' });
+    expect(getComputedStyle(title).visibility).toBe('visible');
+    await cdp().send('Emulation.setEmulatedMedia', { media: '' });
+  });
+
+  it('share_fits_between_a_phone_and_a_laptop', async () => {
+    const { screen } = await renderRoute(`${DESK}/share`);
+    await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
+    // At 820 px the sidebar stays, so the kit stacks: nothing scrolls sideways, the page or its main area.
+    await page.viewport(820, 1000);
+    const main = screen.getByRole('main').element();
+    await expect.poll(() => main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+    const card = screen.getByRole('figure').element().getBoundingClientRect();
+    const words = screen.getByRole('list', { name: 'Ready-made words' }).element().getBoundingClientRect();
+    expect(words.top).toBeGreaterThan(card.bottom);
+    expect(Math.round(words.width)).toBeGreaterThan(300);
+  });
+
+  it('share_on_a_phone_keeps_its_board_gaps', async () => {
+    const { screen } = await renderRoute(`${DESK}/share`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
+    // N-Run2-Share-Phone: 16 px between the header, the link card, the printable card and Print
+    // card, the ready-made words and the website embed.
+    const header = screen.container.querySelector('.cd-page-header')!.getBoundingClientRect();
+    const link = screen.getByRole('region', { name: 'Your link' }).element().getBoundingClientRect();
+    const card = screen.getByRole('figure').element().getBoundingClientRect();
+    const print = screen.getByRole('button', { name: 'Print card' }).element().getBoundingClientRect();
+    const heading = screen.getByRole('heading', { level: 2, name: 'Ready-made words' }).element().getBoundingClientRect();
+    const words = screen.getByRole('list', { name: 'Ready-made words' }).element().getBoundingClientRect();
+    const later = screen.container.querySelector('.cd-share-kit__later')!.getBoundingClientRect();
+    expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 16]);
   });
 
   it('share_kit_on_the_live_step', async () => {

@@ -38,8 +38,8 @@ async function writeToClipboard(text: string): Promise<void> {
 /**
  * What an owner needs to put their Desk where customers already look (N-Run2-Share): the link with
  * Copy link and Open, a printable card with its QR code, the ready-made words with Copy for each,
- * and the website embed, which is coming later. Every one of them carries the Desk's public link
- * and nothing else: a link under the API's paths throws before anything shows.
+ * and the website embed, which is coming later. Each is built from `publicUrl`; a link under the
+ * API's paths, a document link among them, throws before anything shows.
  */
 export function ShareKit({ publicUrl, business, ownerName, showLink = true }: ShareKitProps) {
   const words = SHARE_COPY(business, ownerName, publicUrl);
@@ -50,6 +50,7 @@ export function ShareKit({ publicUrl, business, ownerName, showLink = true }: Sh
           <p className="cd-share-kit__caption cd-type-caption">Your link</p>
           <CopyLink
             url={publicUrl}
+            look="text"
             actions={
               <Button variant="secondary" size="main" href={publicUrl} external>
                 Open

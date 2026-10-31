@@ -19,7 +19,7 @@ describe('share copy', () => {
     expect(displayLink(URL)).toBe('desk.example/d/rivera');
     expect(spokenLink(URL)).toBe('desk.example slash d slash rivera');
     expect(google).toBe('Questions, quotes and bookings, any time: desk.example/d/rivera. Answered by Claude, an AI, under Maria Rivera’s rules.');
-    expect(email).toBe('Questions? Ask Rivera Plumbing any time at desk.example/d/rivera (answered by Claude, an AI).');
+    expect(email).toBe('Ask Rivera Plumbing any time at desk.example/d/rivera (answered by Claude, an AI).');
     expect(voicemail).toBe(
       'You’ve reached Rivera Plumbing. For quotes and bookings, visit desk.example slash d slash rivera, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.',
     );

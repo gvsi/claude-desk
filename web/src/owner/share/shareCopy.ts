@@ -11,8 +11,8 @@ import type { CopyListItem } from '../../ds/index.ts';
  */
 const API_PATH = /\/api\//i;
 
-/** Refuses anything but a public page's link, so no document link reaches words that get pasted. */
-function publicOnly(url: string): string {
+/** Refuses a link under the API's paths, so no document link reaches words that get pasted. */
+function notUnderTheApi(url: string): string {
   if (API_PATH.test(url)) throw new Error('Only the Desk’s public link is shared.');
   return url;
 }
@@ -33,16 +33,17 @@ export function spokenLink(url: string): string {
 }
 
 /**
- * The three ready-made words for `business`'s Desk at `url`: for a Google profile, an email
- * signature and a voicemail, each naming the link and that Claude, an AI, answers; the voicemail
- * adds that `ownerName` calls back about an emergency. Only the Desk's public link: a link under the
- * API's paths throws.
+ * The three ready-made words for `business`'s Desk at `url`, in N-Run2-Share's words: for a Google
+ * profile, an email signature and a voicemail, each naming the link and that Claude, an AI,
+ * answers; the voicemail adds that `ownerName` calls back about an emergency. The email signature
+ * leaves out the board's opening question, "Need a plumber?", which names a trade the Desk's data
+ * doesn't have. A link under the API's paths, a document link among them, throws.
  */
 export function SHARE_COPY(business: string, ownerName: string, url: string): CopyListItem[] {
-  const link = displayLink(publicOnly(url));
+  const link = displayLink(notUnderTheApi(url));
   return [
     { title: 'Google profile', text: `Questions, quotes and bookings, any time: ${link}. Answered by Claude, an AI, under ${ownerName}’s rules.` },
-    { title: 'Email signature', text: `Questions? Ask ${business} any time at ${link} (answered by Claude, an AI).` },
+    { title: 'Email signature', text: `Ask ${business} any time at ${link} (answered by Claude, an AI).` },
     {
       title: 'Voicemail',
       text: `You’ve reached ${business}. For quotes and bookings, visit ${spokenLink(url)}, where Claude, an AI, answers any time. For an emergency, leave a message and ${ownerName} will call you back.`,

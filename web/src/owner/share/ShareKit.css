@@ -1,8 +1,11 @@
 /* ShareKit (N-Run2-Share): the link card, then 24 px under it the printable card (300 px) and,
    32 px to its right, the ready-made words under their heading, 8 px apart, with the website embed
-   20 px under them: an outline with no fill, its pill at the right. On a phone the two stack. */
+   20 px under them: an outline with no fill, its pill at the right. When the kit has less room than
+   the card and a readable column of words, the two stack; on a phone (N-Run2-Share-Phone) every
+   gap is 16 px. */
 
 .cd-share-kit {
+  container: cd-share-kit / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-24);
@@ -14,6 +17,7 @@
   color: var(--text-secondary);
 }
 
+/* No size token is the printable card's own 300 px column (ShareCard's width). */
 .cd-share-kit__kit {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -51,6 +55,7 @@
   margin: 0;
 }
 
+/* No weight token: the section type's 520, as CopyList's titles set it. */
 .cd-share-kit .cd-share-kit__later-title {
   color: var(--text-primary);
   font-weight: 520;
@@ -68,16 +73,40 @@
   height: 100%;
 }
 
-@media (max-width: 767.98px) {
+/* Less room than the 300 px card, the 32 px gap and about 300 px of words: one column. A container
+   query can't read a token, so the width is written out. */
+@container cd-share-kit (max-width: 639.98px) {
   .cd-share-kit__kit {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-/* Print card: while the page is marked, only the card reaches paper, on one page, at its top left,
-   in dark ink on the paper's light ground, as the QR code's own quiet zone is. The rest of the app
-   is hidden and takes no room, so it adds no blank pages for the card to repeat on. */
+@media (max-width: 767.98px) {
+  .cd-share-kit,
+  .cd-share-kit__kit {
+    gap: var(--space-16);
+  }
+
+  .cd-share-kit__later {
+    margin-top: var(--space-8);
+  }
+}
+
+/* Print card: while the page is marked, only the card reaches paper, on one page: at its own 300 px
+   (the card spans its column under 768 px, and paper is narrower than that), centred at the top, in
+   dark ink on the light ground the QR code's quiet zone has, its fill and border printed. The rest
+   of the app is hidden and takes no room, so it adds no blank pages, and the sheet stays white even
+   with background graphics on. */
 @media print {
+  :root[data-print-only='share-card'] {
+    color-scheme: light;
+    background: none;
+  }
+
+  :root[data-print-only='share-card'] body {
+    background: none;
+  }
+
   :root[data-print-only='share-card'] body * {
     visibility: hidden;
   }
@@ -96,8 +125,13 @@
   :root[data-print-only='share-card'] .cd-share-kit__card figure {
     position: fixed;
     top: 0;
+    right: 0;
     left: 0;
+    width: 300px;
+    max-width: none;
+    margin: 0 auto;
     border-color: var(--illustration-line);
     background: var(--illustration-card);
+    print-color-adjust: exact;
   }
 }
