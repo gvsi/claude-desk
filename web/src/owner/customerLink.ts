@@ -6,9 +6,12 @@
 /**
  * The public page as this Desk's owner sees it: `/d/{slug}?preview={deskId}`. The new tab asks the
  * API for the owner's preview of the Desk, and falls back to a visitor's chat when it can't have one.
+ * With `draft` ("Try to break it"'s idea), `&draft={text}` too, URL-encoded: the page types it into
+ * its chat box once, for the owner to send, and takes it out of the address.
  */
-export function customerLink(slug: string, deskId: string): string {
-  return `/d/${encodeURIComponent(slug)}?preview=${encodeURIComponent(deskId)}`;
+export function customerLink(slug: string, deskId: string, draft?: string): string {
+  const link = `/d/${encodeURIComponent(slug)}?preview=${encodeURIComponent(deskId)}`;
+  return draft === undefined ? link : `${link}&draft=${encodeURIComponent(draft)}`;
 }
 
 /** The Desk's public link, the one to share: `{origin}/d/{slug}`. */

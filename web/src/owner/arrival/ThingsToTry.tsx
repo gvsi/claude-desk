@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { NeedsYouItem } from '../../api/views.ts';
@@ -21,11 +21,10 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
 /** What happened to the attack idea the owner picked. */
 type Pick =
-  | { idea: string; outcome: 'copied' }
-  /** Copied, but the browser kept the new tab from opening. */
-  | { idea: string; outcome: 'blocked' }
-  /** The clipboard refused: the idea is shown selected instead. */
-  | { idea: string; outcome: 'failed' };
+  /** The public page opened in a new tab, the idea typed into its chat box. */
+  | { idea: string; outcome: 'opened' }
+  /** The browser kept the new tab from opening. */
+  | { idea: string; outcome: 'blocked' };
 
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
@@ -108,7 +107,7 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
               Open your public page
             </Button>
           </Thing>
-          <BreakIt link={link} ownerName={ownerName} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} />
           {firstHeld?.decision ? (
             <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld.held_by)}>
               <Button variant="secondary" onClick={onFocusRequest}>
@@ -162,60 +161,47 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
 }
 
 /**
- * "Try to break it": the ideas, one of which is copied for the public page, which then opens in a
- * new tab. The tab is opened without `noopener` (with it the browser hides whether the tab opened),
- * and this page cuts the new tab's link back to it. A browser that blocks the tab gets a link to
- * open it by hand; a clipboard that refuses leaves the idea selected to copy by hand.
+ * "Try to break it": the ideas. A pick opens the public page in a new tab with the idea in its link
+ * (`?draft=`), which the page types into its chat box for the owner to send; nothing is sent
+ * without their Send. The idea is copied first, as a fallback only: a clipboard that refuses
+ * changes nothing, since the link carries the idea either way. The tab is opened without
+ * `noopener` (with it the browser hides whether the tab opened), and this page cuts the new tab's
+ * link back to it. A browser that blocks the tab gets a link to open it by hand, the idea in it too.
  */
-function BreakIt({ link, ownerName }: { link: string; ownerName: string }) {
+function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
-  const ideaRef = useRef<HTMLParagraphElement>(null);
-
-  useLayoutEffect(() => {
-    if (pick?.outcome !== 'failed' || !ideaRef.current) return;
-    window.getSelection()?.selectAllChildren(ideaRef.current);
-  }, [pick]);
 
   const onPick = async (idea: string) => {
     setPick(null);
     try {
       await navigator.clipboard.writeText(idea);
     } catch {
-      setPick({ idea, outcome: 'failed' });
-      return;
+      // The link below carries the idea; the copy was only in case it doesn't arrive.
     }
-    const tab = window.open(link, '_blank');
+    const tab = window.open(customerLink(slug, deskId, idea), '_blank');
     if (tab === null) {
       setPick({ idea, outcome: 'blocked' });
       return;
     }
     tab.opener = null;
-    setPick({ idea, outcome: 'copied' });
+    setPick({ idea, outcome: 'opened' });
   };
 
   const below = showing ? (
     <div className="cd-things__ideas">
       <SuggestionChips label="Ideas to try" suggestions={ATTACK_IDEAS} onPick={(idea) => void onPick(idea)} />
-      {pick?.outcome === 'failed' ? (
-        <>
-          <p ref={ideaRef} className="cd-things__idea cd-type-meta">
-            {pick.idea}
-          </p>
-          <Notice tone="error">Copy didn't work. The idea is selected, so copy it yourself.</Notice>
-        </>
-      ) : null}
-      {pick?.outcome === 'copied' ? <Notice tone="info">Copied. Paste it into the chat.</Notice> : null}
+      {pick?.outcome === 'opened' ? <Notice tone="info">Typed into the chat box in the new tab. Press Send there.</Notice> : null}
       {pick?.outcome === 'blocked' ? (
         <Notice
           tone="info"
           action={
-            <Button variant="secondary" href={link} external>
+            <Button variant="secondary" href={customerLink(slug, deskId, pick.idea)} external>
               Open your public page
             </Button>
           }
         >
-          Copied. Paste it into the chat.
+          Your browser blocked the new tab. Open your public page, with the idea typed in.
         </Notice>
       ) : null}
     </div>

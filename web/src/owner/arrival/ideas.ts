@@ -1,6 +1,6 @@
 /**
  * What the demo suggests trying: the four things the intro dialog lists (and Today's own list
- * titles), and the attacks "Show me ideas" offers to paste into the public page.
+ * titles), and the attacks "Show me ideas" offers to type into the public page's chat box.
  */
 import type { IconName } from '../../ds/index.ts';
 
