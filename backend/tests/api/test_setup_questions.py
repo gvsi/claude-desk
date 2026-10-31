@@ -1707,6 +1707,18 @@ def test_fact_turns_capture_business_policies_with_bounded_fields():
             'how it works, never limits.') in SETUP_TURN_SYSTEM
 
 
+def test_suggested_fields_are_stored_only_by_code():
+    answers = SetupAnswers(summary="Tax advice.")
+    assert answers.suggested_fields == []
+    answers.suggested_fields.append("pricing")
+    assert SetupAnswers(summary="Tax advice.").suggested_fields == []
+    assert SetupAnswers(summary="Tax advice.", suggested_fields=["summary", "pricing"]).suggested_fields == [
+        "summary", "pricing"]
+    assert "suggested_fields" not in SetupPatch.model_fields
+    assert all("suggested_fields" not in output.model_fields for output in SETUP_TURNS.values())
+    assert "suggested_fields" not in SetupStart.model_fields
+
+
 def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
     assert ("On the quote question, pricing records how the business prices in words, only from the owner's "
             "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM

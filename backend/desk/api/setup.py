@@ -1796,14 +1796,25 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
+SETUP_POLICY_CLAIMS = {
+    "summary": "policy:about",
+    "service_area": "policy:service_area",
+    "pricing": "policy:pricing",
+    "intake": "policy:intake",
+    "after_hours": "policy:after_hours",
+    "urgent": "policy:urgent",
+    "how_we_help": "policy:how_we_help",
+}
+
+
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date) -> SeedParts:
-    """The Desk's parts from the answers: the public charter (the contact, summary and business policies; never
-    hours, which have their own part), the hours, the price list, the calendar and the notification defaults."""
+    """The Desk's parts from the answers: the public charter (the contact and business policies, omitting policy
+    fields filled from unconfirmed suggestions), the hours, the price list, the calendar and notification defaults."""
+    claim_values = [("contact", answers.public_contact)]
+    claim_values.extend((key, getattr(answers, field)) for field, key in SETUP_POLICY_CLAIMS.items()
+                        if field not in answers.suggested_fields)
     charter = [Claim(key=key, kind="text", value=value.strip())
-               for key, value in (("contact", answers.public_contact), ("policy:about", answers.summary),
-                                  ("policy:service_area", answers.service_area), ("policy:pricing", answers.pricing),
-                                  ("policy:intake", answers.intake), ("policy:after_hours", answers.after_hours),
-                                  ("policy:urgent", answers.urgent), ("policy:how_we_help", answers.how_we_help))
+               for key, value in claim_values
                if value and value.strip()]
     return SeedParts(charter=charter, hours=list(answers.hours), prices=price_items(answers.price_items),
                      calendar=calendar_slots(answers.hours, timezone, today),

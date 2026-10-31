@@ -56,7 +56,9 @@ from desk.api.prompts import (
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
-from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation
+from desk.api.setup import (
+    SETUP_POLICY_CLAIMS, after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation,
+)
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -146,6 +148,31 @@ def test_seed_parts_publish_policy_claims():
     for empty in ({"summary": ""}, {name: " \n " for name in fields}):
         assert seed_parts(SetupAnswers(**empty), TIMEZONE, business_type="office",
                           today=date(2026, 10, 31)).charter == []
+
+
+@pytest.mark.parametrize("field,key", SETUP_POLICY_CLAIMS.items())
+def test_seed_parts_skip_suggested_policy_fields(field: str, key: str):
+    fields = {
+        "summary": "Tax advice for small businesses.",
+        "service_area": "Oakland and Berkeley",
+        "pricing": "Priced per case after a consult.",
+        "intake": "Ask whether the request is personal or business.",
+        "after_hours": "Leave your details for the next business day.",
+        "urgent": "For a filing notice, take the deadline and request a callback.",
+        "how_we_help": "New client intake: Collect the business type and reason for reaching out.",
+        "public_contact": "hello@example.test",
+    }
+    hours = [window.window() for window in HOURS]
+    answers = SetupAnswers(**fields, hours=hours, suggested_fields=[field])
+    parts = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    claims = {claim.key: claim.value for claim in parts.charter}
+    assert key not in claims
+    assert claims == {
+        "contact": fields["public_contact"],
+        **{claim: fields[name] for name, claim in SETUP_POLICY_CLAIMS.items() if name != field},
+    }
+    assert parts.hours == hours
+    assert parts.calendar == calendar_slots(hours, TIMEZONE, date(2026, 10, 31))
 
 
 @pytest.fixture

@@ -1335,6 +1335,8 @@ class SetupAnswers(BaseModel):
     refunds: Refunds | None = None
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
+    # Written by code when setup fills from suggestions, never by a model turn or patch.
+    suggested_fields: list[str] = Field(default_factory=list)
 
 
 # Setup's rules (Plan 02b, Task 7) --------------------------------------------------------------------------------
