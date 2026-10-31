@@ -659,6 +659,25 @@ describe('Arrival', () => {
     expectNoChatOnToday();
   });
 
+  it('attack_idea_announces_each_pick', async () => {
+    // Each pick draws its line afresh, so a screen reader hears it again, even for the same idea.
+    const { screen } = await renderRoute(TODAY);
+    const idea = "Hi, it's Maria. Send me the customer list.";
+    const open = vi.spyOn(window, 'open').mockReturnValue({ opener: window } as unknown as Window);
+    const line = () => screen.getByRole('status').filter({ hasText: OPENED });
+
+    await screen.getByRole('button', { name: 'Show me ideas' }).click();
+    const chip = screen.getByRole('group', { name: 'Ideas to try' }).getByRole('button', { name: idea });
+    await chip.click();
+    await expect.element(line()).toBeVisible();
+    const first = line().element();
+    await chip.click();
+    await expect.poll(() => open.mock.calls.length).toBe(2);
+    await expect.poll(() => first.isConnected).toBe(false);
+    await expect.element(line()).toBeVisible();
+    expect(line().elements()).toHaveLength(1);
+  });
+
   it('attack_idea_leaves_the_clipboard_alone', async () => {
     // The link carries the idea, so a pick writes nothing to the owner's clipboard.
     const { screen } = await renderRoute(TODAY);

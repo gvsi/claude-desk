@@ -23,6 +23,8 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 /** What happened to the "Try to break it" idea the owner picked, by its key. */
 interface Pick {
   key: BreakItIdea['key'];
+  /** Counts the picks, so each one draws its line afresh and a screen reader hears it again. */
+  n: number;
   /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
   outcome: 'opened' | 'blocked';
 }
@@ -179,22 +181,27 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
   const onPick = (text: string) => {
     const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
     if (idea === undefined) return;
-    setPick(null);
+    const n = (pick?.n ?? 0) + 1;
     const tab = window.open(customerLink(slug, deskId, idea.key), '_blank');
     if (tab === null) {
-      setPick({ key: idea.key, outcome: 'blocked' });
+      setPick({ key: idea.key, n, outcome: 'blocked' });
       return;
     }
     tab.opener = null;
-    setPick({ key: idea.key, outcome: 'opened' });
+    setPick({ key: idea.key, n, outcome: 'opened' });
   };
 
   const below = showing ? (
     <div className="cd-things__ideas">
       <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
-      {pick?.outcome === 'opened' ? <Notice tone="info">The new tab opens with the idea in its chat box. Send it from there.</Notice> : null}
+      {pick?.outcome === 'opened' ? (
+        <Notice key={pick.n} tone="info">
+          The new tab opens with the idea in its chat box. Send it from there.
+        </Notice>
+      ) : null}
       {pick?.outcome === 'blocked' ? (
         <Notice
+          key={pick.n}
           tone="info"
           action={
             <Button variant="secondary" href={customerLink(slug, deskId, pick.key)} external>
