@@ -66,6 +66,13 @@ function rowTexts(screen: { container: HTMLElement }): string[] {
   return [...screen.container.querySelectorAll('[aria-label="Changes"] li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim() ?? '');
 }
 
+/** The check panel's lines, in order. */
+function checkLines(screen: { container: HTMLElement }): string[] {
+  const panel = screen.container.querySelector('[aria-label="Checked before you confirm"]');
+  if (panel === null) throw new Error('no check panel');
+  return [...panel.querySelectorAll('li')].map((li) => li.textContent?.trim() ?? '');
+}
+
 /** True when `first` comes before `second` in the page. */
 function before(first: Element | null, second: Element | null): boolean {
   if (first === null || second === null) return false;
@@ -286,6 +293,8 @@ describe('rule draft review', () => {
       await expect.element(screen.getByText('Your rules stay the same.', { exact: true })).toBeVisible();
       await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
       expect(screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
+      // The check alone (N-Conn-20): no preset, so nothing about what runs on its own.
+      expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.']);
     }
     expect(requests('ruleDraft')).toHaveLength(1);
 
@@ -327,6 +336,8 @@ describe('rule draft review', () => {
     expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length);
     for (const text of rows) expect(text).toMatch(/^Changed/);
     for (const text of rows) expect(text).toContain('Not covered by a rule you set, so I ask you.');
+    // The check, then what the preset keeps running on its own.
+    expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.']);
 
     await expectOwnerBoard(screen.container, {
       current: 'Rules',

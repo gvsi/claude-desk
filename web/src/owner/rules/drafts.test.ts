@@ -236,6 +236,20 @@ describe('rule drafts', () => {
     expect(checkStatus({ ...CHECKED, ok: false, checks: [passing] })).toEqual({ status: 'failed', lines: ["One of the safety checks didn't pass."] });
     // A report that says ok while a check failed is not checked.
     expect(checkStatus({ ...CHECKED, checks: [failing('A stranger could book on Sunday')] }).status).toBe('failed');
+
+    // A preset's review, either preset, also says what still runs on its own (N-Conn-18), once checked.
+    const presetChecked = {
+      status: 'checked',
+      lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
+    };
+    expect(checkStatus(CHECKED, 'ask_first')).toEqual(presetChecked);
+    expect(checkStatus(CHECKED, 'auto')).toEqual(presetChecked);
+    expect(checkStatus(CHECKED, null)).toEqual({ status: 'checked', lines: ['Checked against the always-on rules and your other rules.'] });
+    expect(checkStatus(null, 'ask_first')).toEqual(UNAVAILABLE);
+    expect(checkStatus({ ...CHECKED, ok: false, checks: [failing('A stranger could book on Sunday')] }, 'ask_first')).toEqual({
+      status: 'failed',
+      lines: ['A stranger could book on Sunday'],
+    });
   });
 
   it('rule_words_match_the_boards', () => {

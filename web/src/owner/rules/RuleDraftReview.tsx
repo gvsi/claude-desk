@@ -191,7 +191,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
         ) : null}
         <ChangeReview
           rows={rows}
-          checks={checkStatus(draft.proof)}
+          checks={checkStatus(draft.proof, draft.preset)}
           hasOtherChanges={moneyCap !== null}
           cancelsLinks={cancelsLinksFor(draft)}
           {...(turningOn ? { confirmLabel: 'Confirm and turn on', cancelLabel: 'Back' } : {})}
