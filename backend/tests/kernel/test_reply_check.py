@@ -1481,6 +1481,67 @@ def test_a_callback_card_cannot_hide_a_separate_booking_claim_in_a_modifier(pros
         ("promise_word", "lex.en.booking")]
 
 
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    (prose, f"Have you booked your {noun}?", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for verb in ("booked", "reserved", "confirmed", "scheduled")
+    for prose in (f"We've {verb} your {noun}.", f"{verb.capitalize()} your {noun}.")
+] + [
+    ("Hemos reservado tu llamada.", "¿Has reservado tu llamada?", "es"),
+    ("He confirmado tu llamada.", "No he confirmado tu llamada.", "es"),
+])
+def test_completed_hyphenated_call_claims_need_a_callback_card(prose, honest, language):
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "conditioned", "language"), [
+    (prose, f"{condition} {prose[0].lower() + prose[1:-1]}, we can discuss access.", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for prose, condition in ((f"Your {noun} is confirmed.", "Once"),
+                             (f"Your {noun} is booked.", "When"),
+                             (f"The {noun} is confirmed.", "Once"),
+                             (f"Your {noun}: confirmed.", "Once"))
+] + [
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+    ("Tu llamada está reservada.", "Cuando tu llamada está reservada, podemos hablar del acceso.", "es"),
+])
+def test_conditions_reach_the_whole_hyphenated_call_noun(prose, conditioned, language):
+    assert reply_check.scan_prose(conditioned) == []
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+
+
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    ("We've booked your follow-up-call.", "Have you booked your follow-up-call?", "en"),
+    ("We've booked your phone-call.", "Have you booked your phone-call?", "en"),
+    ("Booked your follow-up-call.", "We haven't booked your follow-up-call.", "en"),
+    ("Your follow-up-call is confirmed.",
+     "Once your follow-up-call is confirmed, we can discuss access.", "en"),
+    ("Your phone-call is booked.", "When your phone-call is booked, we can discuss access.", "en"),
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+])
+async def test_hyphenated_call_claims_with_a_real_callback_receipt(app, client, reviewer, prose, honest, language):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    blocked = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("promise_word", f"lex.{language}.callback")]
+    assert_handed_off(blocked, language)
+    assert reviewer.soft_inputs == []
+    backed = await checked(client, visitor, prose, [clause("callback_confirmed", callback.fact_id)])
+    assert (backed.ok, backed.violations) == (True, [])
+    assert [block.template for block in backed.blocks] == [None, "callback_confirmed"]
+    harmless = await checked(client, visitor, honest)
+    assert (harmless.ok, harmless.violations) == (True, [])
+    assert len(reviewer.soft_inputs) == 2
+
+
 @pytest.mark.parametrize("clitics", ["me", "te", "le", "lo", "la", "nos", "os", "les", "los", "las", "se",
                                      "se lo", "se la", "te lo", "nos la"])
 @pytest.mark.parametrize(("noun", "category"), [("mesa", "booking"), ("llamada", "callback")])
