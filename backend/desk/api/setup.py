@@ -11,11 +11,14 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   the client's `idempotency_key` writes the interview's row first, holding the key and its body's hash, with no Desk
   yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
   key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say) deletes its row, since
-  nothing was made, so the same request can be sent again; once the Desk was asked for, the row keeps the outcome,
-  a failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands,
-  with nothing made: 409 `conflict` for another body, the stored failure again when the first failed, and while the
-  first is still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits;
-  a row still starting after the longest a start can take (`START_ABANDONED_S`) is abandoned, and a repeat deletes it.
+  nothing was made, so the same request can be sent again. Before the kernel is asked for the Desk, the start records
+  it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a failure too
+  (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing
+  made: 409 `conflict` for another body, the stored failure again when the first failed, and while the first is still
+  starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. A row that never
+  recorded asking for its Desk and is still starting after the longest a start can take (`START_ABANDONED_S`) is
+  abandoned, and a repeat deletes it. A row that did record it but has no Desk and no failure stays uncertain (the
+  Desk may exist, its answer lost): it answers 409 `in_progress` for good, and only a new key starts again.
   The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A start without a key writes its row last.
@@ -682,12 +685,14 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
 async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
     `conflict` when the key's start had another body, and the first's failure again when it failed. While the first
-    is still starting, 409 `in_progress` at once, to be sent again in `START_RETRY_S`. A row still starting after
-    `START_ABANDONED_S` is abandoned (its request stopped): it is deleted, if it still is one, and the key is free."""
+    is still starting, 409 `in_progress` at once, to be sent again in `START_RETRY_S`. A row that never recorded
+    asking the kernel for its Desk and is still starting after `START_ABANDONED_S` is abandoned (its request stopped
+    before anything was made): it is deleted, if it still is one, and the key is free. A row that did record it stays
+    `in_progress` however old: its Desk may exist."""
     key, sha = body.idempotency_key, start_sha256(body)
     found = select(INTERVIEWS.c.interview_id, INTERVIEWS.c.desk_id, INTERVIEWS.c.request_sha256,
-                   INTERVIEWS.c.start_error, _STALE.label("stale")).where(INTERVIEWS.c.copy_id == owner.copy_id,
-                                                                         INTERVIEWS.c.idempotency_key == key)
+                   INTERVIEWS.c.start_error, INTERVIEWS.c.desk_requested_at, _STALE.label("stale")).where(
+        INTERVIEWS.c.copy_id == owner.copy_id, INTERVIEWS.c.idempotency_key == key)
     async with engine.connect() as conn:
         row = (await conn.execute(found)).mappings().one_or_none()
     if row is None:
@@ -697,7 +702,8 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     if row["start_error"] is not None:
         raise _failure(row["start_error"])
     if row["desk_id"] is None:
-        if row["stale"] and await _drop_abandoned(engine, owner.copy_id, row["interview_id"]):
+        abandoned = row["stale"] and row["desk_requested_at"] is None
+        if abandoned and await _drop_abandoned(engine, owner.copy_id, row["interview_id"]):
             return None
         raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
     if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
@@ -706,12 +712,12 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
 
 
 async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) -> bool:
-    """Delete an abandoned keyed row only while it still is one (no Desk, no failure, older than
-    `START_ABANDONED_S`), so a start that finished meanwhile keeps its row: whether it went."""
+    """Delete an abandoned keyed row only while it still is one (no Desk asked for, no Desk, no failure, older than
+    `START_ABANDONED_S`), so a start that moved on meanwhile keeps its row: whether it went."""
     async with engine.connect() as conn:
         gone = await conn.execute(delete(INTERVIEWS).where(
             INTERVIEWS.c.interview_id == interview_id, INTERVIEWS.c.copy_id == copy_id, INTERVIEWS.c.desk_id.is_(None),
-            INTERVIEWS.c.start_error.is_(None), _STALE))
+            INTERVIEWS.c.start_error.is_(None), INTERVIEWS.c.desk_requested_at.is_(None), _STALE))
         await conn.commit()
     if gone.rowcount == 1:
         logger.warning("a keyed setup start abandoned mid-way was let go")
@@ -750,6 +756,7 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
     keyed = (INTERVIEWS.c.interview_id == interview_id, INTERVIEWS.c.copy_id == owner.copy_id)
     try:
         described, desk = await _read_description(owner, engine, model, body)
+        await _asking_for_desk(engine, keyed)
     except BaseException:                           # nothing was made: the key is free for the same request again
         await _settle(engine, delete(INTERVIEWS).where(*keyed))
         raise
@@ -765,6 +772,18 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
                                                                       updated_at=func.now()))
         raise
     return setup_state(interview, slug)
+
+
+async def _asking_for_desk(engine: AsyncEngine, keyed: tuple) -> None:
+    """Record on the keyed row, committed, that the start is about to ask the kernel for its Desk: from then on the
+    Desk may exist, so the row is never taken over as abandoned. 409 `in_progress`, with no Desk asked for, when the
+    row isn't there to record it on (a repeat took it over)."""
+    async with engine.connect() as conn:
+        recorded = await conn.execute(update(INTERVIEWS).where(*keyed, INTERVIEWS.c.desk_requested_at.is_(None))
+                                      .values(desk_requested_at=func.now(), updated_at=func.now()))
+        await conn.commit()
+    if recorded.rowcount != 1:
+        raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
 
 
 async def _settle(engine: AsyncEngine, statement: Executable) -> None:

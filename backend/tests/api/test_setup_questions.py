@@ -1349,6 +1349,53 @@ async def test_a_start_abandoned_mid_way_frees_its_key_once_it_is_older_than_any
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
 
 
+async def test_a_start_that_asked_for_its_desk_is_never_taken_over(app, browser, fake, kernel_http, model, engine, db,
+                                                                   monkeypatch):
+    # The kernel made the Desk, but its answer was lost and the start never settled its row (its process stopped, or
+    # the last write failed): the row has no Desk and no failure. It did record that the Desk was asked for, so no
+    # age makes it abandoned: the Desk may exist, a repeat answers 409 `in_progress` however old the row is, and only
+    # a new key starts again.
+    owner = await new_owner(app, browser, kernel_http)
+
+    async def unsettled(engine, statement) -> None:
+        return None
+
+    with monkeypatch.context() as patch:
+        patch.setattr(desk_setup, "_settle", unsettled)
+        fake.drop_response("POST /desks")
+        model.add(started())
+        first = await start_keyed(owner)
+    assert first.status_code == 503, first.text
+    assert len(fake.called("POST /desks")) == 1
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)",
+               (desk_setup.START_ABANDONED_S + 5,))
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    ((desk_id, start_error, asked),) = db.execute("SELECT desk_id, start_error, desk_requested_at IS NOT NULL"
+                                                  " FROM app.setup_interviews").fetchall()
+    assert (desk_id, start_error, asked) == (None, None, True)
+
+    model.add(started())
+    fresh = await start_keyed(owner, "start-again")
+    assert fresh.status_code == 201, fresh.text
+
+
+async def test_a_start_whose_row_went_meanwhile_asks_for_no_desk(app, browser, fake, kernel_http, model, db):
+    # While Claude reads the description, the start's row goes (a repeat took it over, say): the start finds no row to
+    # record its Desk request on, so it asks the kernel for no Desk and answers 409 `in_progress`.
+    owner = await new_owner(app, browser, kernel_http)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    db.execute("DELETE FROM app.setup_interviews WHERE copy_id = %s", (owner.copy_id,))
+    release.set()
+    first = await asyncio.wait_for(first, 5)
+    assert (first.status_code, first.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    assert fake.called("POST /desks") == []
+
+
 class EachOnItsOwn:
     """Admission with no lock in this process, as two processes each admit a request on their own."""
 

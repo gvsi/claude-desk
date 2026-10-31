@@ -70,7 +70,7 @@ APP_COLUMNS = {
                    "created_at", "replay_id"},
     "setup_interviews": {"interview_id", "copy_id", "desk_id", "business_type", "step", "consent", "answers",
                          "transcript", "draft_cards", "draft_version", "created_at", "updated_at", "idempotency_key",
-                         "request_sha256", "start_error"},
+                         "request_sha256", "start_error", "desk_requested_at"},
     "a2a_turns": {"agent_key_id", "session_id", "nonce", "copy_id", "desk_id", "status", "http_status", "response",
                   "through_seq", "created_at", "updated_at"},
     "model_calls": {"model_call_id", "copy_id", "session_id", "route", "model", "input_tokens", "cached_tokens",
@@ -129,6 +129,7 @@ def test_migration_sets_app_columns(db):
         "INSERT INTO app.setup_interviews (interview_id, copy_id, request_sha256) VALUES ('setup-1', 'c-1', 'h')",
         "INSERT INTO app.setup_interviews (interview_id, copy_id, start_error)"
         " VALUES ('setup-1', 'c-1', '{\"status\": 500}')",
+        "INSERT INTO app.setup_interviews (interview_id, copy_id, desk_requested_at) VALUES ('setup-1', 'c-1', now())",
     ):
         with pytest.raises(psycopg.errors.CheckViolation), db.transaction(force_rollback=True):
             db.execute(statement)
