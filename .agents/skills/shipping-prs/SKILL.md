@@ -35,6 +35,7 @@ Work reaches `main` through a pull request: a branch in a worktree, the review p
 
 ## Merge
 
+- Before `gh pr merge`, run `git fetch origin` and `make evals-merge-ready HEAD=origin/<branch>`; merge only on exit 0. On `not ready` (subcommand exit 1; make reports any recipe failure as exit 2), rebase onto `origin/main`, regenerate the run-free results file with `make evals-tier2 MAX_USD=0`, remove the stale file, push and wait for green before checking readiness again and merging; resolve `error` results before merging.
 - Merge only when the panel loop has ended with no `VALID — fix now` P1 or P2, no round is running, and every check is green: `gh pr merge <n> --squash`. Never merge with a failing or pending check.
 - The squash commit keeps the PR title as its subject and ends with the `Co-Authored-By` line from `AGENTS.md`; pass `--subject` and `--body` when the default message would drop it.
 - A clean panel is not owner sign-off. Anything on the sign-off list in `AGENTS.md` still needs the project owner's go before merge.

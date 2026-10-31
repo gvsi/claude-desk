@@ -100,6 +100,10 @@ On pull requests, CI runs `make evals-results-check`. It:
 - checks that the recorded-rate history only grew;
 - recomputes pass or fail from the rows, ignoring the verdict stored in the file.
 
+Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base, so rebase and regenerate the results file before merging.
+
+On pushes to `main`, CI also runs the results check against `HEAD~1`, the previous main commit, to detect merged gated inputs without matching results.
+
 Its limit, said plainly: CI can recompute pass or fail from the committed rows, but it can't prove the rows came from a real run, since it holds no model credentials. The results files are self-attested.
 
 ## Cost and provider
