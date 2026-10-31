@@ -27,9 +27,14 @@ function selectors(css: string): string[] {
     .flatMap((prelude) => prelude.split(',').map((selector) => selector.trim()));
 }
 
-/** The selectors in `css` that don't start with the article's root class. */
+// A selector that starts at the article's root, and one that then steps to the root's own siblings (`+`, `~`),
+// which are outside the article.
+const AT_THE_ROOT = /^\.vision-article(?![\w-])/;
+const TO_A_SIBLING = /^\.vision-article(?![\w-])[^\s+~>]*\s*[+~]/;
+
+/** The selectors in `css` that don't select the article's root or something inside it. */
 function outsideTheRoot(css: string): string[] {
-  return selectors(css).filter((selector) => !/^\.vision-article(?![\w-])/.test(selector));
+  return selectors(css).filter((selector) => !AT_THE_ROOT.test(selector) || TO_A_SIBLING.test(selector));
 }
 
 /** Each rule in `css` as its selector list and its declarations. */
@@ -62,9 +67,25 @@ describe('the Vision article stylesheet', () => {
       '@media (max-width: 720px) { .va-band { display: none; } }',
       '.vision-articles .va-bar { margin: 0; }',
       'body { background: var(--va-paper); }',
+      // The root's siblings, after it, are outside the article.
+      '.vision-article + .cd-about-page { font-size: 12px; }',
+      '.vision-article ~ .cd-owner { font-family: var(--font-serif); }',
+      '.vision-article:not(.x)~.cd-owner { margin: 0; }',
     ];
-    expect(bad.map(outsideTheRoot)).toEqual([['.va-bar'], ['.va-p'], ['.va-band'], ['.vision-articles .va-bar'], ['body']]);
-    expect(outsideTheRoot('/* .va-bar { } */ .vision-article :focus-visible { outline-color: var(--va-link); }')).toEqual([]);
+    expect(bad.map(outsideTheRoot)).toEqual([
+      ['.va-bar'],
+      ['.va-p'],
+      ['.va-band'],
+      ['.vision-articles .va-bar'],
+      ['body'],
+      ['.vision-article + .cd-about-page'],
+      ['.vision-article ~ .cd-owner'],
+      ['.vision-article:not(.x)~.cd-owner'],
+    ]);
+    // Inside it: a descendant or a child, and a sibling of something inside it.
+    expect(
+      outsideTheRoot('/* .va-bar { } */ .vision-article :focus-visible, .vision-article > main, .vision-article .va-p + .va-p { margin: 0; }'),
+    ).toEqual([]);
 
     expect(selectors(STYLES).length).toBeGreaterThan(50);
     expect(outsideTheRoot(STYLES)).toEqual([]);
