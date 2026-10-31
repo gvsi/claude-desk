@@ -76,16 +76,26 @@ describe('Vision pages', () => {
   it('vision_pages_are_labelled_and_offline', async () => {
     const fetches = vi.spyOn(window, 'fetch');
     for (const path of VISION_ROUTES) {
+      performance.clearResourceTimings();
       const { screen } = await renderRoute(path);
       // The vision bar, word for word, with the way back to the owner's Desk.
       const bar = screen.getByRole('note', { name: 'Vision' });
       await expect.element(bar).toBeVisible();
       await expect.element(bar).toHaveTextContent(`Vision${VISION_LINE}Back to your Desk`);
       await expect.element(bar.getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', BACK_HREF);
-      // Static: in a while on the page, nothing was asked of the API, or of anything else.
+      // Static: in a while on the page, nothing was asked of the API, by fetch or any other way the
+      // browser loads a resource (a request, an event stream, an image, a beacon), and nothing was
+      // sent to a path the mock API doesn't serve.
       await wait(300);
       expect(mockStore.requests, path).toEqual([]);
+      expect(mockStore.unhandled, path).toEqual([]);
       expect(fetches, path).not.toHaveBeenCalled();
+      const toTheApi = performance
+        .getEntriesByType('resource')
+        .map((entry) => new URL(entry.name))
+        .filter((url) => url.origin === window.location.origin && /^\/api(?:\/|$)/.test(url.pathname))
+        .map((url) => url.pathname);
+      expect(toTheApi, path).toEqual([]);
     }
   });
 
