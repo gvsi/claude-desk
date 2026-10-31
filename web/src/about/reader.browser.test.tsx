@@ -1279,7 +1279,8 @@ describe('ReaderPage', () => {
     expect(heading.getAttribute('tabindex')).toBe('-1');
     expect(heading.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
     expect(getComputedStyle(heading).outlineStyle).toBe('none');
-    expect(at.path).toBe('/about/prediction#limitations');
+    // The router draws the new address in a transition, which a busy machine may not have drawn yet.
+    await expect.poll(() => at.path).toBe('/about/prediction#limitations');
     // The next Tab goes on from the section, not from the top of the page.
     await userEvent.tab();
     expect(heading.compareDocumentPosition(document.activeElement as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1292,7 +1293,7 @@ describe('ReaderPage', () => {
     const why = headingOf('why-anthropic');
     expect(document.activeElement).toBe(why);
     expect(Math.abs(why.getBoundingClientRect().top - parseFloat(getComputedStyle(why).scrollMarginTop))).toBeLessThanOrEqual(1);
-    expect(at.path).toBe('/about/proposal#why-anthropic');
+    await expect.poll(() => at.path).toBe('/about/proposal#why-anthropic');
     expect(marked(), 'the phone list marks nothing').toEqual([]);
     await phone.unmount();
   });

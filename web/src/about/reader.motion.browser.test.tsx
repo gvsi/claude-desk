@@ -131,6 +131,19 @@ function eachFrame<T>(read: () => T): { frames: T[]; stop: () => void } {
   return { frames, stop: () => cancelAnimationFrame(id) };
 }
 
+/**
+ * Turns the browser's scroll anchoring off for the test, so nothing but the page puts the window back. On the root and
+ * the body both: Chromium on Linux still anchors the window to a focused heading with it off on the root alone.
+ */
+function withoutScrollAnchoring(): void {
+  document.documentElement.style.overflowAnchor = 'none';
+  document.body.style.overflowAnchor = 'none';
+  onTestFinished(() => {
+    document.documentElement.style.overflowAnchor = '';
+    document.body.style.overflowAnchor = '';
+  });
+}
+
 /** Makes the reading type's web font still loading, as on a cold load, and returns what finishes loading it. */
 function typeStillLoading(): () => void {
   let loaded = () => {};
@@ -172,7 +185,7 @@ describe('ReaderPage with motion', () => {
     const between = new Set(tops.frames.filter((y) => y < top - 1 && y > 89));
     expect(between.size, 'frames part way there').toBeGreaterThan(2);
     expect(document.activeElement).toBe(heading);
-    expect(at.path).toBe('/about/prediction#limitations');
+    await expect.poll(() => at.path).toBe('/about/prediction#limitations');
     await untilStill();
     await screen.unmount();
   });
@@ -314,10 +327,7 @@ describe('ReaderPage with motion', () => {
   it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
     // Followed before the type has loaded, a section that the swap moves after the glide has arrived glides back to
     // its place once the type has loaded. Scroll anchoring is off, so nothing else puts the window back.
-    document.documentElement.style.overflowAnchor = 'none';
-    onTestFinished(() => {
-      document.documentElement.style.overflowAnchor = '';
-    });
+    withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
     const heading = headingOf('limitations');
@@ -342,10 +352,7 @@ describe('ReaderPage with motion', () => {
     // Followed before the type has loaded, then Back before it loads: once it does, the window stays where Back put
     // it, and isn't taken back to the section. A memory router has no browser to restore the place, so the test puts
     // the window back as the browser does. Scroll anchoring is off, so nothing else moves it.
-    document.documentElement.style.overflowAnchor = 'none';
-    onTestFinished(() => {
-      document.documentElement.style.overflowAnchor = '';
-    });
+    withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
     await jumpTo(1800);
@@ -370,10 +377,7 @@ describe('ReaderPage with motion', () => {
   it('page_scrolls_stay_instant_with_motion', async () => {
     // The scrolls the page makes itself land in the frame the page draws, never part way, and the place the page
     // remembers for Back is where they landed.
-    document.documentElement.style.overflowAnchor = 'none';
-    onTestFinished(() => {
-      document.documentElement.style.overflowAnchor = '';
-    });
+    withoutScrollAnchoring();
     const screen = await renderReader('proposal');
     await expect.poll(title).toBe('Product proposal');
     const seen = eachFrame(() => ({ title: title(), y: Math.round(window.scrollY) }));
