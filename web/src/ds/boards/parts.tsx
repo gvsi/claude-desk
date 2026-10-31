@@ -196,7 +196,7 @@ export const THINGS_TO_TRY = {
   chat: {
     icon: 'conversations',
     title: 'Chat as a customer',
-    detail: 'Your public page opens in a new tab. Ask about a leak, a price or a time.',
+    detail: 'Your public page opens in a new tab. Ask about a price or a time.',
     action: 'Open your public page',
   },
   breakIt: {
