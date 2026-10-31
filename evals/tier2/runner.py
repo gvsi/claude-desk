@@ -38,14 +38,15 @@
 6. The copy's records (`Records.snapshot`), each decision read through `owner_decision`, the
    owner's Demo inbox, usage (`app.model_calls`, and the kernel's checks' calls in its `review` and
    `reply` entries, a reply's soft-promise call among them, as `evals.usage.kernel_check_call` reads
-   them for the report; an entry whose call can't be read is `infra`, and a Desk-side model other than
-   the configured one is `config_mismatch`, each failed run keeping every call it read, the models that
-   served them and the entries it couldn't read, `usage_unread`, which the pass charges a run's estimate
-   for), `check_complete` (anything missing is `infra`, so a blind snapshot can't read as clean),
-   then `judge_run`, in memory. The owner's Demo inbox is the kernel's, whose read route and
-   verification codes plan 01b adds (the kernel writes owner alerts and checkpoint notices there
-   already): before that plan has landed where the pass runs (`landed`), the run doesn't read it and
-   the artifact says so (`owner_inbox_unread`), which the verdict names as a skipped check.
+   them for the report; an entry whose call can't be read, or a session whose `app.model_calls` query
+   fails, is `infra`, and a Desk-side model other than the configured one is `config_mismatch`, each
+   failed run keeping every call it read, the simulator's usage, the models that served them and what
+   it couldn't read, `usage_unread`, which the pass charges a run's estimate for), `check_complete`
+   (anything missing is `infra`, so a blind snapshot can't read as clean), then `judge_run`, in memory.
+   The owner's Demo inbox is the kernel's, whose read route and verification codes plan 01b adds (the
+   kernel writes owner alerts and checkpoint notices there already): before that plan has landed where
+   the pass runs (`landed`), the run doesn't read it and the artifact says so (`owner_inbox_unread`),
+   which the verdict names as a skipped check.
 
 The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. The outcome is written
 to `out_dir` with codes, agent keys, cookies, tokens and link tokens redacted.
@@ -825,15 +826,22 @@ class _Run:
                                                                     list[str]]:
         """Every Desk-side model call the run can read (the API's rows, and the kernel's checks' calls as
         `evals.usage.kernel_check_call` reads them from the ledger, a reply's soft-promise call among them),
-        the models that served each part, the ledger entries whose call can't be read (each with why) and
-        the calls on a model or route other than the configured ones. An entry it can't read doesn't stop
-        the read, so every call it can read is kept."""
+        the models that served each part, what it couldn't read (each ledger entry with why, each session
+        whose `app.model_calls` query failed) and the calls on a model or route other than the configured
+        ones. Neither an entry it can't read nor a query that fails stops the read, so every call it can
+        read is kept. A failed query is named by its view and session and its error's type only, since
+        a database error's message can carry the connection's DSN."""
         from evals.usage import kernel_check_call   # here, since evals.usage imports this module (via evals.results)
 
         usage, unread, mismatches = [], [], []
         api, kernel = set(), set()
         for session_id in self.session_ids:
-            for row in await self.records.model_calls(session_id):
+            try:
+                rows = await self.records.model_calls(session_id)
+            except Exception as error:   # never lets the spend already read go unseen
+                unread.append(f"the app.model_calls query for session {session_id} failed ({type(error).__name__})")
+                continue
+            for row in rows:
                 served, route = production_name(str(row.get("model"))), row.get("route")
                 usage.append({"part": "api", **row, "model": served})
                 api.add(served)

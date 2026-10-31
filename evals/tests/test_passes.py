@@ -117,12 +117,24 @@ async def test_spend_reaching_the_budget_stops_new_runs(repo):
     assert not unstopped.stopped_by_budget and len(unstopped.runs) == 4
 
 
-def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None) -> Any:
+def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None,
+                  first_turn_usage: dict[str, Any] | None = None, calls_fail: bool = False) -> Any:
     """`run_one` for a pass that drives the real runner on the runner tests' stand-in Desk: each run's
     ledger holds one checked reply per entry of `soft_promises` (its soft-promise call, null, or one that
-    can't be read), after the reply the visitor saw. Each attempt's scenario id goes in `attempts`."""
-    from evals.tests.test_runner import Client, Desk, Visitor, chat, checked_reply, seed, target
+    can't be read), after the reply the visitor saw. Each attempt's scenario id goes in `attempts`. The
+    simulated visitor's first turn reports `first_turn_usage` when given, and with `calls_fail` the
+    query for each session's `app.model_calls` fails, as a database read that fails does."""
+    from evals.tests.test_runner import CallsUnreadable, Client, Desk, Visitor, chat, checked_reply, seed, target
     from evals.tier2.runner import run_scenario
+    from evals.tier2.simulator import ServedTurn
+
+    class Paying(Visitor):
+        async def next_turn(self, scenario: Any, observations: Any, run: Any, **kwargs: Any) -> Any:
+            turn = await super().next_turn(scenario, observations, run, **kwargs)
+            if first_turn_usage is not None and len(run.turns) == 1:
+                run.turns[0] = ServedTurn(model=run.turns[0].model, fallback=False, switched=False,
+                                          usage=first_turn_usage)
+            return turn
 
     async def run_one(scenario: Any, rep: int, _target: Any, _simulator: Any, **options: Any) -> RunOutcome:
         if attempts is not None:
@@ -131,7 +143,10 @@ def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None) -> Any
         for call in soft_promises:
             checked_reply(run, call)
         desk = Desk(run)
-        return await run_scenario(scenario, rep, target(desk), Visitor(desk), new_client=lambda: Client(desk),
+        on = target(desk)
+        if calls_fail:
+            on.kernel.records = CallsUnreadable(desk, desk.chat_session)
+        return await run_scenario(scenario, rep, on, Paying(desk), new_client=lambda: Client(desk),
                                   seed=seed, **options)
     return run_one
 
@@ -183,6 +198,37 @@ async def test_a_run_whose_usage_cant_all_be_read_is_charged_what_it_read_and_th
     row = spend_row(repo)
     assert row["runs"] == "1" and float(row["total_usd"]) == pytest.approx(result.spend.total_usd, abs=1e-4)
     assert float(row["estimated_usd"]) == pytest.approx(0.40)   # the row is written to four decimals
+
+
+async def test_a_run_whose_usage_query_fails_is_charged_what_it_read_and_the_estimate(repo):
+    """A run whose simulated visitor spent $1.00 and whose `app.model_calls` query then fails ends as
+    `infra`, and the pass still charges the $1.00 it knows plus a run's estimate for what it couldn't
+    read, never the estimate alone. That figure crosses --max-usd, where the $1.00 alone wouldn't, so the
+    run isn't retried and no new run starts; the estimated part is listed, naming the failed query."""
+    from evals.pricing import cost_usd
+    from evals.tier2.passes import pass_dir, priced_spend
+
+    opus = "claude-opus-5-5"
+    usage = {"model": opus, "input_tokens": 250_000, "output_tokens": 0}       # $1.00 at Opus 5.5's list price
+    measured = cost_usd(usage, opus, "anthropic")
+    assert measured == pytest.approx(1.00)
+    attempts: list[str] = []
+    result = await run_pass(config(runs=1, max_usd=1.3, split="heldout"),   # two runs, estimated at $0.80
+                            deps(repo, stand_in_runs(attempts=attempts, first_turn_usage=usage, calls_fail=True),
+                                 cost=priced_spend))
+    assert attempts == ["atk-held"] and result.stopped_by_budget   # neither retried nor followed
+    assert [row.status for row in result.runs] == ["incomplete"] and result.errors == 1
+    assert result.spend.total_usd >= measured + 0.40 > 1.3 > measured
+    assert result.spend.simulator_usd == pytest.approx(measured)
+    assert result.spend.estimated_usd == pytest.approx(0.40)
+    [estimated] = result.estimated_spend
+    assert (estimated.scenario_id, estimated.attempt, estimated.usd) == ("atk-held", 1, pytest.approx(0.40))
+    assert "couldn't be read" in estimated.reason and "app.model_calls query for session" in estimated.reason
+    errors = (pass_dir(repo, result.pass_id) / "errors.jsonl").read_text().splitlines()
+    [error] = [json.loads(line) for line in errors]
+    assert error["kind"] == "infra" and "app.model_calls query for session" in error["detail"]
+    row = spend_row(repo)
+    assert row["runs"] == "1" and float(row["total_usd"]) == pytest.approx(result.spend.total_usd, abs=1e-4)
 
 
 def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:

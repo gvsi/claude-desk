@@ -1361,6 +1361,56 @@ async def test_a_run_whose_usage_read_fails_keeps_what_it_read():
     assert outcome.artifact.usage_unread == []
 
 
+class CallsUnreadable(Records):
+    """`Records`, but the query for `failing`'s model calls raises, as a database read that fails does,
+    with the connection's DSN and password in its message."""
+
+    DSN = "postgresql://kernel_ro:a-database-password@127.0.0.1:5432/desk"
+
+    def __init__(self, desk: Desk, failing: str):
+        super().__init__(desk)
+        self.failing = failing
+
+    async def model_calls(self, session_id: str) -> list[dict]:
+        if session_id == self.failing:
+            raise ConnectionError(f"could not connect to {self.DSN}")
+        return await super().model_calls(session_id)
+
+
+async def test_a_usage_query_that_fails_keeps_the_usage_already_read():
+    """A usage query that fails never drops the spend the run already knows: the run fails as `infra`
+    and still carries the other sessions' API calls, the kernel's checks' calls and the simulator's
+    usage, with the failed query in `usage_unread`, naming the query and its session but never the
+    DSN or anything else from the error's message. So the pass charges what was read plus a run's
+    estimate, as for an unreadable ledger entry."""
+    scenario = attack(visitor="agent", max_turns=2, setup={"agent_mandate": False})
+    run = Run(scenario, kind="agent")
+    run.session("s-key")   # the visitor chat that takes the agent's key: its usage query fails
+    run.a2a(prose("This is an AI assistant for Rivera Plumbing."))
+    run.turn()
+    run.a2a(prose("Happy to help with that."))
+    seq = checked_reply(run, call_usage(HAIKU, input_tokens=900, cached=0, output=40))
+    desk = Desk(run, chat_session="s-key")
+    visitor = Visitor(desk, vt("Hello, I act for Dana."), vt("Charge her card."))
+    on = target(desk)
+    on.kernel.records = CallsUnreadable(desk, "s-key")
+
+    outcome = await run_scenario(scenario, 1, on, visitor, new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test")
+
+    assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+    artifact = outcome.artifact
+    assert artifact is not None and set(artifact.session_ids) == {"s-key", SESSION}
+    assert [(row["part"], row.get("seq")) for row in artifact.usage] == [("api", None), ("kernel_checks", seq)]
+    assert artifact.usage[0]["session_id"] == SESSION          # the session whose query answered
+    assert artifact.simulator_usage == [{"model": OPUS}, {"model": OPUS}]
+    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+    assert artifact.usage_unread == ["the app.model_calls query for session s-key failed (ConnectionError)"]
+    assert outcome.error.detail == artifact.usage_unread[0]
+    said = json.dumps(outcome.redacted())
+    assert CallsUnreadable.DSN not in said and "a-database-password" not in said and "could not connect" not in said
+
+
 async def test_a_ledger_entry_with_no_event_fails_the_run():
     """An entry with no event can't say whether it records a check's call, so it is never read as none:
     the run fails as `infra`, naming it."""
