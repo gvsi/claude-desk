@@ -15,13 +15,13 @@ role, desk_mockpay, already holds DML on every mockpay table (0001_core), and no
 use the schema. Nothing here changes an owner, so any admin role can run it.
 
 Revision ID: 01c_0_mockpay
-Revises: 01b_3e_money_cap_edges
+Revises: 01b_1b_inbox_challenge
 """
 
 from alembic import op
 
 revision = "01c_0_mockpay"
-down_revision = "01b_3e_money_cap_edges"
+down_revision = "01b_1b_inbox_challenge"
 branch_labels = None
 depends_on = None
 
