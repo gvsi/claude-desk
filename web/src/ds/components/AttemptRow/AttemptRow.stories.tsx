@@ -80,9 +80,10 @@ export const ActionCheckpoint: Story = {
     await expect(time.getBoundingClientRect().right).toBeLessThan(title.getBoundingClientRect().left);
     await expect(title.getBoundingClientRect().right).toBeLessThan(checkpoint.getBoundingClientRect().left);
 
-    // A live attempt carries no Recorded tag.
+    // A live attempt carries no Recorded tag, and one with no reason given no label.
     await expect(canvas.queryByText('Recorded')).toBeNull();
     await expect(link.querySelector('.cd-recorded-tag')).toBeNull();
+    await expect(link.querySelector('.cd-status-label')).toBeNull();
   },
 };
 
@@ -156,6 +157,60 @@ export const RecordedNarrow: Story = {
     await expect(who.scrollWidth).toBeGreaterThan(who.clientWidth);
     await expect(tag.scrollWidth).toBeLessThanOrEqual(tag.clientWidth);
     await expect(tag.getBoundingClientRect().right).toBeLessThanOrEqual(link.getBoundingClientRect().right - 10);
+    await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+  },
+};
+
+export const TurnedDown: Story = {
+  args: {
+    time: '9:52 am',
+    why: 'Your rule says no',
+    title: 'Asked for 50% off the drain clearing',
+    who: 'Recorded by the checkpoint',
+    stoppedBy: 'action',
+    href: '#safety/dec-half-off',
+  },
+  play: async ({ canvas }) => {
+    // Why it was turned down, then what they tried and where it came from under it, unchanged.
+    const link = canvas.getByRole('link', { name: /^9:52 am Your rule says no Asked for 50% off the drain clearing Recorded by the checkpoint/ });
+    await expectStoppedBy(link, 'Action checkpoint', ['passed', 'stopped', 'unreached', 'unreached']);
+    const why = within(link).getByText('Your rule says no');
+    const label = why.closest('.cd-status-label') as HTMLElement;
+    await expect(label.querySelector('.cd-status-dot--refused')).toHaveAttribute('aria-hidden', 'true');
+    expectComputed(why, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.92)' });
+    const title = within(link).getByText('Asked for 50% off the drain clearing');
+    expectComputed(title, { fontSize: '14px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(why.getBoundingClientRect().bottom).toBeLessThanOrEqual(title.getBoundingClientRect().top);
+    await expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(within(link).getByText('Recorded by the checkpoint').getBoundingClientRect().top);
+    // The time stands on the label's line: the same type, its words' tops level.
+    const time = canvas.getByText('9:52 am');
+    const timeTop = time.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(time).paddingTop);
+    await expect(timeTop).toBe(why.getBoundingClientRect().top);
+  },
+};
+
+export const TurnedDownNarrow: Story = {
+  args: {
+    time: '9:52 am',
+    why: "Your rules couldn't be checked, so I said no",
+    title: 'Asked to book Saturday at 9:00 am',
+    who: 'Recorded by the checkpoint',
+    stoppedBy: 'action',
+    href: '#safety/dec-saturday',
+  },
+  // A phone's list: the longest label wraps inside the row rather than running past it.
+  render: (args: AttemptRowProps) => (
+    <ul style={{ width: 300, maxWidth: '100%', margin: 0, padding: 0, listStyle: 'none' }}>
+      <li>
+        <AttemptRow {...args} />
+      </li>
+    </ul>
+  ),
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: /^9:52 am Your rules couldn't be checked, so I said no Asked to book/ });
+    const why = within(link).getByText("Your rules couldn't be checked, so I said no");
+    await expect(why.getBoundingClientRect().right).toBeLessThanOrEqual(link.getBoundingClientRect().right - 10);
+    await expect(why.scrollWidth).toBeLessThanOrEqual(why.clientWidth);
     await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
   },
 };

@@ -1006,11 +1006,13 @@ describe('Today', () => {
 
     await expect.element(block.getByText('Claude handled 3', { exact: true })).toBeVisible();
     await expect.element(block.getByText('You stepped in 1 time', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('2 stopped', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('2 requests', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around|stopped/i);
 
-    // The design system's figure styles: the booked total at the figure size, the stopped count at
-    // the smaller one, both in the interface's face with tabular figures.
+    // The design system's figure styles: the booked total at the figure size, the count of
+    // requests turned down at the smaller one, both in the interface's face with tabular figures.
     const [booked, stopped] = [...block.element().querySelectorAll('.cd-week__number')];
     expect([booked?.textContent, stopped?.textContent]).toEqual(['$378', '2']);
     if (!booked || !stopped) throw new Error('Last 7 days shows both figures');
@@ -1060,9 +1062,11 @@ describe('Today', () => {
     const bookings = block.getByRole('heading', { name: 'Bookings', exact: true }).element().closest('.cd-week__part');
     expect(bookings?.querySelector('a')).toBeNull();
     await expect.element(block.getByText('No conversations in the last 7 days.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
     expect(block.getByText(/Claude handled/).elements()).toHaveLength(0);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around/i);
 
     // Claude handled every conversation and the owner didn't step in. That says only what the
     // owner did, never that no one needed them: a request can still be waiting in Needs you.
@@ -1076,21 +1080,23 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
-  it('attempts_count_refused_requests_only', async () => {
-    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried:
-    // "Since last night" shows it as blocked, and the last 7 days have no attempt to talk Claude around.
+  it('turned_down_counts_refused_requests_only', async () => {
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody asked for:
+    // "Since last night" shows it as blocked, and the last 7 days turned no request down.
     const { screen } = await renderRoute(TODAY);
     const block = region(screen, 'Last 7 days');
     const night = region(screen, 'Since last night');
     await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
 
-    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one counts.
+    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one
+    // counts, in the singular.
     const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
     await expect.poll(refused, { timeout: 5_000 }).toBe(1);
-    await expect.element(block.getByText('1 stopped', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('1 request', { exact: true })).toBeVisible();
+    expect(block.getByText('Nothing turned down in the last 7 days.').elements()).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {

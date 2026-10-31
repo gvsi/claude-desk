@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { LedgerPage } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
-import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusDot } from '../../ds/index.ts';
+import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusLabel } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -18,12 +18,14 @@ import {
   CATEGORY_LABELS,
   NOT_SORTED,
   anythingStoppedIn,
+  anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
+  causeLabel,
   originCopy,
   stoppedBy,
-  stoppedHeadline,
   triageOf,
+  turnedDownHeadline,
 } from './copy.ts';
 import { attemptsQuery, ledgerQuery } from './queries.ts';
 import { RecordList } from './RecordList.tsx';
@@ -90,12 +92,13 @@ function anyFailed(...failures: (ReadFailure | null)[]): ReadFailure | null {
 
 /**
  * This week's count of the requests the kernel refused, in Claude's voice: the figure Today's
- * "Last 7 days" shows. With none, what will show up here and how to see one, but only once the
- * attempts say nothing else was stopped this week either, and only while neither read has failed
- * since it last worked, so an earlier read never passes for current; with Claude's own stopped
- * drafts alone nobody tried to talk Claude around, so nothing shows here and the list below has the
- * drafts. A failed read of the count or of the attempts says so first, in either view, since
- * "Every entry" has no list of the attempts to say it over.
+ * "Last 7 days" shows. With none, it says so only once the attempts say no request was refused
+ * this week either, and only while neither read has failed since it last worked, so an earlier
+ * read never passes for current. Claude's own stopped drafts are no request anyone made, so with
+ * them alone none were turned down, and the list below has the drafts. With nothing stopped at
+ * all, under the same conditions, what will show up here and how to see one follow. A failed read
+ * of the count or of the attempts says so first, in either view, since "Every entry" has no list
+ * of the attempts to say it over.
  */
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
@@ -105,11 +108,17 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const failure = anyFailed(todayFailure, attemptsFailure);
   const week = today.data?.this_week;
   const attempts = safety.data;
+  // Both reads in, and neither failed since it last worked: a count of none can be said.
+  const current = week !== undefined && attempts !== undefined && failure === null;
   let shown: ReactNode = null;
   if (week !== undefined && week.stopped > 0) {
-    shown = <p className="cd-safety__headline cd-type-summary">{stoppedHeadline(week.stopped)}</p>;
-  } else if (week !== undefined && attempts !== undefined && failure === null && !anythingStoppedIn(attempts, week)) {
-    shown = (
+    shown = <p className="cd-safety__headline cd-type-summary">{turnedDownHeadline(week.stopped)}</p>;
+  } else if (current && !anythingTurnedDownIn(attempts, week)) {
+    shown = <p className="cd-safety__headline cd-type-summary">{turnedDownHeadline(0)}</p>;
+  }
+  let empty: ReactNode = null;
+  if (current && week.stopped === 0 && !anythingStoppedIn(attempts, week)) {
+    empty = (
       <EmptyState
         title="Nothing stopped this week"
         body="When someone tries to get around your rules, you'll see here what they tried and what stopped it. Try it yourself from your public page."
@@ -125,6 +134,7 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
     <>
       <ReadFailed failure={failure} />
       {shown}
+      {empty}
     </>
   );
 }
@@ -136,8 +146,7 @@ function HeldForYou({ deskId }: { deskId: string }) {
   if (held === 0) return null;
   return (
     <Button variant="secondary" href={todayPath(deskId)}>
-      <StatusDot tone="held" />
-      {held} held for you
+      <StatusLabel tone="held">{held} held for you</StatusLabel>
     </Button>
   );
 }
@@ -186,9 +195,10 @@ interface AttemptsViewProps {
 }
 
 /**
- * The attempts, each a link that opens it beside the list: the one the address names, else the
- * newest. With none, the list is left out: the empty state above already says nothing was stopped.
- * A failed read is said above, beside the headline (`Headline`), over the attempts read before, and
+ * The attempts, each a link that opens it beside the list, a refused request's row saying why it
+ * was turned down when the API gave a cause: the one the address names, else the newest. With
+ * none, the list is left out: the empty state above already says nothing was stopped. A failed
+ * read is said above, beside the headline (`Headline`), over the attempts read before, and
  * with nothing read yet it takes the place of "Reading the attempts".
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
@@ -235,6 +245,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
               <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
                 <AttemptRow
                   time={formatWhen(attemptTime(a, page), timezone, now)}
+                  why={causeLabel(a) ?? undefined}
                   title={triageOf(a)?.summary ?? a.reason_plain}
                   who={originCopy(a.origin)}
                   stoppedBy={stoppedBy(a)}
