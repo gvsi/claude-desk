@@ -308,14 +308,6 @@ export function capFromAnswer(text: string): number {
   return Number.isSafeInteger(dollars) ? Math.min(dollars * 100, MONEY_CAP_MAX_CENTS) : 0;
 }
 
-/** CPA limits accept a stated amount, never a number embedded in an unrelated answer. */
-function consultantCapFromAnswer(text: string): number {
-  const match = /^(?:up to\s+)?\$?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/i.exec(text.trim());
-  if (!match?.[1]) return 0;
-  const cents = Number(match[1].replace(/,/g, '')) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
-  return Number.isSafeInteger(cents) && cents <= MONEY_CAP_MAX_CENTS ? cents : 0;
-}
-
 /**
  * The new Desk's tools: every built-in tool, with Documents and Payments connected but not on (each
  * `needs_review` as a connect never confirmed, `new`, with no changed definition), and nothing from
@@ -569,41 +561,53 @@ function openConsultant(interview: Interview): void {
   ]);
 }
 
-/** The consultant deliberately asks contact before hours and skips quote/discount topics. */
-const CONSULTANT_TOPICS: readonly QuestionKey[] = ['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments', 'money_limit'];
+/** Contact comes before hours; quote/discount topics are skipped and a money maximum is optional. */
+const CONSULTANT_TOPICS: readonly QuestionKey[] = ['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments'];
+
+/** Only an exact offered answer grants automatic booking; other text asks the owner. */
+const CONSULTANT_BOOKING_CHOICES: ReadonlyMap<string, 'auto' | 'ask'> = new Map([
+  ['Weekdays during office hours', 'auto'],
+  ['Ask us to confirm each time', 'ask'],
+]);
+
+/** Document permission is separate from payments, which continue to ask the owner. */
+const CONSULTANT_DOCUMENT_CHOICES: ReadonlyMap<string, 'auto' | 'ask'> = new Map([
+  ['Always ask me first', 'ask'],
+  ['Send verified clients their own documents; ask before payments', 'auto'],
+]);
 
 /** Code-owned limit wording; exact choice words are pending Giovanni's sign-off. */
 const CONSULTANT_LIMITS = {
   documents_and_payments: {
     text: "Can I send customers their own documents, like invoices, once they've confirmed who they are? And up to what amount can I send a payment link without asking you?",
-    choices: ['Always ask me first', 'Send verified clients their own documents; ask before payments'],
-  },
-  money_limit: {
-    text: "What's the most I should take or pay out without asking you? I'd suggest $250 to start. If you say $0, I'll always ask you first.",
-    choices: ['Always ask me first', 'Up to $250', 'Up to $500'],
+    choices: [...CONSULTANT_DOCUMENT_CHOICES.keys()],
   },
 } as const;
 
 function askConsultant(interview: Interview, question: QuestionKey): void {
   interview.state.question = question;
-  if (question === 'money_limit' || question === 'documents_and_payments') {
+  if (question === 'documents_and_payments') {
     const limit = CONSULTANT_LIMITS[question];
-    say(interview, 'claude', limit.text, limit.choices.map((text, index) => ({ text, recommended: index === 0 })));
+    say(interview, 'claude', limit.text, limit.choices.map((text) => ({ text, recommended: false })));
   } else if (question === 'contact_and_after_hours') {
     say(interview, 'claude', 'When clients write after hours, how should I handle their questions?', [
       { text: 'Take their details for the next business day', recommended: true },
       { text: 'Ask them to contact us during office hours', recommended: false },
     ]);
   } else if (question === 'hours_and_area') {
-    say(interview, 'claude', 'When should I offer intro consults for your San Jose clients?', [
-      { text: 'Weekdays during office hours', recommended: true },
-      { text: 'Ask us to confirm each time', recommended: false },
-    ]);
+    say(interview, 'claude', 'When should I offer intro consults for your San Jose clients?',
+      [...CONSULTANT_BOOKING_CHOICES.keys()].map((text, index) => ({ text, recommended: index === 0 })));
   }
 }
 
 function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
-  for (const { card } of interview.state.messages) if (card?.state === 'proposed') card.state = 'accepted';
+  // Optional money maximums stay uncovered until finishing; an unanswered maximum always asks.
+  if (!interview.covered.has('money_limit')) interview.capCents = 0;
+  for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
+  for (const { card } of interview.state.messages) {
+    if (card?.state !== 'proposed') continue;
+    card.state = card.job?.config?.block === 'purpose_payment' && card.job.config.amount_cents === null ? 'declined' : 'accepted';
+  }
   interview.state.question = null;
   if (interview.consultant) {
     say(interview, 'claude', 'Your plan: help clients arrange an intro consult, gather new client intake, and handle retainer requests under the rules you approve. Return-status questions take their details for your team to reply. For example: “I need help with a business return” starts intake; “Can we talk about my taxes?” starts a consult request; “Where is my return?” leaves a question for your team.');
@@ -662,7 +666,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string): void
     interview.covered.add(question);
     interview.answers[question] = text.trim();
   }
-  if (interview.state.question === 'money_limit') interview.capCents = interview.consultant ? consultantCapFromAnswer(text) : capFromAnswer(text);
+  if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);
   if (interview.consultant) {
     interview.covered.add('quote_limit');
     interview.covered.add('discounts');
@@ -724,8 +728,8 @@ function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDr
     if (!interview.consultant && !interview.usedSuggestions) return rule;
     // An unanswered or skipped limit never inherits the scripted run's automatic permission.
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
-    if (rule.applies_to === 'native.release_document' && (interview.answers.documents_and_payments === undefined || interview.answers.documents_and_payments === 'Always ask me first')) return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
-    if (rule.applies_to === 'native.book' && interview.answers.hours_and_area === undefined) return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
+    if (rule.applies_to === 'native.release_document' && (CONSULTANT_DOCUMENT_CHOICES.get(interview.answers.documents_and_payments ?? '') ?? 'ask') === 'ask') return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
+    if (rule.applies_to === 'native.book' && (CONSULTANT_BOOKING_CHOICES.get(interview.answers.hours_and_area ?? '') ?? 'ask') === 'ask') return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
     if (rule.applies_to === 'effect:pay_out' && interview.answers.money_limit === undefined) return { ...rule, mode: 'ask', reason: 'Refunds ask you first.' };
     return rule;
   });
@@ -988,8 +992,6 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
     interview.usedSuggestions = true;
-    if (!interview.covered.has('money_limit')) interview.capCents = 0;
-    for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
     finishQuestions(sv.world, interview, true);
     return ok(stateOf(interview, req.query));
   },

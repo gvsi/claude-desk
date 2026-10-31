@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { PublicDesk } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, SetupState, Today } from '../api/views.ts';
+import type { BusinessOut, CopyOut, RulesDraft, SetupState, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
@@ -90,6 +90,47 @@ async function setupState(key: RouteKey, id: string, body?: unknown, proposal_id
 }
 
 describe('setup consultant run and decisions', () => {
+  it('maps_each_document_choice_to_rules_and_asks_for_unrecognised_answers', async () => {
+    for (const [text, mode] of [
+      ['Always ask me first', 'ask'],
+      ['Send verified clients their own documents; ask before payments', 'auto'],
+      ['We will decide later', 'ask'],
+    ] as const) {
+      let state = await startState();
+      state = await setupState('setupConsent', state.interview_id, { allow: false });
+      while (state.question !== 'documents_and_payments') state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: state.messages.at(-1)!.choices[0]!.text });
+      expect(state.messages.at(-1)!.choices.map((choice) => choice.text)).toEqual(['Always ask me first', 'Send verified clients their own documents; ask before payments']);
+      state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
+      if (state.step === 'questions') await setupState('setupSuggestions', state.interview_id, {});
+      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
+      const draft = result.body as RulesDraft;
+      expect(draft.cards.filter((card) => card.applies_to === 'native.release_document').map((card) => card.mode), text).toEqual([mode]);
+      const money = draft.cards.filter((card) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(card.applies_to));
+      expect(money.length).toBeGreaterThan(0);
+      expect(money.every((card) => card.mode === 'ask')).toBe(true);
+      expect(draft.auto_money_cap_cents).toBe(0);
+    }
+  });
+
+  it('maps_each_booking_choice_to_rules_and_asks_for_unrecognised_answers', async () => {
+    for (const [text, modes] of [
+      ['Weekdays during office hours', ['auto', 'ask']],
+      ['Ask us to confirm each time', ['ask', 'ask']],
+      ['We will decide later', ['ask', 'ask']],
+    ] as const) {
+      let state = await startState();
+      state = await setupState('setupConsent', state.interview_id, { allow: false });
+      while (state.question !== 'hours_and_area') state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: state.messages.at(-1)!.choices[0]!.text });
+      expect(state.messages.at(-1)!.choices.map((choice) => choice.text)).toEqual(['Weekdays during office hours', 'Ask us to confirm each time']);
+      state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
+      await setupState('setupSuggestions', state.interview_id, {});
+      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
+      expect((result.body as RulesDraft).cards.filter((card) => card.applies_to === 'native.book').map((card) => card.mode), text).toEqual(modes);
+    }
+  });
+
   it('starts_payment_amounts_null_and_requires_an_owner_amount_to_accept_them', async () => {
     const start = await startState();
     let state = await setupState('setupConsent', start.interview_id, { allow: true });
@@ -110,21 +151,27 @@ describe('setup consultant run and decisions', () => {
     }
   });
 
-  it('accepts_remaining_proposals_at_both_endings_and_preserves_prior_decisions', async () => {
+  it('declines_unpriced_payments_at_both_endings_and_preserves_prior_decisions', async () => {
     for (const ending of ['answer', 'suggestions'] as const) {
-      let state = await startState();
-      state = await setupState('setupConsent', state.interview_id, { allow: false });
-      const cards = state.messages.flatMap(({ card }) => card ? [card] : []);
-      const schedule = cards.find((card) => card.job?.job === 'schedule')!;
-      const status = cards.find((card) => card.job?.job === 'status')!;
-      await setupState('setupProposal', state.interview_id, { accept: false }, status.proposal_id);
-      state = await setupState('setupProposal', state.interview_id, { accept: true, title: 'Intro call', autonomy: 'ask' }, schedule.proposal_id);
-      const before = state.messages.flatMap(({ card }) => card ? [card] : []);
-      if (ending === 'suggestions') state = await setupState('setupSuggestions', state.interview_id, {});
-      else while (state.question !== null) state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Yes' });
-      expect(state.step).toBe('tools');
-      expect(state.messages.flatMap(({ card }) => card ? [card] : [])).toEqual(before.map((card) => ({ ...card, state: card.state === 'proposed' ? 'accepted' : card.state })));
-      expect((await setupState('setup', state.interview_id)).messages).toEqual(state.messages);
+      for (const amount_cents of [null, 0, 50_000]) {
+        let state = await startState();
+        state = await setupState('setupConsent', state.interview_id, { allow: false });
+        const cards = state.messages.flatMap(({ card }) => card ? [card] : []);
+        const schedule = cards.find((card) => card.job?.job === 'schedule')!;
+        const status = cards.find((card) => card.job?.job === 'status')!;
+        const payment = cards.find((card) => card.job?.job === 'payment')!;
+        await setupState('setupProposal', state.interview_id, { accept: false }, status.proposal_id);
+        if (amount_cents !== null) await setupState('setupProposal', state.interview_id, { accept: true, amount_cents }, payment.proposal_id);
+        state = await setupState('setupProposal', state.interview_id, { accept: true, title: 'Intro call', autonomy: 'ask' }, schedule.proposal_id);
+        const before = state.messages.flatMap(({ card }) => card ? [card] : []);
+        if (ending === 'suggestions') state = await setupState('setupSuggestions', state.interview_id, {});
+        else while (state.question !== null) state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Yes' });
+        expect(state.step).toBe('tools');
+        const after = state.messages.flatMap(({ card }) => card ? [card] : []);
+        expect(after.map((card) => card.state)).toEqual(['accepted', 'accepted', amount_cents === null ? 'declined' : 'accepted', 'declined', 'accepted', 'accepted']);
+        expect(after.map(({ state: _state, ...card }) => card)).toEqual(before.map(({ state: _state, ...card }) => card));
+        expect((await setupState('setup', state.interview_id)).messages).toEqual(state.messages);
+      }
     }
   });
 
@@ -169,14 +216,28 @@ describe('setup consultant run and decisions', () => {
     }
   });
 
-  it('keeps_ambiguous_or_invalid_cpa_money_answers_at_zero', async () => {
-    for (const text of ['I file 2026 returns', '-500', '$10,001', 'Always ask me first', 'Up to $500', '$250.50']) {
+  it('leaves_optional_money_maximums_unasked_and_finishes_at_ask_first', async () => {
+    for (const ending of ['answer', 'suggestions'] as const) {
       let state = await startState();
       state = await setupState('setupConsent', state.interview_id, { allow: false });
-      while (state.question !== 'money_limit') state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Yes' });
-      state = await setupState('setupAnswer', state.interview_id, { question: 'money_limit', text });
-      const expected = text === 'Up to $500' ? 50_000 : text === '$250.50' ? 25_050 : 0;
-      expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } }), text).toMatchObject({ status: 200, body: { auto_money_cap_cents: expected } });
+      const topics = [];
+      while (state.question !== null) {
+        topics.push(state.question);
+        expect(state.question).not.toBe('money_limit');
+        expect(topics.length).toBeLessThanOrEqual(4);
+        expect(await mockStore.dispatch('setupAnswer', { params: { id: state.interview_id }, body: { question: 'money_limit', text: 'Up to $500' } })).toMatchObject({ status: 409 });
+        state = ending === 'suggestions' ? await setupState('setupSuggestions', state.interview_id, {})
+          : await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Up to $500' });
+      }
+      expect(state.step).toBe('tools');
+      const result = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+      if ('network' in result || result.status !== 200) throw new Error('setupRules must answer');
+      const draft = result.body as RulesDraft;
+      expect(draft.auto_money_cap_cents).toBe(0);
+      const money = draft.cards.filter((card) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(card.applies_to));
+      expect(money.length).toBeGreaterThan(0);
+      expect(money.every((card) => card.mode === 'ask')).toBe(true);
+      expect(state.messages.some((message) => message.text.includes("What's the most I should take or pay out"))).toBe(false);
     }
   });
 
@@ -252,7 +313,10 @@ describe('setup consultant run and decisions', () => {
     expect(state.step).toBe('tools');
     expect(state.question).toBeNull();
     expect(state.messages.slice(0, before.messages.length)).toEqual(before.messages.map((message) => (
-      message.card?.state === 'proposed' ? { ...message, card: { ...message.card, state: 'accepted' } } : message
+      message.card?.state === 'proposed' ? {
+        ...message,
+        card: { ...message.card, state: message.card.job?.job === 'payment' ? 'declined' : 'accepted' },
+      } : message
     )));
     expect(state.messages).toHaveLength(before.messages.length + 2);
     expect(state.messages.at(-2)?.text).toMatch(/Your plan:/);
@@ -316,25 +380,29 @@ describe('setup consultant run and decisions', () => {
     const topics = [];
     while (state.question !== null) {
       topics.push(state.question);
-      expect(topics.length).toBeLessThanOrEqual(5);
+      expect(topics.length).toBeLessThanOrEqual(4);
       const choices = state.messages.at(-1)!.choices;
       expect(choices.length).toBeGreaterThanOrEqual(2);
       expect(choices.length).toBeLessThanOrEqual(4);
-      expect(choices.filter((choice) => choice.recommended)).toHaveLength(1);
-      expect(choices[0]?.recommended).toBe(true);
+      const recommended = choices.filter((choice) => choice.recommended);
+      if (['quote_limit', 'discounts', 'documents_and_payments', 'money_limit'].includes(state.question)) {
+        expect(recommended).toHaveLength(0);
+      } else {
+        expect(recommended.length).toBeLessThanOrEqual(1);
+        if (recommended.length > 0) expect(choices[0]?.recommended).toBe(true);
+      }
       expect(choices.every((choice) => [...choice.text].length <= 80)).toBe(true);
-      const text = state.question === 'money_limit' ? 'Up to $250' : choices[0]!.text;
-      if (state.question === 'money_limit') expect(choices.map((choice) => choice.text)).toEqual(['Always ask me first', 'Up to $250', 'Up to $500']);
+      const text = choices[0]!.text;
       state = await setupState('setupAnswer', state.interview_id, { question: state.question, text });
       expect(state.messages.filter((message) => message.role === 'owner').at(-1)?.text).toBe(text);
     }
-    expect(topics).toEqual(['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments', 'money_limit']);
+    expect(topics).toEqual(['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments']);
     expect(state.step).toBe('tools');
     expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
     expect(state.messages.at(-2)?.text).toMatch(/plan.*consult.*intake.*retainer/i);
     expect(state.messages.at(-2)?.text).toContain('“');
     const draft = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
-    expect(draft).toMatchObject({ status: 200, body: { auto_money_cap_cents: 25_000 } });
+    expect(draft).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
   });
 
   it('opens_the_cpa_run_with_understanding_six_stable_cards_and_a_fact_question', async () => {
