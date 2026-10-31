@@ -2681,6 +2681,38 @@ async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
 # The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------
 
 
+@pytest.mark.kernel_plan("01b")
+async def test_copy_starts_with_public_website_and_price_list_knowledge(kernel, ro_read):
+    """Real and fake copies expose the same two amount-free seed items through context and the API view,
+    with one normal knowledge write ledgered for each."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    expected = [
+        KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
+                      text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                           "water heater flush and leak repair. Each price is given in a quote from this list.",
+                      label=Label(readers=["public"])),
+        KnowledgeItem(item_id="kn-website", source="website",
+                      title="Your website, rivera-plumbing.example, read during setup",
+                      text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                           "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+                      label=Label(readers=["public"])),
+    ]
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    seen = await context(http.session(visitor.session_token), visitor.state.session_id)
+    assert sorted(seen.knowledge, key=lambda item: item.item_id) == expected
+    assert ro_read(ro_schema, copy.copy_id,
+                   "SELECT item_id, source, title, text, readers FROM {ro}.knowledge_items"
+                   " WHERE desk_id = %s ORDER BY item_id", (desk_id,)) == [
+        {"item_id": item.item_id, "source": item.source, "title": item.title,
+         "text": item.text, "readers": ["public"]} for item in expected]
+    written = [entry.event.summary for entry in (await ledger_page(http.owner(copy.owner_token), desk_id)).entries
+               if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "knowledge"]
+    assert written == [{"part": "knowledge", "item_id": item_id, "owner_only_forced": False}
+                       for item_id in ("kn-website", "kn-price-list")]
+
+
 def knowledge_item(readers: list[str], text: str = "Street parking is free after 6 pm.") -> KnowledgeItem:
     return KnowledgeItem(item_id="upload-parking", source="upload", title="Parking", text=text,
                          label=Label(readers=readers))
@@ -2723,7 +2755,8 @@ async def test_knowledge_round_trips(kernel, ro_read):
     assert await refused(elsewhere) == (404, "not_found")
     written = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
                if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "knowledge"]
-    assert [summary["item_id"] for summary in written] == ["upload-parking", "upload-parking"]
+    assert [summary["item_id"] for summary in written] == [
+        "kn-website", "kn-price-list", "upload-parking", "upload-parking"]
 
 
 @pytest.mark.kernel_plan("01b")

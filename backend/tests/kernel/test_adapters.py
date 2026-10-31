@@ -532,12 +532,13 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert (decision.visitor_plain, decision.answers, decision.expires_at) == (
         "Waiting for Maria Rivera to approve", ["allow_once", "deny_once"], now + timedelta(hours=24))
 
-    # ledgered after the Desk, its two pinned tools (plan 01c) and its rules, and the owner was alerted
+    # ledgered after the Desk, its two knowledge items, pinned tools and rules; the owner was alerted
     entries = await rows_of(app, copy.copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
-    assert [(e.seq, e.event.kind) for e in entries] == [(1, "desk_data"), (2, "tool_pin"), (3, "tool_pin"),
-                                                        (4, "policy"), (5, "session"), (6, "decide")]
-    assert entries[4].event.summary == {"session_id": seeded.session_id, "kind": "visitor"}
-    assert (entries[5].seq, entries[5].event.session_id, entries[5].event.summary) == (decision.ledger_seq,
+    assert [(e.seq, e.event.kind) for e in entries] == [
+        (1, "desk_data"), (2, "desk_data"), (3, "desk_data"), (4, "tool_pin"), (5, "tool_pin"),
+        (6, "policy"), (7, "session"), (8, "decide")]
+    assert entries[6].event.summary == {"session_id": seeded.session_id, "kind": "visitor"}
+    assert (entries[7].seq, entries[7].event.session_id, entries[7].event.summary) == (decision.ledger_seq,
                                                                                        seeded.session_id, {
         "decision_id": row.decision_id, "action_id": action.action_id, "tool": "native.quote", "outcome": "hold",
         "card_ids": ["rv-quote"], "policy_version": 1, "auto_money_cap_cents": 50_000, "reviewed": False})
