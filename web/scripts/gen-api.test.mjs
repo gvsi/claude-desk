@@ -95,13 +95,13 @@ describe('gen-api', () => {
       },
       '/events': { get: { responses: { 200: { description: 'Events', content: { 'text/event-stream': { schema: {} } } } } } },
       '/slow': { post: { responses: { 200: json(ref('Thing')), 202: json(ref('Item')) } } },
-      // Every JSON media type names the model, parameters aside, and document bytes carry none.
+      // Every JSON media type names the model, parameters aside, and a document link's bytes carry none.
       '/problems': {
         get: {
           responses: { 200: both(body('application/json; charset=utf-8', ref('Thing')), body('application/problem+json', ref('Thing'))) },
         },
       },
-      '/d/{token}': { get: { responses: { 200: body('text/plain; charset=utf-8', { type: 'string' }) } } },
+      '/d/{token}': { get: { responses: { 200: body('application/octet-stream', {}) } } },
     };
     const expected = {
       'GET /things/{id}': { 200: 'Thing' },
@@ -156,8 +156,8 @@ describe('gen-api', () => {
     await expect(generate(answering({ 200: both(json(ref('Thing')), body('text/event-stream', {})) }))).rejects.toThrow(
       /GET \/x 200 answers with a JSON body and with one that carries no model/,
     );
-    await expect(generate(answering({ 200: body('application/octet-stream', { type: 'string', format: 'binary' }) }))).rejects.toThrow(
-      /GET \/x 200 answers "application\/octet-stream", which is neither JSON nor a body known to carry no model/,
+    await expect(generate(answering({ 200: body('image/png', { type: 'string', format: 'binary' }) }))).rejects.toThrow(
+      /GET \/x 200 answers "image\/png", which is neither JSON nor a body known to carry no model/,
     );
     // A response only pointed at, which would otherwise read as one with no body.
     await expect(generate(answering({ 200: { $ref: '#/components/responses/Thing' } }))).rejects.toThrow(

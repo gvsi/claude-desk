@@ -118,8 +118,8 @@ const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', '
 const NO_MODEL_BODIES = new Set([
   // The visitor's event stream.
   'text/event-stream',
-  // A document link's bytes: documents are text, served as `text/plain; charset=utf-8`.
-  'text/plain',
+  // A document link's bytes, as the API declares them (`GET /api/d/{token}`).
+  'application/octet-stream',
 ]);
 
 /** Whether a media type, parameters dropped, is JSON: `application/json` or any type ending `+json`. */
