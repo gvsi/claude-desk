@@ -1,15 +1,64 @@
-import { ConceptFooter } from '../ds/index.ts';
-import { VisionFrame } from './VisionFrame.tsx';
+import { ClaudeMessage, Composer, MarginReceipt, PublicShell, SystemLine, Transcript, TranscriptRow, VisitorMessage } from '../ds/index.ts';
+import { brandFrom } from '../public/brand.ts';
+import { CLAUDE_ACCOUNT_ABOUT, CLAUDE_ACCOUNT_INVOICE, CLAUDE_ACCOUNT_SOURCES, CLAUDE_ACCOUNT_TURNS, RIVERA_PUBLIC_DESK } from './data.ts';
+import { ClaudeWords, VisionFrame } from './VisionFrame.tsx';
 
-/** `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, back on Rivera's public page, signed in. */
+const noop = () => undefined;
+
+/**
+ * `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, a returning customer, back on Rivera
+ * Plumbing's public page signed in with her Claude account. Claude asks to use the account for this
+ * visit, it matches her contact on record, and her invoice comes as a document card only for her;
+ * the receipts say both the match and her consent. It keeps the public page's rules: the AI
+ * disclosure, the document only in its card, and the concept footer.
+ */
 export function ClaudeAccountPage() {
+  const { brand, ownerName } = brandFrom(RIVERA_PUBLIC_DESK);
+  const t = CLAUDE_ACCOUNT_TURNS;
+  const s = CLAUDE_ACCOUNT_SOURCES;
+  const composerLabel = `Message ${brand.name}`;
   return (
-    <VisionFrame title="Rivera Plumbing">
+    // As the public page names its tab: the business.
+    <VisionFrame title={brand.name}>
       {(bar) => (
-        <div>
-          {bar}
-          <ConceptFooter />
-        </div>
+        <PublicShell
+          banner={bar}
+          brand={brand}
+          ownerName={ownerName}
+          language="en"
+          onAskForOwner={noop}
+          about={CLAUDE_ACCOUNT_ABOUT}
+          composer={<Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} />}
+        >
+          <Transcript label={`Conversation with ${brand.name}`}>
+            <SystemLine text={t.signedIn} />
+            <TranscriptRow margin={<MarginReceipt source={s.checked} plain={t.checked} ledgerSeq={40} />}>
+              <ClaudeWords text={t.ask} ownerName={ownerName} />
+            </TranscriptRow>
+            <TranscriptRow>
+              <VisitorMessage text={t.yes} />
+            </TranscriptRow>
+            <TranscriptRow
+              margin={[
+                <MarginReceipt key="matched" source={s.matched} plain={t.matchedReceipt} ledgerSeq={41} />,
+                <MarginReceipt key="checked" source={s.checked} plain={t.checked} ledgerSeq={42} />,
+              ]}
+            >
+              <ClaudeWords text={t.matched} ownerName={ownerName} />
+            </TranscriptRow>
+            <TranscriptRow>
+              <VisitorMessage text={t.invoice} />
+            </TranscriptRow>
+            <TranscriptRow
+              margin={[
+                <MarginReceipt key="checked" source={s.checked} plain={t.checked} ledgerSeq={43} />,
+                <MarginReceipt key="released" source={s.released} plain={t.releasedReceipt} ledgerSeq={44} />,
+              ]}
+            >
+              <ClaudeMessage blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={ownerName} />
+            </TranscriptRow>
+          </Transcript>
+        </PublicShell>
       )}
     </VisionFrame>
   );

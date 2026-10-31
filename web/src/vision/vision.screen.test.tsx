@@ -24,6 +24,7 @@ import { VISION_LINE } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
+import { expectNoWindowScroll } from '../test/screen.ts';
 
 const CITY_OFFICE = '/vision/city-office';
 const TEAM_DESK = '/vision/team-desk';
@@ -60,6 +61,21 @@ const CITY_FACTS = [
   'Permit B-2026-0377',
   'Status: issued',
 ];
+
+/** The public page's AI disclosure, as every public page shows it. */
+const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+
+/** Dana's visit, in the board's words. */
+const ACCOUNT = {
+  ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
+  yes: 'Yes, use it',
+  matched: 'Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?',
+  matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
+  invoice: 'All fixed, thanks. Can you send me the invoice?',
+  sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
+  releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
+  checked: 'Reply checked against Maria Rivera’s rules',
+} as const;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -314,6 +330,81 @@ describe('Vision pages against their boards', () => {
       chat.getByRole('button', { name: 'Take over' }).element() as HTMLElement,
       access.querySelector('button') as HTMLElement,
     ]);
+  });
+
+  it('claude_account_matches_its_board', async () => {
+    // As Boards/Vision, Claude account draws it: Dana back on Rivera's public page, signed in.
+    const { screen, router } = await renderRoute(CLAUDE_ACCOUNT);
+    const log = main(screen).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+    await expect.element(log).toBeVisible();
+    const root = screen.container;
+    const bar = await expectVisionBar(root, BACK_HREF);
+    // As the public page names its tab: the business.
+    expect(document.title).toBe('Rivera Plumbing');
+
+    // The public page right under the bar, in the window's height: the brand header, the chat and the about column.
+    const header = screen.getByRole('banner').element();
+    expect(top(header)).toBe(bottom(bar));
+    expectComputed(header, { height: '76px' });
+    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(window.innerHeight);
+    expectNoWindowScroll();
+
+    // The AI disclosure under the chat's title, as on every public page.
+    const disclosure = [...main(screen).element().querySelectorAll('p')].filter((line) => line.textContent === DISCLOSURE);
+    expect(disclosure).toHaveLength(1);
+
+    // Signed in with a Claude account: the line, then Claude asks to use it for this visit.
+    const transcript = log.element() as HTMLElement;
+    await expect.element(log.getByText('Signed in with your Claude account.', { exact: true })).toBeVisible();
+    expectConversationType(transcript);
+    expect(some(transcript, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
+      ACCOUNT.ask,
+      ACCOUNT.matched,
+      ACCOUNT.sent,
+    ]);
+    expect(some(transcript, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual([ACCOUNT.yes, ACCOUNT.invoice]);
+
+    // The match and her consent are in the receipts, in order, each a line and never a button.
+    expect(await expectReceiptsUnderMessages(transcript)).toBe(3);
+    expect(some(transcript, '.cd-margin-line').map((line) => line.textContent)).toEqual([
+      ACCOUNT.checked,
+      ACCOUNT.matchedReceipt,
+      ACCOUNT.checked,
+      ACCOUNT.checked,
+      ACCOUNT.releasedReceipt,
+    ]);
+    expect(transcript.querySelector('.cd-transcript-row__margin button')).toBeNull();
+
+    // The invoice is a document card, only for her, with its download.
+    const invoice = log.getByRole('article', { name: 'Document, only for you' });
+    await expect.element(invoice).toBeVisible();
+    expect(invoice.element().textContent).toContain('Invoice, drain clearing');
+    const download = invoice.getByRole('link', { name: 'Download' });
+    expectComputed(download.element(), SPEC.primary);
+
+    // The about column: hours, Rivera's service area and the phone, Rivera's own facts.
+    const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    expect(about.getByRole('article').elements().map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Policy', 'Contact']);
+    await expect.element(about.getByText('We work in Oakland, Berkeley, Alameda and Emeryville.', { exact: true })).toBeVisible();
+    expectComputed(one(main(screen).element(), '.cd-composer__box'), SPEC.composer);
+    await expectFooter(root);
+
+    // focus_order_is_logical: the bar, Ask for Maria Rivera, the download, then the composer.
+    await expectTabOrder(userEvent, [
+      bar.querySelector('a') as HTMLElement,
+      main(screen).getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement,
+      download.element() as HTMLElement,
+      main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
+    ]);
+
+    // Nothing here is live: the download goes nowhere, not even to a page of the app, and nothing
+    // is asked of the API.
+    await download.click();
+    await wait(300);
+    expect(router.state.location.pathname).toBe(CLAUDE_ACCOUNT);
+    await expect.element(log).toBeVisible();
+    expect(mockStore.requests).toEqual([]);
+    expect(mockStore.unhandled).toEqual([]);
   });
 });
 
