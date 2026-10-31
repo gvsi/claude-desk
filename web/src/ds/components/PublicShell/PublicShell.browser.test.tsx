@@ -140,7 +140,7 @@ function LongChat({ language = 'en', links = false, tagline, rows = 80, follow =
       ownerName={rivera.business.ownerName}
       language={language}
       openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
-      banner={banner ? <div data-testid="banner" style={{ height: 64 }} /> : undefined}
+      banner={banner ? <div data-testid="banner" style={{ height: 96 }} /> : undefined}
       onAskForOwner={() => {}}
       about={page.charter}
       aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
@@ -914,7 +914,8 @@ it('a_window_crossing_900_in_one_step_settles_without_a_switch', async () => {
 it('a_banner_sits_above_the_header_and_counts_in_the_fit', async () => {
   // A banner (the vision bar) is the top of the shell's column: pinned with the brand header while
   // tall, scrolled away with it while short. Its height counts among the pinned parts, so a phone
-  // with room for the conversation without it (320 x 568) is short with it.
+  // with room for the conversation without it (320 x 568) is short with it. The banner is 96 px,
+  // well past the fit's margin, so the result doesn't hang on a few pixels of font metrics.
   const seen = [];
   for (const size of [[1440, 900], [568, 320], [320, 568]] satisfies Size[]) {
     await renderLongChat(size, { banner: true });
