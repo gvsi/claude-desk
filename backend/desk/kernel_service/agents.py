@@ -23,8 +23,9 @@ Desk the key was minted for); then the nonce, which lasts one A2A turn (Plan 01c
   /sessions` with the same body hash returns the session the nonce opened, creating nothing;
 - bound or spent, with another session or body hash: 401;
 - the turn ends (spent) at a verdict with `ok`, an immediate-handoff violation (`canary`,
-  `unsupported_language`, `session_paused`) or the turn's second `/check_reply` (`end_turn`), or
-  `NONCE_TTL_S` after its first use;
+  `unsupported_language`, `session_paused`: those outside `desk.rewrites.REWRITABLE`), a blocked
+  `/check_reply` the API sent with `final: true`, or the turn's second `/check_reply` (`end_turn`),
+  or `NONCE_TTL_S` after its first use;
 - spent: the same call again is 409 `replayed`, but a resent `POST /sessions` still returns the
   bound session (ledgered `agent_auth {resent_opening: true}`).
 
@@ -73,6 +74,7 @@ from desk.kernel_service import auth, ledger
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import signed_time
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
+from desk.rewrites import REWRITABLE
 
 AGENT_TS_SKEW_S = 300                    # a signature's timestamp is good this long either side of the kernel's clock
 NONCE_TTL_S = 300                        # a turn ends this long after its nonce's first use
@@ -82,7 +84,6 @@ DEMO_ON_BEHALF_OF = "Demo visitor"
 DEMO_PER_CHARGE_CENTS = 2_000            # the "Agent demo" row: $20 a charge, $100 in all, for an hour
 DEMO_TOTAL_CENTS = 10_000
 DEMO_MANDATE_TTL = timedelta(hours=1)
-IMMEDIATE_HANDOFFS = frozenset({"canary", "unsupported_language", "session_paused"})
 TURN_CHECKS = 2                          # a turn's second reply check ends it
 
 KEY_ID = re.compile(r"[0-9a-f]{16}")
@@ -251,16 +252,20 @@ async def authenticate(ctx: KernelCtx, request: Request, row: SessionRow, *, rou
     request.state.agent_turn = Turn(copy_id=row.copy_id, agent_key_id=call.auth.agent_key_id, nonce=call.auth.nonce)
 
 
-async def end_turn(ctx: KernelCtx, request: Request, verdict: ReplyVerdict) -> None:
+async def end_turn(ctx: KernelCtx, request: Request, verdict: ReplyVerdict, *, final: bool = False) -> None:
     """After an agent session's reply check: counts the check against its turn's nonce and ends
-    the turn at a passing verdict, an immediate handoff or the turn's second check."""
+    the turn at a verdict the API shows: a passing one, an immediate handoff (a violation no
+    rewrite can fix, outside `desk.rewrites.REWRITABLE`), a blocked check the API sent as final
+    (`final`: `CheckReplyRequest.final` sent true, so its handoff is shown and nothing rewrites
+    it), or the turn's second check. A check sent without `final` ends it only as before, so the
+    API's rewrite on the same nonce still runs until it says which attempt is its last."""
     turn: Turn | None = getattr(request.state, "agent_turn", None)
     if turn is None:
         return
     nonce = await _nonce_row(ctx, turn.agent_key_id, turn.nonce)
     nonce.check_replies += 1
-    immediate = any(violation.kind in IMMEDIATE_HANDOFFS for violation in verdict.violations)
-    if (verdict.ok or immediate or nonce.check_replies >= TURN_CHECKS) and nonce.spent_at is None:
+    immediate = any(violation.kind not in REWRITABLE for violation in verdict.violations)
+    if (verdict.ok or immediate or final or nonce.check_replies >= TURN_CHECKS) and nonce.spent_at is None:
         nonce.spent_at = ctx.clock.now()
     await ctx.db.flush()
 

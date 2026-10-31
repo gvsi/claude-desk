@@ -908,6 +908,6 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
     verdict = await check_draft(ctx, row, draft, final=body.final)
-    if row.kind == "agent":
-        await agents.end_turn(ctx, request, verdict)
+    if row.kind == "agent":            # a turn ends at a blocked check only when the API said it was final
+        await agents.end_turn(ctx, request, verdict, final=body.final and "final" in body.model_fields_set)
     return verdict
