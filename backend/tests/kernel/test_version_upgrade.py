@@ -378,6 +378,27 @@ async def test_startup_discovery_counts_against_its_budget(app, client, monkeypa
     assert told == [[[WAITING_ALERT], [WAITING_ALERT]]] * 2
 
 
+async def test_a_copy_whose_lookup_outlasts_the_budget_is_left_to_the_background(app, client, monkeypatch):
+    # one copy's lookup is cut off when the budget runs out, however long it would hang, and the copy is left
+    # for the background to look at again, as a failed lookup is
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    discover, calls, hung = activation.desks_to_bring_up, [], asyncio.Event()
+
+    async def hanging_once(*args, **kwargs):
+        calls.append(args[1])
+        if len(calls) == 1:
+            await hung.wait()                                    # never set: the lookup hangs until it's cut off
+        return await discover(*args, **kwargs)
+
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.05)
+    monkeypatch.setattr(activation, "desks_to_bring_up", hanging_once)
+    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
+    assert startup == activation.StartupRebuild(results={}, left=[], unscanned=[copy.copy_id])
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    assert calls == [copy.copy_id, copy.copy_id]
+
+
 async def test_a_copy_whose_lookup_fails_at_startup_is_looked_at_again_in_the_background(app, client, monkeypatch):
     copy = await rivera(app, client)
     await seed_from_an_earlier_kernel(app, copy)

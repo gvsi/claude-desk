@@ -749,9 +749,9 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     or a Desk only within `STARTUP_REBUILD_S` of its own start, finding included. It rebuilds a
     version only from a cached report, leaving one that needs a live proof (`NEEDS_PROOF`), so the
     kernel serves within the budget and one copy's lookup or one Desk's compile, however many
-    copies and Desks there are. What it doesn't reach is left, in order, for
-    `rebuild_in_background`: the Desks it found and the copies it didn't look at, and one whose
-    lookup failed. Until then a version left as stored refuses every call (`version_outdated`)."""
+    copies and Desks there are; a copy's lookup gets only what is left of the budget and is cut off
+    when it runs out. What it doesn't reach is left, in order, for `rebuild_in_background`: the
+    Desks it found and the copies it didn't look at, and one whose lookup failed or was cut off. Until then a version left as stored refuses every call (`version_outdated`)."""
     started = monotonic()
 
     def spent() -> bool:
@@ -765,7 +765,13 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
         if spent():
             unscanned += copies[n:]
             break
-        desk_ids = await _desks_of(runtime, copy_id)
+        try:                                  # the lookup gets only what is left of the budget
+            desk_ids = await asyncio.wait_for(_desks_of(runtime, copy_id),
+                                              STARTUP_REBUILD_S - (monotonic() - started))
+        except TimeoutError:
+            log.info("rebuild_lookup_cut_off copy_id=%s", copy_id)
+            unscanned += copies[n:]           # the budget is spent: the background looks at the rest
+            break
         if desk_ids is None:                  # its lookup failed: the background looks again
             unscanned.append(copy_id)
             continue
