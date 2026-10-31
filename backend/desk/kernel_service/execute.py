@@ -845,7 +845,10 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     target.checked = _checked(execution)
     orphaned = execution.state == "intent"
     if private and not await auth.session_stands(ctx, _named(target), None):
-        ended = await session_ended(ctx, decision) or "session_closed"          # "session_closed": its Desk's gone
+        # `session_ended` names nothing once the Desk is gone, whose deletion closed the session: "desk", as
+        # every other refusal names a deleted Desk
+        ended = await session_ended(ctx, decision) or ("desk" if target.desk_row.deleted_at is not None
+                                                       else "session_closed")
         return await _refused_in_recovery(ctx, target, execution, ended, orphaned=orphaned)
     outcome = await _ask_adapter(ctx, target, action_id)
     if orphaned:
@@ -877,10 +880,11 @@ async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execu
     adapter isn't asked. `on_failed` runs first, before anything is ledgered, so the rows it locks
     come before the ledger head (`repo.py`). Then the record: an intent is `unknown` (ledgered as
     orphaned), then the action is `refused_at_execution` with nothing in its result, ledgered as
-    reconciled with the reason `session_ended` and the part that ended it (`ended`) as its check;
-    the visitor sees the state's own status line, never why their session ended. If `on_failed`
-    fails, what `prepare` reserved may stand, so, with whatever it wrote taken back, the action stays
-    `unknown` with nothing in its result, for the next try."""
+    reconciled with the reason `session_ended` and the part that ended it (`ended`: how the session
+    ended, or `desk` when its Desk was deleted) as its check, which picks the owner's line
+    (`decide.set_state`); the visitor sees the state's own status line, never why their session
+    ended. If `on_failed` fails, what `prepare` reserved may stand, so, with whatever it wrote taken
+    back, the action stays `unknown` with nothing in its result, for the next try."""
     action_id = target.action.action_id
     try:
         async with ctx.db.begin_nested():

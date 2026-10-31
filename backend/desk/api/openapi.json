@@ -7920,6 +7920,17 @@
             "type": "string",
             "title": "Reason Plain"
           },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain"
+          },
           "visitor_plain": {
             "type": "string",
             "title": "Visitor Plain"

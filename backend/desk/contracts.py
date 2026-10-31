@@ -237,6 +237,9 @@ class Decision(BaseModel):
     card_ids: list[str]
     review: Review | None = None
     reason_plain: str                     # owner-facing kernel template from the action and deciding cards; the call's free text quoted, labelled "Claude's note"
+    owner_plain: str | None = None        # owner-facing kernel template: why an approved or allowed action didn't run (`refused_at_execution`); None otherwise.
+                                          # Only on the owner's reads (the owner's GET /decisions/{id}, the approval answer); None on every answer to a session or
+                                          # agent. Fixed templates in the owner's language, never free text; like reason_plain, the signature doesn't cover it
     visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits
     answers: list[ApprovalAnswer] = []    # held only; allow_person only where "Decision lifecycle" allows it
     expires_at: AwareDatetime             # allow: 60 s; hold: 24 h; evaluated lazily by the kernel

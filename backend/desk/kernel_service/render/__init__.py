@@ -8,8 +8,9 @@ limit. An action a visitor or agent asked for that ran says what was done, one l
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
 in its `last_language`, else English (`language`). Owner alert previews (`owner_preview`) are
-English and owner-only. The owner-only lines (`OWNER_STATUS`) sit apart from the status lines, so
-`status` can't render one into any visitor text.
+English and owner-only. The owner-only lines (`OWNER_STATUS`: why an action was refused at
+execution, a decision's `owner_plain`) sit apart from the status lines, so `status` can't render one
+into any visitor text; `owner_line` renders them in the owner's language (`OWNER_LANGUAGE`).
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
@@ -52,10 +53,14 @@ DECISION_STATUS_KEYS = STATUS_KEYS - RECEIPT_KEYS
 MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
 MESSAGE_KEYS = frozenset(en.MESSAGES)
 EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
-# Owner-only lines (why an approved private release was refused), which nothing renders until an
-# owner-facing field carries them: outside `STATUS_KEYS`, so no decision's status line can take one.
+# Owner-only lines (why an action was refused at execution: a decision's `owner_plain`, `owner_line`):
+# outside `STATUS_KEYS`, so no decision's status line can take one.
 OWNER_STATUS: dict[str, dict[str, str]] = {"en": en.OWNER_STATUS, "es": es.OWNER_STATUS}
 OWNER_STATUS_KEYS = frozenset(en.OWNER_STATUS)
+# The language the owner reads the owner-only lines in. The kernel keeps no owner language, so this is
+# English for every owner; an owner-language source, once there is one, replaces this line. Never the
+# session's language: these lines are the owner's, not the visitor's.
+OWNER_LANGUAGE: Language = "en"
 OPEN_STATUS: dict[str, Callable[[bool, datetime | None, datetime], str]] = {"en": en.open_status,
                                                                             "es": es.open_status}
 
@@ -101,6 +106,12 @@ def open_status_text(is_open: bool, boundary: datetime | None, as_of: datetime, 
     and `as_of` read in the business's time zone `tz`, with the cards' time formats."""
     local = boundary.astimezone(tz) if boundary is not None else None
     return OPEN_STATUS[lang](is_open, local, as_of.astimezone(tz))
+
+
+def owner_line(key: str) -> str:
+    """The owner-only line `key` ("refused_desk_deleted", ...) in `OWNER_LANGUAGE`. Any other key,
+    a status line's included, raises KeyError: there is no free-text fallback."""
+    return OWNER_STATUS[OWNER_LANGUAGE][key]
 
 
 def owner_preview(kind: str) -> str:

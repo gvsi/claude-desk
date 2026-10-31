@@ -964,6 +964,37 @@ def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
     assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
 
 
+OWNER_PLAIN_REVISION = "0013_decision_owner_plain"
+
+
+def test_a_decision_from_before_the_owner_plain_revision_has_no_owner_line(admin, api, monkeypatch):
+    """A decision written before the revision reads with no owner line (NULL), as every state but a
+    refusal at execution does; the column stays nullable, joins no kernel_ro view (the API reads it
+    only through the owner's kernel reads), and the revision runs again over what it added."""
+    revision = ScriptDirectory.from_config(alembic_config()).get_revision(OWNER_PLAIN_REVISION).module
+    # Exercise the revision's SQL in a rolled-back transaction on this suite's database alone.
+    # No scratch database is needed for this column-only migration.
+    monkeypatch.setattr(revision.op, "execute", admin.execute)
+    with admin.transaction(force_rollback=True):
+        admin.execute("SET LOCAL lock_timeout = '5s'")
+        revision.downgrade()
+        assert "owner_plain" not in columns(admin, "kernel", "decisions")
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES ('dec-before-owner-plain', 'copy-owner-plain', 'desk-owner-plain', 'session-owner-plain', 0,"
+            " 'call-1', 'c', 'native.quote', 'hold', 'refused_at_execution', 1, 'r', 'v', now(), 1)")
+        revision.upgrade()
+        assert admin.execute("SELECT owner_plain FROM kernel.decisions"
+                             " WHERE decision_id = 'dec-before-owner-plain'").fetchone() == (None,)
+        assert nullable_columns(admin, "kernel", "decisions")["owner_plain"] is True
+        assert "owner_plain" not in columns(admin, "kernel_ro", "decisions")
+        revision.upgrade()                                # the revision runs again over what it added
+        assert columns(admin, "kernel", "decisions").count("owner_plain") == 1
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        api.execute("SELECT owner_plain FROM kernel.decisions LIMIT 0")
+
+
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
     savepoint = session.begin_nested()
     session.add(row)

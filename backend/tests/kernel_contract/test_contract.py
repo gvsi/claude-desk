@@ -507,7 +507,9 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
     assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
     assert result.execution is None and result.card_diff is None
     assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
-    assert await read_decision(view, held.decision_id) == result.decision
+    # the session reads the owner's answer without the owner's line (`owner_plain`), which only the owner's reads carry
+    read = await read_decision(view, held.decision_id)
+    assert read.owner_plain is None and read == result.decision.model_copy(update={"owner_plain": None})
     assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
                    (session_id,)) == [{"n": 0}]
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")

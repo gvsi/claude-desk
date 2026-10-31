@@ -179,6 +179,7 @@ export interface Decision {
   card_ids: string[];
   review?: Review | null;
   reason_plain: string;
+  owner_plain?: string | null;
   visitor_plain: string;
   answers?: ("allow_once" | "deny_once" | "allow_person" | "deny_always")[];
   expires_at: string;

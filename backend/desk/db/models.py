@@ -319,6 +319,8 @@ class Decision(Base):
     card_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     review: Mapped[c.Review | None] = mapped_column(ContractJSON(c.Review))
     reason_plain: Mapped[str] = mapped_column(Text)
+    # why it was refused at execution, for the owner alone (`decide.set_state`); None in every other state
+    owner_plain: Mapped[str | None] = mapped_column(Text)
     visitor_plain: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ledger_seq: Mapped[int] = mapped_column(BigInteger)

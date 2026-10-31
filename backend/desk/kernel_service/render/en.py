@@ -31,14 +31,19 @@ STATUS: dict[str, str] = {
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
 }
 
-# Owner-only, key for key with `es.OWNER_STATUS`: why an approved release of private data was
-# refused, since its session no longer stood for its person. Unused until an owner-facing field
-# carries it. A decision's status line reaches the visitor, who mustn't read why their session
-# ended, so these are kept out of `STATUS` and no status line can render one.
+# Owner-only, key for key with `es.OWNER_STATUS`: why an approved or allowed action was refused at
+# execution, a decision's `owner_plain`. An approved release of private data whose session no
+# longer stood for its person says why the session ended; otherwise the Desk was deleted, the rules
+# changed (a failed re-check), or, for anything else, a line that names no cause. A decision's
+# status line reaches the visitor, who mustn't read why their session ended, so these are kept out
+# of `STATUS` and no status line can render one.
 OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "Not shared: their session ended when their contact changed",
     "refused_person_removed": "Not shared: they were removed from your records",
     "refused_session_closed": "Not shared: their session ended before your answer",
+    "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
+    "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
+    "refused_fallback": "This couldn't run when you answered, so it wasn't done.",
 }
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a

@@ -350,21 +350,58 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
     return render.status(state, lang, owner=owner)
 
 
+# How a session that no longer stands ended (`execute.session_ended`), and the parts of the re-check
+# that can fail (`execute.recheck_under`) other than the Desk's, each a refusal at execution's `check`.
+SESSION_ENDED_CHECKS = frozenset({"contact_changed", "person_removed", "session_closed"})
+RECHECK_CHECKS = frozenset({"tool", "session", "args", "profile", "policy", "binding"})
+
+
+def owner_refusal_key(reason: str | None, check: str | None) -> str:
+    """The owner line (`render.OWNER_STATUS`) for a refusal at execution, from its own ledgered
+    `reason` and `check`: a deleted Desk (`desk`) says so; a private release whose session ended
+    (`session_ended`) says how; a failed re-check says the rules changed; anything else (an adapter's
+    own `prepare` refusal, an allow's session closed before it ran) names no cause."""
+    if check == "desk":
+        return "refused_desk_deleted"
+    if reason == "session_ended" and check in SESSION_ENDED_CHECKS:
+        return f"refused_{check}"
+    if reason == "rules_changed" and check in RECHECK_CHECKS:
+        return "refused_rules_changed"
+    return "refused_fallback"
+
+
+# Every line `owner_refusal_key` picks is an owner line, checked at import: a missing one would raise in
+# `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
+if not {owner_refusal_key(reason, check) for reason in ("session_ended", "rules_changed", None)
+        for check in (*SESSION_ENDED_CHECKS, *RECHECK_CHECKS, "desk", None)} <= render.OWNER_STATUS_KEYS:
+    raise RuntimeError("every refusal at execution has an owner line")
+
+
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
                     summary: dict[str, Any], status: str | None = None) -> LedgerEntry:
     """Moves a decision to `state` in the caller's transaction: the status line for the new state
-    (`status_line`, the template `status` when given, which must be a decision's status line), a
-    ledger entry (`kind`, `summary`, kernel-built values only) and a signature over both. Lock the
-    row first. The line is rendered first, so a `status` that isn't a decision's status line raises
-    ValueError before anything here changes. The caller's handling decides the rest: in T1 and on
-    the answer path the request fails and its transaction rolls back; in T2, `execute._run` settles
-    the action `unknown`, with nothing delivered."""
+    (`status_line`, the template `status` when given, which must be a decision's status line), the
+    owner's line, a ledger entry (`kind`, `summary`, kernel-built values only) and a signature over
+    the status line and the entry. Lock the row first. The lines are rendered first, so a `status`
+    that isn't a decision's status line raises ValueError before anything here changes. The
+    caller's handling decides the rest: in T1 and on the answer path the request fails and its
+    transaction rolls back; in T2, `execute._run` settles the action `unknown`, with nothing
+    delivered.
+
+    The owner's line (`owner_plain`) is set for `refused_at_execution` alone, picked by the
+    refusal's own `reason` and `check` in `summary` (`owner_refusal_key`, which always picks one)
+    and rendered in the owner's language (`render.owner_line`), never the session's; every other
+    state clears it. It isn't signed and never enters the summary, so no ledger entry holds it."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     visitor_plain = status_line(state, tool=row.tool, session=session,
                                 owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status)
+    owner_plain = None
+    if state == "refused_at_execution":
+        owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
     row.state = state
     row.visitor_plain = visitor_plain
+    row.owner_plain = owner_plain
     row.updated_at = ctx.clock.now()
     entry = await _append(ctx, row, kind, summary)
     row.ledger_seq = entry.seq
@@ -456,11 +493,14 @@ def normalized_action(row: ActionRow) -> NormalizedAction:
                             recipient=row.recipient, starts_at=row.starts_at)
 
 
-async def decision_contract(ctx: KernelCtx, row: DecisionRow, *, inbox: Sequence[InboxNotice] = ()) -> Decision:
+async def decision_contract(ctx: KernelCtx, row: DecisionRow, *, inbox: Sequence[InboxNotice] = (),
+                            for_owner: bool = False) -> Decision:
     """The `Decision` a stored row answers with. `answers` are the owner's choices on a held
     request, so they are listed while it is `held` and in no other state (the row keeps what it
     was offered). `inbox` holds the alerts the call that created it wrote; a decision read back
-    later carries none."""
+    later carries none. `owner_plain` is the owner's alone: only an answer to the owner's own
+    credential (`for_owner`: the owner's read by ID, the answer to a held request) carries it, and
+    every other answer, to a session or an agent, has None whatever the row holds."""
     action = None
     if row.action_id is not None:
         action_row = (await ctx.db.scalars(ctx.repo.scoped(
@@ -469,8 +509,8 @@ async def decision_contract(ctx: KernelCtx, row: DecisionRow, *, inbox: Sequence
     return Decision(decision_id=row.decision_id, session_id=row.session_id, call_id=row.call_id, action=action,
                     outcome=row.outcome, state=row.state, policy_version=row.policy_version,
                     policy_ids=row.policy_ids, card_ids=row.card_ids, review=row.review,
-                    reason_plain=row.reason_plain, visitor_plain=row.visitor_plain,
-                    answers=row.answers if row.state == "held" else [],
+                    reason_plain=row.reason_plain, owner_plain=row.owner_plain if for_owner else None,
+                    visitor_plain=row.visitor_plain, answers=row.answers if row.state == "held" else [],
                     expires_at=row.expires_at, inbox=list(inbox), ledger_seq=row.ledger_seq,
                     signature=row.signature or "")
 
@@ -1013,7 +1053,9 @@ async def post_decide(body: DecideRequest, ctx: Ctx, request: Request) -> Decisi
 @router.get("/decisions/by_call", response_model=Decision)
 async def get_by_call(session_id: str, generation: int, call_id: str, ctx: Ctx, request: Request) -> Decision:
     """The decision `/decide` committed for a call, after the API lost its answer, settled as any
-    read is; 404 when none was. A session reads its own calls, the owner its own session's."""
+    read is; 404 when none was. A session reads its own calls, the owner its own session's. It
+    stands in for `/decide`'s answer, which goes back to the session's turn, so, like that answer,
+    it never carries the owner's line (`owner_plain`), whoever asks."""
     if await auth.caller(ctx, request, session_id) == "owner":
         owner = await auth.require_owner(ctx, request, session_id=session_id)
         if session_id != owner.session_id:
@@ -1037,7 +1079,8 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
     decision no copy holds is 404, ledgered on the session whose token asked. The owner's
     credential is held to the same naming: a bad owner token is 401 and another copy's owner finds
     nothing (404), each ledgered on the decision's session; an owner asking for a decision no copy
-    holds is 404, logged, since an owner session has no Desk ledger of its own.
+    holds is 404, logged, since an owner session has no Desk ledger of its own. Only the owner's read
+    carries the owner's line (`owner_plain`); the session's has None.
 
     Each credential is resolved before the transaction takes its connection, except the decision's
     session, which only the decision names: that session is proved in the copy the transaction
@@ -1051,7 +1094,7 @@ async def get_decision(decision_id: str, ctx: Ctx, request: Request) -> Decision
         if row is None:   # another copy's decision, or none: 404 alike
             raise AuthError(404, "not_found", "unknown_decision" if named is None else "wrong_copy",
                             route=route_template(request), named=named)
-        return await decision_contract(ctx, await _read(ctx, row))
+        return await decision_contract(ctx, await _read(ctx, row), for_owner=True)
     row = await _decision_row(ctx, decision_id, copy_id) if copy_id is not None else None
     if row is None:   # no decision has this ID, so it names no session: the token alone says who asks
         await auth.caller(ctx, request, None)

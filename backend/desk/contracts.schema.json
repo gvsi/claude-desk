@@ -688,6 +688,18 @@
           "title": "Reason Plain",
           "type": "string"
         },
+        "owner_plain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Plain"
+        },
         "visitor_plain": {
           "title": "Visitor Plain",
           "type": "string"

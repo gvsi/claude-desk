@@ -285,8 +285,9 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
     """Dana, verified, asks for her invoice, which the owner's rules hold; the owner then gives Dana another
     contact (or removes her), which ends the session that asked, and approves the held release. It is refused
     at execution with nothing run: the decision's status line, which Dana's session reads, is the state's own
-    and never says why the session ended; the answer is ledgered as refused because the session ended; and no
-    document link entry is written."""
+    and never says why the session ended, while the owner's answer and her read of the decision say why
+    (`owner_plain`); the answer is ledgered as refused because the session ended; and no document link entry
+    is written."""
     desk = await golden_desk(k)
     await confirm_cards(k, desk, [ASK_FOR_DOCUMENTS])
     dana = await open_caller(k, desk, "dana")
@@ -297,14 +298,18 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
     if change == "contact":
         await put_people(k, desk, upsert=[person("dana", "Dana Whitfield", "dana.again@example.net")],
                          expect=updated(desk))
+        why = "Not shared: their session ended when their contact changed"
     else:
         await put_people(k, desk, remove=["dana"], expect=updated(desk))
+        why = "Not shared: they were removed from your records"
     async with assert_ledgered(records, desk.copy, desk.desk_id, "approval") as new:
         await k.call("POST /approvals/{decision_id}/answer", path={"decision_id": held.decision_id},
                      body={"answer": "allow_once"}, auth=desk.owner, expect=Expect(fields={
                          "decision.decision_id": held.decision_id, "decision.state": "refused_at_execution",
                          "decision.visitor_plain": "The rules changed, so this didn't go ahead",
-                         "execution": None}))
+                         "decision.owner_plain": why, "execution": None}))
+    await k.call("GET /decisions/{id}", path={"id": held.decision_id}, auth=desk.owner, expect=Expect(fields={
+        "decision_id": held.decision_id, "state": "refused_at_execution", "owner_plain": why}))
     if k.is_real:
         refused = [(entry.event.summary.get("state"), entry.event.summary.get("reason"), entry.event.summary.get("check"))
                    for entry in new if entry.event.ref_id == held.decision_id]

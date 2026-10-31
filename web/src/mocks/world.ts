@@ -561,6 +561,7 @@ export class MockWorld {
       card_ids: [...spec.cardIds],
       review: null,
       reason_plain: spec.reasonPlain,
+      owner_plain: null,
       visitor_plain: statusLine(language, state, spec.tool),
       answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
