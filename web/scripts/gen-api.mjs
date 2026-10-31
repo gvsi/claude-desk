@@ -79,15 +79,23 @@ function linkRefs(node, own, contractNames, imports) {
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', 'options', 'trace']);
 
 /**
- * The schema name a 2xx answer carries: its JSON body's component schema, `Name[]` for a list of
- * one, or null when it has no JSON body (a 204, the SSE stream). Any other JSON body names no
- * model and fails, as does a response the document only points at.
+ * The bodies a 2xx answer may carry with no model, by media type without its parameters; each
+ * reads as null. Any media type that is neither JSON nor one of these fails.
  */
-function responseName(response, where, schemas) {
-  if (response === null || typeof response !== 'object' || '$ref' in response) fail(`${where} is not an inline response`);
-  const body = response.content?.['application/json'];
-  if (body === undefined) return null;
-  const schema = body.schema;
+const NO_MODEL_BODIES = new Set([
+  // The visitor's event stream.
+  'text/event-stream',
+  // A document link's bytes: documents are text, served as `text/plain; charset=utf-8`.
+  'text/plain',
+]);
+
+/** Whether a media type, parameters dropped, is JSON: `application/json` or any type ending `+json`. */
+function isJson(type) {
+  return type === 'application/json' || /^[^/]+\/[^/]+\+json$/.test(type);
+}
+
+/** The schema name a JSON body carries: its component schema, or `Name[]` for a list of one. */
+function jsonName(schema, where, schemas) {
   const named = (node) => {
     const name = refName(node.$ref);
     if (!(name in schemas)) fail(`${where} names ${name}, which is not in components.schemas`);
@@ -96,6 +104,28 @@ function responseName(response, where, schemas) {
   if (schema && typeof schema.$ref === 'string') return named(schema);
   if (schema?.type === 'array' && schema.items && typeof schema.items.$ref === 'string') return `${named(schema.items)}[]`;
   fail(`${where}'s JSON body names no schema`);
+}
+
+/**
+ * The schema name a 2xx answer carries: the one its JSON bodies name (`application/json` or any
+ * `+json` type), or null when it has no body (a 204) or only a body known to carry no model (the
+ * event stream, document bytes). JSON bodies that name no model or different ones fail, as do a
+ * JSON body beside one with no model, any other media type, and a response the document only
+ * points at.
+ */
+function responseName(response, where, schemas) {
+  if (response === null || typeof response !== 'object' || '$ref' in response) fail(`${where} is not an inline response`);
+  const names = new Set();
+  let noModel = false;
+  for (const [mediaType, body] of Object.entries(response.content ?? {})) {
+    const type = mediaType.split(';')[0].trim().toLowerCase();
+    if (isJson(type)) names.add(jsonName(body?.schema, where, schemas));
+    else if (NO_MODEL_BODIES.has(type)) noModel = true;
+    else fail(`${where} answers ${JSON.stringify(mediaType)}, which is neither JSON nor a body known to carry no model`);
+  }
+  if (names.size > 1) fail(`${where}'s JSON bodies name different schemas: ${[...names].join(', ')}`);
+  if (names.size === 1 && noModel) fail(`${where} answers with a JSON body and with one that carries no model`);
+  return names.size === 1 ? [...names][0] : null;
 }
 
 /** A single status code, the only response key besides `default` this generator reads. */

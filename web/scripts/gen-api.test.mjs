@@ -94,6 +94,13 @@ describe('gen-api', () => {
       },
       '/events': { get: { responses: { 200: { description: 'Events', content: { 'text/event-stream': { schema: {} } } } } } },
       '/slow': { post: { responses: { 200: json(ref('Thing')), 202: json(ref('Item')) } } },
+      // Every JSON media type names the model, parameters aside, and document bytes carry none.
+      '/problems': {
+        get: {
+          responses: { 200: both(body('application/json; charset=utf-8', ref('Thing')), body('application/problem+json', ref('Thing'))) },
+        },
+      },
+      '/d/{token}': { get: { responses: { 200: body('text/plain; charset=utf-8', { type: 'string' }) } } },
     };
     const expected = {
       'GET /things/{id}': { 200: 'Thing' },
@@ -102,6 +109,8 @@ describe('gen-api', () => {
       'POST /things': { 201: 'Decision' },
       'GET /events': { 200: null },
       'POST /slow': { 200: 'Thing', 202: 'Item' },
+      'GET /problems': { 200: 'Thing' },
+      'GET /d/{token}': { 200: null },
     };
     expect(apiOperations(doc(schemas, paths))).toEqual(expected);
 
@@ -115,6 +124,8 @@ describe('gen-api', () => {
       '  "POST /things": { 201: "Decision" },',
       '  "GET /events": { 200: null },',
       '  "POST /slow": { 200: "Thing", 202: "Item" },',
+      '  "GET /problems": { 200: "Thing" },',
+      '  "GET /d/{token}": { 200: null },',
     ]);
   });
 
@@ -132,6 +143,21 @@ describe('gen-api', () => {
       /GET \/x 200's JSON body names no schema/,
     );
     await expect(generate(answering({ 200: json(ref('Ghost')) }))).rejects.toThrow(/GET \/x 200 names Ghost/);
+    // A JSON body under another JSON media type is still a JSON body, never one with no model.
+    await expect(generate(answering({ 200: body('application/problem+json', { type: 'object' }) }))).rejects.toThrow(
+      /GET \/x 200's JSON body names no schema/,
+    );
+    // JSON bodies that name different models, a JSON body beside one that carries none, and a
+    // media type that is neither JSON nor known to carry no model.
+    await expect(generate(answering({ 200: both(json(ref('Thing')), body('application/problem+json', ref('Item'))) }))).rejects.toThrow(
+      /GET \/x 200's JSON bodies name different schemas: Thing, Item/,
+    );
+    await expect(generate(answering({ 200: both(json(ref('Thing')), body('text/event-stream', {})) }))).rejects.toThrow(
+      /GET \/x 200 answers with a JSON body and with one that carries no model/,
+    );
+    await expect(generate(answering({ 200: body('application/octet-stream', { type: 'string', format: 'binary' }) }))).rejects.toThrow(
+      /GET \/x 200 answers "application\/octet-stream", which is neither JSON nor a body known to carry no model/,
+    );
     // A response only pointed at, which would otherwise read as one with no body.
     await expect(generate(answering({ 200: { $ref: '#/components/responses/Thing' } }))).rejects.toThrow(
       /GET \/x 200 is not an inline response/,
@@ -196,5 +222,15 @@ describe('gen-api', () => {
 
 /** A response whose JSON body is `schema`. */
 function json(schema) {
-  return { description: 'Successful Response', content: { 'application/json': { schema } } };
+  return body('application/json', schema);
+}
+
+/** A response whose one body, of `mediaType`, is `schema`. */
+function body(mediaType, schema) {
+  return { description: 'Successful Response', content: { [mediaType]: { schema } } };
+}
+
+/** A response with the bodies of both `one` and `other`. */
+function both(one, other) {
+  return { description: 'Successful Response', content: { ...one.content, ...other.content } };
 }
