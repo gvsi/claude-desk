@@ -11,7 +11,7 @@ import { OutcomeGroups } from './OutcomeGroups.tsx';
 const { line } = rivera.paymentLimit;
 
 const NOTE =
-  "Drawn on N-R2-Setup-08-Rules, built against boards in review; sign-off pending. The setup interview's draft rules, grouped by what Claude does, under the payment limit.";
+  "Drawn on N-R2-Setup-08-Rules, signed on 2026-10-30. The setup interview's draft rules, grouped by what Claude does, under the payment limit.";
 
 const meta = {
   title: 'Rules/OutcomeGroups',

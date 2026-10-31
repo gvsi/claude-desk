@@ -49,10 +49,10 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Setup-09-Situations',
     canvasNote: [
-      'Built against the board in review; sign-off pending.',
+      'Signed on 2026-10-30.',
       'The setup interview’s situations step: each situation is a SituationRow, with the outcome in words beside its dot, the second look, and “Not what we planned” beside a thin held bar.',
       'By the owner’s ruling of 2026-10-30, “Looks right” is the only answer: the board’s “Change a rule” is removed, as on the board updated on the canvas.',
-      'The step list in the bar (“Questions, Tools, Rules, Safety check, Live”) is Steps, which comes with the Connectors and rules change, so the bar has a gap where it goes; the bar, the column and the buttons are page layout the web app (plan 04) owns.',
+      'The step list in the bar (“Questions, Tools, Rules, Safety check, Live”) is left out of the setup frame, so the bar has a gap where it goes; the bar, the column and the button are page layout the web app (plan 04) owns.',
     ].join(' '),
   },
 } satisfies Meta;
