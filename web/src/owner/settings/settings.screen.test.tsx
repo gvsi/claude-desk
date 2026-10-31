@@ -37,6 +37,12 @@ const UNCONFIRMED = "We couldn't confirm that Main line was deleted. Reload to s
 /** The owner's line for a request the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 
+/** The owner's lines for a delete refused outright: a conflict, and too many requests at once. */
+const REFUSED: readonly (readonly [status: number, line: string])[] = [
+  [409, 'This changed while you were looking. Reload to see where it stands.'],
+  [429, "That's a lot of requests at once. Wait a moment, then try again."],
+];
+
 /** Notifications' lead, under its vision note. */
 const NOTIFICATIONS_LEAD = 'Held requests and paused chats reach your Demo inbox right away. Other alerts wait for your briefing.';
 
@@ -211,12 +217,26 @@ describe('Settings', () => {
     expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
     expect(requests('deleteDesk')).toHaveLength(1);
 
+    // A delete refused outright (a conflict, too many requests) leaves no doubt that it didn't go
+    // through: the page says why at once, without reading the copy again, and changes nothing.
+    for (const [status, line] of REFUSED) {
+      mockStore.inject({ route: 'deleteDesk', status });
+      const reads = requests('desks').length;
+      await remove.click();
+      await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+      await expect.element(section.getByRole('alert')).toHaveTextContent(line);
+      await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+      expect(requests('desks')).toHaveLength(reads);
+      expect(router.state.location.pathname).toBe(GENERAL);
+      expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
+    }
+
     // Confirmed: one delete, answered 204, then the other Desk's Today, with no "not found" on the way.
     const sawNotFound = watchFor("This page doesn't exist");
     await remove.click();
     await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1].map(() => `/api/owner/desks/${RIVERA.deskId}`));
+    expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1, 2, 3].map(() => `/api/owner/desks/${RIVERA.deskId}`));
     expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
     await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
