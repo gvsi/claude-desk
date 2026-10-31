@@ -369,7 +369,7 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, execution: Execution) -> Exe
     checked = _checked(execution)
     await _note(ctx, row, {"decision_id": row.decision_id, "action_id": execution.action_id, "repeat": True,
                            **(checked._asdict() if checked is not None else {})})
-    await ctx.db.commit()
+    await ctx.commit()                                   # the stored result, once its session still stands
     return execution.result
 
 
@@ -401,6 +401,9 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
                         route=EXECUTE_ROUTE, named=named)
     named = Named(copy_id=found.copy_id, desk_id=found.desk_id, session_id=found.session_id)
     session = await _share_session(ctx, found.session_id)          # the session row before the decision row
+    if session.closed_at is not None:
+        # closed since its token was proved (`auth.still_open`): refused as at authentication, nothing run
+        raise AuthError(409, "closed", "closed", route=EXECUTE_ROUTE, named=named)
     row = await _lock_decision(ctx, found.decision_id)
     if generation != session.generation or row.generation != session.generation:
         raise _stale(named, row.decision_id)
@@ -490,7 +493,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     result = await adapter.execute(target.xctx(ctx), target.action, args)
     visible, flagged = await _visible(ctx, target, result)
     await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed", **flagged))
-    await ctx.db.commit()
+    await ctx.commit()                                   # under the session row T2 holds, so it stands
     return visible
 
 

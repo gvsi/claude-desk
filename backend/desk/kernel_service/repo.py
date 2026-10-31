@@ -87,6 +87,17 @@ Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted wi
 the Desk row's) to its Desk likewise; the public page's owner
 alert when it withholds a field is an insert under a fresh key, in a read that locks nothing.
 
+A session's read is answered only if the session still stands once the read is done. Most routes
+check the session on the row as they read it, without a lock, and the owner may close it meanwhile
+(a person's removal or new contact, the Desk's deletion). Every session whose token a request
+proves is watched (`auth.watch_session`), and after the request's last read, as its last
+statements before it answers, `auth.still_open` reads the session, its person and its Desk afresh:
+closed, or no longer the person it read as, is 409 `closed`, and nothing the request read is
+answered. Those reads lock nothing, so they wait for nothing and add no step to the order above.
+They run in `KernelCtx.commit`, which a commit that ends what a request answers goes through (an
+execution's T2, a repeated execution's stored result), and when the request's transaction ends
+having read anything since its last commit.
+
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
 in a fresh transaction after the request's own has rolled back. An error that isn't a refusal is
@@ -102,7 +113,7 @@ import secrets
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, get_args
 
@@ -168,6 +179,23 @@ class KernelCtx:
     engine: AsyncEngine                   # for the credential lookups below, on their own connection
     policies: PolicyRuntime               # the policy engine, its loaded versions and the proof cache
     decisions: DecisionsBackend           # the auto reviewer
+    # what must still hold when the request's reads are done (`auth.watch_session`), by key
+    rechecks: dict[str, Callable[[], Awaitable[None]]] = field(default_factory=dict)
+
+    async def recheck(self) -> None:
+        """Runs the request's rechecks, each reading afresh what the request read its rows under (the
+        session it acts for still open, as the same person): one that no longer holds raises its
+        refusal, so the request answers nothing it read."""
+        for check in list(self.rechecks.values()):
+            await check()
+
+    async def commit(self) -> None:
+        """Commits the transaction once the request's rechecks pass. A commit that ends what a request
+        answers with, data a session reads, comes through here, and so does the end of every request
+        transaction (`kernel_transaction`); `db.commit()` is kept for a refusal's own record, which
+        answers nothing read (tests/kernel/test_session_recheck.py lists those)."""
+        await self.recheck()
+        await self.db.commit()
 
     def bind(self, copy_id: str) -> KernelRepo:
         """Run this context's transaction as `copy_id`. Binding again to the same copy is a no-op;
@@ -190,12 +218,17 @@ class KernelCtx:
 
 @asynccontextmanager
 async def kernel_transaction(runtime: KernelRuntime) -> AsyncIterator[KernelCtx]:
-    """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception."""
+    """A `KernelCtx` on a new session: committed when the block ends, rolled back on an exception.
+    When the block has read anything since its last commit, its rechecks (`KernelCtx.recheck`) run
+    first, as the last statements before the request answers: one that fails rolls it back and
+    raises its refusal. A request whose last statement was a `KernelCtx.commit` ran them there."""
     async with runtime.sessions() as db:
         ctx = KernelCtx(db=db, clock=runtime.clock, signer=runtime.signer, settings=runtime.settings,
                         engine=runtime.engine, policies=runtime.policies, decisions=runtime.decisions)
         try:
             yield ctx
+            if db.in_transaction():
+                await ctx.recheck()
         except Exception:
             await db.rollback()
             raise

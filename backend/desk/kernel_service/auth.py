@@ -24,7 +24,7 @@ from fastapi import Request
 from sqlalchemy import select
 
 from desk.contracts import LedgerEvent
-from desk.db.models import ActorSession, Desk
+from desk.db.models import ActorSession, Desk, Person
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_service import ledger, repo
 from desk.kernel_service.repo import KernelCtx, KernelFailure, route_template
@@ -175,6 +175,7 @@ async def authenticate_session(ctx: KernelCtx, request: Request, session_id: str
         raise AuthError(401, "auth", "bad_token", route=route, named=named)
     if desk_id is not None and desk_id != row.desk_id:
         raise AuthError(404, "not_found", "wrong_copy", route=route, named=named)
+    await watch_session(ctx, request, row)
     return row
 
 
@@ -201,6 +202,7 @@ async def require_session_token(ctx: KernelCtx, request: Request) -> SessionRow:
     row = (await ctx.db.scalars(copy.scoped(select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one()
     if row.kind == "owner" or not hmac.compare_digest(row.secret_hash, token_hash):
         raise AuthError(401, "auth", "bad_token", route=route)      # the owner token goes in X-Owner-Session
+    await watch_session(ctx, request, row)
     require_open(ctx, request, row)
     row.last_seen_at = ctx.clock.now()
     return row
@@ -222,6 +224,40 @@ def require_open(ctx: KernelCtx, request: Request, row: SessionRow, *, generatio
         raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
     if generation is not None and generation != row.generation:
         raise AuthError(409, "stale_generation", "stale_generation", route=route_template(request), named=named)
+
+
+async def watch_session(ctx: KernelCtx, request: Request, row: SessionRow) -> None:
+    """Has the request check the visitor or agent session `row` again once its reads are done
+    (`still_open`, which `KernelCtx.commit` and the end of the request's transaction run). Each
+    route checks the session's state on the row as it read it, most without a lock, and reads what
+    the session may see by the person it read it verified as; the owner may close the session in
+    between (a contact change or removal, the Desk's deletion), and the request then answers
+    nothing it read. Called wherever a session's token is proved (`authenticate_session`,
+    `require_session_token`), so every route a session calls is watched."""
+    ctx.rechecks.setdefault(f"session:{row.session_id}", partial(
+        still_open, ctx, request, Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id),
+        row.person_id))
+
+
+async def still_open(ctx: KernelCtx, request: Request, named: Named, person_id: str | None) -> None:
+    """The session `named` as the database has it now, read afresh in the request's transaction:
+    open, verified as `person_id` when it was so when its token was proved (a session that a right
+    code verifies in this request gains a person, which is never changed or dropped), that person
+    still on record, and its Desk not deleted. Otherwise 409 `closed`, ledgered on the session as
+    `require_open` ledgers it."""
+    session = (await ctx.db.execute(ctx.repo.scoped(select(SessionRow.closed_at, SessionRow.person_id).where(
+        SessionRow.session_id == named.session_id)))).one_or_none()
+    open_now = session is not None and session.closed_at is None and person_id in (None, session.person_id)
+    if open_now and session.person_id is not None:
+        person = (await ctx.db.execute(ctx.repo.scoped(select(Person.removed_at).where(
+            Person.person_id == session.person_id)))).one_or_none()
+        open_now = person is not None and person.removed_at is None
+    if open_now:
+        desk = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+            Desk.desk_id == named.desk_id)))).one_or_none()
+        open_now = desk is not None and desk.deleted_at is None
+    if not open_now:
+        raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
 
 
 async def owner_session(ctx: KernelCtx, request: Request, copy_id: str | None = None) -> SessionRow | None:
