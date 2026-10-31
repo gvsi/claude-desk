@@ -1155,10 +1155,11 @@ describe('agents page', () => {
   });
 
   it('lost_start_stays_unresolved_when_its_session_cannot_reopen', async () => {
-    // "Try again" after a lost start finds the session gone (401), and opening a new one fails (a
-    // 429, or no answer). The send itself never answered, so the start is still unresolved: the lost
-    // line and "Try again" stay, with no task to send a second agent and no busy line. The next
-    // "Try again" goes on, and the agent runs once.
+    // "Try again" after a lost start finds the session gone (the mock ends it, so the send is
+    // answered 401), and opening a new one fails (a 429, or no answer). The send itself never
+    // answered, so the start is still unresolved: the lost line and "Try again" stay, with no task to
+    // send a second agent and no busy line. The next "Try again" opens a new session, where the key,
+    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once.
     for (const failure of [{ status: 429 as const }, { status: 'network' as const }]) {
       mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
       const { screen } = await renderRoute(PAGE);
@@ -1169,7 +1170,7 @@ describe('agents page', () => {
       const runs = agentRuns();
       await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
       await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
-      mockStore.inject({ route: 'sendAgent', status: 401 });
+      mockStore.dropVisitorCookie(RIVERA.slug);
       mockStore.inject({ route: 'openSession', ...failure });
       await panel.getByRole('button', { name: 'Try again' }).click();
       await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(2);
@@ -1180,7 +1181,10 @@ describe('agents page', () => {
       expect(panel.getByText(UNREACHABLE_COPY.en).elements(), what).toHaveLength(0);
 
       await panel.getByRole('button', { name: 'Try again' }).click();
-      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+      await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+      expect(chipsIn(screen), what).toEqual([]);
+      expect(requests('openSession', mark), what).toHaveLength(3);
       const keys = requests('sendAgent', mark).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
       expect(keys, what).toHaveLength(3);
       expect(new Set(keys).size, what).toBe(1);
