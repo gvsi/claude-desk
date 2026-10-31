@@ -13,6 +13,7 @@ executed through `/decide` and `/execute`.
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import time
 import unicodedata
@@ -1046,6 +1047,69 @@ async def own_callback(client: httpx.AsyncClient, visitor: Visitor) -> Fact:
     assert result.state == "succeeded"
     [fact] = result.facts
     return fact
+
+
+@pytest.mark.parametrize(("prose", "callback_pattern"), [
+    ("We've booked your appointment—call us for details.", r"We've booked your appointment-call"),
+    ("Once your call is confirmed, your appointment is booked.",
+     r"your call is confirmed, your appointment is booked"),
+])
+def test_booking_matches_survive_callback_containment(monkeypatch, prose, callback_pattern):
+    # Keep the category boundary enforced even if a callback pattern is too broad.
+    monkeypatch.setattr(reply_check, "CALLBACK_LINES", [
+        ("lex.en.callback", re.compile(callback_pattern, re.IGNORECASE))])
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.en.booking")]
+
+
+BOOKING_THEN_CALL_CASES = [
+    (f"We've booked your {noun}{separator}call us for details.", "en",
+     f"Call us to book your {noun}.")
+    for noun in ("appointment", "table", "viewing")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+] + [
+    (f"Hemos reservado su {noun}{separator}llámenos para más detalles.", "es",
+     f"Llámenos para reservar su {noun}.")
+    for noun in ("cita", "mesa", "visita")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+]
+
+
+def test_a_spanish_booking_subject_ending_in_llamada_still_needs_a_booking_card():
+    prose = "Tu cita de llamada está confirmada."
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.es.booking")]
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+def test_an_imperative_call_after_a_booking_is_not_a_callback_claim(prose, language, honest):
+    expected = [("promise_word", f"lex.{language}.booking")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperative(
+        app, client, reviewer, prose, language, honest):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    receipt = clause("callback_confirmed", callback.fact_id)
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id) for v in verdict.violations] == [
+            ("promise_word", f"lex.{language}.booking")]
+        assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, honest, clauses)
+        assert (verdict.ok, verdict.violations) == (True, [])
+    acknowledgment = "Your call is confirmed." if language == "en" else "Su llamada está confirmada."
+    verdict = await checked(client, visitor, acknowledgment, [receipt])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.template for block in verdict.blocks] == [None, "callback_confirmed"]
 
 
 @pytest.mark.parametrize(("prose", "language", "category"), [

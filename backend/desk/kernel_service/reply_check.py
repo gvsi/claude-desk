@@ -310,28 +310,43 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
+def _claim_spans(pattern: re.Pattern[str], reading: str) -> Iterable[tuple[int, int]]:
+    """A lexicon's claim spans. An optional `claim` group distinguishes a claim from lexical
+    context consumed by another alternative, such as a Spanish call's subject and verb."""
+    group = "claim" if "claim" in pattern.groupindex else 0
+    for match in pattern.finditer(reading):
+        start, end = match.span(group)
+        if end > start:
+            yield start, end
+
+
 def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
     """A `promise_word` (`lex.<lang>.booking` or `lex.<lang>.callback`) for each claim in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
-    such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
-    claim inside a longer one found is that claim, so one claim is one violation."""
+    such a claim in the same category and reading ("cuando tu cita está confirmada" holds
+    "está confirmada"). Containment is reduced within each category; booking and callback
+    matches never suppress each other."""
     found: set[tuple[int, int, str]] = set()
     for reading, origin in readings.items():
-        reach = -1       # the furthest end of a conditioned claim starting at or before this one
-        for start, end, rule_id in sorted((match.start(), match.end(), rule_id)
+        reach: dict[str, int] = {}  # conditioned reach within each category
+        for start, end, rule_id in sorted((start, end, rule_id)
                                           for rule_id, pattern in (*BOOKING_LINES, *CALLBACK_LINES)
-                                          for match in pattern.finditer(reading) if match.end() > match.start()):
-            if _conditioned(text, reading, origin, start):     # the same for every claim starting here
-                reach = max(reach, end)
-            if reach < end:
+                                          for start, end in _claim_spans(pattern, reading)):
+            category = rule_id.rsplit(".", 1)[1]
+            if _conditioned(text, reading, origin, start):
+                reach[category] = max(reach.get(category, -1), end)
+            if reach.get(category, -1) < end:
                 found.add((origin[start], origin[end - 1] + 1, rule_id))
     hits: list[tuple[int, str, Violation]] = []
-    reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
+    reaches: dict[str, int] = {}
+    previous: dict[str, tuple[int, int]] = {}
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
-        if previous is not None and previous != (start, end):
-            reach = max(reach, previous[1])
-        previous = (start, end)
-        if reach < end:
+        category = rule_id.rsplit(".", 1)[1]
+        prior = previous.get(category)
+        if prior is not None and prior != (start, end):
+            reaches[category] = max(reaches.get(category, -1), prior[1])
+        previous[category] = (start, end)
+        if reaches.get(category, -1) < end:
             hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
     return hits
 
@@ -356,8 +371,8 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
     clause checks passed, which says the same: the owner's decision of 2026-10-30). Call claims
     instead pass with `callback_card`, a `callback_confirmed` card those checks passed. Neither
-    card exempts the other category. Overlapping claims are reduced before either exemption, so
-    a call's shorter Spanish verb phrase is part of that call, not a separate booking. A word mixing
+    card exempts the other category. Overlapping claims are reduced only within their own
+    category before either exemption. A word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
     inside one of `names` (the Desk's own names) as it is written there; the canaries of
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
