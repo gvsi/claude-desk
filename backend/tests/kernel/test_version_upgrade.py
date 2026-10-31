@@ -394,7 +394,8 @@ async def test_a_copy_whose_lookup_outlasts_the_budget_is_left_to_the_background
             await hung.wait()                                    # never set: the lookup hangs until it's cut off
         return await discover(*args, **kwargs)
 
-    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.05)
+    # a budget the real listing meets even on a slow runner; the lookup hangs past it all the same
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.5)
     monkeypatch.setattr(activation, "desks_to_bring_up", hanging_once)
     startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
     assert startup == activation.StartupRebuild(results={}, left=[], unscanned=[copy.copy_id])
@@ -742,6 +743,7 @@ async def test_a_desk_row_held_by_an_owner_write_holds_up_no_other_desk(app, cli
         assert await rules_alerts(app, other) == [WAITING_ALERT]      # the other Desk went on meanwhile
         assert await rules_alerts(app, held_copy) == []
         release.set()
+        await writer                     # the write has let go of the row before the next pass, however slow
 
     writer = asyncio.create_task(owner_write())
     await asyncio.wait_for(holding.wait(), timeout=5)
@@ -763,7 +765,7 @@ async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, c
     copy = await rivera(app, client)
     await seed_from_an_earlier_kernel(app, copy)
     await without_new_native_tools(app, copy)
-    holding, release = asyncio.Event(), asyncio.Event()
+    holding, release, served = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def owner_write():
         async with kernel_ctx(app) as ctx:
@@ -773,7 +775,9 @@ async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, c
             await release.wait()
 
     async def waiting(seconds):
+        await served.wait()                                      # the row stays held until the kernel serves
         release.set()
+        monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 10.0)  # once the row goes, a slow runner still finishes
 
     writer = asyncio.create_task(owner_write())
     await asyncio.wait_for(holding.wait(), timeout=5)
@@ -784,6 +788,7 @@ async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, c
         async with started_kernel(frozen_clock, reviewer) as (kernel, _):
             rebuilding = kernel.state.rebuilding
             assert rebuilding is not None and not rebuilding.done()
+            served.set()
             assert await rebuilding == {(copy.desk_id, 1): None}
     await writer
 
