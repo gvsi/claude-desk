@@ -179,6 +179,9 @@ const UNPROVED = {
 
 const FAILED_LINE = "I couldn't answer just now. Your answer is still here; try again.";
 
+/** A business name longer than setup's bar, at any width. */
+const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
 
@@ -1695,6 +1698,29 @@ describe('setup', () => {
       const business = screen.getByText(/^Rivera Plumbing, Heating/).first().element() as HTMLElement;
       expect(business.scrollWidth, `${width}`).toBeGreaterThan(business.clientWidth);
       expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
+      expectNoHorizontalScroll();
+    }
+  });
+
+  it('setup_bar_carries_a_long_business_name_in_full', async () => {
+    // A name too long for the bar is cut with an ellipsis, at a laptop's width and a phone's, and
+    // carries its whole self as its title, so it can still be read in full; nothing scrolls sideways.
+    const state = await startInterview();
+    // The name as the API keeps it, set on the Desk directly rather than read from a description.
+    deskOf(state).summary.business_name = LONG_BUSINESS_NAME;
+    for (const viewport of [
+      { width: 1512, height: 900 },
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      const where = `at ${viewport.width}`;
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const name = screen.getByRole('banner').getByText(LONG_BUSINESS_NAME, { exact: true });
+      await expect.element(name).toBeVisible();
+      const business = name.element() as HTMLElement;
+      expect(business.scrollWidth, where).toBeGreaterThan(business.clientWidth);
+      expect(getComputedStyle(business).textOverflow, where).toBe('ellipsis');
+      expect(business.title, where).toBe(LONG_BUSINESS_NAME);
       expectNoHorizontalScroll();
     }
   });

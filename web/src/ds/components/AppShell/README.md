@@ -13,7 +13,7 @@
 - The page is a `main`, padded 24 px at the top, 40 px at the sides and 20 px at the bottom (16 px at the top and sides on a phone). Its content is at most `size-content` wide, centered.
 - With `fill`, the page takes the whole main area instead: no padding and no content width, so a page with its own columns, such as Conversations' list beside the open conversation, starts where the sidebar ends and runs the window's height. Such a page pads its own columns and draws its own dividers. `fill` changes only the main area, so moving between a padded page and a filled one never restyles the sidebar.
 - The sidebar looks the same on every page, the column above with the Answering switch and the owner at its foot (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar). There is no option to draw it another way.
-- Below 768 px, or with `layout="compact"`, a top bar on the panel replaces the column. It is 56 px high and holds the mark, the business name and a ghost "Menu" button drawn as its icon alone, as the phone boards draw it, its name for screen readers (`aria-expanded`).
+- Below 768 px, or with `layout="compact"`, a top bar on the panel replaces the column. It is 56 px high and holds the mark, the business name and a ghost "Menu" button drawn as its icon alone, as the phone boards draw it, its name for screen readers (`aria-expanded`). A business name too long for the bar is cut with an ellipsis, and its `title` holds it in full, so it can still be read.
 - Only the navigation changes at the breakpoint. The page stays mounted, so resizing the window or turning a phone keeps an unsent draft and the rest of the page's state.
 - Menu opens the sidebar as a modal sheet from the left, with focus inside it, over the page dimmed by `scrim`, as behind `DemoInboxSheet` and `Dialog`. Escape, "Close menu", the dimmed page or going to a page closes it, and focus returns to Menu. Escape inside the sidebar's Desk list closes only the list.
 - The sheet appears in place; nothing slides.
@@ -33,7 +33,7 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `sidebar` | `ReactNode` | Required. |
-| `business` | `string` | Required. Shown in the compact top bar, as written. |
+| `business` | `string` | Required. Shown in the compact top bar, as written, and as its `title`. |
 | `banner` | `ReactNode` | Full width, above everything. |
 | `layout` | `'auto' \| 'compact'` | `auto` (the default) switches to the top bar below 768 px. |
 | `fill` | `boolean` | The page fills the main area, unpadded, for a page with its own columns. The sidebar is unchanged. |

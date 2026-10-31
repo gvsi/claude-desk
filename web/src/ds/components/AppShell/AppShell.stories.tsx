@@ -275,6 +275,53 @@ export const Compact: Story = {
   },
 };
 
+/** A business name longer than a phone's top bar. */
+const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+
+export const PhoneLongName: Story = {
+  args: {
+    business: LONG_BUSINESS_NAME,
+    sidebar: (
+      <Sidebar
+        business={LONG_BUSINESS_NAME}
+        onSwitchBusiness={fn()}
+        desks={[{ id: 'desk-bayview-main', name: rivera.business.deskName }]}
+        currentDeskId="desk-bayview-main"
+        onSwitchDesk={fn()}
+        current="today"
+        hrefs={hrefs}
+        peopleLabel="Customers"
+        answering
+        onAnsweringChange={fn()}
+        owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
+        linkComponent={RouterLink}
+      />
+    ),
+  },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board shows the owner app on a phone; this is the Compact top bar at a phone’s 390 px with a business name too long for it, cut with an ellipsis and carried in full as its title.',
+  },
+  play: async ({ canvas }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
+    const bar = canvas.getByRole('button', { name: 'Menu' }).closest('.cd-app-shell__topbar') as HTMLElement;
+    // long_name_carries_its_title: the name is cut with an ellipsis where it doesn't fit, and its
+    // title holds it in full, so it can still be read.
+    const business = within(bar).getByText(LONG_BUSINESS_NAME);
+    await expect(business).toBeVisible();
+    await expect(business.scrollWidth).toBeGreaterThan(business.clientWidth);
+    expectComputed(business, { textOverflow: 'ellipsis' });
+    await expect(business).toHaveAttribute('title', LONG_BUSINESS_NAME);
+    // Menu keeps its place in the bar, and nothing scrolls sideways.
+    const menu = within(bar).getByRole('button', { name: 'Menu' }).getBoundingClientRect();
+    await expect(business.getBoundingClientRect().right).toBeLessThanOrEqual(menu.left);
+    await expect(menu.right).toBeLessThanOrEqual(window.innerWidth - 16);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
 export const CompactAbout: Story = {
   args: {
     layout: 'compact',

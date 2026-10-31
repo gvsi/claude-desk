@@ -145,7 +145,8 @@ export function SwitcherMenu({ businesses, currentBusinessId, onPick, onNewBusin
                 {initialsOf(business.name)}
               </span>
               <span className="cd-switcher-menu__text">
-                <span className="cd-switcher-menu__name cd-type-control" data-copy="user">
+                {/* A name too long for the row is cut with an ellipsis; its title holds it in full. */}
+                <span className="cd-switcher-menu__name cd-type-control" data-copy="user" title={business.name}>
                   {business.name}
                 </span>
                 <span className="cd-switcher-menu__caption cd-type-caption">{deskCount(business.desks.length)}</span>

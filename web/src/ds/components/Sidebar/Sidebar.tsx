@@ -157,7 +157,8 @@ export function Sidebar({
         aria-label={`Switch business, current: ${business}`}
         onClick={onSwitchBusiness}
       >
-        <span className="cd-sidebar__ellipsis" data-copy="user">
+        {/* A name too long for the row is cut with an ellipsis; its title holds it in full. */}
+        <span className="cd-sidebar__ellipsis" data-copy="user" title={business}>
           {business}
         </span>
         <Icon name="chevrons" size={16} className="cd-sidebar__quiet-icon" />
