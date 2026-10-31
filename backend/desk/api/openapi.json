@@ -8872,7 +8872,7 @@
           "kind"
         ],
         "title": "Handoff",
-        "description": "A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:\n\n- `callback`: a visitor's call-back request. `reason` is \"<name> \u00b7 <contact> \u00b7 <reason>\" as the visitor typed them\n  (untrusted text); `callback_window` is \"<start>/<end>\" in ISO 8601, or None without one.\n- `card`: the kernel's handoff card handed the conversation over (in place of a reply its check blocked, or cited\n  by Claude). `reason` is the kernel's own template (\"The Desk handed this to you.\"), and `callback_window` is\n  None: no call back was promised.\n\nA null window alone can't tell them apart; `kind` does. The card opens none while its session has an open\nhandoff of either kind."
+        "description": "A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:\n\n- `callback`: a visitor's call-back request. `reason` is \"<name> \u00b7 <contact> \u00b7 <reason>\" as the visitor typed them\n  (untrusted text); `callback_window` is \"<start>/<end>\" in ISO 8601, or None without one.\n- `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite\n  fixes). `reason` is the kernel's own template (\"The Desk handed this to you.\"), and `callback_window` is None:\n  no call back was promised.\n\nA null window alone can't tell them apart; `kind` does. None opens in the owner's preview, while a held request\nawaits the owner, or while the session has an open handoff; a call-back request takes over an open card handoff\nunder the same ID, as kind `callback`."
       },
       "Health": {
         "properties": {

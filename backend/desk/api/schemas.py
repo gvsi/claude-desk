@@ -335,12 +335,13 @@ class Handoff(BaseModel):
 
     - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
       (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
-    - `card`: the kernel's handoff card handed the conversation over (in place of a reply its check blocked, or cited
-      by Claude). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is
-      None: no call back was promised.
+    - `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite
+      fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
+      no call back was promised.
 
-    A null window alone can't tell them apart; `kind` does. The card opens none while its session has an open
-    handoff of either kind."""
+    A null window alone can't tell them apart; `kind` does. None opens in the owner's preview, while a held request
+    awaits the owner, or while the session has an open handoff; a call-back request takes over an open card handoff
+    under the same ID, as kind `callback`."""
 
     handoff_id: str
     session_id: str
