@@ -4,12 +4,13 @@
  * real situations, the safety check, the confirm with Answering still off, the owner's preview and
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
+import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
@@ -264,7 +265,8 @@ describe('setup', () => {
 
   it('start_left_while_under_way_stays_left', async () => {
     // The owner leaves with "Save and exit" while a retry of a start under way is in flight. The
-    // retry then makes the interview, and the page, gone, takes nobody back into setup.
+    // retry then makes the interview, and the page, gone, neither keeps it nor takes anybody back
+    // into setup.
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -284,10 +286,25 @@ describe('setup', () => {
     await expect.poll(() => posts).toBe(2);
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+
+    // The retry's answer, read: `request()` reports its success just before the page's own code
+    // after it runs, so the test wakes first, then lets that code run (every microtask queued before
+    // a task boundary has run by it) before looking.
+    const answered = new Promise<void>((resolve) => {
+      const stop = observeRequests((outcome) => {
+        if (outcome.key !== 'startSetup' || !outcome.ok) return;
+        stop();
+        resolve();
+      });
+      onTestFinished(stop);
+    });
+    const cached = vi.spyOn(QueryClient.prototype, 'setQueryData');
+    onTestFinished(() => cached.mockRestore());
     release();
-    await expect.poll(() => requests('startSetup').length).toBe(2);
-    // Long enough for the retry's answer to reach the page and be acted on, had it been.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await answered;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(requests('startSetup')).toHaveLength(2);
+    expect(cached.mock.calls.filter(([key]) => Array.isArray(key) && key[0] === 'setup')).toEqual([]);
     expect(router.state.location.pathname).not.toMatch(/^\/app\/setup/);
   });
 
