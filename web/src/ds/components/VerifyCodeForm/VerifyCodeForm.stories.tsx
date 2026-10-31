@@ -91,7 +91,9 @@ export const Idle: Story = {
     const confirm = canvas.getByRole('button', { name: 'Confirm' });
     await expect(field).toHaveAttribute('inputmode', 'numeric');
     await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
-    await expect(field).toHaveAttribute('maxlength', '6');
+    // No character limit of the browser's, which would cut a code before its spaces are dropped:
+    // the form keeps six digits itself (pastes_spaced_code, below).
+    await expect(field).not.toHaveAttribute('maxlength');
     await expect(field).toHaveValue('');
 
     // The board's parts: the label above a main-height field, and Confirm beside it on the same
@@ -147,6 +149,23 @@ export const Idle: Story = {
     await userEvent.click(field);
     await userEvent.paste('Code: 615 204.');
     await expect(field).toHaveValue('615204');
+    await userEvent.clear(field);
+    // pastes_spaced_code: a code written with spaces or a dash keeps all six digits, as a paste or
+    // as one insertion with no paste event, the way a phone keyboard's clipboard suggestion, a
+    // dropped text or a filling tool brings it in. Still six digits at most.
+    for (const spaced of ['482 913', '48 29 13', '482-913']) {
+      await userEvent.click(field);
+      await userEvent.paste(spaced);
+      await expect(field).toHaveValue('482913');
+      await userEvent.clear(field);
+      field.focus();
+      document.execCommand('insertText', false, spaced);
+      await expect(field).toHaveValue('482913');
+      await userEvent.clear(field);
+    }
+    field.focus();
+    document.execCommand('insertText', false, '48 29 13 77');
+    await expect(field).toHaveValue('482913');
     await userEvent.clear(field);
     await expect(args.onSubmit).not.toHaveBeenCalled();
 

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -15,7 +15,10 @@ const WHOLE_CODE = /^[0-9]{6}$/;
 
 /**
  * The digits in some text, at most six: letters, spaces and dashes are dropped, and full-width
- * digits, which some keyboards type, count as the digits they are.
+ * digits, which some keyboards type, count as the digits they are. This is the field's only limit:
+ * a `maxlength` would let the browser cut a code at six characters before its spaces or dash are
+ * dropped, so "48 29 13" brought in by a keyboard's clipboard suggestion or a drop would keep
+ * four digits.
  */
 function digitsOf(text: string): string {
   return text.normalize('NFKC').replace(/[^0-9]/g, '').slice(0, CODE_LENGTH);
@@ -77,17 +80,6 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
     setCode(digitsOf(next));
   };
 
-  // The browser would cut a paste at six characters before dropping what isn't a digit, so
-  // "482 913" would lose its last digit. The form takes the digits of the paste itself, in place of
-  // whatever was selected.
-  const paste = (event: ClipboardEvent<HTMLInputElement>) => {
-    event.preventDefault();
-    const input = event.currentTarget;
-    const start = input.selectionStart ?? code.length;
-    const end = input.selectionEnd ?? code.length;
-    change(code.slice(0, start) + event.clipboardData.getData('text') + code.slice(end));
-  };
-
   return (
     <form className="cd-verify-code" lang={language} aria-busy={checking || undefined} noValidate onSubmit={submit}>
       <div className="cd-verify-code__entry">
@@ -102,12 +94,10 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
             type="text"
             inputMode="numeric"
             autoComplete="one-time-code"
-            maxLength={CODE_LENGTH}
             value={code}
             aria-invalid={failed || undefined}
             aria-describedby={failed ? failedId : undefined}
             onChange={(event) => change(event.target.value)}
-            onPaste={paste}
           />
           {/* Busy keeps the words and the focus: the button stays focusable but inert. */}
           <Button variant="primary" size="main" type="submit" disabled={!whole && !checking} busy={checking}>
