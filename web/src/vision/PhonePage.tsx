@@ -54,7 +54,7 @@ function OwnerPhone() {
     <PhoneFrame caption={PHONE_PAGE.ownerCaption}>
       <div className="cd-vision-phone__screen">
         <div>
-          <p className="cd-vision-quiet cd-type-caption">{PHONE_TODAY.business}</p>
+          <p className="cd-vision-phone__business cd-vision-quiet cd-type-caption">{PHONE_TODAY.business}</p>
           <h2 className="cd-type-greeting cd-vision-phone__greeting">{PHONE_TODAY.greeting}</h2>
         </div>
         {/* A vision page sends nothing: the answers keep their look and do nothing. */}

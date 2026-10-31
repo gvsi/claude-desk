@@ -288,6 +288,8 @@ describe('Vision pages', () => {
     const heldLine = held.getByText(VISION_INERT_LINE, { exact: true });
     await expect.element(heldLine).toBeVisible();
     expect(heldLine.element().getAttribute('role')).toBe('status');
+    // 8 px under the answers' row, as the story measures it.
+    expect(round(top(heldLine.element()) - bottom(one(held.element(), '.cd-approval-card__row')))).toBe(8);
     await deny.click();
     await wait(300);
     expect(held.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(1);
@@ -796,6 +798,15 @@ describe('Vision pages against their boards', () => {
     await expect.element(held.getByRole('button', { name: 'Allow this time' })).toBeVisible();
     await expect.element(held.getByRole('button', { name: 'Deny this time' })).toBeVisible();
     await expect.element(held.getByText('Web chat, 2 min ago', { exact: true })).toBeVisible();
+    // The page sets only its own lines: the greeting 2 px under the business's name, and the held
+    // quote with the card's own spacing, its reason 12 px under the status line and "Held by" 14 px
+    // under the reason.
+    const businessName = owner.getByText('Rivera Plumbing', { exact: true }).element();
+    const greeting = owner.getByRole('heading', { level: 2, name: 'Good morning, Maria' }).element();
+    expect(round(top(greeting) - bottom(businessName))).toBe(2);
+    const reason = one(held.element(), '.cd-approval-card__reason');
+    expect(round(top(reason) - bottom(one(held.element(), '.cd-approval-card__top')))).toBe(12);
+    expect(round(top(one(held.element(), '.cd-approval-card__held-by')) - bottom(reason))).toBe(14);
     const live = owner.getByRole('region', { name: 'Live now' });
     expect(live.getByRole('listitem').elements().map((row) => row.textContent)).toEqual(['Lucía HerreraVisitor', 'Alex Kim’s assistantAgent']);
     const tabs = owner.getByRole('navigation', { name: "The owner app's tabs" }).getByRole('link').elements();
