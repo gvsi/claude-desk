@@ -10540,6 +10540,18 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event."
           }
         },
         "type": "object",
@@ -12758,6 +12770,18 @@
           "reason_plain": {
             "type": "string",
             "title": "Reason Plain"
+          },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."
           },
           "created_at": {
             "type": "string",

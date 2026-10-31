@@ -51,7 +51,23 @@ from desk.api.schemas import (
 )
 from desk.api.setup import INTERVIEWS
 from desk.api.store import MESSAGES, triaged
-from desk.contracts import Decision
+from desk.contracts import Decision, DecisionState
+
+
+async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state: DecisionState,
+                         ledger_seq: int) -> str | None:
+    """Read the owner-only reason for a copy-scoped status, never from a visitor-readable stored row.
+
+    Match the exact state and ledger entry being displayed, so a later read cannot annotate an older status.
+    The caller has already scoped the session or decision row to the owner's Desks.
+    """
+    if state != "refused_at_execution":
+        return None
+    decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": decision_id})
+    if (decision.decision_id, decision.session_id, decision.state, decision.ledger_seq) != (
+            decision_id, session_id, state, ledger_seq):
+        return None
+    return decision.owner_plain
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
 OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity

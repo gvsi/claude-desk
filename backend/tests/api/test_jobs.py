@@ -266,6 +266,26 @@ async def test_resume_drops_a_snapshot_that_isnt_approved(copy, engine, caplog):
     assert snapshot.visitor_plain not in caplog.text
 
 
+async def test_direct_resume_clears_the_owner_reason(copy, engine, monkeypatch):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-private-reason", discount_bp=1500)
+    copy.fake.never(caller.desk_id, "native.quote")
+    refused = await copy.answer(held)
+    assert refused.owner_plain
+    seen = []
+    deliver = jobs.deliver
+
+    async def checked(conn, ids, item):
+        seen.append(item.decision.owner_plain)
+        return await deliver(conn, ids, item)
+
+    monkeypatch.setattr(jobs, "deliver", checked)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, refused)
+    assert seen == [None]
+    assert refused.owner_plain
+
+
 async def test_a_late_resume_job_never_shows_an_older_state(copy, engine, fake, monkeypatch):
     """A resume job that runs late (retried after a deploy, or slow to start) can carry a state the kernel has since
     moved past, which the visitor's next request already showed. It shows nothing: no older status, no action

@@ -180,6 +180,9 @@ class OwnerTranscriptItem(TranscriptItem):
     owner_translation: str | None
     triage: Triage | None
     stopped_draft: StoppedDraft | None
+    owner_plain: str | None = Field(default=None, description=(
+        "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; "
+        "never part of the stored or signed visitor event."))
 
 
 # The visitor's chat (Task 7) ---------------------------------------------------------------------------------
@@ -1042,6 +1045,8 @@ class ToolDecisionRow(BaseModel):
     outcome: Outcome
     state: DecisionState
     reason_plain: str
+    owner_plain: str | None = Field(default=None, description=(
+        "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."))
     created_at: AwareDatetime
     ledger_seq: int
     replayed: bool

@@ -613,6 +613,10 @@ export interface OwnerTranscriptItem {
   owner_translation: string | null;
   triage: Triage | null;
   stopped_draft: StoppedDraft | null;
+  /**
+   * Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event.
+   */
+  owner_plain?: string | null;
 }
 /**
  * A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
@@ -1001,6 +1005,10 @@ export interface ToolDecisionRow {
     | "unknown"
     | "refused_at_execution";
   reason_plain: string;
+  /**
+   * Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise.
+   */
+  owner_plain?: string | null;
   created_at: string;
   ledger_seq: number;
   replayed: boolean;

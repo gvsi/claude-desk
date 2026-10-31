@@ -201,7 +201,8 @@ async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model
     approved = jobs[0]["args"]["approved"]
     assert (approved["decision_id"], approved["state"]) == (held.decision_id, "approved")
     assert jobs[0]["args"] == {"copy_id": session.copy_id, "desk_id": session.desk_id, "session_id": held.session_id,
-                               "decision": first.json()["decision"], "approved": approved}
+                               "decision": {key: value for key, value in first.json()["decision"].items()
+                                            if key != "owner_plain"}, "approved": approved}
     before = await sse_events(engine, held.session_id)
     async with engine.connect() as conn:
         messages_before = (await conn.execute(text("SELECT count(*) FROM app.messages WHERE session_id = :s"),
@@ -297,6 +298,110 @@ async def test_answer_without_an_approved_snapshot_shows_only_the_outcome(app, b
             in json.dumps(model.requests[1].messages))
     assert not [fact for fact in fake.desks[fake.sessions[held.session_id].desk_id].facts.values()
                 if fact.kind == "quote" and f"session:{held.session_id}" in fact.label.readers]   # nothing ran
+
+
+async def test_refusal_reason_stays_on_owner_reads(app, browser, fake, kernel_http, model, engine, jobs_connector):
+    held = await held_request(app, browser, fake, kernel_http, model)
+    fake.never(fake.sessions[held.session_id].desk_id, "native.quote")
+    model.add(response(reply("That request couldn't go ahead. Can I help with something else?")))
+
+    answered = await answer(held, "allow_once")
+    assert answered.status_code == 200, answered.text
+    decision = answered.json()["decision"]
+    owner_line = fake.decisions[held.decision_id].decision.owner_plain
+    assert owner_line and decision["state"] == "refused_at_execution"
+    assert decision["owner_plain"] == owner_line
+    read = await held.owner.get(f"/api/owner/decisions/{held.decision_id}")
+    assert read.status_code == 200 and read.json()["owner_plain"] == owner_line
+
+    (job,) = await resume_jobs(jobs_connector)
+    assert owner_line not in json.dumps(job["args"])
+    assert "owner_plain" not in json.dumps(job["args"])
+    assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
+    visitor_read = await kernel_http.session(held.token).call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert visitor_read.owner_plain is None and owner_line not in visitor_read.model_dump_json()
+
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        events = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    transcript = await held.visitor.get(f"/api/public/desks/{held.slug}/session")
+    assert transcript.status_code == 200
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"),
+            {"s": held.session_id})).scalars().all()
+        updates = (await conn.execute(text(
+            "SELECT text FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
+            {"s": held.session_id})).scalars().all()
+    assert updates == [decision["visitor_plain"]]
+    for serialized in (transcript.text, json.dumps([event.model_dump(mode="json") for _, event in events]),
+                       json.dumps(rows), json.dumps(model.requests[-1].messages)):
+        assert owner_line not in serialized
+        assert "owner_plain" not in serialized
+
+
+@pytest.mark.parametrize("path", ["queued", "fallback", "lost_answer", "conflict"])
+async def test_owner_reason_is_cleared_before_resume_crossings(app, browser, fake, kernel_http, model, engine,
+                                                              jobs_connector, monkeypatch, path):
+    from desk.api import jobs
+    from desk.api.routes import owner
+
+    held = await held_request(app, browser, fake, kernel_http, model)
+    fake.never(fake.sessions[held.session_id].desk_id, "native.quote")
+    if path == "lost_answer":
+        fake.drop_response("POST /approvals/{decision_id}/answer")
+    elif path == "conflict":
+        await kernel_http.owner(held.owner_token).call(
+            "POST /approvals/{decision_id}/answer", owner.AnswerRequest(answer="allow_once"),
+            path={"decision_id": held.decision_id})
+    deferred, delivered = [], []
+    defer, deliver = owner.defer_resume_after_answer, jobs.deliver
+
+    async def defer_seen(app, ids, decision, approved=None):
+        deferred.append(decision.owner_plain)
+        if path == "fallback":
+            raise ConnectorException("queue unavailable")
+        await defer(app, ids, decision, approved)
+
+    async def deliver_seen(conn, ids, item, **kwargs):
+        delivered.append(item.decision.owner_plain)
+        return await deliver(conn, ids, item, **kwargs)
+
+    monkeypatch.setattr(owner, "defer_resume_after_answer", defer_seen)
+    monkeypatch.setattr(jobs, "deliver", deliver_seen)
+    answered = await answer(held, "allow_once")
+    assert answered.status_code == (409 if path in {"lost_answer", "conflict"} else 200), answered.text
+    owner_line = answered.json()["decision"]["owner_plain"]
+    assert owner_line
+    await resolved(engine, held.session_id)
+    await jobs_done(jobs_connector)
+    assert deferred == [None]
+    assert delivered == [None]
+    assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
+
+
+async def test_owner_status_and_tool_history_include_refusal_reason(app, browser, fake, kernel_http, model, engine):
+    held = await held_request(app, browser, fake, kernel_http, model)
+    desk_id = fake.sessions[held.session_id].desk_id
+    fake.never(desk_id, "native.quote")
+    answered = await answer(held, "allow_once")
+    assert answered.status_code == 200
+    owner_line = answered.json()["decision"]["owner_plain"]
+    assert owner_line
+    await resolved(engine, held.session_id)
+
+    history = await held.owner.get(f"/api/owner/conversations/{held.session_id}")
+    assert history.status_code == 200, history.text
+    statuses = [item for item in history.json()["items"] if item["kind"] == "status"]
+    assert [(item["event"]["state"], item.get("owner_plain")) for item in statuses] == [
+        ("held", None), ("refused_at_execution", owner_line)]
+    assert all("owner_plain" not in item["event"] for item in statuses)
+    tools = await held.owner.get(f"/api/owner/desks/{desk_id}/tools/native.quote/decisions")
+    assert tools.status_code == 200, tools.text
+    (row,) = [row for row in tools.json()["items"] if row["decision_id"] == held.decision_id]
+    assert row["owner_plain"] == owner_line
+    assert all(row["owner_plain"] is None for row in tools.json()["items"] if row["state"] != "refused_at_execution")
 
 
 async def test_lost_answer_response_still_resumes(app, browser, fake, kernel_http, model, engine, jobs_connector):

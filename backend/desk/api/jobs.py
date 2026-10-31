@@ -8,9 +8,9 @@ next message.
 
 - `resume_after_answer(copy_id, desk_id, session_id, decision, approved=None)`, deferred once the owner answered a
   held request: in one transaction, the optional signed `approved` snapshot as a `receipt`, then the signed outcome
-  as `resolved`; only the outcome adds an `action_update` row that wakes Claude and a `run_resumable` control row,
-  which the visitor's next request handles by running
-  Claude's follow-up with the visitor's credential. A decision whose outcome may still change (an `unknown`
+  as `resolved`, each with its owner-only reason stripped and its signed fields unchanged. Only the outcome adds
+  an `action_update` row that wakes Claude and a `run_resumable` control row, which the visitor's next request handles
+  by running Claude's follow-up with the visitor's credential. A decision whose outcome may still change (an `unknown`
   execution) also leaves a `decision_pending` row, so its final state is shown once it has one. Idempotent: a
   state already shown writes nothing, so a repeated or retried job, or a status another path showed first, adds
   nothing. Nor does a job that runs late, once a later state of its decision is shown (the visitor's next request
@@ -59,7 +59,7 @@ from procrastinate.manager import JobManager
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock
+from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock, visitor_safe
 from desk.api.model import ModelClient
 from desk.api.ratelimit import RateLimited, RateLimiter, RateLimitLedger
 from desk.api.ro import KERNEL_RO, due_decisions
@@ -186,12 +186,15 @@ async def _keep_running(app: procrastinate.App, env: JobEnv, name: str, options:
 
 async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: Decision,
                                     approved: Decision | None = None) -> None:
-    """Leave the owner's answer for the resume job: IDs, the signed outcome and its optional approved snapshot."""
+    """Queue IDs, the signed outcome and its optional approved snapshot, excluding the owner-only reason and key."""
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     await app.configure_task(RESUME_AFTER_ANSWER).defer_async(
-        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, decision=decision.model_dump(mode="json"),
-        approved=approved.model_dump(mode="json") if approved is not None else None)
+        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id,
+        decision=decision.model_dump(mode="json", exclude={"owner_plain"}),
+        approved=approved.model_dump(mode="json", exclude={"owner_plain"}) if approved is not None else None)
 
 
 async def defer_triage(app: procrastinate.App, ids: Ids, stopped: Stopped) -> None:
@@ -276,6 +279,8 @@ async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decisio
         approved = None
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     await conn.commit()                                    # a READ COMMITTED transaction of its own, for deliver()
     try:
         await run_lock(conn, ids.session_id)               # what the session shows can't change until this commits

@@ -20,7 +20,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
-from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
@@ -462,7 +462,12 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     state = SessionState(session_id=session_id, kind=session["kind"], verified=session["verified"],
                          assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
     process = runtime(request)
-    return OwnerTranscript(state=state, items=await transcript(ctx.ro.conn, ids, "owner", after),
+    items = await transcript(ctx.ro.conn, ids, "owner", after)
+    for item in items:
+        if item.kind == "status" and item.event is not None:
+            item.owner_plain = await owner_reads.refusal_reason(
+                ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq)
+    return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
 
 
@@ -583,6 +588,7 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
 
 async def _remember_approval(ctx: OwnerCtx, decision: Decision) -> None:
     """Keep an in-flight approval readable even when its answer's response and resume job were lost."""
+    decision = visitor_safe(decision)
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")
@@ -611,6 +617,8 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: D
     records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
     only the outcome waking Claude. If that fails too, the answer still stands, and the due-decisions job surfaces
     the outcome once it is final."""
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")
