@@ -1937,7 +1937,14 @@ describe('setup', () => {
     const slow = new Promise<void>((resolve) => {
       land = resolve;
     });
-    mockStore.inject({ route: 'desks', status: 200, until: slow, body: withAnswering(before.body as BusinessOut[], second.desk_id, true) });
+    // Every read of them is slow: the step's own, and the one the app sends as any go-live settles.
+    mockStore.inject({
+      route: 'desks',
+      status: 200,
+      times: 10_000,
+      until: slow,
+      body: withAnswering(before.body as BusinessOut[], second.desk_id, true),
+    });
     mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
     const from = mockStore.requests.length;
     await page2.getByRole('button', { name: 'Go live' }).click();
