@@ -152,6 +152,8 @@ export const Phone: Story = {
     const box = sheet.getBoundingClientRect();
     await expect([box.left, box.top, box.width, box.height]).toEqual([0, 0, 390, window.innerHeight]);
     expectComputed(sheet, { borderLeftWidth: '0px' });
+    // The whole window, so no scrim.
+    await expect(getComputedStyle(sheet, '::before').content).toBe('none');
 
     // Focus moves in, to the composer; the page behind is inert.
     const composer = within(sheet).getByRole('textbox', { name: 'Ask Claude' });
@@ -197,7 +199,7 @@ export const Tablet: Story = {
   render: (args) => <RulesScreen {...args} />,
   parameters: {
     canvasNote:
-      'No board draws the panel on a tablet. At 768 px the sidebar’s column and the panel would leave the page 104 px, so under 1024 px the panel is the same modal sheet as on a phone, over the whole window, with the sidebar’s column and the page behind it inert.',
+      'No board draws the panel on a tablet. At 768 px the sidebar’s column and the panel would leave the page 104 px, so under 1024 px the panel is a modal sheet, as on a phone; from 640 px it keeps its 400 px, docked at the window’s right edge over the scrim, with the sidebar’s column and the page behind it inert.',
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const width = window.innerWidth;
@@ -205,12 +207,18 @@ export const Tablet: Story = {
     const opener = canvas.getByRole('button', { name: OPENER });
     await userEvent.click(opener);
 
-    // tablet_gets_the_sheet: a modal sheet over the whole window, as on a phone.
+    // tablet_gets_a_docked_sheet: a modal sheet, the panel's own 400 px with its padding and seam,
+    // flush with the window's right edge at its full height.
     const sheet = canvas.getByRole('dialog', { name: 'Ask Claude' });
     await expect(sheet).toHaveAttribute('aria-modal', 'true');
     const box = sheet.getBoundingClientRect();
-    await expect([box.left, box.top, box.width, box.height]).toEqual([0, 0, width, window.innerHeight]);
-    expectComputed(sheet, { borderLeftWidth: '0px', paddingLeft: '16px' });
+    await expect([box.left, box.top, box.width, box.height]).toEqual([width - 400, 0, 400, window.innerHeight]);
+    expectComputed(sheet, { borderLeftWidth: '1px', paddingLeft: '24px', backgroundColor: 'rgb(34, 34, 32)' });
+    // The scrim covers the rest of the window, at the token's half-black: any point left of the
+    // panel lands on the panel's own backdrop, not on the inert page.
+    const scrim = getComputedStyle(sheet, '::before');
+    await expect([scrim.backgroundColor, scrim.position, scrim.left, scrim.right]).toEqual(['rgba(0, 0, 0, 0.5)', 'fixed', '0px', '400px']);
+    await expect(document.elementFromPoint(10, window.innerHeight / 2)).toBe(sheet);
     await expect(within(sheet).getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
 
     // The sidebar's column shows at this width, and it is inert behind the sheet, as the page is.

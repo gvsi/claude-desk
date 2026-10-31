@@ -20,8 +20,9 @@ export interface AskClaudePanelProps {
 }
 
 /**
- * Below this width the panel is a modal sheet over the whole window, as AskClaudePanel.css draws it:
- * beside the sidebar's column (264 px) and the panel (400 px), the page would have under 360 px.
+ * Below this width the panel is a modal sheet, as AskClaudePanel.css draws it (docked at the right
+ * over the scrim, or the whole window on a phone): beside the sidebar's column (264 px) and the
+ * panel (400 px), the page would have under 360 px.
  */
 const NARROW = '(max-width: 1023.98px)';
 
@@ -101,10 +102,10 @@ function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean
 /**
  * The owner's conversation with Claude about rules and connectors: a header with "Close", the
  * conversation in a polite log, and a composer at the bottom. Beside the page it is a complementary
- * panel; under 1024 px, where the page beside it would be under 360 px wide, it is a modal sheet over
- * the whole window. Render it as `AppShell`'s `panel`, so the shell can make the rest of the app
- * inert while it is a sheet. Nothing changes from here: Claude's cards lead into the same reviews as
- * the page.
+ * panel; under 1024 px, where the page beside it would be under 360 px wide, it is a modal sheet,
+ * docked at the window's right edge over the scrim, or over the whole window under 640 px. Render it
+ * as `AppShell`'s `panel`, so the shell can make the rest of the app inert while it is a sheet.
+ * Nothing changes from here: Claude's cards lead into the same reviews as the page.
  */
 export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskClaudePanelProps) {
   const headingId = useId();

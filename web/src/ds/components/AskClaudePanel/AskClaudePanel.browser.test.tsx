@@ -1,9 +1,10 @@
 /**
  * The Ask Claude panel beside the Rules page, as the signed board draws it (N-Conn-12-Chat), across
- * its breakpoint. Under 1024 px, where the page beside it would be under 360 px wide, it is a modal
+ * its breakpoints. Under 1024 px, where the page beside it would be under 360 px wide, it is a modal
  * sheet: whatever the app draws behind it, the sidebar's column or the top bar that replaces it,
- * stays out of reach until the sheet goes or the window widens again. The sheet's keyboard walk
- * holds at an upright tablet and at the narrowest phone, 320 px.
+ * stays out of reach until the sheet goes or the window widens again. From 640 px it keeps the
+ * panel's 400 px, docked at the right over the scrim; under 640 px it is the whole window. The
+ * sheet's keyboard walk holds at an upright tablet and at the narrowest phone, 320 px.
  */
 import { composeStories } from '@storybook/react-vite';
 import { act } from 'react';
@@ -34,6 +35,10 @@ const TABLET = { width: 768, height: 1024 };
 const BESIDE = 1024;
 /** The narrowest the page beside the panel may be. */
 const PAGE_MIN = 360;
+/** The panel's own width, `size-side-panel`. */
+const PANEL = 400;
+/** The `scrim` token. */
+const SCRIM = 'rgba(0, 0, 0, 0.5)';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -84,6 +89,37 @@ function expectNoSidewaysScroll(width: number): void {
   expect(main.scrollWidth, `${width} px: the page doesn't scroll sideways`).toBeLessThanOrEqual(main.clientWidth);
 }
 
+/**
+ * From 640 px to 1023 px: the sheet is the panel's own 400 px, flush with the window's right edge at
+ * its full height, and the scrim covers the rest of the window. The scrim is the panel's own
+ * backdrop, so any point left of the panel lands on the panel; the page behind is inert.
+ */
+function expectDockedOverTheScrim(width: number, height: number): void {
+  const box = panel().getBoundingClientRect();
+  expect([box.left, box.top, box.width, box.height], `${width} px: 400 px, flush right, full height`).toEqual([width - PANEL, 0, PANEL, height]);
+  const scrim = getComputedStyle(panel(), '::before');
+  expect(scrim.backgroundColor, `${width} px: the scrim`).toBe(SCRIM);
+  expect([scrim.position, scrim.top, scrim.left, scrim.bottom, scrim.right], `${width} px: the scrim covers the rest of the window`).toEqual([
+    'fixed',
+    '0px',
+    '0px',
+    '0px',
+    `${PANEL}px`,
+  ]);
+  for (const [x, y] of [
+    [1, 1],
+    [width - PANEL - 1, height / 2],
+    [1, height - 1],
+  ] as const) {
+    expect(document.elementFromPoint(x, y), `${width} px: the scrim at ${x}, ${y}`).toBe(panel());
+  }
+}
+
+/** No scrim: beside the page, and as the phone's whole-window sheet. */
+function expectNoScrim(width: number): void {
+  expect(getComputedStyle(panel(), '::before').content, `${width} px: no scrim`).toBe('none');
+}
+
 /** The sheet is modal: nothing behind it takes focus, by Tab or from a script, and Tab stays in it. */
 async function expectModal(controls: HTMLElement[] = behind()): Promise<void> {
   await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
@@ -109,14 +145,19 @@ it('ask_claude_sheet_keeps_the_page_inert_across_the_breakpoint', async () => {
   expect(panel().getAttribute('role')).toBe('complementary');
   expect(container.querySelector('[inert]')).toBeNull();
 
-  // Down to a phone: the top bar replaces the sidebar behind the sheet, and stays out of reach.
+  // Down to a phone: the top bar replaces the sidebar behind the sheet, and stays out of reach. Under
+  // 640 px the sheet is the whole window, with no scrim.
   await page.viewport(PHONE.width, PHONE.height);
   await vi.waitFor(() => expect(container.querySelector('.cd-app-shell__menu')).not.toBeNull());
   await expectModal();
+  const phone = panel().getBoundingClientRect();
+  expect([phone.left, phone.top, phone.width, phone.height], 'the whole window').toEqual([0, 0, PHONE.width, PHONE.height]);
+  expectNoScrim(PHONE.width);
 
   // And to the narrowest phone.
   await page.viewport(NARROWEST.width, NARROWEST.height);
   await expectModal();
+  expectNoScrim(NARROWEST.width);
 });
 
 it('leaving_the_phone_lifts_the_inert_page', async () => {
@@ -139,7 +180,8 @@ it('leaving_the_phone_lifts_the_inert_page', async () => {
 
 it('ask_claude_is_a_sheet_while_the_page_beside_it_would_be_under_360_px', async () => {
   // At an upright tablet the sidebar's column (264 px) and the panel (400 px) would leave the page
-  // 104 px; just under 1024 px, 359 px. Both get the sheet. At 1024 px the page has its 360 px.
+  // 104 px; just under 1024 px, 359 px. Both get the sheet, docked at the right over the scrim. At
+  // 1024 px the page has its 360 px.
   await page.viewport(TABLET.width, TABLET.height);
   act(() => root.render(<AskClaude />));
   const widths = [
@@ -155,18 +197,18 @@ it('ask_claude_is_a_sheet_while_the_page_beside_it_would_be_under_360_px', async
     const main = container.querySelector<HTMLElement>('main');
     if (!main) throw new Error('No main');
     if (role === 'dialog') {
-      // A modal sheet over the whole window, focus inside, and the shell behind it inert.
+      // A modal sheet, 400 px at the right over the scrim, focus inside, and the shell behind it inert.
       expect(panel().getAttribute('aria-modal'), `${width} px`).toBe('true');
-      const box = panel().getBoundingClientRect();
-      expect([box.left, box.top, box.width, box.height], `${width} px: the whole window`).toEqual([0, 0, width, TABLET.height]);
+      expectDockedOverTheScrim(width, TABLET.height);
       expect(panel().contains(document.activeElement), `${width} px: focus is in the sheet`).toBe(true);
       expect(main.closest('[inert]'), `${width} px: the page is inert`).not.toBeNull();
       expect(container.querySelector('.cd-app-shell__column')?.closest('[inert]'), `${width} px: the sidebar is inert`).not.toBeNull();
     } else {
       // Beside the page, which keeps its 360 px, and nothing is inert.
       expect(panel().hasAttribute('aria-modal'), `${width} px`).toBe(false);
-      expect(panel().getBoundingClientRect().width, `${width} px: the panel`).toBe(400);
+      expect(panel().getBoundingClientRect().width, `${width} px: the panel`).toBe(PANEL);
       expect(main.getBoundingClientRect().width, `${width} px: the page beside it`).toBeGreaterThanOrEqual(PAGE_MIN);
+      expectNoScrim(width);
       expect(container.querySelector('[inert]'), `${width} px: nothing is inert`).toBeNull();
     }
     expectNoSidewaysScroll(width);
