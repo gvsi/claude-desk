@@ -89,6 +89,8 @@ export function StartStep() {
     for (let retries = 0; ; retries += 1) {
       try {
         const state = await request('startSetup', { body: { ...attempt.body, idempotency_key: attempt.key } });
+        // The owner left meanwhile: the interview is theirs to open from their Desks, not to be taken back to.
+        if (signal.aborted) return;
         queryClient.setQueryData(['setup', state.interview_id], state);
         void navigate(`/app/setup/${encodeURIComponent(state.interview_id)}`);
         return;

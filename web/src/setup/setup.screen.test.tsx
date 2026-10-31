@@ -4,6 +4,7 @@
  * real situations, the safety check, the confirm with Answering still off, the owner's preview and
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
+import { http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -14,6 +15,7 @@ import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
+import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -258,6 +260,35 @@ describe('setup', () => {
     expect(sent).toHaveLength(3);
     expect(new Set(sent.map((body) => JSON.stringify(body))).size).toBe(1);
     expect(mockStore.world.desks.length).toBe(desks + 1);
+  });
+
+  it('start_left_while_under_way_stays_left', async () => {
+    // The owner leaves with "Save and exit" while a retry of a start under way is in flight. The
+    // retry then makes the interview, and the page, gone, takes nobody back into setup.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let posts = 0;
+    worker.use(
+      http.post('/api/owner/setup', async () => {
+        posts += 1;
+        if (posts === 2) await gate;
+        return undefined;
+      }),
+    );
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    const { screen, router } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(() => posts).toBe(2);
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+    release();
+    await expect.poll(() => requests('startSetup').length).toBe(2);
+    // Long enough for the retry's answer to reach the page and be acted on, had it been.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).not.toMatch(/^\/app\/setup/);
   });
 
   it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
