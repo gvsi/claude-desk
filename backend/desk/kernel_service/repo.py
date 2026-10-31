@@ -52,8 +52,9 @@ asks for a Desk or business row.
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,
 and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `execute`, T3
-`on_failed`, reconciliation `reconcile` and then `on_failed`, activation its `ON_ACTIVATE`
-hooks), so a hook may wait for the rows it locks like any other step. An insert under a fresh key
+`on_failed`, reconciliation `reconcile` and then `on_failed`, or `on_failed` alone when it
+refuses a private action whose session no longer stands, activation its `ON_ACTIVATE` hooks), so
+a hook may wait for the rows it locks like any other step. An insert under a fresh key
 waits for nothing, so it may come after a later step: T1 and an approved answer run `prepare`
 (step 10) before they insert the intent row (step 3), since a new `action_id` could wait only on
 another uncommitted insert of the same action, which the decision's lock (step 2) rules out, and

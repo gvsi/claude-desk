@@ -868,22 +868,27 @@ async def _hold_session_for(ctx: KernelCtx, decision_id: str) -> bool:
 async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execution, ended: str, *,
                                orphaned: bool) -> bool:
     """A private action's outcome, recovered once its session no longer stands for its person: the
-    adapter isn't asked. An intent is first `unknown` (ledgered as orphaned); then, once `on_failed`
-    has run, the action is `refused_at_execution` with the plain reason `ended` and nothing in its
-    result, ledgered as reconciled. If `on_failed` fails, what `prepare` reserved may stand, so it
-    stays `unknown` for the next try."""
+    adapter isn't asked. `on_failed` runs first, before anything is ledgered, so the rows it locks
+    come before the ledger head (`repo.py`). Then the record: an intent is `unknown` (ledgered as
+    orphaned), then the action is `refused_at_execution` with the plain reason `ended` and nothing
+    in its result, ledgered as reconciled. If `on_failed` fails, what `prepare` reserved may stand,
+    so, with whatever it wrote taken back, the action stays `unknown` with nothing in its result,
+    for the next try."""
     action_id = target.action.action_id
-    if orphaned:
-        await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
-    except Exception as exc:
+        undone = True
+    except Exception as exc:                        # its writes and row locks taken back with the savepoint
         repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
-        return True
-    await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
-                  _summary(target, "refused_at_execution", reason="session_ended", check=ended, reconciled=True),
-                  status=f"refused_{ended}")
+        undone = False
+    if orphaned:
+        await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
+    if undone:
+        await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
+                      _summary(target, "refused_at_execution", reason="session_ended", check=ended,
+                               reconciled=True),
+                      status=f"refused_{ended}")
     return True
 
 async def _ask_adapter(ctx: KernelCtx, target: _Target,

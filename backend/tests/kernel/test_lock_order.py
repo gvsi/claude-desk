@@ -6,9 +6,10 @@ kernel transactions never deadlock.
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
-their reconciliation, answers, cancels and reads, a verification start allowed or approved, a
-right code checked, a document link opened, a person removed or given another contact, a Desk
-deleted, and a handoff closed, after the Desk row an owner's write holds first.
+their reconciliation (a private action's too, refused once its session closed), answers, cancels
+and reads, a verification start allowed or approved, a right code checked, a document link
+opened, a person removed or given another contact, a Desk deleted, and a handoff closed, after
+the Desk row an owner's write holds first.
 """
 
 import asyncio
@@ -24,7 +25,7 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import Connection
 
 from desk.contracts import Decision, ExecResult, NormalizedAction
-from desk.db.models import CalendarSlot, DemoInboxEntry, PolicyVersion
+from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PolicyVersion
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import demo_inbox, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
@@ -32,12 +33,13 @@ from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, Ada
 from .fakes import FakeAdapter
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
 from .test_adapters import book, visitor_of
-from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
+from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
 from .test_compiler import card
-from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode
+from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
-from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
 from .test_lead_tools import callback, handoff_done
+from .test_private_release import verified_fake_desk
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
 from .test_verification import check, code_in, entry_of, started
@@ -217,6 +219,50 @@ async def test_reconciliation_runs_the_adapter_before_it_ledgers(app, client, re
     outcome = [] if state == "unknown" else [{**base, "state": state, "reconciled": True}]
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [
         {**base, "state": "unknown", "orphaned": True}, *outcome]   # the same record, in the same order
+
+
+async def hold_the_active_version_and_fail(xctx: ExecCtx, action: NormalizedAction) -> None:
+    """An `on_failed` that holds the active version, then can't undo what `prepare` reserved."""
+    await hold_the_active_version(xctx, action)
+    raise RuntimeError("the provider can't release the reservation")
+
+
+@pytest.mark.parametrize(("on_failed", "state"), [
+    (hold_the_active_version, "refused_at_execution"),                 # undone, then refused
+    (hold_the_active_version_and_fail, "unknown"),                     # not undone: still unknown
+], ids=["undone", "undo-failed"])
+async def test_a_private_actions_refused_recovery_undoes_before_it_ledgers(app, client, registry, frozen_clock,
+                                                                         monkeypatch, on_failed, state):
+    """An approved hold of an action that releases private data, its intent left by a kernel that
+    died after the answer, recovered once its session closed: the adapter isn't asked, and the rows
+    its `on_failed` locks come before the ledger head, as in every other step. If it can't undo,
+    the action stays `unknown`, with nothing in its result."""
+    release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
+    rows, visitor, _, _ = await verified_fake_desk(app, client, release,
+                                                   [card("ask-quote", "native.quote", mode="ask")])
+    _, held = await held_on(client, rows, visitor=visitor)
+    with monkeypatch.context() as patch:
+        patch.setattr(execute, "_after_intent", crash)
+        with pytest.raises(Crash):
+            await post_answer(client, rows.owner, held.decision_id, "allow_once")     # dies after the intent
+    release.script["on_failed"] = on_failed
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+    frozen_clock.advance(31)
+
+    with lock_log(app) as log:
+        assert (await read(client, rows.owner, held)).state == state
+
+    # the reconciliation commits at once, and the read goes on in a new transaction holding the decision again
+    assert log.transactions == [["sessions", "decisions", "executions", "policy_versions", "ledger_heads"],
+                                ["decisions"]]
+    assert "reconcile" not in release.calls and release.calls[-1] == "on_failed"
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view) == (
+        "failed" if state == "refused_at_execution" else "unknown", [], {})
+    entries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"]
+    refused = [("refused_at_execution", None, "session_ended", True)] if state == "refused_at_execution" else []
+    assert [(s["state"], s.get("orphaned"), s.get("reason"), s.get("reconciled")) for s in entries] == [
+        ("unknown", True, None, None), *refused]
 
 
 async def test_reconciliation_and_a_running_execution_never_deadlock(app, client, registry, frozen_clock):
