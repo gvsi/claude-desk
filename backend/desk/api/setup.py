@@ -197,7 +197,6 @@ from desk.api.prompts import (
     MemoryDraft,
     PlannedOutcome,
     PriceAnswer,
-    JobProposal,
     ProposalCard,
     SetupNextStep,
     SetupCardAnswer,
@@ -2033,7 +2032,11 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
                 await connect_payments(owner, desk_id)
             except Exception as failed:
                 logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
-    await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+            break
+    try:
+        await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except Exception as failed:
+        logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 
 
 async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
@@ -2043,7 +2046,7 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
         interview = await _read(engine, owner, interview_id)
         interview.business_tools_enabled = business_tools_enabled
         owner.desk(interview.desk_id)
-        if interview.step != "questions" or interview.busy:
+        if interview.step != "questions" or interview.consent is None or interview.busy:
             raise ApiProblem(409, "conflict")
         seen = _stored(interview)
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))

@@ -12507,7 +12507,9 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 60
+                "maxLength": 60,
+                "minLength": 1,
+                "pattern": "^[^\\n\\r]*$"
               },
               {
                 "type": "null"

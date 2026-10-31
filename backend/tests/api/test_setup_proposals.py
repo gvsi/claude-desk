@@ -392,7 +392,7 @@ async def test_the_last_answer_uses_the_same_finish_and_post_commit_work(proposa
     assert calls == [["Book an intro"]]
 
 
-@pytest.mark.parametrize("value, enabled", [(None, False), ("0", False), ("false", False), ("1", True), ("TRUE", True)])
+@pytest.mark.parametrize("value, enabled", [(None, False), ("0", False), ("false", False), ("1", True), ("true", True), ("TRUE", False)])
 def test_business_tool_setting_is_explicit_and_defaults_off(monkeypatch, value, enabled):
     from desk.api.settings import Settings
 
@@ -437,10 +437,10 @@ async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_k
     entries[0].card.state = "declined" if declined else "accepted"
     assert entries[0].card.connector.connectable is (app_key == "stripe")
     state = interview_with(SetupAnswers(summary="Tax advice"), entries)
-    calls = []
+    calls, connects = [], []
 
     async def connect(*args):
-        raise AssertionError("this app must not be connected")
+        connects.append(args)
 
     async def put(owner, desk_id, jobs):
         calls.append((desk_id, jobs))
@@ -449,6 +449,7 @@ async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_k
     monkeypatch.setattr(setup, "_put_business_tools", put)
     setup.finish(state)
     await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
+    assert connects == []
     assert calls == [(state.desk_id, [])]
 
 
@@ -497,3 +498,103 @@ def test_finish_declines_an_unpriced_purpose_payment():
     assert entries[0].card.state == "declined"
     assert [accepted.title for accepted in setup.accepted_jobs(state)] == ["Book an intro"]
     assert state.answers.how_we_help == "Book an intro: Book a free slot"
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("  Book a consult  ", "Book a consult"), ("", None), ("   ", None),
+    ("A\nB: forged line", None), ("A\rB", None), ("\nA", None), ("A\n", None),
+])
+async def test_decision_titles_are_trimmed_and_one_nonempty_line(proposals, engine, title, expected):
+    owner, state, ids = proposals
+    before = await stored(engine, state["interview_id"])
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{ids[0]}?cards=1",
+                                     json={"accept": True, "title": title})
+    if expected is None:
+        assert reply.status_code == 422, reply.text
+        assert await stored(engine, state["interview_id"]) == before
+    else:
+        assert shown(reply)[0]["job"]["title"] == expected
+
+
+async def test_suggestions_before_consent_are_refused(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    before = await stored(engine, state["interview_id"])
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 409, reply.text
+    assert await stored(engine, state["interview_id"]) == before
+
+
+async def test_answer_holds_the_turn_before_reading(proposals, model, engine, monkeypatch):
+    import asyncio
+    from tests.api.test_setup_questions import turn
+
+    owner, state, ids = proposals
+    path = f"/api/owner/setup/{state['interview_id']}"
+    read = setup._read
+    read_reached, release = asyncio.Event(), asyncio.Event()
+
+    async def paused_read(*args):
+        result = await read(*args)
+        if not read_reached.is_set():
+            read_reached.set()
+            await release.wait()
+        return result
+
+    monkeypatch.setattr(setup, "_read", paused_read)
+    model.add(turn(summary="Tax advice"))
+    pending = asyncio.create_task(owner.browser.post(path + "/answer", json={
+        "question": "what_you_do", "text": "Tax advice"}))
+    try:
+        await asyncio.wait_for(read_reached.wait(), 5)
+        decision = await asyncio.wait_for(owner.browser.post(path + f"/proposals/{ids[0]}",
+                                                              json={"accept": True}), 5)
+    finally:
+        release.set()
+        answer_reply = await pending
+    assert decision.status_code == 409, decision.text
+    assert answer_reply.status_code == 200, answer_reply.text
+    assert (await stored(engine, state["interview_id"]))["answers"]["summary"] == "Tax advice"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_duplicate_stripe_cards_connect_once(monkeypatch, fail):
+    from types import SimpleNamespace
+
+    entries = setup.proposal_entries([], [stripe(), stripe()])
+    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    connects, writes = [], []
+
+    async def connect(owner, desk_id):
+        connects.append(desk_id)
+        if fail:
+            raise RuntimeError("connection failed")
+        return []
+
+    async def put(owner, desk_id, jobs):
+        writes.append((desk_id, jobs))
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    monkeypatch.setattr(setup, "_put_business_tools", put)
+    setup.finish(state)
+    await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
+    assert connects == [state.desk_id]
+    assert writes == [(state.desk_id, [])]
+
+
+async def test_a_failed_business_tool_write_keeps_saved_setup(proposals, engine, monkeypatch, caplog):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    observed = []
+
+    async def put(ctx, desk_id, jobs):
+        observed.append(((await stored(engine, interview_id))["step"], interview_id in setup._RUNNING))
+        raise RuntimeError("tool write failed")
+
+    monkeypatch.setattr(setup, "_put_business_tools", put)
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    assert observed == [("tools", False)]
+    assert (await stored(engine, interview_id))["step"] == "tools"
+    assert "a setup business tools write failed (RuntimeError)" in caplog.text

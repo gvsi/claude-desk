@@ -74,7 +74,7 @@ class Settings:
     a2a_loopback: str = "http://127.0.0.1:8700"
     kernel_ro_schema: str = "kernel_ro"
     replay_night: bool = True               # each new copy asks for the recorded night; never from the environment
-    business_tools_enabled: bool = False   # configurations stay hidden until the kernel blocks are deployed
+    business_tools_enabled: bool = False   # enable configurations only once the kernel's blocks are deployed
     setup_policy_claims_enabled: bool = True   # runtime switch for publishing setup's policy claims
 
     @property
@@ -131,6 +131,6 @@ class Settings:
             model_provider=model_provider,
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
-            business_tools_enabled=(_env("BUSINESS_TOOLS_ENABLED") or "").lower() in {"1", "true"},
+            business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") in {"1", "true"},
             setup_policy_claims_enabled=_env("SETUP_POLICY_CLAIMS_ENABLED") != "0",
         )

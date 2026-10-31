@@ -642,9 +642,17 @@ class SetupProposalIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     accept: bool
-    title: str | None = Field(None, max_length=60)
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60,
+                                            pattern=r"^[^\n\r]*$")] | None = None
     amount_cents: Cents | None = None
     autonomy: Autonomy | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def one_line_title(cls, value: object) -> object:
+        if isinstance(value, str) and ("\n" in value or "\r" in value):
+            raise ValueError("proposal title must be one line")
+        return value
 
     @model_validator(mode="after")
     def accepting_changes(self) -> "SetupProposalIn":
