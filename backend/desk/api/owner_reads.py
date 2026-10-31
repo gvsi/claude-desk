@@ -269,7 +269,9 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
     Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
     For evaluated refusals, take the first match in the policy precedence below, regardless of the IDs' row order.
     Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
-    event, a dict summary with outcome `refuse`, and a matching decision ID when present. The web holds the labels.
+    event with matching `ref_id` and `session_id`, a dict summary with outcome `refuse`, and a matching summary
+    decision ID when present. Early refusals omit the summary decision ID, so the event reference is required.
+    The web holds the labels.
 
     Source                                           Cause                 Signed label
     reason: paused                                   paused                The chat was paused
@@ -303,6 +305,8 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
         return None
     event = entry.get("event")
     if not isinstance(event, dict) or event.get("kind") != "decide":
+        return None
+    if event.get("ref_id") != row["decision_id"] or event.get("session_id") != row["session_id"]:
         return None
     summary = event.get("summary")
     if not isinstance(summary, dict) or summary.get("outcome") != "refuse":

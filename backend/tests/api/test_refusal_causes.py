@@ -54,8 +54,10 @@ from desk.kernel_service import decide
     ({}, ["X.F.never.card"], None),
 ])
 def test_refusal_cause_uses_exact_kernel_codes(summary, policies, expected):
-    row = {"decision_id": "decision", "policy_ids": policies, "reason_plain": "Your rule says never", "card_ids": []}
-    entry = {"event": {"kind": "decide", "summary": {"outcome": "refuse", **summary}}}
+    row = {"decision_id": "decision", "session_id": "session", "policy_ids": policies,
+           "reason_plain": "Your rule says never", "card_ids": []}
+    entry = {"event": {"kind": "decide", "ref_id": "decision", "session_id": "session",
+                       "summary": {"outcome": "refuse", **summary}}}
 
     assert refusal_cause(row, entry, verified=False) == expected
 
@@ -108,9 +110,17 @@ def test_refusal_without_its_ledger_entry_has_no_cause():
     {"event": {"kind": "decide", "summary": {
         "outcome": "refuse", "decision_id": "someone-else", "reason": "paused"}}},
     {"event": {"kind": "decide", "summary": {"outcome": "refuse", "decision_id": None}}},
+    {"event": {"kind": "decide", "ref_id": "someone-else", "summary": {
+        "outcome": "refuse", "reason": "paused"}}},
+    {"event": {"kind": "decide", "session_id": "another-session", "summary": {
+        "outcome": "refuse", "reason": "paused"}}},
+    {"event": {"kind": "decide", "ref_id": None, "summary": {"outcome": "refuse", "reason": "paused"}}},
+    {"event": {"kind": "decide", "session_id": None, "summary": {"outcome": "refuse", "reason": "paused"}}},
 ])
 def test_refusal_requires_matching_refused_decide_entry(entry):
-    row = {"decision_id": "decision", "policy_ids": [], "card_ids": []}
+    row = {"decision_id": "decision", "session_id": "session", "policy_ids": [], "card_ids": []}
+    if isinstance(entry.get("event"), dict):
+        entry = {"event": {"ref_id": "decision", "session_id": "session", **entry["event"]}}
     assert refusal_cause(row, entry, verified=False) is None
 
 
@@ -119,8 +129,8 @@ def test_plain_deny_requires_no_cards(decision_id):
     summary = {"outcome": "refuse"}
     if decision_id is not None:
         summary["decision_id"] = decision_id
-    entry = {"event": {"kind": "decide", "summary": summary}}
-    row = {"decision_id": "decision", "policy_ids": [], "card_ids": ["unmapped-card"]}
+    entry = {"event": {"kind": "decide", "ref_id": "decision", "session_id": "session", "summary": summary}}
+    row = {"decision_id": "decision", "session_id": "session", "policy_ids": [], "card_ids": ["unmapped-card"]}
     assert refusal_cause(row, entry, verified=False) is None
     assert refusal_cause({**row, "card_ids": []}, entry, verified=False) == "no_rule"
 
