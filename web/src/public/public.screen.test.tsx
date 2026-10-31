@@ -546,7 +546,9 @@ describe('public chat page', () => {
       const button = failed.getByRole('button', { name: retry }).element().getBoundingClientRect();
       expect(Math.abs(words.right - bubble.right), `${at}: the line ends at ${words.right}, the bubble at ${bubble.right}`).toBeLessThanOrEqual(2);
       expect(Math.abs(button.right - bubble.right), `${at}: "${retry}" ends at ${button.right}, the bubble at ${bubble.right}`).toBeLessThanOrEqual(2);
-      expect(words.left, `${at}: the line starts at the row's left`).toBeGreaterThan(row.getBoundingClientRect().left + 1);
+      const margin = row.querySelector('.cd-transcript-row__margin')?.getBoundingClientRect();
+      const dot = failed.element().querySelector('.cd-status-dot')?.getBoundingClientRect();
+      expect(dot?.left, `${at}: the line starts at the margin's left, with the lines above it`).toBe(margin?.left);
       expect(words.top, `${at}: the line sits under the bubble`).toBeGreaterThanOrEqual(bubble.bottom);
       // "Try again" keeps its full control height, a target a finger can hit.
       expect(button.height, at).toBeGreaterThanOrEqual(32);

@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import type { EvMessage, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
+import { executedLine } from '../../fixtures/receipts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { AgentMessage } from '../AgentMessage/AgentMessage.tsx';
 import { Button } from '../Button/Button.tsx';
@@ -386,5 +387,69 @@ export const BubbleNotSentNarrow: Story = {
   },
   play: async ({ canvasElement }) => {
     await expectNotSentUnderTheBubble(canvasElement, 358);
+  },
+};
+
+/**
+ * A Spanish visitor's question that didn't send, under the quote receipt its turn settled there.
+ * The receipt is the wider line, as the kernel's Spanish lines often are.
+ */
+const PREGUNTA = '¿Cuánto cuesta destapar un desagüe?';
+const NO_SE_ENVIO = 'No se envió. Tu mensaje sigue aquí.';
+const INTENTAR = 'Intentar de nuevo';
+const COTIZADO = executedLine('native.quote', 'es', ownerName);
+
+function NotSentUnderAReceipt({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div lang="es">
+      <Transcript label="Conversación con Rivera Plumbing">
+        <TranscriptRow
+          margin={[
+            <MarginReceipt key="quote" source={{ kind: 'decision', state: 'executed' }} plain={COTIZADO} ledgerSeq={41} />,
+            <Notice
+              key="failed"
+              tone="error"
+              action={
+                <Button variant="ghost" onClick={onRetry}>
+                  {INTENTAR}
+                </Button>
+              }
+            >
+              {NO_SE_ENVIO}
+            </Notice>,
+          ]}
+        >
+          <VisitorMessage text={PREGUNTA} />
+        </TranscriptRow>
+      </Transcript>
+    </div>
+  );
+}
+
+export const BubbleNotSentUnderAReceipt: Story = {
+  render: () => <NotSentUnderAReceipt onRetry={fn()} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board draws a visitor's message that didn't send. Here a quote receipt wider than the error line is attached above it, in Spanish: the line starts with the receipt, so their dots stay in one column, and Intentar de nuevo still ends where the bubble ends.",
+  },
+  play: async ({ canvasElement }) => {
+    await expectAttachedUnder(canvasElement, '.cd-visitor-message__bubble', 'end', 640);
+    const { inner } = rowParts(canvasElement, '.cd-visitor-message__bubble');
+    const bubble = inner.getBoundingClientRect();
+    const receipt = within(canvasElement).getByText(COTIZADO, { exact: true });
+    const alert = within(canvasElement).getByRole('alert');
+    const words = within(alert).getByText(NO_SE_ENVIO, { exact: true });
+    // The receipt is the widest line attached, so it is the one that ends at the bubble.
+    await expect(textBox(receipt).width).toBeGreaterThan(textBox(words).width);
+    await expect(Math.abs(textBox(receipt).right - bubble.right)).toBeLessThanOrEqual(1);
+    // The error line starts with the receipt: one column of dots.
+    const receiptDot = receipt.closest('.cd-margin-line')?.querySelector<HTMLElement>('.cd-status-dot')?.getBoundingClientRect();
+    const noticeDot = alert.querySelector<HTMLElement>('.cd-status-dot')?.getBoundingClientRect();
+    await expect(noticeDot?.left).toBe(receiptDot?.left);
+    // Its next step, under it, still ends where the bubble ends.
+    const button = within(alert).getByRole('button', { name: INTENTAR }).getBoundingClientRect();
+    await expect(Math.abs(button.right - bubble.right)).toBeLessThanOrEqual(1);
+    await expect(button.top).toBeGreaterThanOrEqual(textBox(words).bottom);
   },
 };
