@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { Link, Outlet, useLocation, useMatches, useNavigate, useOutletContext, useParams } from 'react-router';
+import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useOutletContext, useParams } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -141,17 +141,42 @@ function DeskGate({ deskId }: { deskId: string }) {
 }
 
 /**
- * Opens each page at its top: the shell's main area scrolls on its own and would keep the last
- * page's place, so "See all rules" at the end of Rules would open All rules near its end. A page
- * is its route on this Desk; moving within one page (an attempt or a conversation beside its list)
- * keeps the page's place, as those routes are made to.
+ * Opens each new page at its top, and Back and Forward at the owner's place on the page they
+ * return to. The shell's main area scrolls on its own and would keep the last page's place, so
+ * "See all rules" at the end of Rules would open All rules near its end; and neither the browser
+ * nor the router restores an area's place, so "Keep my rules" on a review, which goes back, would
+ * land on Rules' top. Each place is remembered by its history entry as the owner scrolls, since by
+ * the time a page has gone its area already holds the next one. A page is its route on this Desk;
+ * moving within one page (an attempt or a conversation beside its list) keeps the page's place, as
+ * those routes are made to.
  */
 function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): void {
   const matches = useMatches();
   const page = matches[matches.length - 1]?.id;
+  const { key } = useLocation();
+  const navigationType = useNavigationType();
+  // The main area's place in each history entry, and the entry it is showing.
+  const places = useRef(new Map<string, number>());
+  const entry = useRef(key);
+
+  // Set before the page's place below, so the scroll that place makes is heard as this entry's.
+  useLayoutEffect(() => {
+    entry.current = key;
+  }, [key]);
+
   useLayoutEffect(() => {
     const main = inside.current?.closest('main');
-    if (main) main.scrollTop = 0;
+    if (!main) return undefined;
+    const remember = () => places.current.set(entry.current, main.scrollTop);
+    main.addEventListener('scroll', remember, { passive: true });
+    return () => main.removeEventListener('scroll', remember);
+  }, [inside]);
+
+  useLayoutEffect(() => {
+    const main = inside.current?.closest('main');
+    if (!main) return;
+    // `key` and `navigationType` are read only when the page changes: within a page, its place stays.
+    main.scrollTop = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
   }, [inside, deskId, page]);
 }
 

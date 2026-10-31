@@ -503,6 +503,44 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
+  it('going_back_returns_to_the_place_on_rules', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    const limit = () => payments.getByText(LIMIT_500, { exact: true }).element();
+    await expect.element(payments.getByText(LIMIT_500, { exact: true })).toBeVisible();
+    // The shell's main area, once the Desk has opened, which scrolls on its own.
+    const main = screen.getByRole('main').element();
+    // Rules scrolled down to Payments' limit.
+    limit().scrollIntoView({ block: 'center' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    expect(inView(limit(), main)).toBe(true);
+
+    // A new limit's review opens at its top; "Keep my rules" goes back to Rules where it was, the
+    // limit still in view.
+    await payments.getByRole('button', { name: 'Change' }).click();
+    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('5000');
+    await payments.getByRole('button', { name: 'Review change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    expect(main.scrollTop).toBe(0);
+    await screen.getByRole('button', { name: 'Keep my rules' }).click();
+    await expect.element(payments.getByText(LIMIT_500, { exact: true })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    expect(inView(limit(), main)).toBe(true);
+
+    // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
+    // returns to the end of Rules.
+    main.scrollTop = main.scrollHeight;
+    const end = main.scrollTop;
+    expect(end).toBeGreaterThan(0);
+    await screen.getByRole('link', { name: 'See all rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    expect(main.scrollTop).toBe(0);
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(end);
+  });
+
   it('rules_page_matches_its_board', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
