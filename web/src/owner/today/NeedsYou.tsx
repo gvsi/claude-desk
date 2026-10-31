@@ -188,7 +188,10 @@ function CallbackCard({ item }: { item: CallbackItem }) {
         <p className="cd-callback__reason cd-type-body" data-copy="user">
           {handoff.reason}
         </p>
-        {handoff.kind === 'card' ? null : <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>}
+        {/* A call back is promised only on a call-back request: one the API names so, or sends with no kind yet. */}
+        {handoff.kind === undefined || handoff.kind === 'callback' ? (
+          <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>
+        ) : null}
         {/* Only the pressed button spins; the other waits, its words shown, until its request settles. */}
         <div className="cd-callback__actions">
           <Button variant="secondary" busy={joining} waiting={closing} onClick={() => void join()}>

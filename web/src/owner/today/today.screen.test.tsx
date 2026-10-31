@@ -1772,6 +1772,31 @@ describe('Today', () => {
     await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
   });
 
+  it('unknown_handoff_kind_promises_no_call_back', async () => {
+    // Only a call-back request promises a call back: a handoff whose kind is null, or one this build
+    // doesn't know, says its reason and nothing about calling back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const callback = items.find((item) => item.handoff != null);
+    if (callback?.handoff == null) throw new Error('the call-back request is in Needs you');
+    const as = (kind: unknown, id: string): NeedsYouItem => ({ ...callback, handoff: { ...callback.handoff, handoff_id: id, kind: kind as 'callback' } });
+    mockStore.inject({
+      route: 'needsYou',
+      status: 200,
+      times: 10_000,
+      body: [...items.filter((item) => item.handoff == null), as(null, 'handoff-null'), as('meeting', 'handoff-meeting')],
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.poll(() => wants.elements().length).toBe(2);
+    for (const card of wants.elements()) {
+      expect(card.textContent).toContain(CALLBACK_REASON);
+      expect(card.textContent).not.toMatch(/call back/i);
+    }
+  });
+
   it('allow_person_above_the_limit_says_so', async () => {
     mockStore.world.addHeldRefund();
     const { screen } = await renderRoute(TODAY);
