@@ -231,18 +231,23 @@ async def mockpay_db() -> AsyncIterator[AsyncConnection]:
         await engine.dispose()
 
 
-async def list_extra_tool(k: KernelHarness, desk: GoldenDesk) -> None:
-    """The mock payments server lists one more tool to the copy: no route of Plan 01c's adds one,
-    so the entry is written into the server's own store (`mockpay.tool_definitions`) as its role
-    (desk_mockpay) would, as a provider changing what it offers. The server is then asked, as any
-    MCP client would ask it, and must list the entry beside the two pinned operations, or the case
-    would show nothing (real kernel only)."""
-    async with mockpay_db() as conn:
-        await conn.execute(text(
-            "INSERT INTO mockpay.tool_definitions (copy_id, name, definition) "
-            "VALUES (:copy_id, :name, CAST(:definition AS jsonb)) "
-            "ON CONFLICT (copy_id, name) DO UPDATE SET definition = EXCLUDED.definition"
-        ), {"copy_id": desk.copy.copy_id, "name": EXTRA_TOOL, "definition": json.dumps(EXTRA_DEFINITION)})
+async def list_extra_tool(k: KernelHarness, desk: GoldenDesk, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mock payments server lists one more tool to the copy, as a provider changing what it
+    offers would. The server lists only its two tools (master plan, "Mock payments server") and no
+    route makes it offer another, so the case edits what this run's server, started in this
+    process, lists for the copy: its store's definitions gain the entry, as Plan 01c's own pin tests
+    present an extra listed tool. The server is then asked, as any MCP client would ask it, and must
+    list the entry beside the two pinned operations, or the case would show nothing (real kernel
+    only)."""
+    from desk.mockpay.store import Store   # Plan 01c
+
+    definitions = Store.definitions
+
+    async def with_the_extra(self: Store, copy_id: str) -> list[dict[str, Any]]:
+        listed = await definitions(self, copy_id)
+        return [*listed, EXTRA_DEFINITION] if copy_id == desk.copy.copy_id else listed
+
+    monkeypatch.setattr(Store, "definitions", with_the_extra)
     listed = await k.mockpay.listed_tools(desk.copy.copy_id)
     assert {EXTRA_TOOL, *MCP_OPERATIONS} <= listed.keys(), (
         f"the mock payments server lists {sorted(listed)} to the copy, so the case can't show that an extra "
@@ -256,7 +261,7 @@ async def owner_context(k: KernelHarness, desk: GoldenDesk) -> SessionContext:
 
 
 @pytest.mark.requires("01c")
-async def test_unpinned_operation_refused(k: KernelHarness, records):
+async def test_unpinned_operation_refused(k: KernelHarness, records, monkeypatch: pytest.MonkeyPatch):
     """Only the operations the Desk pinned are ever given. With the payments server also listing
     `transfer_funds`, verified Dana's call to `payments.transfer_funds` is refused before it is
     normalized, and ledgered, with nothing to run or approve. Connecting the server again profiles
@@ -265,7 +270,7 @@ async def test_unpinned_operation_refused(k: KernelHarness, records):
     Dana's payment history still runs past the server's extra entry."""
     desk = await golden_desk(k)
     if k.is_real:
-        await list_extra_tool(k, desk)
+        await list_extra_tool(k, desk, monkeypatch)
     dana = await open_caller(k, desk, "dana")
     callers = {"a visitor's": await open_caller(k, desk, "visitor"), "Dana's": dana,
                "an agent's": await open_caller(k, desk, "agent")}
@@ -280,7 +285,8 @@ async def test_unpinned_operation_refused(k: KernelHarness, records):
 
     if k.is_real:
         connected = sorted((profile.tool, profile.status) for profile in profiles)
-        assert connected == [(LIST_CHARGES, "enabled"), (REFUND, "enabled")], f"connecting again gave {connected}"
+        expected = sorted([(LIST_CHARGES, "enabled"), (REFUND, "enabled")])
+        assert connected == expected, f"connecting again gave {connected}"
         known = set(get_args(ToolName))
         for whose, context in contexts.items():
             tools = {profile.tool for profile in (*context.tools, *context.tools_declared)}
