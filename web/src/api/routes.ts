@@ -21,6 +21,7 @@ import type {
   SessionState,
   ToolProfile,
 } from './contracts.ts';
+import type { MoneyCapIn } from './openapi.gen.ts';
 import type {
   AgentCardOut,
   AgentRunStarted,
@@ -44,7 +45,6 @@ import type {
   HealthOut,
   KnowledgeBody,
   MessageAccepted,
-  MoneyCapBody,
   NeedsYouItem,
   OwnerMessageBody,
   OwnerTranscript,
@@ -215,7 +215,7 @@ interface RouteShapes {
   draftRules: { body: DraftAddBody; response: RulesDraft };
   draftPreset: { body: PresetBody; response: RulesDraft };
   draftSuggestion: { body: undefined; response: RulesDraft };
-  draftMoneyCap: { body: MoneyCapBody; response: RulesDraft };
+  draftMoneyCap: { body: MoneyCapIn; response: RulesDraft };
   confirmRules: { body: ConfirmRulesBody; response: PolicyVersionOut };
   confirmTool: { body: ConfirmToolBody; response: ToolConfirmedOut };
   setupRules: { body: undefined; response: RulesDraft };
