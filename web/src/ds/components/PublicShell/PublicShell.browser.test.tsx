@@ -1097,3 +1097,38 @@ it('focus_on_ask_goes_on_to_the_composer_as_the_owner_joins', async () => {
     fromNowhere: 'the page',
   });
 });
+
+it('focus_moving_on_from_ask_scrolls_nothing', async () => {
+  // On a short shell, a keyboard visitor reading mid-chat with focus on "Ask for Maria Rivera" as
+  // Maria joins: focus goes on to the composer's text box, or with that disabled to the scroll
+  // region, without scrolling. The message they were reading stays where it was on screen. The
+  // shell's scrollTop moves only by what the chat's head lost with Ask, as the browser keeps the
+  // conversation in place under a head that got shorter (scroll anchoring).
+  const seen = [];
+  for (const composerDisabled of [false, true]) {
+    await renderLongChat([568, 320], { composerDisabled });
+    const shell = one('.cd-public-shell');
+    const head = one('.cd-public-shell__chat-head');
+    shell.scrollTop = Math.round(shell.scrollHeight / 2);
+    (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+    await nextFrames();
+    const reading = [...container.querySelectorAll<HTMLElement>('.cd-transcript-row')].find(
+      (row) => row.getBoundingClientRect().top > head.getBoundingClientRect().bottom,
+    );
+    if (!reading) throw new Error('no message under the chat head');
+    const before = { scrollTop: shell.scrollTop, head: head.offsetHeight, reading: reading.getBoundingClientRect().top };
+    act(() => root.render(<LongChat composerDisabled={composerDisabled} ownerInChat />));
+    await nextFrames();
+    seen.push({
+      composerDisabled,
+      short: isShort(),
+      focused: document.activeElement === one(composerDisabled ? '.cd-public-shell__scroll' : '.cd-composer__input'),
+      readingMoved: reading.getBoundingClientRect().top - before.reading,
+      scrolledPastWhatTheHeadLost: shell.scrollTop - before.scrollTop + (before.head - head.offsetHeight),
+    });
+  }
+  expect(seen).toEqual([
+    { composerDisabled: false, short: true, focused: true, readingMoved: 0, scrolledPastWhatTheHeadLost: 0 },
+    { composerDisabled: true, short: true, focused: true, readingMoved: 0, scrolledPastWhatTheHeadLost: 0 },
+  ]);
+});

@@ -202,10 +202,11 @@ function askOf(shell: HTMLElement | null): HTMLElement | null {
 /**
  * Where focus goes when "Ask for {owner}" leaves the chat's head with it: the composer's text box,
  * or, while that is disabled or there is none, the conversation's scroll region, the stop after Ask.
+ * Without scrolling: the visitor stays where they were reading.
  */
 function focusAfterAsk(shell: HTMLElement): void {
   const box = shell.querySelector<HTMLElement>('.cd-public-shell__composer textarea:not(:disabled)');
-  (box ?? partsOf(shell).region)?.focus();
+  (box ?? partsOf(shell).region)?.focus({ preventScroll: true });
 }
 
 /** The element that scrolls the conversation now: the shell when it is short, its scroll region when not. */
