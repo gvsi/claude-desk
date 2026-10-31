@@ -15,7 +15,8 @@ async def test_fresh_copy_lists_seeded_knowledge_in_creation_order(api, browser,
 
     assert reply.status_code == 200, reply.text
     rows = reply.json()
-    assert [row["item_id"] for row in rows] == ["kn-price-list", "kn-website"]
+    assert [row["item_id"] for row in rows] == ["kn-website", "kn-price-list"]
+    assert datetime.fromisoformat(rows[0]["created_at"]) < datetime.fromisoformat(rows[1]["created_at"])
     for row in rows:
         item = seeded.knowledge[row["item_id"]]
         assert set(row) == {"item_id", "title", "text", "readers", "source", "created_at"}
@@ -30,7 +31,7 @@ async def test_fresh_copy_lists_seeded_knowledge_in_creation_order(api, browser,
              "label": {"readers": ["public"]}}
     assert (await owner.browser.post(path, json={"item": added})).status_code == 200
     rows = (await owner.browser.get(path)).json()
-    assert [row["item_id"] for row in rows] == ["kn-price-list", "kn-website", "a-later"]
+    assert [row["item_id"] for row in rows] == ["kn-website", "kn-price-list", "a-later"]
     assert datetime.fromisoformat(rows[-1]["created_at"]) == fake.now
 
 
@@ -46,7 +47,7 @@ async def test_legacy_knowledge_sorts_first_with_required_null_timestamp(api, br
 
     assert reply.status_code == 200, reply.text
     rows = reply.json()
-    assert [row["item_id"] for row in rows] == ["a-legacy", "z-legacy", "kn-price-list", "kn-website"]
+    assert [row["item_id"] for row in rows] == ["a-legacy", "z-legacy", "kn-website", "kn-price-list"]
     assert [row["created_at"] for row in rows[:2]] == [None, None]
 
 
