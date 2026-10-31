@@ -1,15 +1,18 @@
 /**
- * A query client whose reads only ever answer from what it was given: nothing it holds is fetched,
- * polled or read again from the API. The preview behind the intro dialog draws Today itself under
- * one, before any copy exists, so a read Today makes (on mount, on a poll, or a `refetch` a hook
- * asks for) can never reach the network: every query is disabled, and its query function answers
- * with what the client holds for it, or never, when it holds nothing. Writes need a click, and the
- * preview is inert.
+ * A query client whose reads only ever answer from what it was given, and whose writes never run:
+ * nothing it holds is fetched, polled or read again from the API, and nothing is sent. The preview
+ * behind the intro dialog draws Today itself under one, before any copy exists, so a read Today
+ * makes (on mount, on a poll, or a `refetch` a hook asks for) can never reach the network: every
+ * query is disabled, and its query function answers with what the client holds for it, or never,
+ * when it holds nothing. A write rejects at once, with none of its own steps run (before it, on
+ * failure, after it), since any of them could send a request of its own. The preview is inert, so
+ * neither should happen; this is what holds if one does.
  */
 import {
   QueryClient,
   type DefaultedQueryObserverOptions,
   type DefaultError,
+  type MutationOptions,
   type QueryFunction,
   type QueryKey,
   type QueryObserverOptions,
@@ -41,6 +44,19 @@ export class StillQueryClient extends QueryClient {
     return { ...defaulted, enabled: false, queryFn: this.#answerFor(defaulted.queryHash) as QueryFunction<TQueryFnData, TQueryKey> };
   }
 
+  // `MutationOptions<any, …>` is the base method's own constraint.
+  override defaultMutationOptions<T extends MutationOptions<any, any, any, any>>(options?: T): T {
+    return {
+      ...super.defaultMutationOptions(options),
+      mutationFn: refuseWrite,
+      onMutate: undefined,
+      onError: undefined,
+      onSuccess: undefined,
+      onSettled: undefined,
+      retry: false,
+    };
+  }
+
   /** What the client holds for the query `hash`, or a promise that never settles when it holds nothing. */
   #answerFor(hash: string): () => Promise<unknown> {
     let answer = this.#answers.get(hash);
@@ -53,4 +69,9 @@ export class StillQueryClient extends QueryClient {
     }
     return answer;
   }
+}
+
+/** Every write under the still client: refused before anything is sent. */
+function refuseWrite(): Promise<never> {
+  return Promise.reject(new Error('The preview behind the intro dialog writes nothing'));
 }
