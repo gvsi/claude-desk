@@ -39,7 +39,7 @@ def denies_ai(text: str, *, people: Iterable[str] = ()) -> bool:
     """True when the text says the speaker, or who the visitor is talking to, is a person and not
     an AI: "I'm a real person", "I'm not a bot", "Soy una persona de verdad", "No soy una IA".
     A claim to be one of `people`, the real people a Desk must never claim to be, is a claim to be a
-    person too: "I'm Maria", "My name is Maria", "You're talking to Maria Rivera", "Soy María".
+    person too: "I'm Maria", "You're talking to Maria Rivera", "Soy María".
     A claim that a frame introduces or quotation marks hold ("it would claim I'm a real person") is
     spared only when the same text says the speaker is an AI in a statement that no frame, quotation
     mark or reporting verb introduces."""
@@ -71,27 +71,23 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
     optional "that" ("it would claim I'm a real person"), or when quotation marks hold it; any
     form of "say", "claim", "pretend", "call", "decir", "afirmar" or "fingir" there, whatever
     negation or modal comes with it ("I'd never say I'm an AI", "nunca diría que soy una IA"),
-    reports it. A subject ("my name is" too) whose next words, past any intensifiers, are one of
-    `names` and not its possessive says the speaker is that person, so a person; after a "talking
-    to" phrase, only in the present tense addressed to the visitor (`_name_negated`, `_claimed_name`)."""
+    reports it. A subject whose next words, past any intensifiers, are one of `names` and not its
+    possessive says the speaker is that person, so a person (`_claimed_name`)."""
     shown = re.sub(r"\b([ai])\.\s?([ia])\.", r"\1\2", normalize(text).replace("\u2019", "'"), flags=re.IGNORECASE)
     found = list(re.finditer(r"[^\W\d_]+(?:'[^\W\d_]+)?|\d+|[^\w\s]", shown))
     tokens = [match.group() for match in found]
     folded = [_fold_word(token) for token in tokens]
     quotes = _quotes(shown, found)
-    for start, length in _subjects(folded, _SUBJECTS + (_NAMING if names else ())):
+    for start, length in _subjects(folded):
         negated = start > 0 and folded[start - 1] in _NEGATIONS and folded[start] not in _PRONOUN_SUBJECTS
         begin = start - 1 if negated else start   # a "no" before "soy" starts the statement
         framed = _framed(folded[:begin])
         reported = framed or _reported(folded[:begin])
         i = start + length
-        named = _name_negated(folded, start, length, negated)
-        if named is not None and (claimed := _claimed_name(folded, i, names)) is not None:
+        if (claimed := _claimed_name(folded, i, names)) is not None:
             quoted = any(opening < begin and claimed < closing for opening, closing in quotes)
-            yield "human", named, framed or quoted, reported or quoted
+            yield "human", negated, framed or quoted, reported or quoted
             continue
-        if tuple(folded[start:i]) in _NAMING:
-            continue   # "my name is" names who the speaker is, never what
         if i + 1 < len(tokens) and tokens[i][:1].isupper() and tokens[i + 1] == "," and folded[i] not in _KNOWN:
             i += 2   # a name and a comma: "I'm Claude, an AI"
         for at, word in enumerate(folded[i:i + WINDOW], start=i):
@@ -103,27 +99,6 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
                 break
             elif word not in _FILLERS and not word.endswith("'s") and not word.isdigit():
                 break
-
-
-def _name_negated(folded: list[str], start: int, length: int, negated: bool) -> bool | None:
-    """Whether a name right after the subject at `start` is negated, or None when a name there claims
-    nothing. After "I'm", "soy" or "my name is" a name says who the speaker is; after a "talking to"
-    phrase, only in the present tense addressed to the visitor: "you're" or "you are" before "talking
-    to", "speaking with" or "chatting with", or "estás" or "está" before "hablando con", with only
-    intensifiers between ("you're really talking to"), and a negation just before "estás" or "está"
-    negates it. A future, modal or imperative ("you'll be talking to", "habla con") names no one."""
-    phrase = tuple(folded[start:start + length])
-    if phrase not in _TALKING_EN + _TALKING_ES:
-        return negated
-    before = start
-    while before > 0 and folded[before - 1] in _INTENSIFIERS:
-        before -= 1
-    if phrase in _TALKING_EN and (folded[before - 1:before] in (["you're"], ["youre"])
-                                  or folded[max(before - 2, 0):before] == ["you", "are"]):
-        return negated
-    if phrase == ("hablando", "con") and folded[before - 1:before] in (["estas"], ["esta"]):
-        return negated or (before > 1 and folded[before - 2] in _NEGATIONS)
-    return None
 
 
 def _claimed_name(folded: list[str], at: int, names: Sequence[tuple[str, ...]]) -> int | None:
@@ -213,9 +188,9 @@ def _single_mark_role(shown: str, at: int) -> str | None:
     return None
 
 
-def _subjects(folded: list[str], subjects: tuple[tuple[str, ...], ...]) -> Iterator[tuple[int, int]]:
+def _subjects(folded: list[str]) -> Iterator[tuple[int, int]]:
     for i in range(len(folded)):
-        for phrase in subjects:
+        for phrase in _SUBJECTS:
             if tuple(folded[i:i + len(phrase)]) == phrase:
                 yield i, len(phrase)
                 break
@@ -230,13 +205,11 @@ def _phrases(text: str) -> tuple[tuple[str, ...], ...]:
     return tuple(tuple(phrase.split()) for phrase in text.split(","))
 
 
-# The first-person subjects and the "talking to" phrases, in English and Spanish, and the subjects
-# read only before a name ("my name is Maria").
-_TALKING_EN = _phrases("talking to, talking with, chatting with, speaking with, speaking to")
-_TALKING_ES = _phrases("hablando con, hablas con, habla con")
-_SUBJECTS = _phrases("i'm, i am, im, we're, we are, soy, somos") + _TALKING_EN + _TALKING_ES
-_NAMING = _phrases("my name is, my name's, me llamo, mi nombre es")
-_PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
+_SUBJECTS = _phrases(
+    "i'm, i am, im, we're, we are, talking to, talking with, chatting with, speaking with, speaking to, soy, somos,"
+    "hablando con, hablas con, habla con"
+)
+_PRONOUN_SUBJECTS = frozenset("i'm i im we're we".split())   # a "no" before these is an answer, not "not"
 # Frames read right before a statement: "claim" or "say" after a modal or "to" ("it would claim",
 # "I can't say", "I'd say", "to say"), "pretend", "as if", "decir que", "fingir que" and "afirmar que".
 _MODALS = "would could can't cannot won't wouldn't couldn't to i'd it'd that'd we'd you'd he'd she'd they'd".split()
