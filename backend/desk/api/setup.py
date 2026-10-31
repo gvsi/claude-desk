@@ -401,9 +401,12 @@ def _turn(interview_id: str) -> Iterator[None]:
 
 
 def setup_state(interview: Interview, slug: str) -> SetupState:
+    """The interview as the owner sees it. Its messages leave out the transcript's first entry, the owner's own
+    description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
+    read, keeps it."""
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question,
-                      messages=[SetupMessage(role=entry.role, text=entry.text) for entry in interview.transcript])
+                      messages=[SetupMessage(role=entry.role, text=entry.text) for entry in interview.transcript[1:]])
 
 
 async def _slug(owner: OwnerCtx, desk_id: str) -> str:

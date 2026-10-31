@@ -185,8 +185,7 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     state = await begin(owner, model, website=WEBSITE)
 
     assert state["step"] == "questions" and state["slug"].startswith("rivera-plumbing-")
-    assert [message["role"] for message in state["messages"]] == ["owner", "claude"]
-    assert state["messages"][0]["text"] == DESCRIPTION
+    assert [message["role"] for message in state["messages"]] == ["claude"]
     (created,) = fake.called("POST /desks")
     assert created.headers["x-owner-session"] == owner.token
     assert created.body["business"] == {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
@@ -205,6 +204,24 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     routes = [call.route for call in fake.calls]
     first_tool = min(index for index, route in enumerate(routes) if route in SETUP_TOOL_ROUTES)
     assert routes.index("POST /desks") < routes.index("PUT /desks/{id}/answering") < first_tool
+
+
+async def test_setups_messages_leave_out_the_owners_description(app, browser, fake, kernel_http, model, engine):
+    # The owner isn't shown their own opening words back: the conversation opens with Claude's consent question. The
+    # description stays first in the stored transcript, which later turns read.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE)
+    assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION}]
+    interview_id = state["interview_id"]
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
+    transcript = (await stored(engine, interview_id))["transcript"]
+    assert transcript[0] == {"role": "owner", "text": DESCRIPTION, "website": WEBSITE}
+
+    consented = await consent(owner, interview_id, False)
+    assert [message["text"] for message in consented["messages"]][:2] == [desk_setup.CONSENT_QUESTION,
+                                                                         "No, I'll type it"]
+    assert DESCRIPTION not in [message["text"] for message in consented["messages"]]
+    assert (await stored(engine, interview_id))["transcript"][0] == transcript[0]
 
 
 async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, kernel_http, model, engine, caplog):
@@ -275,7 +292,7 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk = fake.desks[other["desk_id"]]
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True)
-    assert consented["messages"][4] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example"}
+    assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example"}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -287,13 +304,13 @@ async def test_declined_consent_reads_nothing(app, browser, fake, kernel_http, m
     declined = await consent(owner, state["interview_id"], False)
 
     assert declined["consent"] is False and declined["question"] == "what_you_do"
-    assert [(message["role"], message["text"]) for message in declined["messages"][2:]] == [
+    assert [(message["role"], message["text"]) for message in declined["messages"][1:]] == [
         ("owner", "No, I'll type it"), ("claude", question_text("what_you_do", "trade"))]
     # a website named later is kept as the owner typed it, and nothing is read
     answered = await answer(owner, model, state["interview_id"], "Plumbing. Our new site is elsewhere.example",
                             turn(website="https://elsewhere.example"))
     assert answered.status_code == 200, answered.text
-    assert answered.json()["messages"][4]["text"] == "Plumbing. Our new site is elsewhere.example"
+    assert answered.json()["messages"][3]["text"] == "Plumbing. Our new site is elsewhere.example"
     text = turn_text(model)
     assert "<memory>" not in text and "<website" not in text
     # consent is given once: it can't be turned into a yes later
@@ -308,7 +325,7 @@ async def test_tool_labels_are_inline_messages(app, browser, fake, kernel_http, 
     consented = await consent(owner, state["interview_id"], True)
 
     assert consented["consent"] is True and consented["question"] == "what_you_do"
-    assert [(message["role"], message["text"]) for message in consented["messages"][2:]] == [
+    assert [(message["role"], message["text"]) for message in consented["messages"][1:]] == [
         ("owner", "Yes, use it"), ("tool_label", "Searched your Claude memory"),
         ("tool_label", "Read rivera-plumbing.example"), ("claude", question_text("what_you_do", "trade"))]
     read = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")
@@ -324,7 +341,7 @@ async def test_refused_fetch_does_not_block_setup(app, browser, fake, kernel_htt
     fake.script("native.read_memory", "hold")                           # held: it never runs without the owner
     state = await begin(owner, model, website=WEBSITE)
     consented = await consent(owner, state["interview_id"], True)
-    assert [(message["role"], message["text"]) for message in consented["messages"][3:]] == [
+    assert [(message["role"], message["text"]) for message in consented["messages"][2:]] == [
         ("tool_label", "Couldn't search your Claude memory"), ("tool_label", "Couldn't read rivera-plumbing.example"),
         ("claude", question_text("what_you_do", "trade"))]
     assert not fake.called("POST /execute")
@@ -1032,7 +1049,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_re
         release.set()
     reply = await first
     assert reply.status_code == 200, reply.text
-    assert [message["text"] for message in reply.json()["messages"][2:4]] == ["Yes, use it",
+    assert [message["text"] for message in reply.json()["messages"][1:3]] == ["Yes, use it",
                                                                              "Searched your Claude memory"]
 
 
