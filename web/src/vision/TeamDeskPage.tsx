@@ -1,18 +1,127 @@
-import { ConceptFooter } from '../ds/index.ts';
-import { TEAM_OWNER } from './data.ts';
-import { VisionFrame, VisionOwnerShell } from './VisionFrame.tsx';
+import { useId } from 'react';
 
-/** `/vision/team-desk` (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk. */
+import {
+  AccessPanel,
+  Button,
+  ConceptFooter,
+  FactCard,
+  MarginReceipt,
+  PageHeader,
+  Pill,
+  Transcript,
+  TranscriptRow,
+  VisitorMessage,
+} from '../ds/index.ts';
+import { LUIS_ACCESS, TEAM_CHAT, TEAM_EVERYONE, TEAM_HEADER, TEAM_OWNER, TEAM_TODAY, TEAM_TURNS, TEAMMATES, type TeamTurn } from './data.ts';
+import { ClaudeWords, VisionFrame, VisionOwnerShell } from './VisionFrame.tsx';
+
+const noop = () => undefined;
+
+/** "Luis Ortega" is "LO": the first letters of the first and last names. */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return [words[0], words.length > 1 ? words[words.length - 1] : undefined].map((word) => Array.from(word ?? '')[0] ?? '').join('');
+}
+
+/**
+ * `/vision/team-desk` (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk, the
+ * "Team" Desk in the sidebar's Desk picker. Conversations with Luis's open: what he asked from the
+ * van, Claude's answers with their cards and receipts, and what his access lets him open beside it.
+ */
 export function TeamDeskPage() {
+  const chatId = useId();
   return (
     <VisionFrame title="Rivera Plumbing team">
       {(bar) => (
         <VisionOwnerShell bar={bar} {...TEAM_OWNER}>
           <div className="cd-vision-page cd-vision-team">
-            <ConceptFooter />
+            <div>
+              <PageHeader
+                title={TEAM_HEADER.title}
+                actions={
+                  <Button variant="secondary" onClick={noop}>
+                    {TEAM_HEADER.action}
+                  </Button>
+                }
+              />
+              <p className="cd-vision-quiet cd-type-meta cd-vision-team__lead">{TEAM_HEADER.lead}</p>
+            </div>
+            <div className="cd-vision-team__columns">
+              <nav aria-label={TEAM_OWNER.peopleLabel} className="cd-vision-team__people">
+                <a href="#everyone" className="cd-vision-team__person">
+                  <span>
+                    <span className="cd-type-control cd-vision-team__name">{TEAM_EVERYONE.name}</span>
+                    <span className="cd-vision-quiet cd-type-caption cd-vision-team__line">{TEAM_EVERYONE.line}</span>
+                  </span>
+                </a>
+                {TEAMMATES.map((person, index) => (
+                  <a
+                    key={person.name}
+                    href={`#teammate-${index + 1}`}
+                    className="cd-vision-team__person"
+                    {...(person.name === TEAM_CHAT.name ? { 'aria-current': 'page' as const } : {})}
+                  >
+                    <span className="cd-vision-team__avatar cd-type-count" aria-hidden="true">
+                      {initials(person.name)}
+                    </span>
+                    <span>
+                      <span className="cd-type-control cd-vision-team__name" data-copy="user">
+                        {person.name}
+                      </span>
+                      <span className="cd-vision-quiet cd-type-caption cd-vision-team__line">{person.line}</span>
+                    </span>
+                  </a>
+                ))}
+              </nav>
+              <section className="cd-vision-team__chat" aria-labelledby={chatId}>
+                <div className="cd-vision-team__head">
+                  <h2 id={chatId} className="cd-type-section" data-copy="user">
+                    {TEAM_CHAT.name}
+                  </h2>
+                  <Pill>{TEAM_CHAT.level}</Pill>
+                  <span className="cd-vision-quiet cd-type-meta">{TEAM_CHAT.where}</span>
+                  <span className="cd-vision-team__actions">
+                    {TEAM_CHAT.actions.map((action) => (
+                      <Button key={action} variant="secondary" onClick={noop}>
+                        {action}
+                      </Button>
+                    ))}
+                  </span>
+                </div>
+                <Transcript label={`Conversation with ${TEAM_CHAT.name}`}>
+                  {TEAM_TURNS.map((turn) => (
+                    <Turn key={turn.asked} turn={turn} ownerName={TEAM_OWNER.owner.name} />
+                  ))}
+                </Transcript>
+              </section>
+              <div className="cd-vision-team__access">
+                <AccessPanel name={LUIS_ACCESS.name} canOpen={LUIS_ACCESS.canOpen} cantOpen={LUIS_ACCESS.cantOpen} onEditAccess={noop} />
+              </div>
+            </div>
+            <div className="cd-vision-team__foot">
+              <p className="cd-vision-quiet cd-type-caption">{TEAM_TODAY}</p>
+              <ConceptFooter />
+            </div>
           </div>
         </VisionOwnerShell>
       )}
     </VisionFrame>
+  );
+}
+
+/** A teammate's message, then Claude's answer with its card, and the receipt under it. */
+function Turn({ turn, ownerName }: { turn: TeamTurn; ownerName: string }) {
+  return (
+    <>
+      <TranscriptRow>
+        <VisitorMessage text={turn.asked} />
+      </TranscriptRow>
+      <TranscriptRow margin={<MarginReceipt source={turn.receipt.source} plain={turn.receipt.plain} ledgerSeq={0} />}>
+        <div className="cd-vision-reply">
+          <ClaudeWords text={turn.reply} ownerName={ownerName} />
+          {turn.fact ? <FactCard {...turn.fact} /> : null}
+        </div>
+      </TranscriptRow>
+    </>
   );
 }
