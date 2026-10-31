@@ -1,10 +1,11 @@
 // Compile-time checks of the route table against the API's own OpenAPI document, run by
 // `npm run typecheck`: every `ROUTES[k]` method and path is an operation in `API_OPERATIONS`
 // (openapi.gen.ts, from `npm run gen:api`), and each of its 2xx answers names the model in
-// `ROUTE_MODELS`, apart from the routes in `NOT_YET_SERVED`, which must still be missing from the
-// document; and every operation in `API_OPERATIONS` is some route's, apart from those on
-// `NEVER_CALLED`. routes.contract.test.ts makes the same checks at run time from openapi.json, and
-// is the only importer of this file.
+// `ROUTE_MODELS` (but a proving route's 202, which must be the retry, `ProvingPending`), apart
+// from the routes in `NOT_YET_SERVED`, which must still be missing from the document; and every
+// operation in `API_OPERATIONS` is some route's, apart from those on `NEVER_CALLED`.
+// routes.contract.test.ts makes the same checks at run time from openapi.json, and is the only
+// importer of this file.
 
 import type { API_OPERATIONS } from './openapi.gen.ts';
 import type { ROUTES, RouteKey } from './routes.ts';
@@ -172,26 +173,64 @@ type NotYetServed = (typeof NOT_YET_SERVED)[number];
 /** A route's operation key in `API_OPERATIONS`: "METHOD /path". */
 type OperationOf<K extends RouteKey> = `${(typeof ROUTES)[K]['method']} ${(typeof ROUTES)[K]['path']}`;
 
-/** The schema names of an operation's 2xx answers, without a proving route's 202 retry. */
+/**
+ * The schema names of an operation's final 2xx answers: every one but a proving route's 202, which
+ * is the retry `request()` follows whatever it names (RetryProblem checks that it is the retry).
+ */
 type AnswerNames<K extends RouteKey, Answers> = {
-  [Status in keyof Answers]: Status extends 202
-    ? (typeof ROUTES)[K] extends { proving: true }
-      ? Answers[Status] extends 'ProvingPending'
-        ? never
-        : Answers[Status]
-      : Answers[Status]
-    : Answers[Status];
+  [Status in keyof Answers]: Status extends 202 ? ((typeof ROUTES)[K] extends { proving: true } ? never : Answers[Status]) : Answers[Status];
 }[keyof Answers];
+
+/** A proving route's 202 that isn't the retry, `ProvingPending`, as a sentence, or never. */
+type RetryProblem<K extends RouteKey, Answers> = (typeof ROUTES)[K] extends { proving: true }
+  ? Answers extends { 202: infer Name extends string | null }
+    ? Equal<Name, 'ProvingPending'> extends true
+      ? never
+      : `${K}: ${OperationOf<K>} answers 202 with ${Name}, but a proving route's 202 is the retry request() follows, so it must be ProvingPending`
+    : never
+  : never;
+
+/** A route whose 2xx answers are only a proving route's 202, as a sentence. */
+type NoFinalAnswer<K extends RouteKey> =
+  `${K}: ${OperationOf<K>} has no final answer besides its 202, so nothing names ${(typeof ROUTE_MODELS)[K]}`;
+
+/**
+ * What is wrong with a served route's 2xx `Answers`, as sentences, or never: a proving route's 202
+ * that isn't the retry, no final answer at all, or final answers that aren't exactly its model.
+ * Spelled out as `RouteProblems` is, so the compiler prints the sentences rather than this alias.
+ */
+type AnswerProblems<K extends RouteKey, Answers> =
+  (
+    | RetryProblem<K, Answers>
+    | ([AnswerNames<K, Answers>] extends [never]
+        ? NoFinalAnswer<K>
+        : Equal<AnswerNames<K, Answers>, (typeof ROUTE_MODELS)[K]> extends true
+          ? never
+          : `${K}: the 2xx answers of ${OperationOf<K>} don't name ROUTE_MODELS.${K}`)
+  ) extends infer P
+    ? P extends string
+      ? P
+      : never
+    : never;
 
 type Assert<T extends true> = T;
 
-/** The answer names on their own, since the document serves no proving route yet. */
+/** RetryProblem's sentence for `draftRules` answering 202 with RulesDraft, for the checks below. */
+type NotTheRetry =
+  "draftRules: POST /api/owner/policy/{desk_id}/draft answers 202 with RulesDraft, but a proving route's 202 is the retry request() follows, so it must be ProvingPending";
+
+/** The answer names and problems on their own, since the document serves no proving route yet. */
 export type AnswerNameChecks = [
   // A proving route's 202 retry isn't its model,
   Assert<Equal<AnswerNames<'draftRules', { 200: 'RulesDraft'; 202: 'ProvingPending' }>, 'RulesDraft'>>,
-  // so a proving route that answers only with the retry names nothing, which no model equals
-  // (the contract test reports it as answering "only with the proving retry"),
+  Assert<Equal<AnswerProblems<'draftRules', { 200: 'RulesDraft'; 202: 'ProvingPending' }>, never>>,
+  // so a proving route that answers only with the retry names nothing, which no model equals,
   Assert<Equal<AnswerNames<'draftRules', { 202: 'ProvingPending' }>, never>>,
+  Assert<Equal<AnswerProblems<'draftPreset', { 202: 'ProvingPending' }>, NoFinalAnswer<'draftPreset'>>>,
+  // and since `request()` follows every proving 202 as the retry, a proving route's 202 must be
+  // ProvingPending and is never its final answer, even when it names the model.
+  Assert<Equal<AnswerProblems<'draftRules', { 200: 'RulesDraft'; 202: 'RulesDraft' }>, NotTheRetry>>,
+  Assert<Equal<AnswerProblems<'draftRules', { 202: 'RulesDraft' }>, NotTheRetry | NoFinalAnswer<'draftRules'>>>,
   // but any other route's 202 is, as each of its 2xx answers is.
   Assert<Equal<AnswerNames<'me', { 200: 'CopyOut'; 202: 'ProvingPending' }>, 'CopyOut' | 'ProvingPending'>>,
   Assert<Equal<AnswerNames<'sendMessage', { 202: 'MessageAccepted' }>, 'MessageAccepted'>>,
@@ -245,9 +284,7 @@ type RouteProblem<K extends RouteKey> = K extends NotYetServed
     ? `${K} is served now: take it off NOT_YET_SERVED`
     : never
   : OperationOf<K> extends keyof Operations
-    ? Equal<AnswerNames<K, Operations[OperationOf<K>]>, (typeof ROUTE_MODELS)[K]> extends true
-      ? never
-      : `${K}: the 2xx answers of ${OperationOf<K>} don't name ROUTE_MODELS.${K}`
+    ? AnswerProblems<K, Operations[OperationOf<K>]>
     : `${K}: ${OperationOf<K>} is not in openapi.json`;
 
 /** Every route's problem, spelled out (a distributive copy, so the compiler prints the sentences). */

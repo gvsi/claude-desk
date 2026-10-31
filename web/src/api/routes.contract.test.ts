@@ -5,8 +5,9 @@
  * - `openapi.gen.ts` is what `npm run gen:api` makes of the document as it stands, so a change to
  *   the document without regenerating fails here, in CI's web tests too.
  * - Every `ROUTES` method and path is in the document, and each of its 2xx answers names the model
- *   in `ROUTE_MODELS`, apart from the routes in `NOT_YET_SERVED`, which must still be missing, so
- *   that list only shrinks.
+ *   in `ROUTE_MODELS` (but a proving route's 202, which must be the retry, `ProvingPending`),
+ *   apart from the routes in `NOT_YET_SERVED`, which must still be missing, so that list only
+ *   shrinks.
  * - Every operation in the document is some route's, apart from those on `NEVER_CALLED`, so a route
  *   the API serves under another path or method fails here rather than staying pending.
  * routes.typecheck.ts makes the same checks at compile time against `API_OPERATIONS`.
@@ -33,10 +34,11 @@ const op = (key: RouteKey) => `${ROUTES[key].method} ${ROUTES[key].path}`;
 
 /**
  * What is wrong with the routes in `keys` against `operations` (from `apiOperations`), as
- * sentences: a pending route the document serves, a served route it lacks, a 2xx answer that
- * doesn't name the route's model (a proving route's 202 retry aside), an operation that none of
- * the routes calls and `neverCalled` doesn't list (such as one the API serves under another path
- * or method), and a listed operation that a route calls or the document doesn't serve.
+ * sentences: a pending route the document serves, a served route it lacks, a proving route's 202
+ * that isn't the retry (`ProvingPending`), a route with no final answer besides that 202, a final
+ * 2xx answer that doesn't name the route's model, an operation that none of the routes calls and
+ * `neverCalled` doesn't list (such as one the API serves under another path or method), and a
+ * listed operation that a route calls or the document doesn't serve.
  */
 function routeProblems(
   operations: Record<string, OperationAnswers>,
@@ -58,12 +60,16 @@ function routeProblems(
       problems.push(`${key}: ${operation} is not in openapi.json`);
       continue;
     }
-    // The answers' names, without a proving route's 202 (the proving protocol's retry, which
-    // `request()` follows), must be exactly the route's model, as the typecheck's `Equal` requires:
-    // none other, and not none at all.
+    // A proving route's 202 is the proving protocol's retry, which `request()` follows whatever it
+    // names, so it must be `ProvingPending` and is never the final answer. The final answers' names
+    // must be exactly the route's model, as the typecheck's `Equal` requires: none other, and not
+    // none at all.
     const model = ROUTE_MODELS[key];
-    const named = Object.entries(answers).filter(([status, name]) => !(route.proving && status === '202' && name === 'ProvingPending'));
-    if (named.length === 0) problems.push(`${key}: ${operation} answers only with the proving retry, not ${model}`);
+    if (route.proving && '202' in answers && answers['202'] !== 'ProvingPending') {
+      problems.push(`${key}: ${operation} answers 202 with ${answers['202']}, but a proving route's 202 is the retry request() follows, so it must be ProvingPending`);
+    }
+    const named = Object.entries(answers).filter(([status]) => !(route.proving && status === '202'));
+    if (named.length === 0) problems.push(`${key}: ${operation} has no final answer besides its 202, so nothing names ${model}`);
     for (const [status, name] of named) {
       if (name !== model) problems.push(`${key}: ${operation} answers ${status} with ${name}, not ${model}`);
     }
@@ -106,9 +112,18 @@ describe('routes against the API contract', () => {
       [op('me')]: { 200: 'CopyOut', 202: 'ProvingPending' },
     };
     expect(routeProblems(operations, new Set(['health']), keys)).toEqual(['me: GET /api/owner/me answers 202 with ProvingPending, not CopyOut']);
-    // A proving route that answers only with the retry names no model, as the typecheck finds too.
+    // `request()` follows every proving 202 as the retry, so a proving route's 202 must be
+    // `ProvingPending`, and never counts as its final answer even when it names the model.
+    const notTheRetry =
+      "draftRules: POST /api/owner/policy/{desk_id}/draft answers 202 with RulesDraft, but a proving route's 202 is the retry request() follows, so it must be ProvingPending";
+    expect(routeProblems({ [op('draftRules')]: { 200: 'RulesDraft', 202: 'RulesDraft' } }, new Set(), ['draftRules'])).toEqual([notTheRetry]);
+    expect(routeProblems({ [op('draftRules')]: { 202: 'RulesDraft' } }, new Set(), ['draftRules'])).toEqual([
+      notTheRetry,
+      'draftRules: POST /api/owner/policy/{desk_id}/draft has no final answer besides its 202, so nothing names RulesDraft',
+    ]);
+    // A proving route that answers only with the retry names no model either, as the typecheck finds too.
     expect(routeProblems({ [op('draftPreset')]: { 202: 'ProvingPending' } }, new Set(), ['draftPreset'])).toEqual([
-      'draftPreset: POST /api/owner/policy/{desk_id}/preset answers only with the proving retry, not RulesDraft',
+      'draftPreset: POST /api/owner/policy/{desk_id}/preset has no final answer besides its 202, so nothing names RulesDraft',
     ]);
     // A pending route the document serves, and a served route it lacks, are problems too.
     expect(routeProblems({ [op('health')]: { 200: 'HealthOut' } }, new Set(['health']), ['health'])).toEqual([
