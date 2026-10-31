@@ -424,13 +424,14 @@ def test_gated_jobs_go_through_the_gate():
     tier2_gate = CHECKS["tier 2 results"][0]
     assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
-    # Tier 2 checks pull requests against main and main pushes against the previous main commit.
+    # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
+    # pushes and manual runs use the previous commit.
     tier2 = job_named("tier 2 results")
     assert "if" not in tier2
     assert tier2["steps"][0]["with"]["fetch-depth"] == 0
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
     assert results["env"] == {
-        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && 'origin/main' || 'HEAD~1' }}",
+        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}",
     }
     assert results["run"].endswith('make evals-results-check BASE="$RESULTS_BASE"')
     # The secret scan reads the whole history.
