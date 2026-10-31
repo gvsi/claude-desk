@@ -269,6 +269,11 @@ async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decisio
     """Show the approved snapshot before the outcome and resume once, in one transaction (module docstring).
     Without a snapshot (including older jobs), show only the outcome. True when this call showed the outcome,
     False when that state, or a later one, was already shown."""
+    if approved is not None and (approved.decision_id != decision.decision_id
+                                 or approved.state != "approved"
+                                 or approved.ledger_seq >= decision.ledger_seq):
+        logger.warning("an approved snapshot doesn't match its outcome; showing only the outcome")
+        approved = None
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
     await conn.commit()                                    # a READ COMMITTED transaction of its own, for deliver()

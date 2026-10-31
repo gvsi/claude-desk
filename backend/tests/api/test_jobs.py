@@ -154,6 +154,70 @@ async def test_resume_job_is_idempotent(copy, engine, db, approved_shown):
         ("run_resumable", unsure.decision_id, False), ("decision_pending", unsure.decision_id, False)]
 
 
+async def test_resume_drops_an_approved_snapshot_with_swapped_ledger_sequences(copy, engine, caplog):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": held.decision_id})
+    assert result.approved is not None
+    outcome = result.decision.model_copy(update={"ledger_seq": result.approved.ledger_seq})
+    approved = result.approved.model_copy(update={"ledger_seq": result.decision.ledger_seq})
+
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, outcome, approved) is True
+
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("held", "held"), ("resolved", "executed")]
+    assert found["action_update"] == [(held.decision_id, outcome.visitor_plain, True)]
+    assert found["control"] == [("run_resumable", held.decision_id, False)]
+    assert "approved snapshot doesn't match its outcome" in caplog.text
+    assert approved.visitor_plain not in caplog.text
+
+
+async def test_resume_drops_another_decisions_approved_snapshot(copy, engine, caplog):
+    caller = await copy.visitor()
+    other = await copy.decide(caller, "other-call", discount_bp=1000)
+    other_answer = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                         path={"decision_id": other.decision_id})
+    approved = other_answer.approved
+    assert approved is not None
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    outcome = await copy.answer(held)
+    assert approved.ledger_seq < outcome.ledger_seq
+
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, outcome, approved) is True
+
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("held", "held"), ("resolved", "executed")]
+    assert found["action_update"] == [(held.decision_id, outcome.visitor_plain, True)]
+    assert found["control"] == [("run_resumable", held.decision_id, False)]
+    assert "approved snapshot doesn't match its outcome" in caplog.text
+    assert approved.visitor_plain not in caplog.text
+
+
+async def test_resume_drops_a_snapshot_that_isnt_approved(copy, engine, caplog):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": held.decision_id})
+    assert result.approved is not None
+    snapshot = result.approved.model_copy(update={"state": "denied"})
+
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, result.decision, snapshot) is True
+
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("held", "held"), ("resolved", "executed")]
+    assert found["action_update"] == [(held.decision_id, result.decision.visitor_plain, True)]
+    assert found["control"] == [("run_resumable", held.decision_id, False)]
+    assert "approved snapshot doesn't match its outcome" in caplog.text
+    assert snapshot.visitor_plain not in caplog.text
+
+
 async def test_a_late_resume_job_never_shows_an_older_state(copy, engine, fake, monkeypatch):
     """A resume job that runs late (retried after a deploy, or slow to start) can carry a state the kernel has since
     moved past, which the visitor's next request already showed. It shows nothing: no older status, no action
