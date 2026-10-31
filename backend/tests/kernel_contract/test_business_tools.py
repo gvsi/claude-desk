@@ -73,6 +73,25 @@ async def test_business_tools_replace_and_expose_review_definition(kernel, ro_re
     assert stored()["status"] == "disabled"
 
 
+@pytest.mark.kernel_plan('01c')
+async def test_readded_business_tool_returns_for_review_as_new(kernel, ro_read):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.intake', title='New client intake', description='Take details.',
+                        config={'block': 'intake', 'questions': ['What?']})
+    request = BusinessToolsRequest(tools=[tool])
+    await owner.call('PUT /desks/{id}/business_tools', request, path={'id': desk_id})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[]), path={'id': desk_id})
+    await owner.call('PUT /desks/{id}/business_tools', request, path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    assert (row['status'], row['review_reason']) == ('needs_review', 'new')
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    event = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools'][-1]
+    assert event.summary['tools'][0]['change'] == 'new'
+
+
 @pytest.mark.kernel_plan("01c")
 async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, ro_read):
     http, schema, _ = kernel
