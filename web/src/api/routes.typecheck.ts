@@ -68,6 +68,7 @@ export const ROUTE_MODELS = {
   draftRules: 'RulesDraft',
   draftPreset: 'RulesDraft',
   draftSuggestion: 'RulesDraft',
+  draftMoneyCap: 'RulesDraft',
   confirmRules: 'PolicyVersion',
   confirmTool: 'ToolConfirmed',
   setupRules: 'RulesDraft',
@@ -113,6 +114,7 @@ export const ROUTE_MODELS = {
  */
 export const NOT_YET_SERVED = [
   // Proving
+  'draftMoneyCap',
   'confirmTool',
 ] as const satisfies readonly RouteKey[];
 

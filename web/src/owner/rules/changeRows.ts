@@ -93,14 +93,16 @@ interface RowLabel {
 const LAST_PLACE = TOOL_ORDER.length + 1;
 
 /**
- * The tools of this Desk's `catalog` (in review order) that the shared rule `card` covers, among
- * `side`, the cards on its side of the draft. The design system's `rulesForTool` over the side's
- * shared rules alone lists exactly the shared rules that cover a tool (master "Coverage and
- * overlap"): every tool with the rule's effect, and for an automatic rule on a tool with several
- * effects, only jointly with an automatic rule for each of the others.
+ * The tools of `catalog`, in its order, that the shared rule `card` covers among the shared rules
+ * of `cards`. The design system's `rulesForTool` over those shared rules alone lists exactly the
+ * shared rules that cover a tool (master "Coverage and overlap"): every tool with the rule's
+ * effect, and for an automatic rule on a tool with several effects, only jointly with an automatic
+ * rule for each of the others. A tool's own rules don't take a shared rule's tools away from it.
+ * A review passes one side of its draft and the Desk's whole catalog in review order; Rules, the
+ * active rules and the Desk's tools on its connectors, in the connectors' order.
  */
-function coveredTools(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[]): ToolName[] {
-  const shared = side.filter(isEffectCard);
+export function coveredTools(card: RuleCard, cards: readonly RuleCard[], catalog: readonly RulesTool[]): ToolName[] {
+  const shared = cards.filter(isEffectCard);
   return catalog.filter((tool) => rulesForTool(tool, shared).some((rule) => rule.card_id === card.card_id)).map((tool) => tool.tool);
 }
 
