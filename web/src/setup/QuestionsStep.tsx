@@ -24,18 +24,19 @@ function awaitsConsent(state: SetupState): boolean {
   return state.consent === null;
 }
 
-/** An answer as sent: the question it answers, the words, and how often the owner had said those words before. */
+/**
+ * An answer that didn't go through: the question it answers, the words, and whether the API may
+ * have taken it (its reply was lost, and the interview couldn't be read to say) or plainly didn't.
+ */
 interface Answer {
   question: QuestionKey;
   text: string;
-  before: number;
+  /** The API may have taken it: true after a lost reply, false after a refusal. */
+  unknown: boolean;
 }
 
-/** How often the conversation holds the owner saying `text`. */
-const timesSaid = (state: SetupState, text: string) => state.messages.filter((message) => message.role === 'owner' && message.text === text).length;
-
-/** The interview, as read, holds the answer: its words are there once more than before it was sent. */
-const holds = (state: SetupState, answer: Answer) => timesSaid(state, answer.text) > answer.before;
+/** The interview no longer waits on `question`: an answer to it was taken, here or elsewhere. */
+const movedPast = (state: SetupState, question: QuestionKey) => state.step !== 'questions' || state.question !== question;
 
 /**
  * The question in view, counted from 1: the API's own (`question`), else the questions Claude has
@@ -89,7 +90,7 @@ function AnswerBox({
           {copy.failed}
         </Notice>
       ) : null}
-      <Composer variant="owner" label={copy.composerLabel} placeholder={copy.placeholder} maxLength={ANSWER_MAX} disabled={sending} onSend={onSend} />
+      <Composer variant="owner" label={copy.composerLabel} placeholder={copy.placeholder} maxLength={ANSWER_MAX} disabled={sending || retrying} onSend={onSend} />
     </>
   );
 }
@@ -109,36 +110,55 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const [failed, setFailed] = useState<Answer | null>(null);
   /** "Try again" is reading the interview. */
   const [retrying, setRetrying] = useState(false);
+  /** A consent whose reply was lost, and the read after it too: the next press reads first. */
+  const [consentUnknown, setConsentUnknown] = useState(false);
   /** Words to put back in the composer once it takes text again. */
   const [refill, setRefill] = useState<{ text: string } | null>(null);
   const id = state.interview_id;
   const asking = awaitsConsent(state);
   const number = questionNumber(state);
 
+  /**
+   * The consent, sent once. A lost reply, or a 409 (it was given already), reads the interview,
+   * which says whether it was taken. When that read fails too, the outcome is unknown: the next
+   * press reads first and sends only if consent is still awaited, so it is never given twice.
+   */
   const consent = async (allow: boolean) => {
     if (consenting !== null) return;
     setConsenting(allow);
-    setConsentError(null);
     try {
+      if (consentUnknown) {
+        // Still unknown while the interview can't be read: the line already says so.
+        const now = await reread();
+        if (now === null) return;
+        setConsentUnknown(false);
+        setConsentError(null);
+        if (!awaitsConsent(now)) return;
+      }
+      setConsentError(null);
       onState(await request('setupConsent', { params: { id }, body: { allow } }));
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer may have been taken: the interview as it stands says whether it was.
-      const now = isUncertain(err) ? await reread() : null;
-      if (now === null || awaitsConsent(now)) setConsentError(ownerErrorCopy(err));
+      const unsure = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+      const now = unsure ? await reread() : null;
+      if (now !== null && !awaitsConsent(now)) return;
+      if (unsure && now === null) setConsentUnknown(true);
+      setConsentError(ownerErrorCopy(err));
     } finally {
       setConsenting(null);
     }
   };
 
   /**
-   * Sends `answer` for its own question. A lost answer may have been taken, and one the API refuses
-   * as stale (409) means the interview has moved past that question: either way the interview is
-   * read, and where it stands says what happened. Taken: on to the next question. Moved past without
-   * these words: they stay in the composer for the question now asked. Else they come back with the
-   * failure line.
+   * Sends `answer` for its own question, decided only by the question and where the interview
+   * stands, never by the words. A refusal (a 409 means the interview moved past that question
+   * before these words reached it) keeps the words: the interview is read, and they stay in the
+   * composer for the question now asked. A lost reply reads the interview: moved past that question
+   * means the answer was taken, so the page moves on; still on it means it wasn't, and the words
+   * come back with the failure line; a read that fails leaves the outcome unknown, with the words
+   * and the line.
    */
-  const submit = async (answer: Answer) => {
+  const submit = async (answer: Omit<Answer, 'unknown'>) => {
     setSending(answer.text);
     setFailed(null);
     try {
@@ -146,28 +166,65 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       setSending(null);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      const unknown = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
-      const now = unknown ? await reread() : null;
-      setSending(null);
-      if (now !== null && holds(now, answer)) return;
-      if (now !== null && (now.step !== 'questions' || now.question !== answer.question)) {
+      if (err instanceof ApiError && err.kind === 'conflict') {
+        const now = await reread();
+        setSending(null);
+        if (now === null) setFailed({ ...answer, unknown: false });
         setRefill({ text: answer.text });
         return;
       }
-      setFailed(answer);
+      const now = isUncertain(err) ? await reread() : null;
+      setSending(null);
+      if (now !== null && movedPast(now, answer.question)) return;
+      setFailed({ ...answer, unknown: isUncertain(err) && now === null });
       setRefill({ text: answer.text });
     }
   };
 
-  /** The composer's words, as the answer to the question the page shows. */
+  /**
+   * "Try again", and Send while an answer didn't go through: the interview is read first, since the
+   * answer may have been taken. Moved past its question: one taken unknowingly moves the page on,
+   * with nothing sent; one refused keeps its words for the question now asked. Still on it: the
+   * words are sent as the answer to that question, never to another. A read that fails changes
+   * nothing, and the line stays.
+   */
+  const retry = async (typed?: string) => {
+    if (failed === null || retrying) return;
+    setRetrying(true);
+    const now = await reread();
+    setRetrying(false);
+    const box = composer.current?.querySelector('textarea');
+    const text = typed ?? (box?.value.trim() || failed.text);
+    if (now === null) {
+      if (typed !== undefined) setRefill({ text });
+      return;
+    }
+    if (movedPast(now, failed.question)) {
+      setFailed(null);
+      if (failed.unknown) {
+        if (box) fillComposer(box, '');
+      } else if (typed !== undefined) {
+        setRefill({ text });
+      }
+      return;
+    }
+    if (box) fillComposer(box, '');
+    void submit({ question: failed.question, text });
+  };
+
+  /** The composer's words: the answer to the question the page shows, unless one before them is still unsettled. */
   const send = (text: string) => {
+    if (failed !== null) {
+      void retry(text);
+      return;
+    }
     if (state.question === null) {
       // No question is waiting here: read where the interview stands, and keep the words.
       setRefill({ text });
       void reread();
       return;
     }
-    void submit({ question: state.question, text, before: timesSaid(state, text) });
+    void submit({ question: state.question, text });
   };
 
   useEffect(() => {
@@ -175,34 +232,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     if (refill === null || !box || box.disabled) return;
     fillComposer(box, refill.text);
     setRefill(null);
-  }, [refill, sending]);
-
-  /**
-   * "Try again" reads the interview first, since the answer may have been taken. Taken: on to the
-   * next question, nothing sent. Moved past without it: the words stay for the question now asked.
-   * Still on that question: the composer's words are sent as the answer to it, never to another. A
-   * read that fails changes nothing, and the line stays.
-   */
-  const retry = async () => {
-    if (failed === null || retrying) return;
-    setRetrying(true);
-    const now = await reread();
-    setRetrying(false);
-    if (now === null) return;
-    const box = composer.current?.querySelector('textarea');
-    if (holds(now, failed)) {
-      setFailed(null);
-      if (box) fillComposer(box, '');
-      return;
-    }
-    if (now.step !== 'questions' || now.question !== failed.question) {
-      setFailed(null);
-      return;
-    }
-    const text = box?.value.trim() || failed.text;
-    if (box) fillComposer(box, '');
-    void submit({ question: failed.question, text, before: timesSaid(now, text) });
-  };
+  }, [refill, sending, retrying]);
 
   return (
     <div className="cd-setup-step">

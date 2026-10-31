@@ -103,7 +103,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const reread = useCallback(
     () =>
       queryClient
-        .fetchQuery({ ...setupQuery(setupId), staleTime: 0 })
+        // One read, no retry: when it fails, the step says the outcome is unknown and the owner tries again.
+        .fetchQuery({ ...setupQuery(setupId), staleTime: 0, retry: false })
         .then((next) => next)
         .catch(() => null),
     [queryClient, setupId],

@@ -226,12 +226,12 @@ describe('setup', () => {
     // The API takes the answer but its reply is lost, and reading the interview fails too: the
     // outcome is unknown, so the words stay, with "Try again".
     mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
-    mockStore.inject({ route: 'setup', status: 503, times: 2 });
+    mockStore.inject({ route: 'setup', status: 503 });
     await screen.getByRole('button', { name: 'Send' }).click();
     await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue(answer);
     const failedReads = requests('setup', mark).length;
-    expect(failedReads).toBeGreaterThan(0);
+    expect(failedReads).toBe(1);
 
     // "Try again" reads first: the interview holds the answer, so it isn't sent again, and the
     // page moves on to the next question.
@@ -243,6 +243,20 @@ describe('setup', () => {
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     const said = (await mockStore.dispatch('setup', { params: { id } })) as { body: SetupState };
     expect(said.body.messages.filter((m) => m.role === 'owner' && m.text === answer)).toHaveLength(1);
+
+    // The same, but the owner presses Send instead of "Try again": it reads first all the same.
+    const other = await startInterview();
+    const again = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
+    const otherBox = again.getByRole('textbox', { name: 'Your answer' });
+    await otherBox.fill(answer);
+    const from = mockStore.requests.length;
+    mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'setup', status: 503 });
+    await again.getByRole('button', { name: 'Send' }).click();
+    await expect.element(again.getByText(FAILED_LINE, { exact: true })).toBeVisible();
+    await again.getByRole('button', { name: 'Send' }).click();
+    await expect.element(again.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    expect(requests('setupAnswer', from)).toHaveLength(1);
   });
 
   it('stale_answer_is_refused_and_kept', async () => {
@@ -271,6 +285,42 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Send' }).click();
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[2]?.text ?? ''}`, { exact: true })).toBeVisible();
     expect(requests('setupAnswer', mark).map((r) => r.body).at(-1)).toEqual({ question: 'hours_and_area', text: 'Water heaters too.' });
+
+    // A refusal is a refusal even when the question was answered elsewhere in the same words: they
+    // stay in the composer, never taken for this page's answer.
+    const twin = await startInterview();
+    const page = (await renderRoute(`/app/setup/${twin.interview_id}`)).screen;
+    const twinBox = page.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(twinBox).toBeVisible();
+    await mockStore.dispatch('setupAnswer', { params: { id: twin.interview_id }, body: { question: 'what_you_do', text: 'Same words.' } });
+    await twinBox.fill('Same words.');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect.element(page.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    await expect.element(twinBox).toHaveValue('Same words.');
+  });
+
+  it('lost_consent_is_read_before_it_is_sent_again', async () => {
+    const state = await startInterview(null);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const mark = mockStore.requests.length;
+
+    // The API takes the consent but its reply is lost, and the read fails too: unknown.
+    mockStore.inject({ route: 'setupConsent', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'setup', status: 503 });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.poll(() => requests('setup', mark).length).toBe(1);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+
+    // Pressed again, it reads first: consent was given, so the first question shows, with no second write.
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    expect(requests('setupConsent', mark)).toHaveLength(1);
+    // Nothing comes before Claude's consent question: the owner's description isn't a message.
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    const first = log.element().firstElementChild;
+    expect(first?.querySelector('[data-copy="user"]')).toBeNull();
+    expect(first?.textContent).toMatch(/^Thanks, Maria\. Before I ask anything/);
   });
 
   it('tool_turns_on_only_after_its_change_is_confirmed', async () => {
