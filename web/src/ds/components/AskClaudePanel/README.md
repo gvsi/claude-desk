@@ -30,3 +30,7 @@
 | `onSend` | `(text: string) => void` | Required. |
 | `busy` | `boolean` | Shows the writing indicator. |
 | `children` | `ReactNode` | The conversation. |
+
+## What it returns focus to
+
+As a sheet, the panel notes what opened it when it appears: the control that had focus outside it, or else the control the click that opened it landed on, since Safari focuses no button a click presses and leaves focus on the page's body. A capture listener on the document notes each click's control for that click's task only (`clickedControl.ts`), so a panel that opens later never takes an old click for its opener.
