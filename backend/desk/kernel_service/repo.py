@@ -13,7 +13,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    route, in T2 by the execution of an adapter that writes the session's own rows
    (`locks_session`, a verification start) on either path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
-   Desk's deletion); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
+   Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
+   nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
    other adapter, on either path, so a Desk's deletion, which closes the session `FOR UPDATE`,
    commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
    own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before

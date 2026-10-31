@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 import yaml
 
-from desk.kernel_service import decisions, reply_check
+from desk.kernel_service import decisions, lang, reply_check
 from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput
 from desk.kernel_service.render import en as render_en
 from desk.kernel_service.render import es as render_es
@@ -140,14 +140,25 @@ def test_the_case_file_holds_every_group():
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
-        "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "human_claims": 3}
+        "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "human_claims": 3,
+        "short_prose": 4}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
         "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
-        "human_claims": {"flag_ai": 3}}
+        "human_claims": {"flag_ai": 3}, "short_prose": {"flag": 2, "pass": 2}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases}
+    # prose too short for the kernel to tell its language reaches the check in the turn's language, which
+    # the visitor's newest message sets: each such draft is sent twice, the same words and cards told en
+    # and told es, and the detection reads none of them
+    short = [c for c in cases if c.group == "short_prose"]
+    assert {lang.detect(reply_check.shown(c.prose)) for c in short} == {"none"}
+    told: dict[tuple[str, tuple[str, ...], str], list[str]] = {}
+    for case_ in short:
+        told.setdefault((case_.prose, tuple(case_.cards), case_.expected), []).append(case_.language)
+    assert sorted(told.values()) == [["en", "es"], ["en", "es"]]
+    assert sorted(answer for _, _, answer in told) == ["flag", "pass"]
     # the follow-up the handoff card states passes beside that card, as the kernel renders it in the
     # case's language, and only there: the same words with no card are a promise
     rivera = DeskInfo(owner_display_name="Maria Rivera", timezone="America/Los_Angeles")

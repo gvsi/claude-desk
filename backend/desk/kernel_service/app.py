@@ -65,7 +65,7 @@ from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, Docume
                              PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed,
                              ToolsConfirmRequest, ToolsConnectRequest, ToolsSimulateChangeRequest)
 from desk.kernel_service import (activation, agents, approvals, auth, context, copies, decide, demo_inbox, desks,
-                                 execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions,
+                                 execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions, turn,
                                  verification)
 from desk.kernel_service.adapters import release_document
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -361,6 +361,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(execute.router)
     app.include_router(approvals.router)
     app.include_router(context.router)
+    app.include_router(turn.router)
     app.include_router(reply_check.router)
     app.include_router(public.router)
     app.include_router(verification.router)

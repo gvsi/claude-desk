@@ -4155,6 +4155,55 @@
       "title": "ToolsSimulateChangeRequest",
       "type": "object"
     },
+    "TurnRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 2000,
+          "title": "Text",
+          "type": "string"
+        },
+        "desk_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Desk Id"
+        }
+      },
+      "required": [
+        "generation",
+        "text"
+      ],
+      "title": "TurnRequest",
+      "type": "object"
+    },
+    "TurnStarted": {
+      "properties": {
+        "language": {
+          "enum": [
+            "en",
+            "es"
+          ],
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "required": [
+        "language"
+      ],
+      "title": "TurnStarted",
+      "type": "object"
+    },
     "VerifyCheckRequest": {
       "additionalProperties": false,
       "properties": {
