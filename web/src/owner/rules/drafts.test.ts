@@ -587,6 +587,29 @@ describe('rule drafts', () => {
     expect(narrowed[1]?.after?.appliesTo).toBe('Payment link');
     // It moves from a group of tools to one tool, which its sides show: no "Shared rule".
     expect(narrowed.map((row) => row.shared)).toEqual([undefined, undefined, undefined]);
+
+    // A shared rule moved from one group to another, "never charge money" to "never send money
+    // out": titled by every tool either side covers, which span connectors, so it has none and goes
+    // last; each side names the tools it covers rather than its group's words, and it stays shared.
+    const neverCharge: RuleCard = { card_id: 'card-never-money', applies_to: 'effect:charge', mode: 'never', who: 'anyone', reason: 'Money never moves without you.' };
+    const neverPayOut = changed(neverCharge, { applies_to: 'effect:pay_out' });
+    const regrouped: [RuleCard, RuleCard][] = [
+      [neverCharge, neverPayOut],
+      [ruleCards['rv-refund'], changed(ruleCards['rv-refund'], { reason: 'Refunds wait for you.' })],
+    ];
+    const moved = changeRows(
+      draftFromDiff(
+        rulesDraft({ cards: [...RIVERA_CARDS.filter((card) => card.card_id !== 'rv-refund'), ...regrouped.map(([, now]) => now)], diff: { added: [], removed: [], changed: regrouped } }),
+        version(7, [...RIVERA_CARDS, neverCharge]),
+      ),
+      PEOPLE,
+      TOOLS,
+    );
+    expect(moved.map((row) => row.key)).toEqual(['rv-refund', 'card-never-money']);
+    expect(moved[1]).toMatchObject({ change: 'changed', title: 'Payment link, Charge within a signed limit and Refund', shared: true, changed: ['applies_to'] });
+    expect(moved[1]?.connector).toBeUndefined();
+    expect(moved[1]?.before?.appliesTo).toBe('Payment link and Charge within a signed limit');
+    expect(moved[1]?.after?.appliesTo).toBe('Refund');
   });
 
   /** Rivera's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
