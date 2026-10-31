@@ -69,6 +69,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.prompts import (
     ROW_TAGS,
+    SEND_REPLY_TOOL,
     SHOWN_LABELS,
     SUMMARY_LABELS,
     Triage,
@@ -113,6 +114,23 @@ class OpenToolUse:
     tool_uses: list[dict]
     generation: int
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class UnreadResults:
+    """The results row answering the current model context's last assistant row, which Claude hasn't read (no
+    assistant row follows it): its `n`, each call's result but `send_reply`'s (whose replies the transcript keeps) as
+    (tool name, `tool_result` block) in block order, and whether a `send_reply` call of that response put a reply on
+    screen."""
+
+    n: int
+    results: list[tuple[str, dict]]
+    replied: bool
+
+    @property
+    def must_read(self) -> bool:
+        """Claude still has to read them: a call other than a reply ran, and no reply of that response showed."""
+        return bool(self.results) and not self.replied
 
 
 @dataclass(frozen=True)
@@ -171,6 +189,7 @@ REPLAYED_KINDS = frozenset({"visitor_text", "agent_text", "delivered", "status"}
 PRESENCE_KINDS = frozenset({"owner_joined", "owner_left"})   # the owner's take-over and hand-back, as their events
 EVENT_KINDS = frozenset({"delivered", "status", *PRESENCE_KINDS})   # rows holding the event they published
 NOT_REPLAYED = MESSAGES.c.replay_id.is_(None)   # every query that builds a model context leaves out recorded history
+SEND_REPLY = SEND_REPLY_TOOL["name"]
 
 
 def lock_key(name: str) -> int:
@@ -416,6 +435,29 @@ async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToo
         MESSAGES.c.model_seq > last.model_seq))).scalar_one()
     return None if answered else OpenToolUse(assistant_n=last.n, tool_uses=tool_uses, generation=last.generation,
                                              created_at=last.created_at)
+
+
+async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResults | None:
+    """The results Claude hasn't read yet in the current model context (`UnreadResults`); None when its last assistant
+    row has no results row yet, or a later assistant row read them, or the context has no assistant row."""
+    current = await _current_context(conn, session_id)
+    if current is None:
+        return None
+    last = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.model_content).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.model_context == current,
+        MESSAGES.c.kind.in_(("model_assistant", "model_tool_results"))).order_by(MESSAGES.c.model_seq.desc())
+        .limit(2))).all()
+    if [row.kind for row in last] != ["model_tool_results", "model_assistant"]:
+        return None
+    results, assistant = last
+    names = {block["id"]: block["name"] for block in assistant.model_content if block.get("type") == "tool_use"}
+    replies = [call_id for call_id, name in names.items() if name == SEND_REPLY]
+    replied = bool(replies) and (await conn.execute(select(func.count()).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered",
+        MESSAGES.c.call_id.in_(replies)))).scalar_one() > 0
+    return UnreadResults(n=results.n, replied=replied, results=[
+        (names[block["tool_use_id"]], block) for block in results.model_content
+        if names.get(block["tool_use_id"]) not in (None, SEND_REPLY)])
 
 
 async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:

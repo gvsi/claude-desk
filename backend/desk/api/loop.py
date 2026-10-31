@@ -61,6 +61,7 @@ from desk.api.store import (
     prepare_model_input,
     start_fresh_context,
     unanswered_tool_use,
+    unread_results,
 )
 from desk.api.tools import (
     DELIVERED_HANDOFF,
@@ -244,7 +245,11 @@ class _Turn:
         A fresh context also opens when the system prompt this turn renders isn't the one the context froze: a
         deploy changed the template, the owner renamed the business, the Desk or themselves, or the context opened
         before contexts froze their prompt. Each thinking block is bound to the prompt it was made under, so this
-        is a deliberate boundary: the new prompt applies from the summary, and no earlier thinking is replayed."""
+        is a deliberate boundary: the new prompt applies from the summary, and no earlier thinking is replayed.
+
+        The boundary waits for a turn edge: while Claude has tool results still to read (a turn stopped after a call
+        ran, `UnreadResults.must_read`) and the context froze a prompt, this turn runs on that prompt, so Claude reads
+        them where it made the calls; the next turn opens the new one."""
         conn, ids = self.conn, self.caller.ids
         body = context_text(context.facts, context.knowledge)
         if context_hash(body) != await last_context_hash(conn, ids.session_id):
@@ -256,9 +261,16 @@ class _Turn:
         for name in delta.add:
             await append_tool_change(conn, ids, "tool_addition", name)
         fresh = delta.fresh
-        if not fresh and await context_system(conn, ids.session_id) != system:
-            logger.info("the system prompt changed since the model context opened: a fresh context starts")
-            fresh = True
+        frozen = None if fresh else await context_system(conn, ids.session_id)
+        if not fresh and frozen != system:
+            unread = await unread_results(conn, ids.session_id) if frozen is not None else None
+            if unread is not None and unread.must_read:
+                logger.info("session %s: the system prompt changed; it applies once Claude has read its tool results",
+                            ids.session_id)
+            else:
+                logger.info("session %s: the system prompt changed since the model context opened: a fresh context "
+                            "starts", ids.session_id)
+                fresh = True
         if fresh:
             await start_fresh_context(conn, ids, model_tools(context), system=system)
 
