@@ -66,7 +66,10 @@ export const REFERENCE_BOARDS = [
   // Customers: the list loading, and the list on a phone.
   'N-Run2-People-Loading',
   'N-Run2-People-Phone',
-  // Setup: real situations and the safety check, each a page longer than the window.
+  // Setup: an answer that couldn't be sent, kept with Try again; the tools step, a page longer
+  // than the window; real situations and the safety check, each a page longer than the window.
+  'N-R2-Setup-04-Answer-Failed',
+  'N-R2-Setup-05-Tools',
   'N-R2-Setup-09-Situations',
   'N-R2-Setup-11-Safety',
   // The agents page: the page itself, longer than the window, and the demo key shown once.
@@ -129,6 +132,8 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Conn-24-Phone-Connectors': 'phone',
   'N-Run2-People-Loading': 'laptop',
   'N-Run2-People-Phone': 'phone',
+  'N-R2-Setup-04-Answer-Failed': 'laptop',
+  'N-R2-Setup-05-Tools': 'laptop-1100',
   'N-R2-Setup-09-Situations': 'laptop-1100',
   'N-R2-Setup-11-Safety': 'laptop-1150',
   'N-R2-Agents-01-Page': 'laptop-1500',

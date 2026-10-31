@@ -1,0 +1,85 @@
+/* SetupToolsList: two cards 20 px apart, each 16 px in from its border: its heading, then 10 px
+   under it a row per connector under a hairline, 12 px above and below (the 36 px tile, 14 px to
+   the name over its line, and at the right where it stands or its button). It lays out by its own
+   width: under 480 px, as on a phone, where it stands or its button goes under the line. */
+
+.cd-setup-tools {
+  container: cd-setup-tools / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-setup-tools__heading {
+  margin: 0 0 var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-setup-tools__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-tools__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* The tile and the words are ConnectorSummary's, as in ConnectorPicker; the words take the row. */
+.cd-setup-tools__row > .cd-connector-summary {
+  flex: 1;
+}
+
+/* Where it stands: its dot 6 px before the words, "On" in primary ink, "Always on" in secondary. */
+.cd-setup-tools__end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-primary);
+}
+
+.cd-setup-tools__end--always-on {
+  color: var(--text-secondary);
+}
+
+/* What to do: how many tools an app brings, 14 px before its button. */
+.cd-setup-tools__end--action {
+  gap: var(--space-14);
+}
+
+.cd-setup-tools__count {
+  color: var(--text-secondary);
+}
+
+/* Under 480 px the line keeps the row's width, and where it stands or what to do sits under it,
+   8 px down, from the same edge. */
+@container cd-setup-tools (max-width: 479.98px) {
+  .cd-setup-tools__row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'icon text'
+      'icon end';
+    align-items: start;
+    gap: var(--space-8) var(--space-14);
+  }
+
+  .cd-setup-tools__row > .cd-connector-icon {
+    grid-area: icon;
+  }
+
+  .cd-setup-tools__row > .cd-connector-summary {
+    grid-area: text;
+  }
+
+  .cd-setup-tools__end {
+    grid-area: end;
+    justify-self: start;
+  }
+}

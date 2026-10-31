@@ -73,27 +73,7 @@
   border-top: 1px solid var(--line-hairline);
 }
 
-.cd-connector-picker__text {
-  min-width: 0;
-}
-
-.cd-connector-picker__name {
-  display: block;
-  font-weight: 520;
-}
-
-/* The badge sits 8 px from the name, as the boards set it. */
-.cd-connector-picker__name .cd-connector-name > .cd-pill,
-.cd-connector-picker__name .cd-connector-name__built-in {
-  margin-left: var(--space-4);
-}
-
-.cd-connector-picker__description {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
+/* The tile and the words beside it are ConnectorSummary's, shared with SetupToolsList. */
 
 .cd-connector-picker__state {
   max-width: 200px;
@@ -135,7 +115,7 @@
     grid-area: icon;
   }
 
-  .cd-connector-picker__text {
+  .cd-connector-picker__item > .cd-connector-summary {
     grid-area: text;
   }
 

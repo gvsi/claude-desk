@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, within } from 'storybook/test';
+import { expect, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -8,17 +8,17 @@ import { MoneyLimit } from '../MoneyLimit/MoneyLimit.tsx';
 import { OUTCOME_GROUP_WORDS, OUTCOME_TONE } from '../OutcomeMenu/outcomeWords.ts';
 import { OutcomeGroups } from './OutcomeGroups.tsx';
 
-const { line, hint } = rivera.paymentLimit;
+const { line } = rivera.paymentLimit;
 
 const NOTE =
-  "Drawn on N-R2-Setup-08-Rules, built against boards in review; sign-off pending. The setup interview's draft rules, grouped by what Claude does, under the payment limit.";
+  "Drawn on N-R2-Setup-08-Rules, signed on 2026-10-30. The setup interview's draft rules, grouped by what Claude does, under the payment limit.";
 
 const meta = {
   title: 'Rules/OutcomeGroups',
   component: OutcomeGroups,
   args: {
     rows: rivera.setupOutcomes,
-    moneyLimit: <MoneyLimit line={line} editing={false} value="" hint={hint} prominent onEdit={fn()} onChange={fn()} onReview={fn()} onCancel={fn()} />,
+    moneyLimit: <MoneyLimit line={line} prominent />,
   },
   render: (args) => (
     <div style={{ maxWidth: 720 }}>
@@ -74,15 +74,18 @@ export const SetupRules: Story = {
     // 40 px tall under hairlines.
     const cards = [...canvasElement.querySelectorAll<HTMLElement>('.cd-card')];
     await expect(cards).toHaveLength(4);
-    // money_line_leads: the limit's line, which holds over every rule below it, in weight 520.
+    // money_line_leads: the limit's line, which holds over every rule below it, in weight 520,
+    // read only: the setup's rules step has no "Change" (owner ruling, 2026-10-30).
     const money = within(cards[0] as HTMLElement).getByText(line);
     expectComputed(money, { fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    await expect(within(cards[0] as HTMLElement).queryAllByRole('button')).toEqual([]);
     for (const [i, card] of cards.entries()) {
       expectComputed(card, { paddingTop: '16px', paddingLeft: '16px', paddingBottom: '16px' });
       const next = cards[i + 1];
       if (next) await expect(next.getBoundingClientRect().top - card.getBoundingClientRect().bottom).toBe(20);
     }
-    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(66);
+    // The line alone, 16 px in from the card's border: 54 px.
+    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(54);
     const [first] = groups(canvasElement);
     const title = first?.querySelector<HTMLElement>('.cd-outcome-groups__title');
     if (!title) throw new Error('No title');
