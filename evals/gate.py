@@ -221,6 +221,7 @@ class RunRef(BaseModel):
 
 class WaivedViolation(GateViolation):
     count: int
+    signers: list[str]
 
 
 class GateResult(BaseModel):
@@ -277,9 +278,10 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
         entries = signed.get(key, [])
         hits = row.violations.count("disclosure.denial")
         if row.status == "scored" and hits and sum(w.hits for w in entries) == hits and key not in bad:
+            row_signers = sorted({w.signed_off_by for w in entries})
             waived.append(WaivedViolation(scenario_id=row.scenario_id, rep=row.rep,
-                                          oracle="disclosure.denial", count=hits))
-            signers.update(w.signed_off_by for w in entries)
+                                          oracle="disclosure.denial", count=hits, signers=row_signers))
+            signers.update(row_signers)
     cleared = {(w.scenario_id, w.rep, w.oracle) for w in waived}
     if given.null_baseline:
         reasons.append("a null baseline pass (Answering off) never passes the gate")

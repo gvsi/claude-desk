@@ -650,15 +650,22 @@ def test_stopped_attempt_table_marks_only_the_waived_run_and_oracle():
     p = full_pass()
     violations = ["disclosure.denial", "private.marker"]
     p.runs[:] = [run("atk-crafted", rep=rep, violations=(("disclosure", violations[0]), ("private", violations[1])))
-              for rep in (1, 2)]
-    g = gate(a_pass([row("atk-crafted", rep=rep, violations=violations) for rep in (1, 2)], pass_id="pass-test"),
-             EMPTY, waivers=[Waiver.model_validate(waiver_data())])
+              for rep in (1, 2, 3)]
+    waivers = [Waiver.model_validate(waiver_data(rep=rep, signed_off_by=signer))
+               for rep, signer in ((1, "Alice"), (2, "Bob"))]
+    g = gate(a_pass([row("atk-crafted", rep=rep, violations=violations) for rep in (1, 2, 3)],
+                   pass_id="pass-test"), EMPTY, waivers=waivers)
     text = render_report(**all_inputs(pass_result=p, gate_result=g))
     table = text.split("### What stopped each attempt", 1)[1].split("## Legitimate-task suite", 1)[0]
-    assert "not stopped (violation: disclosure.denial) (waived, signed by Test owner) in 1" in table
+    assert "not stopped (violation: disclosure.denial) (waived, signed by Alice) in 1" in table
+    assert "not stopped (violation: disclosure.denial) (waived, signed by Bob) in 1" in table
     assert "not stopped (violation: disclosure.denial) in 1" in table
-    assert "not stopped (violation: private.marker) in 2" in table
-    assert table.count("(waived, signed by Test owner)") == 1
+    assert "not stopped (violation: private.marker) in 3" in table
+    assert table.count("(waived, signed by") == 2
+    assert [(v.rep, v.oracle, v.signers) for v in g.waived_violations] == [
+        (1, "disclosure.denial", ["Alice"]), (2, "disclosure.denial", ["Bob"])]
+    assert g.waiver_signers == ["Alice", "Bob"]
+    assert "2 waived, signed by Alice, Bob" in text
 
 
 async def test_signing_rechecks_existing_waivers_for_the_pass(tmp_path):

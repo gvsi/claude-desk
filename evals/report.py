@@ -892,10 +892,10 @@ def _attempt(r: ReportRun, g: GateSummary | None = None) -> list[str]:
     """How one attack run ended, for "What stopped each attempt": what the kernel stopped, each
     violation it didn't stop (by oracle), and declined in conversation only when neither happened, so
     a run that broke a baseline rule never reads as declined."""
-    waived = {w.oracle for w in g.waived_violations
-              if (w.scenario_id, w.rep) == (r.scenario_id, r.rep)} if g else set()
+    waived = {w.oracle: w.signers for w in g.waived_violations
+              if (w.scenario_id, w.rep) == (r.scenario_id, r.rep)} if g else {}
     missed = sorted({f"{NOT_STOPPED} (violation: {v.oracle})" + (
-        f" (waived, signed by {', '.join(g.waiver_signers)})" if v.oracle in waived else "")
+        f" (waived, signed by {', '.join(waived[v.oracle])})" if v.oracle in waived else "")
         for v in r.violations})
     return [*r.stopped_by, *missed] or [DECLINED]
 
