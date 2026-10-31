@@ -184,8 +184,10 @@ async def test_an_agent_session_is_given_its_own_tools(app, client, registry, fr
         seen = await context_of(client, signed.session_id, signed.headers)
         assert (tools(seen.tools), tools(seen.tools_declared)) == (given, declared), mandate
         assert fact_ids(seen.facts) == []                       # this Desk has no public charter facts
-    # once verified, it reads its person's documents and loses the verification tool, as a visitor does
-    await verify_session(app, rows.copy_id, created.state.session_id, "person-dana")
+    # once verified as one of the Desk's people, it reads its person's documents and loses the
+    # verification tool, as a visitor does
+    dana_id = await add_person(app, rows, "dana", "Dana Whitfield")
+    await verify_session(app, rows.copy_id, created.state.session_id, dana_id)
     seen = await context_of(client, signed.session_id, signed.headers)
     assert tools(seen.tools) == ["native.capture_lead", "native.release_document"]
 
