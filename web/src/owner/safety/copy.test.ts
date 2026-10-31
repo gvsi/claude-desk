@@ -104,6 +104,8 @@ describe('Safety copy', () => {
     expect(anythingStoppedIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(true);
     // A hold is the owner's to answer, not stopped.
     expect(anythingStoppedIn(one('held', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    // A kind this build doesn't know yet may be a stop, so it counts.
+    expect(anythingStoppedIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
     // A time that can't be read may be this week's, so the week isn't said to have nothing.
     expect(anythingStoppedIn(one('reply_blocked', 'not a time'), week)).toBe(true);
   });

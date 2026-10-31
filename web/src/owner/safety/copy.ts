@@ -134,11 +134,11 @@ export function stoppedHeadline(n: number): string {
  * local date in the week's time zone, from `start` on. An attempt newer than the week Today last
  * read (just past midnight, or with the clocks apart) counts too, and so does one whose time can't
  * be read, which may be this week's: the week is never said to have stopped nothing when it may
- * have. A hold isn't stopped.
+ * have. A hold is the one kind that isn't stopped, so a kind this build doesn't know yet counts.
  */
 export function anythingStoppedIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
   return attempts.some((a) => {
-    if (a.kind !== 'refused' && a.kind !== 'reply_blocked') return false;
+    if (a.kind === 'held') return false;
     const date = localDate(a.created_at, week.timezone);
     return date === null || date >= week.start;
   });
