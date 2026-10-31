@@ -14,6 +14,7 @@ import { Composer } from '../Composer/Composer.tsx';
 import { keepTabInside } from '../Dialog/useModalDialog.ts';
 import { IconButton } from '../IconButton/IconButton.tsx';
 import { WritingIndicator } from '../WritingIndicator/WritingIndicator.tsx';
+import { clickedControl } from './clickedControl.ts';
 
 import './AskClaudePanel.css';
 
@@ -56,15 +57,20 @@ function isNarrow(): boolean {
  */
 function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean): void {
   const setPageModal = useContext(AppShellPanelContext);
-  // What opened the panel: what had focus, outside it, when it appeared.
+  // What opened the panel: what had focus, outside it, when it appeared, or else the control the
+  // click that opened it landed on. Safari focuses no button a click presses, so after a click focus
+  // is still on the page's body.
   const opener = useRef<HTMLElement | null>(null);
   const removing = useRef(false);
 
   useLayoutEffect(() => {
     const panel = panelRef.current;
     const doc = panel?.ownerDocument;
+    const outside = (element: Element | null | undefined): element is HTMLElement =>
+      element instanceof HTMLElement && element !== doc?.body && !panel?.contains(element);
     const active = doc?.activeElement;
-    opener.current = active instanceof HTMLElement && active !== doc?.body && !panel?.contains(active) ? active : null;
+    const clicked = clickedControl();
+    opener.current = outside(active) ? active : outside(clicked) ? clicked : null;
     removing.current = false;
     return () => {
       removing.current = true;

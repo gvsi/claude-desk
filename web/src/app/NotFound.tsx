@@ -25,7 +25,7 @@ export function NotFound() {
         title={<span id={titleId}>This page doesn't exist</span>}
         body={
           <>
-            Check the link, or <TextLink href="/">start again from the home page</TextLink>.
+            Check the link, or <TextLink href="/" runningText>start again from the home page</TextLink>.
           </>
         }
       />
