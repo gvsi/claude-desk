@@ -31,7 +31,6 @@ import {
   initialChatState,
   lowerOnly,
   ownerInChatNow,
-  ownerIsOutIn,
   ownerTypingDelayMs,
   type ChatAction,
   type ChatState,
@@ -271,13 +270,12 @@ class VisitorChat {
 
   /**
    * The session as the chat opens with it, from the read of its stored conversation: the one read
-   * that may put the chat in the owner's hands, unless the conversation says she is out (her leave or
-   * Claude's words after her latest join, which the API's read of the session can miss).
+   * that may put the chat in the owner's hands. The API reads the session's mode, the conversation
+   * and its cursor as one snapshot, so its mode stands as read.
    */
   private openedSession(transcript: VisitorTranscript): SessionState {
-    const read = transcript.state;
     this.modeKnown = true;
-    return { ...read, mode: read.mode === 'owner' && ownerIsOutIn(transcript.items) ? 'ai' : read.mode };
+    return transcript.state;
   }
 
   /**
@@ -292,14 +290,14 @@ class VisitorChat {
   /**
    * A session from a later read of the stored conversation, sent when the chat had last lost track
    * `since`. Older than the stream's latest change of mode, it says nothing of the mode. Otherwise it
-   * says the mode as of its `last_seq` (Claude's when the conversation says she is out), which may
-   * only lower it, and confirms it if it was sent since the chat last lost track of the stream.
+   * says the mode as of its `last_seq`, which may only lower it, and confirms it if it was sent since
+   * the chat last lost track of the stream.
    */
   private laterRead(transcript: VisitorTranscript, since: number): SessionState {
     const read = transcript.state;
     if (transcript.last_seq < this.modeSeq) return this.laterSession(read, null);
     if (since === this.tracked) this.modeKnown = true;
-    return this.laterSession(read, read.mode === 'owner' && ownerIsOutIn(transcript.items) ? 'ai' : read.mode);
+    return this.laterSession(read, read.mode);
   }
 
   private dispatch(action: ChatAction): void {

@@ -8,7 +8,7 @@ import { EV_ERROR_CODES, type EvMessage, type EvOwnerJoined, type EvOwnerTyping,
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, lowerOnly, ownerInChatNow, ownerIsOutIn, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, lowerOnly, ownerInChatNow, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -552,32 +552,6 @@ describe('chatReducer', () => {
     const back = run([{ type: 'catching_up' }], joined);
     expect(now(back)).toBe(false);
     expect(now(run([{ type: 'caught_up' }], back))).toBe(true);
-  });
-
-  it('the_stored_conversation_can_say_the_owner_is_out', () => {
-    const left = (n: number): TranscriptItem => ({ ...item(n, 'owner_left'), event: { type: 'owner_left' } });
-    const joinedAt = (n: number): TranscriptItem => ({ ...item(n, 'owner_joined'), event: ownerJoined });
-    const said = (n: number, author: EvMessage['author']): TranscriptItem => ({
-      ...item(n, 'delivered'),
-      event: { ...quoteMessage, message_id: `msg-${n}`, author },
-    });
-    // Her join last, or after it only her words, the Desk's, the visitor's and statuses: it can't say she left.
-    expect(ownerIsOutIn(STORED_TAKEN_OVER)).toBe(false);
-    expect(ownerIsOutIn([joinedAt(1), said(2, 'owner'), said(3, 'desk'), visitorText(4, 'Thanks'), { ...item(5, 'status'), event: quoteReceipt }])).toBe(false);
-    expect(ownerIsOutIn([joinedAt(1), left(2), joinedAt(3)])).toBe(false);
-    expect(ownerIsOutIn([])).toBe(false);
-    // Her leave after her latest join, or any Claude message after it: she isn't in.
-    expect(ownerIsOutIn([...STORED_TAKEN_OVER, left(5)])).toBe(true);
-    expect(ownerIsOutIn([...STORED_TAKEN_OVER, said(5, 'claude')])).toBe(true);
-    expect(ownerIsOutIn([joinedAt(1), left(2), joinedAt(3), said(4, 'claude')])).toBe(true);
-    // No join kept at all: a leave or a Claude message anywhere says she isn't in.
-    expect(ownerIsOutIn([said(1, 'claude')])).toBe(true);
-    expect(ownerIsOutIn([left(1)])).toBe(true);
-    // By `n`, in whatever order the items come; an item that says it is a join and holds something
-    // else is no join.
-    expect(ownerIsOutIn([joinedAt(3), left(2)])).toBe(false);
-    expect(ownerIsOutIn([left(5), ...STORED_TAKEN_OVER])).toBe(true);
-    expect(ownerIsOutIn([said(1, 'claude'), { ...item(2, 'owner_joined'), event: null }])).toBe(true);
   });
 
   it('an_answer_after_the_chat_loaded_only_lowers_the_mode', () => {

@@ -177,23 +177,6 @@ export function ownerInChatNow({ session, state, ready, modeKnown }: OwnerInChat
 }
 
 /**
- * Whether the stored conversation says the owner isn't in the chat, whatever the session's mode was
- * read as: her leave after her latest join, or any message of Claude's after it (with no join kept,
- * anywhere). The API reads the session before the conversation, so a hand-back between the two
- * leaves an owner's mode beside a conversation that has moved on. This only ever turns her off.
- */
-export function ownerIsOutIn(items: readonly TranscriptItem[]): boolean {
-  const sorted = [...items].sort((a, b) => a.n - b.n);
-  const joined = sorted.findLastIndex((item) => item.kind === 'owner_joined' && item.event?.type === 'owner_joined');
-  return sorted
-    .slice(joined + 1)
-    .some(
-      ({ kind, event }) =>
-        (kind === 'owner_left' && event?.type === 'owner_left') || (kind === 'delivered' && event?.type === 'message' && event.author === 'claude'),
-    );
-}
-
-/**
  * The mode an answer after the chat has loaded may give the session: what it `said`, but never the
  * owner's unless the chat already has it, since the answer may have been taken before a hand-back the
  * stream has shown since. `said` is null for a read older than the stream's latest change of mode,

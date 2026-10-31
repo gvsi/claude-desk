@@ -1422,31 +1422,21 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
-  it('reload_race_a_stale_owner_mode_with_her_leave_stored_shows_claude', async () => {
-    for (const race of ['her leave and Claude answering', 'Claude answering, her leave never kept'] as const) {
-      // Maria takes the chat over and hands it back, and Claude answers again.
-      const first = await renderRoute(PAGE, { seed: 'rivera' });
-      await ready(first.screen);
-      const chat = mockStore.visitorSession(RIVERA.slug);
-      if (!chat) throw new Error('this browser has a chat');
-      mockStore.world.takeOver(chat);
-      await vi.waitFor(() => expect(chatHead(), race).toEqual(withOwner(HEAD.en)));
-      if (race === 'her leave and Claude answering') mockStore.world.handBack(chat);
-      else chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
-      await say(first.screen, 'How much is drain clearing?');
-
-      // A reload whose read took the session's mode before the hand-back (the API reads the session,
-      // then the stored conversation and its cursor): the session says she is in the chat, while the
-      // conversation holds what came after, and the stream resumes past all of it, so nothing on it
-      // will correct the head. The conversation says she isn't in, and that is enough to say so.
-      chat.state = { ...chat.state, mode: 'owner' };
-      const lastSeq = chatEvents().length;
-      const second = await renderRoute(PAGE);
-      await ready(second.screen);
-      expect(chatHead(), race).toEqual(withClaude(HEAD.en));
-      await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(new RegExp(`after=${lastSeq}$`)));
-      expect(chatHead(), race).toEqual(withClaude(HEAD.en));
-    }
+  it('reload_trusts_the_sessions_snapshot_after_an_unrecorded_take_over', async () => {
+    // Claude answers a question, then the kernel puts the chat in Maria's hands, but her join was
+    // never recorded. The session read is one snapshot of the mode, the conversation and its cursor,
+    // so its mode stands on a reload: Claude's earlier reply doesn't say she is out.
+    const first = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(first.screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await say(first.screen, 'How much is drain clearing?');
+    chat.state = { ...chat.state, mode: 'owner', generation: chat.state.generation + 1 };
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    expect(shownMessages()).toHaveLength(1);
+    expect(systemLines()).toEqual([]);
+    expect(chatHead()).toEqual(withOwner(HEAD.en));
   });
 
   it('back_on_the_page_the_head_waits_for_the_mode_to_be_confirmed', async () => {
