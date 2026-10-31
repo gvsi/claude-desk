@@ -38,6 +38,34 @@ export const Today: Story = {
   },
 };
 
+/** Setup's four starters wrap two and two in the phone's content column. */
+export const SetupStarters: Story = {
+  args: {
+    label: 'Examples',
+    suggestions: ['A hair salon in Oakland', 'A plumber in Oakland', 'Apartments in Sacramento', 'A CPA firm in San Jose'],
+    max: 4,
+  },
+  render: (args) => (
+    <div style={{ maxWidth: 358 }}>
+      <SuggestionChips {...args} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Setup’s four starters replace the three examples on the nearest board, UXC-P602-After; this story checks their phone wrapping.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const chips = canvas.getAllByRole('button');
+    await expect(chips.map((chip) => chip.textContent)).toEqual(args.suggestions);
+    const boxes = chips.map((chip) => chip.getBoundingClientRect());
+    await expect(boxes[0]?.top).toBe(boxes[1]?.top);
+    await expect(boxes[2]?.top).toBe(boxes[3]?.top);
+    await expect(boxes[2]?.top).toBeGreaterThan(boxes[0]?.top ?? 0);
+    await userEvent.click(chips[3] as HTMLElement);
+    await expect(args.onPick).toHaveBeenCalledWith('A CPA firm in San Jose');
+  },
+};
+
 /** On a vision page, which makes no requests: the chips look and focus as ever, and a pick does nothing. */
 export const InertSuggestions: Story = {
   args: { label: 'Try asking', suggestions: ['Book an inspection', 'Pay the fee', 'Talk to staff'], inertSuggestions: true },
