@@ -9,14 +9,14 @@
  *
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
- * the sheet opens and every few seconds while it is open, and not while it is closed. While that
- * first read is out, the button's place says the inbox is opening; if it fails, the inbox's title
- * says it couldn't be opened, with "Try again". A later read that fails says the same under the
- * sheet's button, and inside the sheet while it is open, where the page behind is out of reach, so
- * the entries read before never pass for current.
+ * the sheet opens and every few seconds while it is open, and not from the moment it closes. While
+ * that first read is out, the button's place says the inbox is opening; if it fails, the inbox's
+ * title says it couldn't be opened, with "Try again". A later read that fails says the same under
+ * the sheet's button, and inside the sheet while it is open, where the page behind is out of reach,
+ * so the entries read before never pass for current.
  */
-import { useQueries, useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useState } from 'react';
+import { focusManager, useQueries, useQuery } from '@tanstack/react-query';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
@@ -39,9 +39,13 @@ export interface OwnerInboxProps {
 
 export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
-  // Whether the sheet is open, as the sheet says each time it opens or closes.
+  // Whether the sheet is open, as the sheet says each time it opens or closes. `openNow` changes the
+  // moment it says so, before Today draws the change. The poll and a return to the tab or the
+  // network ask it, so one that comes while the close is still being drawn reads nothing.
   const [open, setOpen] = useState(false);
+  const openNow = useRef(false);
   const openChanged = (next: boolean) => {
+    openNow.current = next;
     setOpen(next);
     onOpenChange?.(next);
   };
@@ -49,16 +53,22 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     queryKey: OWNER_INBOX_KEY,
     queryFn: () => request('ownerInbox'),
     // Once as Today opens; after that, only while the sheet is open.
-    refetchInterval: open ? pollMs('inbox') : false,
-    refetchOnWindowFocus: open,
-    refetchOnReconnect: open,
+    refetchOnWindowFocus: () => openNow.current,
+    refetchOnReconnect: () => openNow.current,
   });
   const failure = useReadFailure(inbox);
 
-  // Read again as the sheet opens, so it shows what is there now.
+  // Read again as the sheet opens, so it shows what is there now, then every few seconds while it
+  // stays open and the tab is in view. The poll is the sheet's own: React Query's `refetchInterval`
+  // would stop only once Today had drawn the close, and a poll that came due in between would read.
   const { refetch } = inbox;
   useEffect(() => {
-    if (open) void refetch();
+    if (!open) return undefined;
+    void refetch();
+    const poll = window.setInterval(() => {
+      if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
+    }, pollMs('inbox'));
+    return () => window.clearInterval(poll);
   }, [open, refetch]);
 
   // The held requests the alerts name, each read for its Desk while the sheet is open. A read that

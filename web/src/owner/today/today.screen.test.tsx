@@ -4,13 +4,15 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import { observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -1062,6 +1064,76 @@ describe("Today's Demo inbox", () => {
     expect(box.top).toBeLessThan(window.innerHeight);
   }
 
+  /**
+   * Counts the Demo inbox reads the app sends from now on while the sheet isn't on the page, each
+   * as it is sent: a read sent while the sheet was open isn't one, however late the mock gets it.
+   */
+  function closedInboxReads(sheet: Locator): () => number {
+    const send = window.fetch;
+    let count = 0;
+    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === ROUTES.ownerInbox.path && sheet.elements().length === 0) count += 1;
+      return send(input, init);
+    });
+    onTestFinished(() => sending.mockRestore());
+    return () => count;
+  }
+
+  /** Settles once the app has an answer to its next Demo inbox read and has taken it in. */
+  function nextInboxAnswer(): Promise<void> {
+    const answered = new Promise<void>((resolve) => {
+      const stop = observeRequests((outcome) => {
+        if (outcome.key !== 'ownerInbox') return;
+        stop();
+        resolve();
+      });
+      onTestFinished(stop);
+    });
+    return answered.then(nextFrames);
+  }
+
+  /**
+   * Every timer the page starts from now on at the Demo inbox's poll interval, for as long as the
+   * page keeps it: `due()` runs each one at once, as if all came due at that moment.
+   */
+  function inboxPacedPolls(): { due: () => void } {
+    // The page's timers as the browser has them (the Node typings say otherwise).
+    const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
+    const running = new Map<number, () => void>();
+    const start = timers.setInterval.bind(window);
+    const stop = timers.clearInterval.bind(window);
+    const starting = vi.spyOn(timers, 'setInterval').mockImplementation((run, ms) => {
+      const id = start(run, ms);
+      if (typeof run === 'function' && ms === pollMs('inbox')) running.set(id, run);
+      return id;
+    });
+    const stopping = vi.spyOn(timers, 'clearInterval').mockImplementation((id) => {
+      if (id !== undefined) running.delete(id);
+      stop(id);
+    });
+    onTestFinished(() => {
+      starting.mockRestore();
+      stopping.mockRestore();
+    });
+    return {
+      due: () => {
+        for (const run of [...running.values()]) run();
+      },
+    };
+  }
+
+  /** Runs `then` once `el` has left the page, before the page's next task. */
+  function onceGone(el: Element, then: () => void): void {
+    const watch = new MutationObserver(() => {
+      if (el.isConnected) return;
+      watch.disconnect();
+      then();
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => watch.disconnect());
+  }
+
   it.each(['desktop', 'phone'] as const)('inbox_alert_opens_the_held_request_%s', async (viewport) => {
     // The seeded hold's alert, as the kernel wrote it, beside entries that name no request: a code,
     // an alert about something else, and a ledger checkpoint.
@@ -1430,5 +1502,32 @@ describe("Today's Demo inbox", () => {
     reads = requests('ownerInbox').length;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(requests('ownerInbox')).toHaveLength(reads);
+  });
+
+  it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
+    // The sheet is closed from the moment it closes, before Today has drawn it closed: a poll that
+    // comes due then, or the owner coming back to the tab then, reads nothing. No poll lands by
+    // itself here, so the test brings them due.
+    const polls = inboxPacedPolls();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // The read as it opens is answered, so none is still out as it closes.
+    const answered = nextInboxAnswer();
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await answered;
+
+    const closedReads = closedInboxReads(sheet);
+    onceGone(sheet.element(), () => {
+      polls.due();
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    });
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(open).toHaveFocus();
+    await nextFrames();
+    expect(closedReads(), 'Demo inbox reads sent once its sheet had closed').toBe(0);
   });
 });
