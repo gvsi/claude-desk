@@ -663,7 +663,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
     can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
     (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
-    for a rewrite, so it opens none. An owner's message never opens one."""
+    for a rewrite, so it opens none. An owner's message never opens one, and neither does the
+    owner's own preview of the Desk (`preview`; the owner's decision of 2026-10-31)."""
     if seen:
         session_row.last_seen_at = ctx.clock.now()
         if detected is not None:
@@ -674,7 +675,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
-    if author == "claude" and shown and any(block.template == "handoff" for block in blocks):
+    if author == "claude" and shown and not session_row.preview and any(block.template == "handoff"
+                                                                        for block in blocks):
         await open_card_handoff(ctx, session_row)
     ok = not violations
     message_id = message_id if message_id is not None else new_id("msg")

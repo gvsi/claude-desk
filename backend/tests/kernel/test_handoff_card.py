@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import DemoInboxEntry, ReplyVerdict
+from desk.contracts import DemoInboxEntry, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger
@@ -28,7 +28,7 @@ from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import ledger_rows, rows_of
 from .test_adapters import Rivera, rivera, visitor_of
-from .test_decide import open_visitor, set_mode, set_session
+from .test_decide import Visitor, open_visitor, set_mode, set_session
 from .test_lead_tools import callback, handoff_done
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
@@ -395,3 +395,22 @@ async def test_a_reply_citing_the_handoff_clause_always_opens_one(app, client, f
     assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
     assert len(await handoff_alerts(app, copy)) == 1
+
+
+async def test_the_owners_own_preview_opens_no_handoff(app, client):
+    """The owner trying the Desk as a customer (`preview`) is the owner already: a card shown in
+    the preview, blocked draft or cited clause, opens no handoff and alerts no one (the owner's
+    decision of 2026-10-31)."""
+    copy = await rivera(app, client)
+    response = await client.post("/sessions", headers=copy.owner, json={"desk_slug": copy.slug, "kind": "visitor",
+                                                                        "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    previewing = Visitor(session_id=created.state.session_id, token=created.session_token)
+    assert_handed_off(await checked(client, previewing, BLOCKED))
+    assert (await checked(client, previewing, "", [clause("handoff")])).ok
+    assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
+    assert handoff_entries(await ledger_rows(app, copy)) == []
+    # an ordinary visitor's card still opens one
+    assert_handed_off(await checked(client, await open_visitor(client, copy), BLOCKED))
+    assert len(await handoffs_of(app, copy)) == 1
