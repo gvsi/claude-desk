@@ -459,6 +459,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       drafts: new Map(),
       lastVersion: 1,
       tools: newDeskTools(),
+      suggestions: [],
     };
     world.desks.push(desk);
     const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
