@@ -13,6 +13,8 @@ export interface BreadcrumbItem {
    */
   label: ReactNode;
   href?: string;
+  /** A stable key for the step, such as its route. Without one, the step's place in the trail is its key. */
+  key?: string;
 }
 
 export interface BreadcrumbProps {
@@ -37,8 +39,8 @@ export function Breadcrumb({ items, linkComponent: Link = PlainLink }: Breadcrum
     <nav aria-label="Breadcrumb" className="cd-breadcrumb">
       <ol role="list" className="cd-breadcrumb__list cd-type-meta">
         {items.map((item, index) => (
-          // The trail is one step per level, in order, so its place is its key.
-          <li key={index} className="cd-breadcrumb__item">
+          // A step's own key when the screen gives one; otherwise its place in the trail.
+          <li key={item.key ?? index} className="cd-breadcrumb__item">
             {index > 0 ? (
               <span className="cd-breadcrumb__separator" aria-hidden="true">
                 /

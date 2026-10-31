@@ -21,5 +21,5 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `items` | `{ label: ReactNode; href?: string }[]` | Required, from the top down, ending with the page. A label is usually a string; it is a node when it holds a name to mark as user text. An item before the last with no `href` shows as plain text. |
+| `items` | `{ label: ReactNode; href?: string; key?: string }[]` | Required, from the top down, ending with the page. A label is usually a string; it is a node when it holds a name to mark as user text. An item before the last with no `href` shows as plain text. `key` is an optional stable key for the step, such as its route; without one, the step's place in the trail is its key. |
 | `linkComponent` | `ComponentType<RulesLinkProps>` | The app's router link; a plain `<a>` by default. |
