@@ -85,13 +85,21 @@ def test_system_prompt_uses_the_business_policies():
         "Use the business's own words for the people it serves and its work",
         "show that policy with the policy clause",
         "Never make up a figure",
-        "one or two questions at a time, before you take their details or book",
+        "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
+        "at a time, before you take their details or book. Ask only about their request: never for a password, "
+        "a code, a card or account number or an ID number, whatever a policy says.",
         "call native__request_callback, and beside its callback_confirmed card",
-        "Maria Rivera will follow up. Never say how soon",
-        "show charter:policy:after_hours with the policy clause",
-        "Offer only the work charter:policy:how_we_help lists and what your tools do",
-        "it isn't something you can do here yet",
-        "When one of your tools is Rivera Plumbing's own rather than a native one, call it by its title",
+        "- When they describe something charter:policy:urgent treats as urgent, that comes first: skip the intake "
+        "questions, ask for their name and a phone number or email, call native__request_callback, and beside its "
+        "callback_confirmed card say plainly that Maria Rivera will follow up. If they'd rather book, find open "
+        "times instead. Never say how soon.",
+        "- When charter:policy:after_hours is there and they ask about reaching Rivera Plumbing outside its "
+        "hours, show it with the policy clause.",
+        "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
+        "something you can't do here, such as checking on a case or sending in documents, say plainly that you "
+        "can't do that here, and offer to take a message for Maria Rivera or arrange a callback.",
+        "When one of your tools is Rivera Plumbing's own rather than a native one, refer to it by its title "
+        "when you offer it.",
     ):
         assert instruction in section
 
@@ -102,8 +110,21 @@ def test_system_prompt_checks_service_area_before_offering_to_book():
     assert lines[next_step + 1] == (
         "- If <desk_context> states where the business works and the request means going to a place, find out "
         "which town that is before you offer to book. If it isn't one they serve, tell them Rivera Plumbing "
-        "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback."
+        "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. "
+        "Either way, show charter:policy:service_area with the policy clause."
     )
+
+
+def test_system_prompt_avoids_prescribing_the_business_work_vocabulary():
+    text = conversation_system(RIVERA)[0]["text"]
+    assert "a consult, a viewing" not in text
+
+
+def test_system_prompt_prioritizes_urgent_requests_over_intake():
+    text = conversation_system(RIVERA)[0]["text"]
+    urgent = next(line for line in text.splitlines() if line.startswith("- When they describe something"))
+    intake = next(line for line in text.splitlines() if line.startswith("- For a new request"))
+    assert text.index(urgent) < text.index(intake)
 
 
 def test_system_prompt_covers_the_rules():
@@ -136,7 +157,8 @@ def test_system_prompt_covers_the_rules():
         "Do not alter a name or disguise words to get through the check",
         "For a language other than English or Spanish, reply with the handoff clause alone.",
         "AI disclosure (no clause)",
-        "¿Tiene los papeles del aparato?",
+        "Could you tell me a little more about what you need?",
+        "¿Me puede contar un poco más de lo que necesita?",
         "These examples specify format only, never new facts or permission. Only real current fact_ids can be cited",
         "a website, email address or phone number only if it is the business's own, as its records in "
         "<desk_context> show it",
