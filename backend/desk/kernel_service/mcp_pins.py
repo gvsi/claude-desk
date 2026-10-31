@@ -74,13 +74,17 @@ def native_pin(tool: str) -> str:
     return adapters.profile_sha256(adapters.ADAPTERS[tool].profile)
 
 
+class BusinessProfileChanged(ValueError):
+    """A configured definition no longer matches the pin a draft was proved against."""
+
+
 def pinned_profile(tool: str, definition_sha256: str | None, stored: ToolProfile | None = None) -> ToolProfile:
     """The adapter's profile for `tool`, enabled, an MCP tool's pinned at `definition_sha256` (a
     native tool's profile carries no hash): what a version enabling it is proved over."""
     from desk.contracts import is_business_tool
     if is_business_tool(tool):
         if stored is None or stored.source != "business" or stored.tool != tool or stored.definition_sha256 != definition_sha256:
-            raise ValueError("business_profile_changed")
+            raise BusinessProfileChanged("business_profile_changed")
         profile = stored
     else:
         profile = adapters.ADAPTERS[tool].profile
@@ -117,7 +121,8 @@ def pending_text(entry: Mapping[str, Any]) -> str:
 
 
 async def _rows(ctx: KernelCtx, desk_id: str, tools: Iterable[str], *, lock: bool) -> dict[str, Tool]:
-    stmt = select(Tool).where(Tool.desk_id == desk_id, Tool.tool.in_(sorted(set(tools)))).order_by(Tool.tool)
+    stmt = (select(Tool).where(Tool.desk_id == desk_id, Tool.tool.in_(sorted(set(tools))))
+            .order_by(Tool.tool).execution_options(populate_existing=True))
     if lock:
         stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(stmt))}
@@ -411,10 +416,17 @@ async def enable_tools(ctx: KernelCtx, desk_id: str, version: int, enables: Sequ
     the hash the version was proved with, its pending fields and review reason cleared. Returns
     their `tool_pin` `{tool, event: "enabled", version, definition_sha256}` events, which the
     activation ledgers after its `policy` entry."""
+    from desk.kernel_service.activation import ConfirmConflict
+
     rows = await _rows(ctx, desk_id, [pin.tool for pin in enables], lock=True)
     events = []
     for pin in sorted(enables, key=lambda pin: pin.tool):
-        pin_row(rows[pin.tool], pin.tool, pin.definition_sha256, status="enabled", review_reason=None)
+        if pin.tool not in rows:
+            raise ConfirmConflict(ctx.copy_id, desk_id, version, "pin_changed")
+        try:
+            pin_row(rows[pin.tool], pin.tool, pin.definition_sha256, status="enabled", review_reason=None)
+        except BusinessProfileChanged:
+            raise ConfirmConflict(ctx.copy_id, desk_id, version, "pin_changed") from None
         events.append(LedgerEvent(kind="tool_pin", origin="kernel", summary={
             "tool": pin.tool, "event": "enabled", "version": version, "definition_sha256": pin.definition_sha256}))
     await ctx.db.flush()

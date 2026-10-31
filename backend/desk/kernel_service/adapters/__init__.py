@@ -12,6 +12,7 @@ the tool by, so the execution's checks and the rules never read the tool differe
 
 import hashlib
 import json
+import logging
 from typing import Literal
 
 import desk_kernel
@@ -20,6 +21,7 @@ from desk.contracts import MCP_TOOLS, ToolName, ToolProfile
 from desk.kernel_service.adapters.base import Adapter
 
 ADAPTERS: dict[ToolName, Adapter] = {}
+log = logging.getLogger(__name__)
 
 # Fields that a tools row's status, review or a pending drift changes; a profile's hash leaves them out.
 UNHASHED_PROFILE_FIELDS = frozenset({"status", "pending_definition_text", "pending_sha256", "review_reason"})
@@ -76,8 +78,10 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
         adapter = blocks.BlockAdapter(expected)
         _check(adapter)
         return adapter
-    except Exception:
+    except Exception as exc:
         # A broken trusted factory is not a reason to fall back to the base native action.
+        from desk.kernel_service import repo
+        repo.log_error(log, exc, "business_adapter_resolution_failed desk_id=%s tool=%s", desk_id, tool)
         return None
 
 
