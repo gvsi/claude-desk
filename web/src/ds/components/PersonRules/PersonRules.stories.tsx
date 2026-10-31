@@ -231,7 +231,7 @@ export const MarkedNameNoRules: Story = {
 };
 
 /** A name holding a right-to-left override (U+202E) with no end: unisolated, it would reorder the words after it. */
-const OVERRIDE_NAME = 'Dana ‮Whitfield';
+const OVERRIDE_NAME = 'Dana \u202EWhitfield';
 
 export const NameWithDirectionOverride: Story = {
   name: 'A name with a direction override',

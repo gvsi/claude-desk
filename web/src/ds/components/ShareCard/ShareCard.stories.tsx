@@ -126,7 +126,7 @@ export const MarkedName: Story = {
 
 export const OwnerNameWithDirectionOverride: Story = {
   name: 'An owner name with a direction override',
-  args: { ownerName: 'Maria ‮Rivera', onPrint: undefined },
+  args: { ownerName: 'Maria \u202ERivera', onPrint: undefined },
   parameters: {
     canvas: 'none',
     canvasNote: 'N-Run2-Share’s card for an owner whose name holds a right-to-left override (U+202E): the name is isolated in its sentence, so it can’t reorder the words after it.',
