@@ -126,6 +126,11 @@ describe('verification', () => {
     expect(requests('sendMessage')).toHaveLength(sent);
     await expect.element(screen.getByRole('article', { name: "Confirm it's you" })).toBeVisible();
 
+    // She hands the chat back: the form comes back under the card, its way out with it.
+    mockStore.world.handBack(chat);
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'I can’t get the code' })).toBeVisible();
+
     // With Claude answering, the same button asks for her, as the head's Ask does.
     const again = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(again.screen);

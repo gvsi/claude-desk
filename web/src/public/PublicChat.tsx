@@ -486,8 +486,13 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   }, [drawn, chat.state.rows, shown]);
 
   // The verify card whose form the visitor closed with "I can't get the code" while the owner was in
-  // the chat, by its row's key.
+  // the chat, by its row's key. It stays closed only while she is in the chat: the form comes back
+  // under its card in the same render that says she is out, and stays open if she joins again.
   const [verifyClosed, setVerifyClosed] = useState<string | null>(null);
+  const ownerHere = chat.ownerInChat;
+  useEffect(() => {
+    if (!ownerHere) setVerifyClosed(null);
+  }, [ownerHere]);
 
   // Words wait in the composer once it can be used: the link's idea as the page opens, and words
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
@@ -568,13 +573,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const verifyRow = latestVerifyRow(state.rows);
   // "I can't get the code" asks for the owner. While she is in the chat she is already here, so it
   // asks for nobody: it closes that card's form, sends nothing, and the visitor's place moves to the
-  // composer. A later verify card brings the form back under it.
+  // composer, without scrolling the conversation. The form comes back once she is out of the chat,
+  // and a later verify card brings it back under that card.
   const closeVerify = () => {
     setVerifyClosed(verifyRow);
-    composerRef.current?.querySelector('textarea')?.focus();
+    composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
   };
   const verifyUnder = (row: ChatRow): ReactNode[] =>
-    verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && verifyClosed !== verifyRow))
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && !(ownerHere && verifyClosed === verifyRow)))
       ? [
           <VerifyInline
             key="verify"
