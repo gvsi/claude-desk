@@ -216,14 +216,25 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
     body = <LoadingLine>{copy.loading}</LoadingLine>;
   } else {
     const { rows, blocked, total } = check.data;
-    // While the rows land, the count follows them: those blocked among the rows landed so far, of
-    // all the check tried. It changes in place and isn't announced; once they have landed, it is
-    // the check's own counts, never worked out here.
-    const shown = landing.live ? rows.slice(0, landing.landed).filter((row) => row.blocked).length : blocked;
+    // The check's own counts, never worked out here. While the rows land, the count on screen
+    // follows them (those blocked among the rows landed so far, of all the check tried), hidden from
+    // assistive tech, which reads the check's own counts at once, as it reads all the rows at once.
+    // Neither is in a live region, so nothing is announced as it ticks.
+    const final = copy.blocked(blocked, total);
+    const ticking = landing.live ? copy.blocked(rows.slice(0, landing.landed).filter((row) => row.blocked).length, total) : null;
     body = (
       <>
         <div className="cd-setup-safety__summary">
-          <p className="cd-setup-safety__count cd-type-summary">{copy.blocked(shown, total)}</p>
+          <p className="cd-setup-safety__count cd-type-summary">
+            {ticking === null ? (
+              final
+            ) : (
+              <>
+                <span aria-hidden="true">{ticking}</span>
+                <span className="cd-sr-only">{final}</span>
+              </>
+            )}
+          </p>
           <p className="cd-setup-step__line cd-type-body">{copy.lead(total)}</p>
         </div>
         {rows.length === 0 ? (

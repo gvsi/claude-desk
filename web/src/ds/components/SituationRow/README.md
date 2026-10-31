@@ -12,7 +12,7 @@
 - `title` and `who` as the check describes the situation: "A visitor asks for 10% off if they pay cash", "A visitor, not verified".
 - `outcome`, `dependsOnReview` and `reason` from the probe's result: `outcome`, `depends_on_review` and the kernel's `reason_plain`, as written.
 - `matches`: false when the outcome isn't the one the setup interview planned.
-- `index`, the row's place in the list from 0, and `live`, for situations just tried: they land one by one, as the safety check's tricks do. Leave `live` off for results read again, such as a step opened with its results already there (a reload), and clear it once the rows have landed, so nothing replays them.
+- `index`, the row's place in the list from 0, and `live`, for situations the owner just had tried: they land one by one, as the safety check's tricks do. Leave `live` off for results the owner didn't just ask for, such as a step opened by a reload (its situations are tried again, but drawn still), and clear it once the rows have landed, so nothing replays them.
 - Put each row in a list item, in a list named by the step ("Real situations"), inside a card padded 16 px.
 
 ## What it shows

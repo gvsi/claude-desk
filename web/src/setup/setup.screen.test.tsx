@@ -241,12 +241,31 @@ function watchRows(label: string): () => DrawnRow[] {
   return () => [...drawn.values()];
 }
 
-/** Every text the safety check's count shows from now until the test ends, in order, each change once. */
-function watchCount(): () => string[] {
+/**
+ * What `el` shows on screen (without its visually hidden words) and what a screen reader reads of
+ * it (without what is hidden from assistive tech).
+ */
+function textOf(el: Element): { shown: string; spoken: string } {
+  const without = (selector: string) => {
+    const copy = el.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll(selector)) hidden.remove();
+    return copy.textContent ?? '';
+  };
+  return { shown: without('.cd-sr-only'), spoken: without('[aria-hidden="true"]') };
+}
+
+/** The safety check's count, "6 of 6 blocked", by what it shows; null when it isn't drawn. */
+const countElement = () => [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ blocked$/.test(textOf(p).shown)) ?? null;
+
+/**
+ * Every text the safety check's count shows from now until the test ends (or, with `spoken`, what a
+ * screen reader reads of it), in order, each change once.
+ */
+function watchCount(read: 'shown' | 'spoken' = 'shown'): () => string[] {
   const seen: string[] = [];
   const record = () => {
-    const count = [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ blocked$/.test(p.textContent ?? ''));
-    const text = count?.textContent ?? null;
+    const count = countElement();
+    const text = count === null ? null : textOf(count)[read];
     if (text !== null && seen.at(-1) !== text) seen.push(text);
   };
   const observer = new MutationObserver(record);
@@ -1385,6 +1404,7 @@ describe('setup', () => {
     await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
     const drawn = watchRows('Tricks tried');
     const counts = watchCount();
+    const spoken = watchCount('spoken');
     await screen.getByRole('button', { name: 'Looks right' }).click();
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
@@ -1414,6 +1434,11 @@ describe('setup', () => {
     await expect.poll(() => moving(list.element())).toEqual([]);
     for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
     await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+
+    // A screen reader reads the check's own count from the first, never the ticks, all six rows
+    // being there from the start; and the count sits in no live region, so nothing announces it.
+    expect(spoken()).toEqual(['6 of 6 blocked']);
+    expect(countElement()?.closest('[aria-live],[role="status"],[role="log"],[role="alert"]')).toBeNull();
   });
 
   it('safety_check_shows_at_once_under_reduced_motion', async () => {
@@ -1433,6 +1458,62 @@ describe('setup', () => {
     expect(drawn()).toHaveLength(6);
     for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
     expect(moving(list.element())).toEqual([]);
+    expect(counts()).toEqual(['6 of 6 blocked']);
+  });
+
+  /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
+  async function openedAtSituations(): Promise<RenderResult> {
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    return screen;
+  }
+
+  it('safety_check_landing_follows_only_its_own_motion', async () => {
+    // Something else moving in the rows (here, each trick's name, on a loop that starts at once)
+    // neither keeps the rows landing nor runs the count ahead of them.
+    const style = document.createElement('style');
+    style.textContent =
+      'ul[aria-label="Tricks tried"] .cd-safety-check-row__label { animation: test-other-motion 1s linear infinite; } @keyframes test-other-motion { to { opacity: 0.9; } }';
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const screen = await openedAtSituations();
+    const counts = watchCount();
+    const at = new Map<string, number>();
+    const timer = new MutationObserver(() => {
+      const count = countElement();
+      if (count !== null && !at.has(textOf(count).shown)) at.set(textOf(count).shown, performance.now());
+    });
+    timer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => timer.disconnect());
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // The count reaches the last row only when it lands, five beats after the first.
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    expect(counts()[0]).toBe('1 of 6 blocked');
+    const beats = ((at.get('6 of 6 blocked') ?? 0) - (at.get('1 of 6 blocked') ?? 0)) / ms(token('--motion-stagger'));
+    expect(beats).toBeGreaterThanOrEqual(4);
+    // And once the rows have landed they are drawn still, whatever else moves in them.
+    await expect.poll(() => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
+  });
+
+  it('safety_check_shows_at_once_where_motion_cant_be_read', async () => {
+    // A browser that can't report what is moving (no `getAnimations`) shows the rows at once,
+    // with the check's own count, rather than failing.
+    const screen = await openedAtSituations();
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
+    Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, writable: true, value: undefined });
+    onTestFinished(() => {
+      if (original) Object.defineProperty(Element.prototype, 'getAnimations', original);
+    });
+    const counts = watchCount();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+    expect([...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
     expect(counts()).toEqual(['6 of 6 blocked']);
   });
 

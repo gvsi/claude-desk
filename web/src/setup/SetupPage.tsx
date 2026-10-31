@@ -172,7 +172,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'rules':
     case 'situations':
-      body = <RulesStep state={state} business={name} onNext={moveTo} />;
+      body = <RulesStep state={state} business={name} onNext={moveTo} live={opened !== 'situations'} />;
       break;
     case 'safety_check':
       body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;

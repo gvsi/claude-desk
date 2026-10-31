@@ -7,9 +7,18 @@ import { useLayoutEffect, useState, type RefObject } from 'react';
 /** The owner came to the step and nothing was there yet: no read is drawn still. A read's time is never below 0. */
 const NO_READ = -1;
 
-/** The rows' own landing: the CSS animations of a row drawn `live`, and of its dot. */
+/** The rows' own landing: the keyframes of a SafetyCheckRow or SituationRow drawn `live`, and of its dot. */
+const LANDING: ReadonlySet<string> = new Set(['cd-safety-check-row-land', 'cd-safety-check-row-dot', 'cd-situation-row-land', 'cd-situation-row-dot']);
+
+/**
+ * Whether anything in `list` is still landing: playing, or waiting for its beat. Other motion in the
+ * rows doesn't count, and where the browser can't say what is moving, nothing is landing.
+ */
 function landing(list: HTMLElement): boolean {
-  return list.getAnimations({ subtree: true }).some((animation) => animation instanceof CSSAnimation && animation.playState !== 'finished');
+  if (typeof list.getAnimations !== 'function') return false;
+  return list
+    .getAnimations({ subtree: true })
+    .some((animation) => animation instanceof CSSAnimation && LANDING.has(animation.animationName) && animation.playState !== 'finished');
 }
 
 /** The place in `list` of the item `target` sits in, from 0, or -1. */
@@ -84,12 +93,13 @@ export function useLanding(list: RefObject<HTMLElement | null>, read: ResultsRea
     const settle = () => {
       if (!landing(el)) update((current) => (current.done ? current : { ...current, landed: rows, done: true }));
     };
-    // Nothing can play it (reduced motion): every row has landed, at once.
+    // Nothing can play it (reduced motion), or the browser can't say: every row has landed, at once.
     if (!landing(el)) {
       settle();
       return undefined;
     }
     const start = (event: AnimationEvent) => {
+      if (!LANDING.has(event.animationName)) return;
       const index = itemIndex(el, event.target);
       if (index >= 0) update((current) => (index < current.landed ? current : { ...current, landed: index + 1 }));
     };

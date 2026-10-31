@@ -44,8 +44,8 @@ export interface SituationRowProps {
   /**
    * The row came with results that just arrived: it lands `index` × `motion-stagger` after the
    * first, rising `space-4` as it fades in, its dot scaling in with it. Without it the row is drawn
-   * still, as results read again are. The screen clears it once the rows have landed, so nothing
-   * replays them.
+   * still, as results the owner didn't just ask for are. The screen clears it once the rows have
+   * landed, so nothing replays them.
    */
   live?: boolean;
 }

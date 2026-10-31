@@ -14,7 +14,7 @@
 - `blocked`, and `stoppedBy` for a blocked trick: the checkpoint that stopped it (`'who'`, `'action'`, `'review'` or `'reply'`), named as Safety names it ("Action checkpoint").
 - `reason`: the kernel's `reason_plain`, as written.
 - `index`: the row's place in the list, from 0, which sets when a live row lands.
-- `live`, for the rows of a check that just ran: they land one by one. Leave it off for results read again, such as a step opened with its results already there (a reload), and clear it once the rows have landed, so nothing replays them. Draw each run's rows anew (key the list by the read), so a check run again lands.
+- `live`, for the rows of a check the owner just ran: they land one by one. Leave it off for results the owner didn't just ask for, such as a step opened by a reload (its check runs again, but is drawn still), and clear it once the rows have landed, so nothing replays them. Draw each run's rows anew (key the list by the read), so a check run again lands.
 - Put each row in a list item, in a list named by the step ("Tricks tried"), inside a card padded 16 px. The count and the line above the card are the screen's words, from the check's own counts.
 
 ## What it shows

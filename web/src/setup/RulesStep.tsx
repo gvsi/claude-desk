@@ -36,6 +36,12 @@ export interface RulesStepProps {
   business: string;
   /** The interview moved on. */
   onNext: (step: SetupStep) => void;
+  /**
+   * The owner came to Real situations on this page (from the rules): the situations are tried as
+   * they watch, and their rows land as they arrive. Setup opened at Real situations (a reload, or
+   * resumed from Today) draws its first results still.
+   */
+  live: boolean;
 }
 
 /** A card's reason as a row's words: the board's rows end without a full stop. */
@@ -87,7 +93,7 @@ function DraftRules({ draft, people, check }: { draft: RulesDraft; people: Peopl
  * draft on situations from the owner's answers, which land one by one as they arrive; "Looks right"
  * goes on to the safety check.
  */
-export function RulesStep({ state, business, onNext }: RulesStepProps) {
+export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
   const [view, setView] = useState<'rules' | 'situations'>(state.step === 'situations' ? 'situations' : 'rules');
@@ -101,11 +107,8 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  // Setup opened at Real situations (a reload, or resumed from Today) draws its first results
-  // still; come to from the rules on this page, they are tried as the owner watches, and land.
-  const [openedAtSituations] = useState(state.step === 'situations');
   const situationRows = useRef<HTMLUListElement>(null);
-  const landing = useLanding(situationRows, situations, !openedAtSituations, situations.data?.length ?? 0);
+  const landing = useLanding(situationRows, situations, live, situations.data?.length ?? 0);
 
   const saveAndExit = (
     <div className="cd-setup-step__actions">
