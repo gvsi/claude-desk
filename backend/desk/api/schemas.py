@@ -35,7 +35,7 @@ from desk.api.prompts import (
     Triage,
 )
 from desk.contracts import (
-    AnyToolName,
+    ToolName,
     BusinessToolDef,
     AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
@@ -953,7 +953,7 @@ class SimulateChangeIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tool: AnyToolName
+    tool: ToolName
 
 
 class KnowledgeIn(BaseModel):

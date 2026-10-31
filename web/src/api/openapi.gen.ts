@@ -744,22 +744,19 @@ export interface SetupTools {
  */
 export interface SimulateChangeIn {
   tool:
-    | (
-        | "native.quote"
-        | "native.find_slots"
-        | "native.book"
-        | "native.release_document"
-        | "native.payment_link"
-        | "native.charge_mandate"
-        | "native.capture_lead"
-        | "native.request_callback"
-        | "native.start_verification"
-        | "native.fetch_website"
-        | "native.read_memory"
-        | "payments.list_charges"
-        | "payments.create_refund"
-      )
-    | string;
+    | "native.quote"
+    | "native.find_slots"
+    | "native.book"
+    | "native.release_document"
+    | "native.payment_link"
+    | "native.charge_mandate"
+    | "native.capture_lead"
+    | "native.request_callback"
+    | "native.start_verification"
+    | "native.fetch_website"
+    | "native.read_memory"
+    | "payments.list_charges"
+    | "payments.create_refund";
 }
 /**
  * A situation Claude wrote to try against the drafted rules: who brings it, the probe code built for it (a
