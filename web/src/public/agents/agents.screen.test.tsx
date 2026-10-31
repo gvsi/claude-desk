@@ -1107,6 +1107,8 @@ describe('agents page', () => {
       await panel.getByRole('button', { name: 'Try again' }).click();
       await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
       expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
+      // "Try again" goes with its line, so focus moves to the panel's title, as after a task.
+      await expect.element(panel.getByRole('heading', { level: 2, name: 'Send an agent' })).toHaveFocus();
       const sent = requests('sendAgent', mark).map((r) => r.body as { task: string; idempotency_key?: string });
       expect(sent, JSON.stringify(fault)).toHaveLength(2);
       expect(sent[0]?.task).toBe('book_visit');

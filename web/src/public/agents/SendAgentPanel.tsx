@@ -283,6 +283,8 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   const tryAgain = () => {
     const { task, key, keyMadeAt } = state;
     if (task === null || key === null || keyMadeAt === null) return;
+    // "Try again" goes with its line either way: its focus moves to the title, as a task's does.
+    titleRef.current?.focus({ preventScroll: true });
     if (Date.now() - keyMadeAt >= KEY_RETRY_WINDOW_MS) {
       setState((prev) => ({ ...prev, status: 'reload' }));
       return;
