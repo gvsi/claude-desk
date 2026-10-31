@@ -38,5 +38,6 @@ export function amount(cents: number): string {
 
 /** The reason of a card lowered to the payment limit `cap`, in `language`. */
 export function loweredReason(cap: number, language: Language): string {
-  return (cap ? LOWERED_REASONS : ZERO_REASONS)[language].replace('{amount}', amount(cap));
+  // A function, so the amount goes in as written: `$` patterns are special in a replacement string.
+  return (cap ? LOWERED_REASONS : ZERO_REASONS)[language].replace('{amount}', () => amount(cap));
 }
