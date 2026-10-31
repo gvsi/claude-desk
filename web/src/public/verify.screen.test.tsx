@@ -19,6 +19,7 @@ import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { aPollPasses, closedInboxReads, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { watchFor } from '../test/watch.ts';
+import { READ_AHEAD_MS } from '../owner/useDesks.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -451,9 +452,10 @@ describe('Demo inbox', () => {
 
   it('owner_inbox_that_failed_is_read_again_on_the_next_visit', async () => {
     // Today opens on a failed inbox read without sending it again. The next time Today opens, from
-    // another page, it reads the inbox afresh, and once that read works the inbox shows.
+    // another page, it reads the inbox afresh, and once that read works the inbox shows. Under
+    // StrictMode, as the app runs, so every render and effect runs twice on mount.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0, strict: true });
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(2);
@@ -465,6 +467,32 @@ describe('Demo inbox', () => {
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(3);
     expect(line.elements()).toHaveLength(0);
+  });
+
+  it('owner_inbox_that_failed_as_a_left_first_visit_read_ahead_is_read_again', { timeout: 15_000 }, async () => {
+    // The owner leaves the first visit's page while it still reads Today ahead, here waiting on a
+    // slow Today, after the inbox's read and its retry failed there. Once that read ahead's wait is
+    // over, Today opened from another page reads the inbox again rather than open on that failure.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    let slowToday = true;
+    worker.use(
+      http.get(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), async () => {
+        if (slowToday) {
+          slowToday = false;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+        return undefined;
+      }),
+    );
+    const { screen, router } = await renderRoute('/', { retryScale: 0 });
+    await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
+    await router.navigate(`/app/${RIVERA.deskId}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, READ_AHEAD_MS));
+
+    await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).click();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(3);
   });
 
   it('owner_inbox_still_out_as_today_opens_says_so', { timeout: 15_000 }, async () => {

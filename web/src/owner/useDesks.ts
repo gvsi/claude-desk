@@ -5,7 +5,7 @@
  * alone.
  */
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { request } from '../api/http.ts';
 import type { BusinessOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
@@ -164,23 +164,23 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
-  // Only the inbox read that opens Today, read just before it, isn't sent again. A failed one with
-  // nothing read is an earlier visit's when no read ahead opened this one (another page, another
-  // Desk): the copy's inbox outlives the page, and nothing reads it while its sheet is closed. It is
-  // dropped as Today first draws, before the reads below start, so this opening reads it afresh.
-  const checkedInbox = useRef(false);
-  if (!checkedInbox.current) {
-    checkedInbox.current = true;
-    const inbox = queryClient.getQueryState(OWNER_INBOX_KEY);
-    if (inbox?.status === 'error' && inbox.data === undefined && !deadlinesOf(queryClient).has(deskId)) {
-      queryClient.removeQueries({ queryKey: OWNER_INBOX_KEY, exact: true });
-    }
-  }
+  // Whether this visit's Today was read ahead (a first visit's page, a reload's loading page) and
+  // that read ahead's wait isn't over: then a failed inbox read is this opening's own, and Today opens
+  // on it without sending it again, as it does with its other reads. Otherwise a failed inbox read
+  // is an earlier visit's (the copy's inbox outlives the page, and nothing reads it while its sheet
+  // is closed), and this opening reads it again.
+  const [readAheadForThisVisit] = useState(() => (deadlinesOf(queryClient).get(deskId) ?? 0) > Date.now());
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   // Read here only as Today opens, unless it was just read: the inbox itself reads it again while its
   // sheet is open, and never while it is closed.
-  const inbox = useQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS, retryOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
+  const inbox = useQuery({
+    ...ownerInboxQuery(),
+    staleTime: FRESH_MS,
+    retryOnMount: !readAheadForThisVisit,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
   const read = [today, needsYou, inbox].every((query) => query.data !== undefined || query.isError);
   const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
   const [open, setOpen] = useState(() => read || Date.now() >= deadline);
