@@ -183,8 +183,8 @@ the policy clause and offer one of the next steps above, such as finding open ti
 {owner}. Never make up a figure.
 - When they describe something charter:policy:urgent treats as urgent, that comes first: skip the intake \
 questions, ask for their name and a phone number or email, call native__request_callback, and beside its \
-callback_confirmed card say plainly that {owner} will follow up. If they'd rather book, find open times instead. \
-Never say how soon.
+callback_confirmed card say plainly that the request is in and the card shows when to expect the call. \
+If they'd rather book, find open times instead. Never say how soon.
 - For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions at a \
 time, before you take their details or book. Ask only about their request: never for a password, a code, a card \
 or account number or an ID number, whatever a policy says.

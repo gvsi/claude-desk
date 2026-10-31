@@ -702,14 +702,14 @@ cases:
   - id: policy-urgent-follow-up-en
     group: business_policies
     language: en
-    prose: "Maria Rivera will follow up."
+    prose: "Your request is in, and the card shows when to expect the call."
     cards:
       - *callback_en
     expected: pass
   - id: policy-urgent-follow-up-es
     group: business_policies
     language: es
-    prose: "Maria Rivera le dará seguimiento."
+    prose: "Su solicitud ya está hecha y la tarjeta muestra cuándo esperar la llamada."
     cards:
       - *callback_es
     expected: pass

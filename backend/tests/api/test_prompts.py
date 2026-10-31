@@ -91,8 +91,8 @@ def test_system_prompt_uses_the_business_policies():
         "call native__request_callback, and beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, that comes first: skip the intake "
         "questions, ask for their name and a phone number or email, call native__request_callback, and beside its "
-        "callback_confirmed card say plainly that Maria Rivera will follow up. If they'd rather book, find open "
-        "times instead. Never say how soon.",
+        "callback_confirmed card say plainly that the request is in and the card shows when to expect the call. "
+        "If they'd rather book, find open times instead. Never say how soon.",
         "- When charter:policy:after_hours is there and they ask about reaching Rivera Plumbing outside its "
         "hours, show it with the policy clause.",
         "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
