@@ -12,7 +12,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
   key. A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing made: 409
   `conflict` for another body, the stored failure again when the first failed (`start_error`), and while the first is
-  still starting, a wait of up to `START_WAIT_S`, then 409 `in_progress`. A start without a key writes its row last.
+  still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. A start
+  without a key writes its row last.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
   memory or website read ever runs for the interview, and a website the owner names later is kept as text.
@@ -206,8 +207,7 @@ TURN_MAX_TOKENS = 4096
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
 SETUP_TIMEOUT_S = 60.0
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
-START_WAIT_S = 25.0             # the most a repeated start waits for the first to finish (then 409 `in_progress`)
-START_POLL_S = 0.2              # how often it looks meanwhile
+START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 DESK_NAME = "Main line"
 MEMORY_QUERY = "business services prices hours area contact website"
 READ_TEXT_MAX = 8000             # what a read keeps for later turns: the website tool's own model_view cut
@@ -661,28 +661,24 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
 async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
     `conflict` when the key's start had another body, and the first's failure again when it failed. While the first
-    is still starting, this waits for it, up to `START_WAIT_S`, then answers 409 `in_progress`."""
+    is still starting, 409 `in_progress` at once, to be sent again in `START_RETRY_S`."""
     key, sha = body.idempotency_key, start_sha256(body)
     found = select(INTERVIEWS.c.interview_id, INTERVIEWS.c.desk_id, INTERVIEWS.c.request_sha256,
                    INTERVIEWS.c.start_error).where(INTERVIEWS.c.copy_id == owner.copy_id,
                                                    INTERVIEWS.c.idempotency_key == key)
-    deadline = monotonic() + START_WAIT_S
-    while True:
-        async with engine.connect() as conn:
-            row = (await conn.execute(found)).mappings().one_or_none()
-        if row is None:
-            return None
-        if row["request_sha256"] != sha:
-            raise ApiProblem(409, "conflict")
-        if row["start_error"] is not None:
-            raise _failure(row["start_error"])
-        if row["desk_id"] is not None:
-            if row["desk_id"] not in owner.desk_ids:  # made after this request read the copy's Desks
-                owner = await _desks_now(owner)
-            return await read(owner, engine, row["interview_id"])
-        if monotonic() >= deadline:
-            raise ApiProblem(409, "in_progress")
-        await asyncio.sleep(START_POLL_S)
+    async with engine.connect() as conn:
+        row = (await conn.execute(found)).mappings().one_or_none()
+    if row is None:
+        return None
+    if row["request_sha256"] != sha:
+        raise ApiProblem(409, "conflict")
+    if row["start_error"] is not None:
+        raise _failure(row["start_error"])
+    if row["desk_id"] is None:
+        raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
+    if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
+        owner = await _desks_now(owner)
+    return await read(owner, engine, row["interview_id"])
 
 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn) -> SetupState:

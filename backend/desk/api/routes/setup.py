@@ -71,7 +71,7 @@ async def start_setup(body: SetupStartIn, request: Request,
     With an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands
     now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
     `conflict`; a repeat of a start that failed answers its failure again (a new click sends a new key); and a repeat
-    sent while the first is still starting waits for it, up to 25 s, then answers 409 `in_progress`, to be sent again.
+    sent while the first is still starting answers 409 `in_progress` at once, to be sent again after `retry_after`.
     Without a key, each start makes its own interview and Desk."""
     if body.idempotency_key is not None:
         repeat = await setup.repeated_start(ctx, runtime(request).started().database(), body)

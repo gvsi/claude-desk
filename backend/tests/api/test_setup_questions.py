@@ -1234,9 +1234,11 @@ async def test_a_repeat_of_a_failed_start_answers_its_failure(app, browser, fake
     assert len(fake.called("POST /desks")) == made + 1
 
 
-async def test_a_repeat_while_the_first_is_starting_waits_for_it(app, browser, fake, kernel_http, model, engine):
+async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(app, browser, fake, kernel_http, model,
+                                                                               engine):
     # The first start is still waiting on Claude when its repeat arrives: the key's row is already written, so the
-    # repeat waits for it and answers the same interview, with one model call and one Desk between them.
+    # repeat answers 409 `in_progress` at once, holding nothing while it waits, and makes nothing. Sent again once the
+    # first is done, it answers the same setup interview, with one model call and one Desk between them.
     owner = await new_owner(app, browser, kernel_http)
     release = asyncio.Event()
     model.add(gate := gated(started(), release))
@@ -1244,30 +1246,12 @@ async def test_a_repeat_while_the_first_is_starting_waits_for_it(app, browser, f
     await asyncio.wait_for(gate.entered.wait(), 5)
     ((interview_id, desk_id),) = await interviews(engine)
     assert desk_id is None                                  # written before Claude answers or the kernel is called
-    repeat = asyncio.create_task(start_keyed(owner))
-    await asyncio.sleep(0.5)
-    assert not repeat.done()
-    release.set()
-    first, repeat = await asyncio.wait_for(asyncio.gather(first, repeat), 10)
-    assert (first.status_code, repeat.status_code) == (201, 201), (first.text, repeat.text)
-    assert repeat.json() == first.json() and first.json()["interview_id"] == interview_id
-    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
-
-
-async def test_a_repeat_waits_only_so_long_for_the_first(app, browser, fake, kernel_http, model, engine, monkeypatch):
-    # Past the wait, the repeat answers 409 `in_progress` and makes nothing; sent again once the first is done, it
-    # answers the interview.
-    monkeypatch.setattr(desk_setup, "START_WAIT_S", 0.3)
-    owner = await new_owner(app, browser, kernel_http)
-    release = asyncio.Event()
-    model.add(gate := gated(started(), release))
-    first = asyncio.create_task(start_keyed(owner))
-    await asyncio.wait_for(gate.entered.wait(), 5)
-    waited = await asyncio.wait_for(start_keyed(owner), 5)
-    assert (waited.status_code, waited.json()) == (409, {"error": "in_progress"})
+    for _ in range(2):
+        busy = await asyncio.wait_for(start_keyed(owner), 1)
+        assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
     release.set()
     first = await asyncio.wait_for(first, 10)
-    assert first.status_code == 201, first.text
+    assert first.status_code == 201 and first.json()["interview_id"] == interview_id, first.text
     assert (await start_keyed(owner)).json() == first.json()
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
 
