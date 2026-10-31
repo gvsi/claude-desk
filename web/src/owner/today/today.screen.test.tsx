@@ -1484,6 +1484,40 @@ describe("Today's Demo inbox", () => {
     expect(closedReads()).toBe(0);
   });
 
+  it('inbox_polls_a_whole_poll_after_each_answer', async () => {
+    // As React Query's own polls do, the open sheet's poll counts again from each read's answer, so a
+    // read that answers late isn't followed by another at once.
+    const { screen } = await renderRoute(TODAY);
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // When the read as it opens answers: the first answer from here on.
+    let answeredAt = 0;
+    const stop = observeRequests((outcome) => {
+      if (outcome.key === 'ownerInbox' && answeredAt === 0) answeredAt = performance.now();
+    });
+    onTestFinished(stop);
+
+    // The read as it opens answers a poll and a half late.
+    const opening = holdReads(ROUTES.ownerInbox.path);
+    await open.click();
+    await vi.waitFor(() => expect(opening.held()).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, pollMs('inbox') * 1.5));
+    const sent: number[] = [];
+    const send = window.fetch;
+    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (url.pathname === ROUTES.ownerInbox.path) sent.push(performance.now());
+      return send(input, init);
+    });
+    onTestFinished(() => sending.mockRestore());
+    opening.release();
+
+    // The next read goes a whole poll after that answer.
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(1));
+    expect(answeredAt).toBeGreaterThan(0);
+    expect((sent[0] ?? 0) - answeredAt).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
+  });
+
   it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
     // The sheet is closed from the moment it closes, before Today has drawn it closed: a poll that
     // comes due then, or the owner coming back to the tab then, reads nothing. No poll lands by

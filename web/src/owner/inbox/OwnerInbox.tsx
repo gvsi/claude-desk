@@ -58,18 +58,23 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   });
   const failure = useReadFailure(inbox);
 
-  // Read again as the sheet opens, so it shows what is there now, then every few seconds while it
-  // stays open and the tab is in view. The poll is the sheet's own: React Query's `refetchInterval`
+  // Read again as the sheet opens, so it shows what is there now.
+  const { refetch, dataUpdatedAt, errorUpdatedAt } = inbox;
+  useEffect(() => {
+    if (open) void refetch();
+  }, [open, refetch]);
+
+  // Then every few seconds while it stays open and the tab is in view, counted again from each read's
+  // answer, as React Query's `refetchInterval` counts. The poll is the sheet's own: `refetchInterval`
   // would stop only once Today had drawn the close, and a poll that came due in between would read.
-  const { refetch } = inbox;
   useEffect(() => {
     if (!open) return undefined;
-    void refetch();
     const poll = window.setInterval(() => {
       if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
     }, pollMs('inbox'));
     return () => window.clearInterval(poll);
-  }, [open, refetch]);
+    // Each answer, read or failed, starts the count again.
+  }, [open, refetch, dataUpdatedAt, errorUpdatedAt]);
 
   // The held requests the alerts name, each read for its Desk while the sheet is open. A read that
   // hasn't answered, failed, or names no action draws no link.
