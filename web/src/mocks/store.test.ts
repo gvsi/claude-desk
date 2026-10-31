@@ -1074,6 +1074,28 @@ describe('the owner in the chat', () => {
     expect(kindsFor(sessionId)).toEqual(['session', 'takeover', 'takeover', 'breaker', 'breaker']);
   });
 
+  it('take_over_and_hand_back_stay_in_both_transcripts', async () => {
+    const { session, events } = await openChat();
+    const sessionId = session.session_id;
+    const at = (generation: number) => ({ params: { session_id: sessionId }, body: { generation } });
+    const visitor = async () => (await call('visitorSession', { params: { slug } })).body as VisitorTranscript;
+
+    // As the API keeps them: each an item of its own kind, holding the event the visitor's stream
+    // got then, with no text, in the visitor's transcript and the owner's.
+    expect((await call('takeover', at(session.generation))).status).toBe(200);
+    const joined = { type: 'owner_joined', name: rivera.business.ownerName };
+    expect((await visitor()).items.map((item) => [item.kind, item.text, item.event])).toEqual([['owner_joined', null, joined]]);
+    expect((await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } })).status).toBe(200);
+    expect((await call('handback', at(session.generation + 1))).status).toBe(200);
+    const read = await visitor();
+    expect(read.items.map((item) => item.kind)).toEqual(['owner_joined', 'delivered', 'owner_left']);
+    expect(read.items.at(-1)?.event).toEqual({ type: 'owner_left' });
+    expect(await ownerKinds(sessionId)).toEqual(['owner_joined', 'delivered', 'owner_left']);
+    // Read in step with the stream: a stream opened after `last_seq` repeats none of them.
+    expect(typesOf(events)).toEqual(['owner_joined', 'message', 'owner_left']);
+    expect(read.last_seq).toBe(events.at(-1)?.[0]);
+  });
+
   it('typing_shows_both_ways', async () => {
     const { session, events } = await openChat();
     const sessionId = session.session_id;

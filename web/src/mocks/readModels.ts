@@ -487,7 +487,8 @@ export function ledgerPage(desk: DeskRecord): LedgerPage {
   };
 }
 
-const VISITOR_KINDS: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'delivered', 'status']);
+/** What a visitor's transcript holds: their own words, what was delivered to them, and where the owner joined and left. */
+const VISITOR_KINDS: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'delivered', 'status', 'owner_joined', 'owner_left']);
 
 export function visitorTranscript(session: SessionRecord): VisitorTranscript {
   return {

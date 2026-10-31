@@ -480,13 +480,18 @@ export class MockWorld {
     this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
-  /** Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells listeners. */
+  /**
+   * Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells
+   * listeners. The transcript keeps a delivered message, a status, and where the owner joined and
+   * left (an item of the event's own kind holding it), as the API does.
+   */
   emit(session: SessionRecord, ev: SseEvent): number {
     const seq = session.events.length + 1;
     session.events.push({ seq, ev });
     session.lastActivity = this.now();
     if (ev.type === 'message') this.addItem(session, 'delivered', null, ev);
     else if (ev.type === 'receipt' || ev.type === 'held' || ev.type === 'resolved') this.addItem(session, 'status', null, ev);
+    else if (ev.type === 'owner_joined' || ev.type === 'owner_left') this.addItem(session, ev.type, null, ev);
     for (const listener of [...session.listeners]) {
       try {
         listener(seq, ev);

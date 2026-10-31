@@ -61,10 +61,13 @@ function levelOf(state: SessionState): string {
   return state.verified ? 'Verified' : 'Public';
 }
 
-/** The kernel's line for the last thing that happened in the chat: its newest receipt or message. */
+/**
+ * The kernel's line for the last thing that happened in the chat: its newest receipt or message.
+ * Where the owner joined or left carries no line of the kernel's, so it is passed over.
+ */
 function latestOf(read: OwnerTranscriptRead): string | null {
   const items = [...read.items].sort((a, b) => b.n - a.n);
-  for (const item of items) if (item.event !== null) return item.event.visitor_plain;
+  for (const { event } of items) if (event !== null && 'visitor_plain' in event) return event.visitor_plain;
   return null;
 }
 

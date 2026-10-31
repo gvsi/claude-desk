@@ -99,6 +99,26 @@ function receiptsOf(row: Element): string[] {
   return [...row.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt')].map((el) => el.textContent?.trim() ?? '');
 }
 
+/** What each row of the conversation shows, in order, without the receipts under it. */
+const rowsShown = () => [...document.querySelectorAll('.cd-transcript-row__main')].map((el) => el.textContent?.trim() ?? '');
+
+/** The lines about the chat (the owner joining, Claude helping again), in order. */
+const systemLines = () => [...document.querySelectorAll('.cd-system-line__text')].map((el) => el.textContent ?? '');
+
+/**
+ * The chat as the visitor sees it: the conversation's text and rows, the line under the chat's
+ * title, whether Claude or the owner is shown writing, and whether the composer can be used.
+ */
+function chatView() {
+  return {
+    conversation: document.querySelector('[role="log"]')?.textContent ?? '',
+    rows: rowsShown(),
+    disclosure: document.querySelector('.cd-public-shell__disclosure')?.textContent ?? '',
+    writing: document.querySelectorAll('.cd-writing-indicator').length,
+    composerEnabled: document.querySelector<HTMLTextAreaElement>('.cd-public-shell__composer textarea')?.disabled === false,
+  };
+}
+
 describe('public chat page', () => {
   it('public_page_discloses_ai_en_es', async () => {
     document.title = APP_TITLE;
@@ -1192,6 +1212,64 @@ describe('public chat page', () => {
     const main = reply.querySelector('.cd-transcript-row__main');
     if (!main) throw new Error('the reply has its message');
     expect(getComputedStyle(main).opacity).toBe('1');
+  });
+
+  it('reload_during_a_take_over_shows_the_owner_joined', async () => {
+    // Dana asks for Maria, and Maria takes the chat over while the page is open.
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    const start = chatEvents().length;
+    await first.screen.getByRole('button', { name: 'Ask for Maria Rivera' }).click();
+    await turnEnded(start);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await expect.element(first.screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+    const open = chatView();
+    expect(systemLines()).toEqual(['Maria Rivera joined the chat']);
+
+    // A new page load during the take-over: the chat comes back as the open page showed it, her
+    // joining last, and in the same state (nothing says Claude is writing, the composer open, the
+    // line under the chat's title as it was).
+    const lastSeq = chatEvents().length;
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    await vi.waitFor(() => expect(chatView()).toEqual(open));
+    expect(systemLines()).toEqual(['Maria Rivera joined the chat']);
+    await expectScreenBasics(second.screen.container, { owner: false });
+
+    // Its stream picks up after the take-over: her words and her hand-back follow the join, and
+    // each line shows once.
+    await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(new RegExp(`after=${lastSeq}$`)));
+    mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+    mockStore.world.handBack(chat);
+    await expect.element(second.screen.getByRole('status').filter({ hasText: 'Claude is helping again.' })).toBeVisible();
+    await sleep(300);
+    expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']);
+    expect(rowsShown().slice(-3)).toEqual(['MRMaria Rivera joined the chat', expect.stringContaining('Hi, it is Maria. I can come at 4 today.'), 'Claude is helping again.']);
+  });
+
+  it('reload_after_a_hand_back_shows_the_join_then_the_leave', async () => {
+    // Maria takes over, writes and hands the chat back, all while the page is open.
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    await say(first.screen, 'How much is drain clearing?');
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+    mockStore.world.handBack(chat);
+    await expect.element(first.screen.getByRole('status').filter({ hasText: 'Claude is helping again.' })).toBeVisible();
+    const open = chatView();
+
+    // A new page load: her joining comes back before her words, and her leaving after them, once each.
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    await vi.waitFor(() => expect(chatView()).toEqual(open));
+    expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']);
+    expect(rowsShown().slice(-3)).toEqual(['MRMaria Rivera joined the chat', expect.stringContaining('Hi, it is Maria. I can come at 4 today.'), 'Claude is helping again.']);
+    await sleep(300);
+    expect(chatView()).toEqual(open);
   });
 
   it('callback_card_shows_the_kernel_title', async () => {
