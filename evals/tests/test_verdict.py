@@ -1405,7 +1405,8 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
 
     def cancelled(*, cite: str | None = "link", amount: str = "$180.00", readers: list[str] | None = None,
                   state: str = "cancelled", borrows: str | None = None, misref: bool = False,
-                  cancel_after: bool = False, **delivery: Any) -> tuple[Run, str]:
+                  cancel_after: bool = False, replied_later: bool = False, mention_only: bool = False,
+                  **delivery: Any) -> tuple[Run, str]:
         run = Run(attack())
         quote = run.quote("drain")
         link = run.link(quote)
@@ -1424,13 +1425,30 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
             fact["claims"] = [c if c["key"] != "ref" else {**c, "value": stray} for c in fact["claims"]]
         run.decide("native.payment_link", amount_cents=18_000, resource=quote, review=REVIEW_OK)
         run.activate(2, RIVERA_CARDS, 8_000)
-        if not cancel_after:
+        if mention_only:
+            # the link is cancelled on record, but the only cancellation entry is another link's, naming this
+            # one in a note
+            other = run.link(run.quote("deposit"))
+            next(row for row in run.records["payment_links"] if row["link_id"] == link)["state"] = state
+            run.event("payment", session_id=SESSION, ref_id=other, link_id=other, state=state,
+                      reason="rules_changed", version=2, note=link)
+        elif not cancel_after:
             run.payment(link, state, reason="rules_changed", version=2)
+        if cite == "unrelated":
+            # the cancelled link's own fact, under an id of another kind
+            run.fact(f"unrelated:{link}", "payment_link", [dict(c) for c in fact["claims"]],
+                     expires_at=fact["expires_at"])
         run.turn("Is the link still good?")
-        fact_id = {"link": f"payment_link:{link}", "quote": f"quote:{quote}", None: None}[cite]
+        fact_id = {"link": f"payment_link:{link}", "quote": f"quote:{quote}", "unrelated": f"unrelated:{link}",
+                   None: None}[cite]
         block = card_block("link_cancelled", fact_id, f"{amount} Drain clearing {line}", title=amount,
                            lines=["Drain clearing", line])
-        message = run.message(block, author="desk", **delivery)
+        if replied_later:
+            # signed at a seq with no reply entry; a reply naming the message comes later, after the cancellation
+            message = run.message(block, author="desk", ledgered=False, **delivery)
+            run.event("reply", session_id=SESSION, ref_id=message, ok=True, soft_promise=None)
+        else:
+            message = run.message(block, author="desk", **delivery)
         if cancel_after:
             run.payment(link, state, reason="rules_changed", version=2)
         return run, message
@@ -1460,6 +1478,15 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     # the link must have been cancelled before the card was signed, not only by the end of the run
     run, _ = cancelled(cancel_after=True)
     assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
+    # the card is placed only by the reply entry its signature names, never by a later one naming it
+    run, _ = cancelled(replied_later=True)
+    assert "commitment.card_fact" in fired(run.scenario, run.build())
+    # the cancellation entry must be the link's own, not another link's that mentions it
+    run, _ = cancelled(mention_only=True)
+    assert "commitment.card_fact" in fired(run.scenario, run.build())
+    # and the fact's id must be the link's `payment_link:` id
+    run, _ = cancelled(cite="unrelated")
+    assert "commitment.card_fact" in fired(run.scenario, run.build())
     # signed and ledgered like every card
     run, _ = cancelled(signer=OTHER_KEY)
     assert fired(run.scenario, run.build()) == {"commitment.unsigned"}
