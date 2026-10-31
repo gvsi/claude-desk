@@ -254,48 +254,42 @@ describe('the About documents', () => {
   });
 
   const HOSTED = '[owner: hosted URL; the passcode comes with the link]';
-  const REPO = '[owner: repo link]';
+  const REPO = '[github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk)';
+  // The sentence as the page shows it, the repository a link.
+  const YOURE_IN_IT = {
+    kind: 'paragraph',
+    children: [
+      { kind: 'text', text: 'You’re in it. The code is at ' },
+      {
+        kind: 'link',
+        href: 'https://github.com/gvsi/claude-desk',
+        internal: false,
+        children: [{ kind: 'text', text: 'github.com/gvsi/claude-desk' }],
+      },
+      { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
+    ],
+  };
 
   it('the_replacement_matches_once_before_and_after_the_fill', () => {
+    // The document links the public repository; the hosted address is still the owner's to give.
     const proposal = raw('product-proposal.md');
-    const filled = proposal
-      .replace(HOSTED, '[desk.example.com](https://desk.example.com)')
-      .replace(REPO, '[github.com/example/claude-desk](https://github.com/example/claude-desk)');
+    const sentence = `The prototype, v1's enforced core, is at ${HOSTED}, with the code at ${REPO}.`;
+    expect(proposal.split(sentence)).toHaveLength(2);
+    const filled = proposal.replace(HOSTED, '[desk.example.com](https://desk.example.com)');
     expect(filled).not.toContain('[owner:');
     expect(proposal.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
     expect(filled.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
 
-    // Before the fill: the hosted address goes, and the repository placeholder stays visible.
+    // Before the fill: the hosted address goes, the repository link stays, and nothing else changes.
     const page = proposalForThePage(proposal);
     expect(page).toContain(`You’re in it. The code is at ${REPO}. Each visitor acts as Maria`);
     expect(page).not.toContain(HOSTED);
-    expect(page.replace(`You’re in it. The code is at ${REPO}.`, '')).toBe(proposal.replace(PROTOTYPE_SENTENCE, ''));
-    const paragraph = ABOUT_DOCUMENTS.proposal.blocks.find(
-      (block) => block.kind === 'paragraph' && block.children[0]?.kind === 'text' && block.children[0].text.startsWith('You’re in it.'),
-    );
-    expect(paragraph).toMatchObject({
-      children: [
-        { kind: 'text', text: 'You’re in it. The code is at ' },
-        { kind: 'placeholder', text: 'owner: repo link' },
-        { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
-      ],
-    });
+    expect(page).toBe(proposal.replace(sentence, `You’re in it. The code is at ${REPO}.`));
+    expect(ABOUT_DOCUMENTS.proposal.blocks).toContainEqual(YOURE_IN_IT);
 
-    // After the fill: the repository link survives as a link.
+    // After the fill: the repository link survives as a link, and the hosted address isn't on the page.
     const { blocks } = readDocument('proposal', filled);
-    expect(blocks).toContainEqual({
-      kind: 'paragraph',
-      children: [
-        { kind: 'text', text: 'You’re in it. The code is at ' },
-        {
-          kind: 'link',
-          href: 'https://github.com/example/claude-desk',
-          internal: false,
-          children: [{ kind: 'text', text: 'github.com/example/claude-desk' }],
-        },
-        { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
-      ],
-    });
+    expect(blocks).toContainEqual(YOURE_IN_IT);
     expect(links(blocks).map((link) => link.href)).not.toContain('https://desk.example.com');
 
     // Anything but exactly one match fails loudly, naming the second match's line.
