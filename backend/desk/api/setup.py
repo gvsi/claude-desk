@@ -450,11 +450,18 @@ def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[Co
                                   job=proposed, connector=None))
     for drafted_connector in connectors:
         connector = drafted_connector.model_copy(deep=True)
-        connector.connectable = connector.app == "stripe"
+        connector.connectable = True
         connector.label = CONNECTOR_LABELS[connector.app]
         cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed",
                                   job=None, connector=connector))
     return [Entry(role="claude", text="", card=card) for card in cards]
+
+
+class ConnectedApp(BaseModel):
+    """An accepted app in the transcript; simulation grants no business capability."""
+
+    app: ConnectorKey
+    simulated: bool
 
 
 @dataclass
@@ -525,6 +532,16 @@ class Interview:
     def planned(self) -> list[ProposalCard]:
         shown = {entry.card.proposal_id: entry.card for entry in self.transcript if entry.card}
         return [shown.get(card.proposal_id, card) for entry in self.transcript for card in entry.planned]
+
+    @property
+    def connected(self) -> list[ConnectedApp]:
+        """Derive connections from current acceptances, without separate stored state or I/O."""
+        cards = {card.proposal_id: card for card in self.planned}
+        cards.update((entry.card.proposal_id, entry.card) for entry in self.transcript if entry.card)
+        apps = dict.fromkeys(card.connector.app for card in cards.values()
+                             if card.state == "accepted" and card.connector is not None
+                             and card.superseded_by is None and card.proposal_id not in self.dropped)
+        return [ConnectedApp(app=app, simulated=app != "stripe") for app in apps]
 
     @property
     def dropped(self) -> set[str]:
@@ -1192,7 +1209,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
                      if entry.card is not None and entry.card.proposal_id == proposal_id)
         entry.owner_decided = True
         await card_turn(owner, engine, model, interview, proposal_id)
-        connect = _claim_connector_connect(interview, proposal_id)
+        connect = _claim_connector_connect(interview, None if interview.step == "tools" else proposal_id)
         await _commit(engine, owner, interview, seen)
     if connect:
         await _connect_accepted_connector(owner, interview)
@@ -1904,7 +1921,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             if not interview.business_tools_enabled:
                 _clear_configs(interview)
             await card_turn(ctx, engine, model, interview, card, text=text)
-            connect = _claim_connector_connect(interview, card)
+            connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
         since = len(interview.transcript)
         key = question
@@ -1951,6 +1968,9 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             _record_plan(interview, turn, reply)
         await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
                                  follow_up=turn if not turn.step_done else None)
+
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
@@ -2055,17 +2075,22 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
     """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
 
 
-def _claim_connector_connect(interview: Interview, proposal_id: str) -> bool:
-    """Persist one attempt with the accepted card before any connection, including one that fails."""
+def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
+    """Reserve one real Stripe attempt before committing; other accepted apps are simulated."""
     if any(entry.connector_connect_attempted for entry in interview.transcript):
         return False
-    entry = next(entry for entry in reversed(interview.transcript)
-                 if entry.card is not None and entry.card.proposal_id == proposal_id)
-    card = entry.card
-    if card.state != "accepted" or card.connector is None or not card.connector.connectable:
-        return False
-    entry.connector_connect_attempted = True
-    return True
+    seen = set()
+    for entry in reversed(interview.transcript):
+        card = entry.card
+        if card is None or card.proposal_id in seen:
+            continue
+        seen.add(card.proposal_id)
+        if ((proposal_id is None or card.proposal_id == proposal_id) and card.state == "accepted"
+                and card.connector is not None and card.connector.app == "stripe"
+                and card.superseded_by is None and card.proposal_id not in interview.dropped):
+            entry.connector_connect_attempted = True
+            return True
+    return False
 
 
 async def _connect_accepted_connector(owner: OwnerCtx, interview: Interview) -> None:
@@ -2097,7 +2122,10 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         seen = _stored(interview)
         interview.transcript.append(Entry(role="owner", text="Use your suggestions"))
         await close_setup(owner, engine, model, interview)
+        connect = _claim_connector_connect(interview)
         await _commit(engine, owner, interview, seen)
+    if connect:
+        await _connect_accepted_connector(owner, interview)
     await after_finish(owner, interview)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
                        business_tools_enabled=interview.business_tools_enabled)
