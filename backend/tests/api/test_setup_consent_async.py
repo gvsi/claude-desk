@@ -1,6 +1,7 @@
 """Setup's shared turn runner stores pending entries before consent, answers or card work runs."""
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -530,6 +531,50 @@ async def test_declined_consent_reads_nothing_and_still_asks(
     assert reply.json()["busy"] is False and reply.json()["question"] == setup.QUESTION_KEYS[0]
     assert seen == [state["interview_id"]]
     assert fake.called("POST /decide") == [] and fake.called("POST /execute") == []
+
+
+async def test_a_stalled_detached_entry_is_bounded_by_the_run_deadline(
+        app, browser, fake, kernel_http, model, monkeypatch, db):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    before = db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
+    entered, exited = asyncio.Event(), asyncio.Event()
+    detached = setup.detached
+    runs = app.state.runtime.turn_runs
+
+    @contextlib.asynccontextmanager
+    async def stalled(owner, engine, ro_schema):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            exited.set()
+        yield owner
+
+    monkeypatch.setattr(setup, "detached", stalled)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2)
+    request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert interview_id in setup._RUNNING and runs.holds(interview_id)
+        reply = await asyncio.wait_for(asyncio.shield(request), 1)
+        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+        assert exited.is_set()
+        assert interview_id not in setup._RUNNING and not runs.holds(interview_id)
+        assert (await owner.browser.get(path)).json() == state
+        assert db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s",
+                          (interview_id,)).fetchone() == before
+    finally:
+        await runs.close()
+        await asyncio.gather(request, return_exceptions=True)
+
+    monkeypatch.setattr(setup, "detached", detached)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 100)
+    retry = await owner.browser.post(path + "/consent", json={"allow": False})
+    assert retry.status_code == 200 and retry.json()["busy"] is False
+    assert retry.json()["question"] == setup.QUESTION_KEYS[0]
 
 
 @pytest.mark.parametrize(("end", "slow"), [("deadline", False), ("deadline", True), ("shutdown", True)])

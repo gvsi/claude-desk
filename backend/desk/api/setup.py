@@ -885,7 +885,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
     never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
-    `keep_staged=False` removes temporary markers on success. The run deadline ends at the final commit.
+    `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
+    acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
     is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
     rolling back the turn.
@@ -907,8 +908,9 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
         busy = None
         committed = False
         try:
-            async with detached(owner, engine, ro_schema) as ctx:
+            async with contextlib.AsyncExitStack() as stack:
                 async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
+                    ctx = await stack.enter_async_context(detached(owner, engine, ro_schema))
                     slug = await _slug(ctx, desk_id)
                     staged = stage(interview)
                     for entry in staged:
