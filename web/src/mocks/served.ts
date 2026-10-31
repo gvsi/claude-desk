@@ -22,6 +22,7 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { idempotencyKeyOf } from './keys.ts';
 import {
   attempts,
   briefingList,
@@ -90,7 +91,7 @@ export interface Req {
 /** The statuses a route answers its model with; a 204 has no body. */
 type OkStatus = 200 | 201 | 202 | 204;
 /** The statuses a route refuses with. */
-type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503;
+type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503 | 504;
 
 /** A refusal's body, as the API writes it: `error`, with a kernel failure's `code` or a conflict's `decision`. */
 export interface ErrorBody {
@@ -105,6 +106,8 @@ export interface ErrorBody {
   cancel_reason?: CancelReason | null;
   /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
   draft?: RulesDraft;
+  /** Seconds to wait before sending again: a keyed setup start's 409 `in_progress`. */
+  retry_after?: number;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -730,8 +733,13 @@ const SERVED: ServedRoutes = {
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
     const task = isRecord(req.body) ? req.body.task : undefined;
-    if (req.malformed || !isDemoAgentTask(task)) return INVALID;
-    const runId = sv.agents.start(sv.world, visitor.desk, visitor.session, task);
+    const key = idempotencyKeyOf(req.body);
+    if (req.malformed || !isDemoAgentTask(task) || key === false) return INVALID;
+    // A repeat with the client's key answers the run the first started and starts nothing; the key
+    // with another task, session or Desk is a conflict (plan 02b).
+    const held = key === null ? null : sv.agents.keyed(key, task, visitor.session, visitor.desk.summary.slug);
+    if (held === 'conflict') return failWith(409, 'conflict');
+    const runId = held ?? sv.agents.start(sv.world, visitor.desk, visitor.session, task, key);
     return ok({ run_id: runId } satisfies AgentRunStarted, 202);
   },
   agentRun(sv, req) {

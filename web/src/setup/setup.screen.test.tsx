@@ -4,21 +4,26 @@
  * real situations, the safety check, the confirm with Answering still off, the owner's preview and
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
+import { http } from 'msw';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
+import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, SETUP_START_LOST_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer } from '../mocks/setup.ts';
+import { worker } from '../mocks/browser.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
+import { retryAfterMs } from '../app/poll.ts';
+import { setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const DESCRIPTION =
@@ -70,6 +75,31 @@ async function interviewAtPreview(description = DESCRIPTION): Promise<SetupState
   await mockStore.dispatch('setupConfirm', { params: { id: state.interview_id } });
   return state;
 }
+
+/** The page's real timers, kept before any test fakes them. */
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+/** Polls `check` in real time until it passes: unlike `expect.poll`, it never moves fake timers on. */
+async function until(check: () => void, timeoutMs = 5_000): Promise<void> {
+  const start = performance.now();
+  for (;;) {
+    try {
+      check();
+      return;
+    } catch (err) {
+      if (performance.now() - start > timeoutMs) throw err;
+    }
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
+  }
+}
+
+/** Lets the page's code queued behind a timer that just fired run: a few microtasks, no time. */
+async function microtasks(): Promise<void> {
+  for (let n = 0; n < 5; n += 1) await Promise.resolve();
+}
+
+/** The idempotency key of each start the page sent, in order. */
+const startKeys = () => requests('startSetup').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
 
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
@@ -140,10 +170,12 @@ describe('setup', () => {
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     await screen.getByRole('button', { name: 'Start' }).click();
 
-    // The description and the browser's own time zone, once.
+    // The description and the browser's own time zone, once, with the press's idempotency key.
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).toBeVisible();
-    expect(requests('startSetup').map((r) => r.body)).toEqual([{ description: DESCRIPTION, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }]);
+    expect(requests('startSetup').map((r) => r.body)).toEqual([
+      { description: DESCRIPTION, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, idempotency_key: expect.any(String) },
+    ]);
     const state = [...mockStore.world.desks].reverse()[0];
     expect(state?.summary.answering).toBe(false);
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
@@ -169,32 +201,200 @@ describe('setup', () => {
     expect(setup.body.consent).toBe(true);
   });
 
-  it('lost_start_is_unknown_and_a_refused_one_can_be_tried_again', async () => {
-    // A clear refusal: its line, and "Start" works again.
+  it('refused_start_lets_a_new_key_through', async () => {
+    // A clear refusal (a 422, a 409 `conflict` on the key) started nothing: its line, "Start" works
+    // again, and the next press is a new start with a new key.
     const { screen } = await renderRoute('/app/setup');
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
-    mockStore.inject({ route: 'startSetup', status: 422, body: { error: 'invalid' } });
-    await screen.getByRole('button', { name: 'Start' }).click();
-    const refused = ownerErrorCopy(new ApiError('unprocessable', { route: 'startSetup', method: 'POST', status: 422, code: 'invalid' }));
-    await expect.element(screen.getByText(refused, { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    for (const refusal of [
+      { status: 422, body: { error: 'invalid' }, kind: 'unprocessable' as const },
+      { status: 409, body: { error: 'conflict' }, kind: 'conflict' as const },
+    ]) {
+      mockStore.inject({ route: 'startSetup', status: refusal.status, body: refusal.body });
+      await screen.getByRole('button', { name: 'Start' }).click();
+      const line = ownerErrorCopy(new ApiError(refusal.kind, { route: 'startSetup', method: 'POST', status: refusal.status, code: refusal.body.error }));
+      await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+      await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+      await expect.element(screen.getByRole('textbox', { name: 'Your business' })).not.toHaveAttribute('readonly');
+      expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    }
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    expect(requests('startSetup')).toHaveLength(2);
+    const keys = startKeys();
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(3);
 
+    // The API says the key can't start anything again (409 `key_spent`: the first start ended with
+    // its Desk unknown): setup didn't start, "Start" works again, and it sends a new key.
+    const spent = (await renderRoute('/app/setup')).screen;
+    await spent.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const end = holdNextStart(mockStore.world);
+    await spent.getByRole('button', { name: 'Start' }).click();
+    await expect.element(spent.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
+    end('spent');
+    await spent.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(spent.getByText(setupStartSpentLine(), { exact: true })).toBeVisible();
+    expect(spent.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    await expect.element(spent.getByRole('button', { name: 'Start' })).toBeEnabled();
+    await spent.getByRole('button', { name: 'Start' }).click();
+    await expect.element(spent.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const spentKeys = startKeys().slice(3);
+    expect(spentKeys).toHaveLength(3);
+    expect(spentKeys[1]).toBe(spentKeys[0]);
+    expect(spentKeys[2]).not.toBe(spentKeys[0]);
+  });
+
+  it('lost_start_is_tried_again_with_its_key', async () => {
     // A start whose answer was lost (no answer, a timeout or a 5xx) may have made a Desk: it is
-    // never called not done, and "Start" stays off on that page, so it can't make a second one.
-    for (const lost of [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }]) {
+    // never called not done, "Start" stays off, and "Try again" sends the same start with the same
+    // key, which goes on to the interview the first made, or makes it now: one Desk either way. Its
+    // line is the design system's retry-safe one, which says so.
+    expect(setupStartLostLine()).toBe(SETUP_START_RETRY_COPY);
+    const lost = [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }, { status: 'network' as const }];
+    for (const fault of lost) {
       const page = (await renderRoute('/app/setup')).screen;
       const mark = mockStore.requests.length;
+      const desks = mockStore.world.desks.length;
       await page.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
-      mockStore.inject({ route: 'startSetup', ...lost });
+      mockStore.inject({ route: 'startSetup', ...fault });
       await page.getByRole('button', { name: 'Start' }).click();
-      await expect.element(page.getByText(SETUP_START_LOST_COPY, { exact: true })).toBeVisible();
+      await expect.element(page.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
       await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
+      // "Try again" sends the words as they were: until the start is settled, they can't be changed.
+      await expect.element(page.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
       expect(requests('startSetup', mark)).toHaveLength(1);
-      expect(page.getByText(refused, { exact: true }).elements()).toHaveLength(0);
+
+      // "Try again" goes with its line, so focus moves to the step's heading rather than the page.
+      const focused: Element[] = [];
+      const onFocus = (event: FocusEvent) => focused.push(event.target as Element);
+      document.addEventListener('focusin', onFocus);
+      const tryAgain = page.getByRole('button', { name: 'Try again' });
+      const button = tryAgain.element();
+      await tryAgain.click();
+      await expect.element(page.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+      document.removeEventListener('focusin', onFocus);
+      const heading = focused[focused.indexOf(button) + 1];
+      expect(heading?.tagName, JSON.stringify(fault)).toBe('H1');
+      expect(heading?.textContent).toBe('Tell me about your business');
+      const sent = requests('startSetup', mark).map((r) => r.body as Record<string, unknown>);
+      expect(sent, JSON.stringify(fault)).toHaveLength(2);
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[0]).toMatchObject({ description: DESCRIPTION, idempotency_key: expect.stringMatching(/^[^\x00-\x1f\x7f]{1,128}$/) });
+      expect(mockStore.world.desks.length, JSON.stringify(fault)).toBe(desks + 1);
     }
+  });
+
+  it('start_under_way_waits_its_retry_after_then_is_sent_again_with_its_key', async () => {
+    // The API answers that a start with this key is still under way (409 `in_progress`): the page
+    // sends the same start again, with the same key, only once the answer's `retry_after` has passed
+    // (2 s when it names none; both scaled here with the polls), until the interview comes. The
+    // page's clock moves only when the test moves it, and the test counts the page's own sends,
+    // which go out the moment it sends them.
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 5 } });
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress' } });
+    const { screen } = await renderRoute('/app/setup');
+    const desks = mockStore.world.desks.length;
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const posts = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith('/api/owner/setup') && init?.method === 'POST').length;
+    const answers: boolean[] = [];
+    onTestFinished(observeRequests((outcome) => (outcome.key === 'startSetup' ? answers.push(outcome.ok) : undefined)));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await screen.getByRole('button', { name: 'Start' }).click();
+    for (const [seconds, sent] of [
+      [5, 1],
+      [2, 2],
+    ] as const) {
+      // The page has read its `sent`th answer, an `in_progress`, and acted on it.
+      await until(() => expect(answers).toHaveLength(sent));
+      expect(posts(), `before the ${seconds} s wait`).toBe(sent);
+      vi.advanceTimersByTime(retryAfterMs(seconds) - 1);
+      await microtasks();
+      expect(posts(), `1 ms before ${seconds} s`).toBe(sent);
+      vi.advanceTimersByTime(1);
+      await microtasks();
+      expect(posts(), `at ${seconds} s`).toBe(sent + 1);
+    }
+    await until(() => expect(answers).toEqual([false, false, true]));
+    vi.useRealTimers();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const sent = requests('startSetup').map((r) => r.body);
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((body) => JSON.stringify(body))).size).toBe(1);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
+  });
+
+  it('start_left_while_under_way_stays_left', async () => {
+    // The owner leaves with "Save and exit" while a retry of a start under way is in flight. The
+    // retry then makes the interview, and the page, gone, neither keeps it nor takes anybody back
+    // into setup.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let posts = 0;
+    worker.use(
+      http.post('/api/owner/setup', async () => {
+        posts += 1;
+        if (posts === 2) await gate;
+        return undefined;
+      }),
+    );
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    const { screen, router } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(() => posts).toBe(2);
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+
+    // The retry's answer, read: `request()` reports its success just before the page's own code
+    // after it runs, so the test wakes first, then lets that code run (every microtask queued before
+    // a task boundary has run by it) before looking.
+    const answered = new Promise<void>((resolve) => {
+      const stop = observeRequests((outcome) => {
+        if (outcome.key !== 'startSetup' || !outcome.ok) return;
+        stop();
+        resolve();
+      });
+      onTestFinished(stop);
+    });
+    const cached = vi.spyOn(QueryClient.prototype, 'setQueryData');
+    onTestFinished(() => cached.mockRestore());
+    release();
+    await answered;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(requests('startSetup')).toHaveLength(2);
+    expect(cached.mock.calls.filter(([key]) => Array.isArray(key) && key[0] === 'setup')).toEqual([]);
+    expect(router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+  });
+
+  it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
+    expect(setupStartSlowLine()).toBe(SETUP_START_SLOW_COPY);
+    // A start that runs long: its own answer is lost, "Try again" finds it under way, and after
+    // three more tries the page says it's taking longer, with "Try again" and "Start" still off.
+    // Once it has made the Desk, "Try again" goes on to its interview: one Desk, one key.
+    const { screen } = await renderRoute('/app/setup');
+    const desks = mockStore.world.desks.length;
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const end = holdNextStart(mockStore.world);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(screen.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByText(setupStartSlowLine(), { exact: true })).toBeVisible();
+    expect(screen.getByText(setupStartLostLine()).elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Tell me about your business' })).toHaveFocus();
+    expect(requests('startSetup')).toHaveLength(5);
+
+    end('made');
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    expect(new Set(startKeys()).size).toBe(1);
+    expect(startKeys()).toHaveLength(6);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
   });
 
   it('interview_outside_the_copy_is_not_found', async () => {
@@ -1088,6 +1288,39 @@ describe('setup', () => {
     return screen;
   }
 
+  it('setup_bar_shows_the_preview_badge_from_1100_px', async () => {
+    // The bell with no tile at 20 px beside "Claude Desk", as the setup boards draw it, at every
+    // width. From 1100 px up the wordmark carries its Preview badge; below, a top bar is a phone's
+    // and carries none. "Save and exit" keeps its width and one line either way, and the lockup
+    // stays clear of the steps beside it.
+    const state = await startInterview();
+    const exitWidths: number[] = [];
+    for (const [width, badge] of [
+      [1100, true],
+      [1099, false],
+    ] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+      await page.viewport(width, 900);
+      const bar = screen.container.querySelector<HTMLElement>('.cd-setup__bar');
+      if (!bar) throw new Error('the setup bar renders');
+      const where = `at ${width}`;
+      await expect.poll(() => bar.querySelector('.cd-wordmark')?.textContent, { message: where }).toBe(badge ? 'Claude DeskPreview' : 'Claude Desk');
+      const mark = bar.querySelector('svg.cd-mark');
+      expect(mark?.getAttribute('width'), where).toBe('20');
+      // No tile: the bell alone draws no rectangle behind it.
+      expect(mark?.querySelector('rect'), where).toBeNull();
+      const exit = screen.getByRole('link', { name: 'Save and exit' }).element() as HTMLElement;
+      expect(exit.scrollWidth, where).toBeLessThanOrEqual(exit.clientWidth);
+      expect(Math.round(exit.getBoundingClientRect().height), where).toBeLessThanOrEqual(32);
+      exitWidths.push(Math.round(exit.getBoundingClientRect().width));
+      const brand = bar.querySelector('.cd-setup__brand')?.getBoundingClientRect();
+      const steps = bar.querySelector('.cd-setup__steps')?.getBoundingClientRect();
+      if (badge && brand && steps) expect(brand.right, where).toBeLessThanOrEqual(steps.left);
+      expectNoHorizontalScroll();
+    }
+    expect(exitWidths[1]).toBe(exitWidths[0]);
+  });
+
   it('setup_fits_phone_width', async () => {
     for (const { name, path, ready } of await everyStep()) {
       const screen = await openStep(path, ready, 'phone');
@@ -1099,6 +1332,16 @@ describe('setup', () => {
         await expect.element(screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem').first()).toBeInTheDocument();
         await expect.element(screen.getByRole('link', { name: 'Save and exit' })).toBeVisible();
         await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
+        // At 390 px the business's name is what gives way: it is cut with an ellipsis where it doesn't
+        // fit (below, a longer one is), never running into the steps beside it, and "Save and exit"
+        // keeps its one line.
+        const business = screen.getByText('Rivera Plumbing', { exact: true }).first().element() as HTMLElement;
+        expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
+        const steps = screen.getByText('Step 1 of 5: Questions', { exact: true }).element().getBoundingClientRect();
+        expect(business.getBoundingClientRect().right).toBeLessThanOrEqual(steps.left);
+        const exit = screen.getByRole('link', { name: 'Save and exit' }).element() as HTMLElement;
+        expect(Math.round(exit.getBoundingClientRect().height)).toBeLessThanOrEqual(32);
+        expect(exit.scrollWidth).toBeLessThanOrEqual(exit.clientWidth);
       }
     }
 

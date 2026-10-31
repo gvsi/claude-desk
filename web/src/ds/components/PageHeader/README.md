@@ -14,6 +14,7 @@
 - `actions`, usually one `Button` (secondary, or primary when it is the page's main action). They sit at the right end of the title's line and wrap under the title on a narrow line. On a phone (under 640 px) they stay on the title's line and the subtitle runs under both, 8 px under the title, as the phone Connectors board draws it (N-Conn-24-Phone-Connectors).
 - `actionsBelowOnPhone`, for the Rules page's preset menu: under 640 px the actions take a line of their own, 16 px under the title (or its subtitle), at the header's full width, and what they hold fills it, so `PresetMenu`'s button and menu are as wide as the column (N-Conn-22-Phone-Presets).
 - `hideSubtitleOnPhone`: under 640 px the subtitle isn't shown, as the phone presets board draws the Rules page.
+- `titleRef`, where the page moves focus to its title after a control that had it goes away (setup's "Try again" after a lost start). The title then takes focus from a script (`tabIndex={-1}`) but is never a Tab stop.
 
 ## Props
 
@@ -24,5 +25,6 @@
 | `actions` | `ReactNode` | At the right of the title's line. |
 | `actionsBelowOnPhone` | `boolean` | Under 640 px, the actions on a line of their own at full width. |
 | `hideSubtitleOnPhone` | `boolean` | Under 640 px, no subtitle. |
+| `titleRef` | `Ref<HTMLHeadingElement>` | The title's element, for moving focus to it; it then takes `tabIndex={-1}`. |
 
 The header has no outer margin; the `AppShell` pads the page above it, and the page spaces what follows.

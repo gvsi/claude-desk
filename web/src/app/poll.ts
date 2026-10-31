@@ -39,6 +39,24 @@ export function agentRunPollMs(): number {
   return Math.max(1, Math.round(AGENT_RUN_POLL_MS * scale));
 }
 
+/** How long to wait before sending again after an answer's `retry_after` of `seconds`, scaled like the polls. */
+export function retryAfterMs(seconds: number): number {
+  return Math.max(1, Math.round(seconds * 1_000 * scale));
+}
+
+/** Resolves after `ms`, or at once when `signal` aborts: a wait between tries that ends with the page. */
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done);
+  });
+}
+
 let retryScale = 1;
 
 /**

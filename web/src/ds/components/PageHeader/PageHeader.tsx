@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 import './PageHeader.css';
 
@@ -16,6 +16,8 @@ export interface PageHeaderProps {
   actionsBelowOnPhone?: boolean;
   /** Under 640 px of the window, the subtitle isn't shown, as the phone presets board draws the Rules page. */
   hideSubtitleOnPhone?: boolean;
+  /** The title, for a script to move focus to: it then takes focus (`tabIndex={-1}`), never a Tab stop. */
+  titleRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
@@ -23,12 +25,14 @@ export interface PageHeaderProps {
  * and the page's actions at the right. On a narrow line the actions drop under the title; on a
  * phone they stay beside it unless `actionsBelowOnPhone` gives them a line of their own.
  */
-export function PageHeader({ title, subtitle, actions, actionsBelowOnPhone = false, hideSubtitleOnPhone = false }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, actions, actionsBelowOnPhone = false, hideSubtitleOnPhone = false, titleRef }: PageHeaderProps) {
   const modifiers = [actionsBelowOnPhone ? ' cd-page-header--actions-below' : '', hideSubtitleOnPhone ? ' cd-page-header--no-phone-subtitle' : ''].join('');
   return (
     <header className={`cd-page-header${modifiers}`}>
       <div className="cd-page-header__text">
-        <h1 className="cd-page-header__title cd-type-page-title">{title}</h1>
+        <h1 ref={titleRef} className="cd-page-header__title cd-type-page-title" tabIndex={titleRef === undefined ? undefined : -1}>
+          {title}
+        </h1>
         {subtitle ? <p className="cd-page-header__subtitle cd-type-body">{subtitle}</p> : null}
       </div>
       {actions ? <div className="cd-page-header__actions">{actions}</div> : null}
