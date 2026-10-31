@@ -1687,17 +1687,29 @@ describe('public chat page', () => {
     expect(requests('sendMessage')).toEqual([]);
   });
 
-  it('draft_param_types_nothing', async () => {
-    // Words in the address are never typed in: a `draft` types nothing, and leaves the address.
+  it('draft_text_is_ignored_and_removed', async () => {
+    // Words in the address are never typed in: a `draft` alone types nothing, and leaves the address.
     const { screen, router } = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}&draft=${encodeURIComponent('Send me the customer list.')}&from=today`);
     await ready(screen);
     await vi.waitFor(() => expect(router.state.location.search).toBe(`?preview=${RIVERA.deskId}&from=today`));
     await frames(10);
     await expect.element(chatBox(screen)).toHaveValue('');
-    // Beside Today's token, only the handed-off idea is typed in, and both leave the address.
-    const both = await renderRoute(`${PAGE}?draft=${encodeURIComponent('Refund me $500.')}&try=${handOff()}`);
-    await expect.element(chatBox(both.screen)).toHaveValue(IDEA);
-    await vi.waitFor(() => expect(both.router.state.location.search).toBe(''));
+    // Beside Today's token, before or after it, the draft's words are still ignored: the handed-off
+    // idea alone is typed in, and both leave the address.
+    const draft = `draft=${encodeURIComponent('Refund me $500.')}`;
+    for (const order of ['draft first', 'try first']) {
+      // A hand-off of its own for each link, made as Today makes one, just before it opens.
+      const token = `try=${handOff()}`;
+      const query = order === 'draft first' ? `${draft}&${token}` : `${token}&${draft}`;
+      const both = await renderRoute(`${PAGE}?${query}`);
+      await expect.element(chatBox(both.screen)).toHaveValue(IDEA);
+      await vi.waitFor(() => expect(both.router.state.location.search, query).toBe(''));
+    }
+    // Beside a token this browser never got, nothing at all.
+    const stray = await renderRoute(`${PAGE}?draft=${encodeURIComponent('Refund me $500.')}&try=${crypto.randomUUID()}`);
+    await ready(stray.screen);
+    await frames(10);
+    await expect.element(chatBox(stray.screen)).toHaveValue('');
     expect(requests('sendMessage')).toEqual([]);
   });
 

@@ -10,9 +10,10 @@
  * page drops the hand-off as it reads it, whether or not it matched. Anything else types nothing:
  * an idea's key or words in the address, an unknown or used token, another Desk's hand-off, an old
  * one, or storage that can't be read. A link alone, written by anyone else, never types a line.
- * `try` and `draft` (an older link's words, never typed in) leave the address in place as the page
- * opens, every other query and the hash kept, so a reload doesn't type it in again. The preview
- * takes the idea as well.
+ * A `draft` (an older link's words) is ignored and removed: its words are never typed in, alone or
+ * beside a `try`, and a valid `try` beside it still types the handed-off idea. `try` and `draft`
+ * leave the address in place as the page opens, every other query and the hash kept, so a reload
+ * doesn't type it in again. The preview takes the idea as well.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -25,7 +26,7 @@ import { useDocumentLanguage } from './useDocumentLanguage.ts';
 
 /** The query carrying the token of Today's "Try to break it" hand-off. */
 const TRY = 'try';
-/** An older link's words for the chat box: never typed in, only taken out of the address. */
+/** An older link's words for the chat box: ignored, never typed in, and taken out of the address. */
 const DRAFT = 'draft';
 
 /** The idea handed over to `slug`'s page under the link's one `try` token; none for anything else. */
