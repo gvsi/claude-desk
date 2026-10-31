@@ -1605,6 +1605,14 @@ describe('public chat page', () => {
     await newerVerificationBeforeReopen(true);
   });
 
+  it('a_stale_owner_reopen_read_cannot_undo_a_streamed_leave', async () => {
+    await staleOwnerReopen(false);
+  });
+
+  it('a_stale_owner_reopen_read_cannot_confirm_across_a_stream_drop', async () => {
+    await staleOwnerReopen(true);
+  });
+
   it('a_newer_read_keeps_an_older_replayed_join_from_bringing_the_owner_back', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
@@ -2889,6 +2897,63 @@ function countStreams(): StreamCount {
     window.EventSource = native;
   });
   return count;
+}
+
+/** A read taken in the owner's hands cannot reconfirm her after a leave or another stream gap. */
+async function staleOwnerReopen(drop: boolean): Promise<void> {
+  const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+  await ready(screen);
+  const chat = mockStore.visitorSession(RIVERA.slug);
+  if (!chat) throw new Error('this browser has a chat');
+  mockStore.world.takeOver(chat);
+  await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+  await router.navigate('/d/nobody-here');
+  await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+  const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
+  let release = () => {};
+  mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  const native = window.EventSource;
+  let source: EventSource | undefined;
+  window.EventSource = class extends native {
+    constructor(url: string | URL, init?: EventSourceInit) {
+      super(url, init);
+      source = this;
+    }
+  };
+  onTestFinished(() => { window.EventSource = native; });
+  const reads = requests('visitorSession').length;
+  const texts = watchTexts();
+  useTimers();
+  await router.navigate(PAGE);
+  await readyNow(screen);
+  await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+  chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+  let releaseCurrent = () => {};
+  if (drop) {
+    // The kernel has handed back, but its leave hasn't been stored yet. The browser loses the
+    // stream while the old owner read is out, so even its matching cursor confirms nothing.
+    source?.dispatchEvent(new Event('error'));
+    await until(() => expect(screen.container.textContent).toContain('Reconnecting to the chat'));
+    mockStore.inject({ route: 'visitorSession', status: 200, body: { ...older, state: chat.state }, until: new Promise<void>((resolve) => (releaseCurrent = resolve)) });
+  } else {
+    mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+    await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
+  }
+  release();
+  await settle();
+  if (drop) source?.dispatchEvent(new Event('open'));
+  await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+  await settle();
+  expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the stale owner read cannot reconfirm her').toBe(false);
+  if (drop) {
+    mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+    await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
+    releaseCurrent();
+    await settle();
+  }
+  texts.stop();
+  expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
+  expect(chatHead()).toEqual(withClaude(HEAD.en));
 }
 
 /** A newer verification result and an older reopen read can share a cursor, before the leave is stored. */
