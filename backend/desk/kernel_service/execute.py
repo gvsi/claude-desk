@@ -832,6 +832,8 @@ async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
     when its Desk is deleted, which the Desk's own checks refuse first."""
     from desk.contracts import is_business_tool
     if is_business_tool(decision.tool):
+        # approvals.py still calls the conservative classifier without a resolved adapter.
+        # Keep this compatibility check until that caller can be updated in its own lane.
         adapter = await adapters.resolve(ctx, decision.desk_id, decision.tool)
         if adapter is not None and not adapter.releases_private_data:
             return None
@@ -944,9 +946,11 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     `session_ended`), the adapter is still asked, under that row, since what it did outside the
     kernel must be recorded as it happened, but nothing it answers reaches the session
     (`_refused_in_recovery`)."""
-    tool = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool).where(
-        ActionRow.action_id == action_id)))).scalar_one_or_none()
-    private = tool is None or releases_private_data(tool)
+    action_row = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool, ActionRow.desk_id).where(
+        ActionRow.action_id == action_id)))).one_or_none()
+    resolved = (await adapters.resolve(ctx, action_row.desk_id, action_row.tool)
+                if action_row is not None else None)
+    private = action_row is None or releases_private_data(action_row.tool, resolved)
     if private and not await _hold_session_for(ctx, decision_id):
         return False
     decision = (await ctx.db.scalars(ctx.repo.scoped(

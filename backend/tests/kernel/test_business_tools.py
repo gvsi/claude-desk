@@ -164,6 +164,41 @@ async def test_resolver_logs_factory_failures_without_owner_text(app, client, mo
     assert secret not in caplog.text
 
 
+async def test_intake_recovery_resolves_privacy_before_checking_a_closed_session(app, client, frozen_clock, monkeypatch):
+    from desk.kernel_service import execute
+    from .test_decide import set_session
+    from .test_execute import read, store_intent
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [RuleCard(card_id='intake-auto', applies_to=row.tool,
+                                                        mode='auto', who='anyone', reason='Take enquiries.')])
+    visitor = await open_visitor(client, copy)
+    allowed = await decided(client, visitor, 'desk.new-enquiry', {'name': 'Dana', 'answers': ['Consult']})
+    assert allowed.outcome == 'allow'
+    await store_intent(app, copy.copy_id, allowed)
+    await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
+    frozen_clock.advance(31)
+    checks = []
+    original = execute.releases_private_data
+
+    def record(tool, resolved=None):
+        checks.append((tool, resolved is not None))
+        return original(tool, resolved)
+
+    monkeypatch.setattr(execute, 'releases_private_data', record)
+    recovered = await read(client, copy.owner, allowed)
+    assert recovered.state == 'failed'  # same as capture_lead: the orphan committed no side effect
+    assert ('desk.new-enquiry', True) in checks
+    assert ('desk.new-enquiry', False) not in checks
+    assert not await rows_of(app, copy.copy_id, select(Lead).where(Lead.desk_id == copy.desk_id))
+
+
 async def test_intake_default_ask_auto_execution_and_owner_only_answers(app, client):
     copy = await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200
