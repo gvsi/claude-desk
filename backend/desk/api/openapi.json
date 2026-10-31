@@ -11752,17 +11752,35 @@
       "SetupAnswerIn": {
         "properties": {
           "question": {
-            "type": "string",
-            "enum": [
-              "what_you_do",
-              "hours_and_area",
-              "quote_limit",
-              "discounts",
-              "documents_and_payments",
-              "money_limit",
-              "contact_and_after_hours"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "what_you_do",
+                  "hours_and_area",
+                  "quote_limit",
+                  "discounts",
+                  "documents_and_payments",
+                  "money_limit",
+                  "contact_and_after_hours"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Question"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card"
           },
           "text": {
             "type": "string",
@@ -11774,11 +11792,10 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "question",
           "text"
         ],
         "title": "SetupAnswerIn",
-        "description": "`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers\n(`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."
+        "description": "`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.\nNaming the ask prevents a repeated answer from answering the next one."
       },
       "SetupConsentIn": {
         "properties": {

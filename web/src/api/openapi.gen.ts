@@ -717,18 +717,22 @@ export interface SendAgentIn {
   idempotency_key: string;
 }
 /**
- * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
- * (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it.
+ * `POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+ * Naming the ask prevents a repeated answer from answering the next one.
  */
 export interface SetupAnswerIn {
-  question:
-    | "what_you_do"
-    | "hours_and_area"
-    | "quote_limit"
-    | "discounts"
-    | "documents_and_payments"
-    | "money_limit"
-    | "contact_and_after_hours";
+  question?:
+    | (
+        | "what_you_do"
+        | "hours_and_area"
+        | "quote_limit"
+        | "discounts"
+        | "documents_and_payments"
+        | "money_limit"
+        | "contact_and_after_hours"
+      )
+    | null;
+  card?: string | null;
   text: string;
 }
 /**

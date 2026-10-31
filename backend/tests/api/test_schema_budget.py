@@ -24,6 +24,7 @@ from desk.api.prompts import (
     RuleChat,
     SetupStart,
     SetupNextStep,
+    SetupCardAnswer,
     SetupUnderstanding,
     Translation,
     Triage,
@@ -34,7 +35,7 @@ REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
-    "setup": (SetupStart, SetupUnderstanding, SetupNextStep, *SETUP_TURNS.values()),
+    "setup": (SetupStart, SetupUnderstanding, SetupNextStep, SetupCardAnswer, *SETUP_TURNS.values()),
     "card_draft": (DraftedRules,),
     "situations": (DraftedSituations,),
     "rules_chat": (RuleChat,),
@@ -124,7 +125,7 @@ def test_every_structured_route_is_counted():
     assert set(OUTPUTS) == ROUTES - {"conversation"}
 
 
-@pytest.mark.parametrize("output", [SetupNextStep, *[model for key, model in SETUP_TURNS.items()
+@pytest.mark.parametrize("output", [SetupNextStep, SetupCardAnswer, *[model for key, model in SETUP_TURNS.items()
                                                   if key in {"what_you_do", "hours_and_area", "contact_and_after_hours"}]])
 def test_setup_planning_uses_one_required_shape(output):
     from desk.api.prompts import planning_fields

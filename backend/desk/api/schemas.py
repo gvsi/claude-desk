@@ -581,13 +581,20 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
-    (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+    Naming the ask prevents a repeated answer from answering the next one."""
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey
+    question: QuestionKey | None = None
+    card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+    @model_validator(mode="after")
+    def one_ask(self) -> "SetupAnswerIn":
+        if (self.question is None) == (self.card is None):
+            raise ValueError("exactly one of question and card is required")
+        return self
 
 
 class SetupMessage(BaseModel):

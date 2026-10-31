@@ -113,11 +113,11 @@ async def begin(owner: Owner, model: ScriptedModel, *, description: str = DESCRI
     return answer.json()
 
 
-async def consent(owner: Owner, interview_id: str, allow: bool, model: ScriptedModel) -> dict:
+async def consent(owner: Owner, interview_id: str, allow: bool, model: ScriptedModel, *, cards: bool = False) -> dict:
     # Existing question tests exercise the fallback unless they script an opening.
     if not model.script:
         model.add(unavailable())
-    answer = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent", json={"allow": allow})
+    answer = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent?cards={int(cards)}", json={"allow": allow})
     assert answer.status_code == 200, answer.text
     return answer.json()
 
@@ -190,8 +190,12 @@ async def answer(owner: Owner, model: ScriptedModel, interview_id: str, text: st
     following = next_step(question) if question in LIMIT_QUESTIONS else None
     if following is not None:
         model.add(following)
+    closing = next_step("what_you_do", next={"kind": "done"}, plan="Your Desk will take customer requests.")
+    model.add(closing)
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer",
                                         json={"question": question, "text": text})
+    if closing in model.script:
+        model.script.remove(closing)
     if following in model.script:  # no next step after a follow-up, failed turn or conflict
         model.script.remove(following)
     return response
@@ -264,12 +268,12 @@ async def test_the_opening_shows_no_cards_and_keeps_the_plan_hidden(
     assert all(card.job.config is None and card.job.can_do_today for card in loaded.planned if card.job)
 
 
-async def test_a_turn_proposes_one_planned_job_as_its_ask(app, browser, kernel_http, model, engine):
+async def test_a_client_with_cards_gets_card_asks(app, browser, kernel_http, model, engine):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do")))
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     async with engine.connect() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
     proposal_id = interview.planned[0].proposal_id
@@ -314,7 +318,7 @@ async def pending_job(app, browser, kernel_http, model, engine):
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do")))
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     async with engine.connect() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
     proposal_id = interview.planned[0].proposal_id
@@ -354,7 +358,8 @@ def test_next_that_doesnt_fit_falls_back(invalid):
     card = ProposalCard.model_validate(proposal_entries()[1]["card"])
     next_card = card.model_copy(deep=True, update={"proposal_id": "p-111111111111"})
     entry = desk_setup.Entry(role="claude", text="Hidden plan", planned=[card, next_card], covered=["what_you_do"])
-    interview = interview_with(SetupAnswers(summary="Tax work"), [entry])
+    interview = interview_with(SetupAnswers(summary="Tax work"),
+                               [desk_setup.Entry(role="owner", text="Consent", cards=True), entry])
     proposed = {"kind": "job", "job": card.proposal_id}
     if invalid == "covered":
         proposed = next_ask("what_you_do")
@@ -386,12 +391,13 @@ async def test_done_waits_for_unshown_planned_items_or_their_drop(
     interview_id = state["interview_id"]
     opening = understanding(next_topic="what_you_do", jobs=understanding()["jobs"][:1], connectors=[])
     model.add(unparsed(opening))
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     row = await stored(engine, interview_id)
     proposal_id = next(card["proposal_id"] for entry in row["transcript"] for card in entry.get("planned", []))
     response = await answer(owner, model, interview_id, "That's all.",
                             turn("Understood.", next={"kind": "done"}, skip=list(QUESTION_KEYS[1:]),
-                                 drop=[proposal_id] if drop else [], plan="The closing plan."))
+                                 drop=[proposal_id] if drop else [], plan="Unused draft plan."),
+                            next_step("what_you_do", next={"kind": "done"}, plan="The closing plan."))
     assert response.status_code == 200, response.text
     state = response.json()
     if drop:
@@ -414,7 +420,7 @@ async def test_a_turn_can_add_a_job_to_the_plan(
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     proposal_id = "p-123456abcdef"
     monkeypatch.setattr(desk_setup, "new_proposal_id", lambda: proposal_id)
     draft = {"job": "payment", "title": "Take a deposit", "why": "Reserve work", "how": "Send a link",
@@ -452,7 +458,7 @@ async def test_a_dropped_draft_gets_one_retry_with_its_errors(
         second = understanding(jobs=[valid if retry == "valid" else bad, other], connectors=[])
         path, body = f"/api/owner/setup/{interview_id}/consent", {"allow": False}
     else:
-        await consent(owner, interview_id, False, model)
+        await consent(owner, interview_id, False, model, cards=True)
         first = {**blank(SETUP_TURNS["what_you_do"]), "add_jobs": [bad, other]}
         second = {**first, "add_jobs": [valid if retry == "valid" else bad, other]}
         path, body = f"/api/owner/setup/{interview_id}/answer", {"question": "what_you_do", "text": "Retainers."}
@@ -607,12 +613,12 @@ async def test_a_follow_up_can_update_the_hidden_plan_without_advancing(app, bro
     assert loaded.covered == set() and loaded.pending_card is None
 
 
-@pytest.mark.parametrize("where", ["fact", "limit", "closing"])
+@pytest.mark.parametrize("where", ["fact", "limit"])
 async def test_a_job_added_at_the_end_is_asked_before_closing(app, browser, kernel_http, model, engine, where):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     draft = {"job": "answer", "title": "Answer tax questions", "why": "Save time", "how": "Use business facts",
              "autonomy": "auto", "config": None}
     if where == "limit":
@@ -620,9 +626,6 @@ async def test_a_job_added_at_the_end_is_asked_before_closing(app, browser, kern
                      turn(next=next_ask("quote_limit"), skip=[key for key in QUESTION_KEYS
                                                             if key not in {"what_you_do", "quote_limit"}]))
         items = [turn(), next_step("quote_limit", next={"kind": "done"}, add_jobs=[draft])]
-    elif where == "closing":
-        items = [turn(next={"kind": "done"}, skip=list(QUESTION_KEYS[1:]), plan=""),
-                 next_step("what_you_do", next={"kind": "done"}, add_jobs=[draft])]
     else:
         items = [turn(next={"kind": "done"}, skip=list(QUESTION_KEYS[1:]), add_jobs=[draft]), unavailable()]
     response = await answer(owner, model, interview_id, "Take tax questions too.", *items)
@@ -639,7 +642,7 @@ async def test_one_planned_connector_is_an_ask_with_no_topic_choices(app, browse
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do", jobs=[], connectors=[{"app": "stripe", "why": "Links"}])))
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     response = await answer(owner, model, interview_id, "We use Stripe.",
                             turn(next={"kind": "connector", "connector": "stripe"}, question=line,
                                  choices=[{"text": "Ignored", "recommended": True}]))
@@ -664,12 +667,12 @@ async def test_a_final_card_decision_closes_with_a_plan_or_without_one_when_unav
     before = len(model.requests)
     item = unavailable() if failed else next_step("what_you_do", next={"kind": "done"},
                                                   reply="Repair requests it is.", plan="Your Desk will take details.")
-    interview = await decide_card(app, owner, engine, model, interview_id, proposal_id, item, state="accepted")
+    interview = await decide_card(app, owner, engine, model, interview_id, proposal_id, item, item, state="accepted")
     assert interview.step == "tools" and interview.question is None and interview.pending_card is None
     assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
     if not failed:
         assert interview.transcript[-2].text == "Your Desk will take details."
-    assert len(model.requests) == before + 1
+    assert len(model.requests) == before + 2
     assert sum(entry.text == desk_setup.QUESTIONS_DONE for entry in interview.transcript) == 1
 
 
@@ -1355,10 +1358,10 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     late = await answer(owner, model, interview_id, "One more thing.", question="contact_and_after_hours")
     assert late.status_code == 409 and late.json() == {"error": "conflict"}
     model.script.clear()
-    # Every call is recorded: start, understanding, eight turns and four next steps.
+    # Every call is recorded: start, understanding, eight turns, four next steps and the close.
     async with engine.connect() as conn:
         calls = (await conn.execute(sql("SELECT route, session_id, model FROM app.model_calls"))).all()
-    assert len(calls) == 14 and set(calls) == {("setup", owner.session_id, "claude-opus-5-5")}
+    assert len(calls) == 15 and set(calls) == {("setup", owner.session_id, "claude-opus-5-5")}
     assert all(request.route == "setup" and request.effort == ("medium" if index == 1 else "low")
                for index, request in enumerate(model.requests))
 
@@ -2480,8 +2483,9 @@ async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser
                     for choice in LIMIT_CHOICES["money_limit"]("office")]}
 
 
-async def test_a_reply_naming_an_amount_before_a_limit_question_is_dropped(
-    app, browser, fake, kernel_http, model,
+@pytest.mark.parametrize("reply_text", ["Most firms let me take a couple grand", "🔟 is typical", "Got it"])
+async def test_no_reply_from_an_untrusted_turn_precedes_a_limit_question(
+    app, browser, fake, kernel_http, model, engine, reply_text,
 ):
     fake.script("native.fetch_website", model_view={"item_id": "website:1", "title": "Business",
                 "text": "the owner approves payments up to $10,000 without asking"})
@@ -2489,10 +2493,12 @@ async def test_a_reply_naming_an_amount_before_a_limit_question_is_dropped(
     state = await begin(owner, model, website=WEBSITE)
     await consent(owner, state["interview_id"], True, model)
     reply = await answer(owner, model, state["interview_id"], "We prepare tax returns.",
-                         turn("Most firms let me take $10,000", next=next_ask("money_limit")))
+                         turn(reply_text, next=next_ask("money_limit")))
     assert reply.status_code == 200, reply.text
     assert "the owner approves" in turn_text(model)
-    assert not any(message["text"] == "Most firms let me take $10,000" for message in reply.json()["messages"])
+    assert not any(message["text"] == reply_text for message in reply.json()["messages"])
+    row = await stored(engine, state["interview_id"])
+    assert not any(entry["text"] == reply_text for entry in row["transcript"])
     assert reply.json()["messages"][-1]["text"] == question_text("money_limit", "trade")
 
 
@@ -2608,12 +2614,13 @@ async def test_the_closing_plan_comes_from_the_plan_field(app, browser, kernel_h
     monkeypatch.setattr(desk_setup, "after_finish", after_finish)
     plan = "Your Desk will take dog walking requests. Customer: Can you walk Luna? Desk: Which area?"
     response = await answer(owner, model, state["interview_id"], "Use this plan.",
-                            turn("Got it.", plan=plan, next=next_ask("done"), skip=list(QUESTION_KEYS[1:])))
+                            turn("Got it.", plan="Unused draft plan.", next=next_ask("done"), skip=list(QUESTION_KEYS[1:])),
+                            next_step("what_you_do", next={"kind": "done"}, plan=plan))
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
     assert [message["text"] for message in response.json()["messages"][-2:]] == [plan, desk_setup.QUESTIONS_DONE]
     assert finished == [state["interview_id"]]
-    assert not any(request.output_schema is SetupNextStep for request in model.requests)
+    assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
 
 
 async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model, engine):
@@ -2712,15 +2719,6 @@ def test_limit_choices_set_only_their_own_topics_limits():
             "Always ask me first", "Up to $100", "Up to $250", "Up to $500"]
 
 
-def test_the_number_check_flags_amounts_percentages_and_number_words():
-    for text in ("$10,000", "10%", "ten thousand", "diez mil", "٣", "Ⅻ", "½", "€", "‰", "％",
-                 "HALF", "dieciséis", "veintidós", "hundreds", "quinientas", "quarter", "te\u200bn",
-                 "ten\nthousand"):
-        assert desk_setup._names_a_number(text), text
-    for text in ("Got it, I'll ask you first", "Someone can contact you", "stone", "money"):
-        assert not desk_setup._names_a_number(text), text
-
-
 async def test_a_failed_closing_next_step_still_finishes_once(app, browser, kernel_http, model):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -2728,13 +2726,13 @@ async def test_a_failed_closing_next_step_still_finishes_once(app, browser, kern
     await answer(owner, model, state["interview_id"], "Just documents.",
                  turn(next=next_ask("documents_and_payments"),
                       skip=[topic for topic in QUESTION_KEYS if topic not in {"what_you_do", "documents_and_payments"}]))
-    model.add(turn(documents="ask"), unavailable())
+    model.add(turn(documents="ask"), unavailable(), unavailable())
     response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer",
                                         json={"question": "documents_and_payments", "text": "Always ask."})
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
     assert response.json()["messages"][-1]["text"] == desk_setup.QUESTIONS_DONE
-    assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
+    assert sum(request.output_schema is SetupNextStep for request in model.requests) == 2
 
 
 async def test_the_next_step_can_skip_and_choose_a_fact_question(app, browser, kernel_http, model, engine):
@@ -2774,3 +2772,306 @@ async def test_dropping_a_numbered_reply_removes_this_turn_even_when_an_earlier_
                  if entry["text"] == "Now ask about payments.")
     assert any(entry["text"] == reply for entry in row["transcript"][:start])
     assert not any(entry["text"] == reply for entry in row["transcript"][start:])
+
+
+async def test_a_client_without_cards_never_gets_a_card_ask(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    model.add(unparsed(understanding(next_topic="what_you_do", connectors=[])))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent", json={"allow": False})
+    assert response.status_code == 200
+    row = await stored(engine, interview_id)
+    proposal_id = next(card["proposal_id"] for entry in row["transcript"] for card in entry.get("planned", []))
+    response = await answer(owner, model, interview_id, "Repairs.",
+                            turn(next={"kind": "job", "job": proposal_id}, question="Take repair requests?"))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "hours_and_area"
+    assert response.json()["pending_card"] is None
+    response = await answer(owner, model, interview_id, "That's all.",
+                            turn(next={"kind": "done"}, skip=list(QUESTION_KEYS[2:])))
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools"
+    row = await stored(engine, interview_id)
+    assert not any(entry.get("card") for entry in row["transcript"])
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+    assert not interview.shows_cards and interview.unshown
+    assert proposal_id in model.requests[-1].messages[0]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("cards", [False, True])
+async def test_shows_cards_survives_a_reload(app, browser, kernel_http, model, engine, cards):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model, cards=cards)
+    row = await stored(engine, state["interview_id"])
+    consent_entry = next(entry for entry in row["transcript"] if entry["text"] == desk_setup.CONSENT_ANSWERS[False])
+    assert consent_entry.get("cards", False) == cards
+    assert ("cards" in consent_entry) == cards
+    async with engine.connect() as conn:
+        loaded = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+    assert loaded.shows_cards is cards
+    assert all("cards" not in entry for entry in row["transcript"] if entry is not consent_entry)
+
+
+async def test_a_limit_turns_own_reply_is_kept_before_the_next_limit_question(app, browser, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Repairs.", turn(next=next_ask("quote_limit")))
+    response = await answer(owner, model, state["interview_id"], "Up to $100.",
+                            turn("Quotes up to $100, understood."),
+                            next_step("quote_limit", reply="Untrusted planning reply", next=next_ask("discounts")))
+    assert response.status_code == 200, response.text
+    assert [message["text"] for message in response.json()["messages"][-2:]] == [
+        "Quotes up to $100, understood.", question_text("discounts", "trade")]
+    assert not any(message["text"] == "Untrusted planning reply" for message in response.json()["messages"])
+
+
+def card_answer(decision="none", **fields):
+    from desk.api.prompts import SetupCardAnswer
+    return structured(SetupCardAnswer(**{
+        "reply": "I'll set up repair requests.", "decision": decision,
+        "next": next_ask("hours_and_area"), "question": "Where do you work?", "choices": [],
+        "skip": [], "drop": [], "add_jobs": [], "plan": "", **fields,
+    }))
+
+
+async def test_typing_yes_accepts_the_pending_card(app, browser, kernel_http, model, engine):
+    from desk.api.prompts import SetupCardAnswer
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    before = await stored(engine, interview_id)
+    model.add(card_answer("accept"))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": proposal_id, "text": "Yes, please."})
+    assert response.status_code == 200, response.text
+    state = response.json()
+    card = next(message["card"] for message in state["messages"] if message["card"])
+    assert card["state"] == "accepted" and state["pending_card"] is None
+    assert state["question"] == "hours_and_area"
+    assert [message["text"] for message in state["messages"][-3:]] == [
+        "Yes, please.", "I'll set up repair requests.", "Where do you work?"]
+    row = await stored(engine, interview_id)
+    planned_before = [entry["planned"] for entry in before["transcript"] if entry.get("planned")]
+    assert [entry["planned"] for entry in row["transcript"] if entry.get("planned")] == planned_before
+    assert model.requests[-1].output_schema is SetupCardAnswer
+    message = model.requests[-1].messages[0]["content"][0]["text"]
+    assert "<owner_answer>Yes, please.</owner_answer>" in message
+    assert "<owner_decision>" in message and "<setup_plan>" in message and proposal_id in message
+
+
+async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    before = await stored(engine, interview_id)
+    model.add(card_answer("none", reply="It takes a caller's repair details so you can reply.",
+                          skip=list(QUESTION_KEYS), drop=[proposal_id], add_jobs=understanding()["jobs"][:1]))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": proposal_id, "text": "What does taking requests mean?"})
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == proposal_id and response.json()["question"] is None
+    row = await stored(engine, interview_id)
+    assert row["transcript"][:-2] == before["transcript"]
+    assert [entry["role"] for entry in row["transcript"][-2:]] == ["owner", "claude"]
+    assert row["transcript"][-1]["text"] == "It takes a caller's repair details so you can reply."
+    assert not row["transcript"][-1].get("question") and not row["transcript"][-1].get("card")
+
+
+async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_http, model, engine):
+    from desk.api.prompts import JobProposal, PurposePaymentConfig
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+        interview.latest_ask.card.job = JobProposal(job="payment", title="Take a deposit", why="Reserve work",
+            how="Send a secure link", autonomy="ask", can_do_today=True,
+            config=PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
+        await desk_setup._save(conn, interview)
+    model.add(card_answer("accept", reply="Enter the amount on the card before accepting it."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": proposal_id, "text": "Yes, take $999."})
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == proposal_id
+    card = next(message["card"] for message in response.json()["messages"] if message["card"])
+    assert card["state"] == "proposed" and card["job"]["config"]["amount_cents"] is None
+    assert response.json()["messages"][-1]["text"] == "Enter the amount on the card before accepting it."
+
+
+async def test_a_typed_answer_must_name_the_pending_card(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    before = await stored(engine, interview_id)
+    calls = len(model.requests)
+    for body, status in [({"card": "p-999999999999", "text": "Yes"}, 409),
+                         ({"card": proposal_id, "question": "what_you_do", "text": "Yes"}, 422),
+                         ({"text": "Yes"}, 422), ({"card": None, "question": None, "text": "Yes"}, 422)]:
+        response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer", json=body)
+        assert response.status_code == status, response.text
+    assert len(model.requests) == calls and await stored(engine, interview_id) == before
+
+
+async def test_typing_no_declines_the_pending_card(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    model.add(card_answer("decline", reply="No repair requests for now."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": proposal_id, "text": "Not now."})
+    assert response.status_code == 200, response.text
+    state = response.json()
+    assert next(message["card"] for message in state["messages"] if message["card"])["state"] == "declined"
+    assert state["pending_card"] is None and state["question"] == "hours_and_area"
+    assert state["messages"][-2]["text"] == "No repair requests for now."
+
+
+async def test_a_failed_typed_card_answer_stores_nothing(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    before = await stored(engine, interview_id)
+    model.add(unavailable())
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer", json={"card": proposal_id, "text": "Yes"})
+    assert response.status_code == 503 and response.json()["error"] == "model_unavailable"
+    assert await stored(engine, interview_id) == before
+
+
+def test_an_empty_owner_entry_is_never_shown():
+    from desk.api.prompts import ProposalCard
+    card = ProposalCard.model_validate(proposal_entries()[1]["card"])
+    interview = interview_with(SetupAnswers(summary="Tax work"), [desk_setup.Entry(role="owner", text="Description"),
+        desk_setup.Entry(role="owner", text="", card=card, choices=[{"text": "hidden", "recommended": False}]),
+        desk_setup.Entry(role="claude", text="", card=card)])
+    state = desk_setup.setup_state(interview, "test", cards=True)
+    assert len(state.messages) == 1 and state.messages[0].role == "claude"
+
+
+@pytest.mark.parametrize("fallback_card", [False, True])
+async def test_a_fallback_drops_the_models_question_and_choices(app, browser, kernel_http, model, engine, fallback_card):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    model.add(unparsed(understanding(next_topic="what_you_do")))
+    await consent(owner, interview_id, False, model, cards=True)
+    response = await answer(owner, model, interview_id, "Repairs.",
+        turn(next={"kind": "job", "job": "p-999999999999"}, question="Wrong target?",
+             choices=[{"text": "Wrong choice", "recommended": True}, {"text": "Also wrong", "recommended": False}],
+             skip=list(QUESTION_KEYS[1:]) if fallback_card else []))
+    assert response.status_code == 200, response.text
+    state = (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json()
+    assert not any(message["text"] == "Wrong target?" for message in state["messages"])
+    assert state["messages"][-1]["choices"] == []
+    if fallback_card:
+        assert state["pending_card"] is not None
+    else:
+        assert state["messages"][-1]["text"] == question_text("hours_and_area", "trade")
+
+
+@pytest.mark.parametrize("kind,target", [("job", "connector"), ("connector", "job")])
+async def test_a_planned_id_is_asked_whatever_kind_names_it(app, browser, kernel_http, model, engine, kind, target):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    model.add(unparsed(understanding(next_topic="what_you_do")))
+    await consent(owner, interview_id, False, model, cards=True)
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+    proposal_id = next(card.proposal_id for card in interview.planned if card.kind == target)
+    response = await answer(owner, model, interview_id, "Repairs.",
+                            turn(next={"kind": kind, kind: proposal_id}, question="Set this up?"))
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == proposal_id
+
+
+async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    model.add(unparsed(understanding(next_topic="what_you_do", connectors=[])))
+    await consent(owner, interview_id, False, model, cards=True)
+    response = await answer(owner, model, interview_id, "We take deposits.",
+                            turn(next={"kind": "connector", "connector": "stripe"}, question="Use Stripe?"))
+    assert response.status_code == 200, response.text
+    row = await stored(engine, interview_id)
+    card = row["transcript"][-1].get("card")
+    assert card is not None and card["connector"] == {
+        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True}
+    assert response.json()["pending_card"] == card["proposal_id"]
+    assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
+               for item in entry.get("planned", []))
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_close_setup_ends_with_the_plan_then_questions_done(app, browser, kernel_http, model, engine, monkeypatch, failed):
+    from desk.api.deps import owner_context
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    settled = []
+    def settle(interview):
+        settled.append(interview.interview_id)
+        interview.transcript.append(desk_setup.Entry(role="claude", text="Settled card placeholder"))
+    monkeypatch.setattr(desk_setup, "settle_plan", settle)
+    plan = "Your Desk will take repair requests."
+    model.add(unavailable() if failed else next_step("what_you_do", next=next_ask("hours_and_area"), plan=plan,
+                                                     skip=list(QUESTION_KEYS), add_jobs=understanding()["jobs"]))
+    before = await stored(engine, state["interview_id"])
+    async with owner_context(app.state.runtime, owner.token) as ctx:
+        interview = await desk_setup._read(engine, ctx, state["interview_id"])
+        await desk_setup.close_setup(ctx, engine, model, interview)
+    assert settled == [interview.interview_id] and interview.step == "tools"
+    assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
+    assert [entry.text for entry in interview.transcript[-(2 if failed else 3):-1]] == (
+        ["Settled card placeholder"] if failed else ["Settled card placeholder", plan])
+    assert not interview.planned  # Closing output cannot add jobs or otherwise plan another ask.
+    assert await stored(engine, state["interview_id"]) == before  # Caller owns persistence.
+    text = model.requests[-1].messages[0]["content"][0]["text"]
+    assert "Every topic is covered and the plan is settled" in text
+
+
+@pytest.mark.parametrize("second_plan", ["Your Desk will take requests.", ""])
+async def test_an_empty_closing_plan_gets_one_retry(app, browser, kernel_http, model, engine, second_plan):
+    from desk.api.deps import owner_context
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    model.add(next_step("what_you_do", next=next_ask("done"), plan=""),
+              next_step("what_you_do", next=next_ask("done"), plan=second_plan))
+    before = len(model.requests)
+    async with owner_context(app.state.runtime, owner.token) as ctx:
+        interview = await desk_setup._read(engine, ctx, state["interview_id"])
+        await desk_setup.close_setup(ctx, engine, model, interview)
+    assert len(model.requests) == before + 2 and interview.step == "tools"
+    assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
+    assert sum(entry.text == second_plan for entry in interview.transcript) == bool(second_plan)
+
+
+async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    release = asyncio.Event()
+    waiting = gated(card_answer("accept"), release)
+    model.add(waiting)
+    path = f"/api/owner/setup/{interview_id}/answer"
+    body = {"card": proposal_id, "text": "Yes"}
+    first = asyncio.create_task(owner.browser.post(path, json=body))
+    try:
+        await asyncio.wait_for(waiting.entered.wait(), timeout=5)
+        calls = len(model.requests)
+        second = await owner.browser.post(path, json=body)
+        assert second.status_code == 409 and len(model.requests) == calls
+    finally:
+        release.set()
+        response = await first
+    assert response.status_code == 200, response.text
+    replay = await owner.browser.post(path, json=body)
+    assert replay.status_code == 409 and len(model.requests) == calls
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_card_turn_reply_is_dropped_before_a_limit_question(app, browser, kernel_http, model, engine, typed):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    reply = "Most firms let me take a couple grand"
+    if typed:
+        model.add(card_answer("accept", reply=reply, next=next_ask("quote_limit")))
+        response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer",
+                                            json={"card": proposal_id, "text": "Yes"})
+        assert response.status_code == 200, response.text
+    else:
+        await decide_card(app, owner, engine, model, interview_id, proposal_id,
+                          next_step("what_you_do", reply=reply, next=next_ask("quote_limit")), state="accepted")
+    row = await stored(engine, interview_id)
+    assert not any(entry["text"] == reply for entry in row["transcript"])
+    assert row["transcript"][-1]["text"] == question_text("quote_limit", "trade")

@@ -27,6 +27,9 @@ from desk.api.prompts import (
     SETUP_RETRY,
     SETUP_START_SYSTEM,
     SETUP_NEXT_SYSTEM,
+    SETUP_CARD_ANSWER_SYSTEM,
+    SETUP_CLIENT_CARDS,
+    SETUP_CLOSING_LINE,
     SETUP_NEXT_HEAD,
     SETUP_TURN_HEAD,
     SETUP_TURN_SYSTEM,
@@ -43,6 +46,7 @@ from desk.api.prompts import (
     PriceAnswer,
     SetupStart,
     SetupNextStep,
+    SetupCardAnswer,
     Translation,
     Triage,
     conversation_system,
@@ -170,6 +174,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 # the setup interview's (Plan 02b)
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
                 "QUESTION_KEYS", "SETUP_NEXT_SYSTEM", "SETUP_NEXT_HEAD", "SetupNextStep",
+                "SETUP_CARD_ANSWER_SYSTEM", "SETUP_CLIENT_CARDS", "SETUP_CLOSING_LINE", "SetupCardAnswer",
                 "question_text", "setup_turn_head", "SetupStart", "SetupTurn", "SETUP_TURNS", "SetupPatch",
                 "SetupAnswers", "HoursAnswer", "PriceAnswer",
                 # triage and owner translations (Plan 02b, Task 10)
@@ -178,7 +183,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 "wrap", "ROW_TAGS", "wrap_action_update", "wrap_website", "SUMMARY_LABELS", "SHOWN_LABELS",
                 "SHOWN_SUFFIX", "summary_line", "conversation_so_far", "RESULT_LABEL", "result_line",
                 "THIS_QUESTION_SO_FAR_TAG", "SETUP_EXCHANGE_LABELS", "this_question_so_far"}
-SETUP_OUTPUTS = (SetupStart, SetupNextStep, *SETUP_TURNS.values(), HoursAnswer, PriceAnswer)
+SETUP_OUTPUTS = (SetupStart, SetupNextStep, SetupCardAnswer, *SETUP_TURNS.values(), HoursAnswer, PriceAnswer)
 ANNOTATION_OUTPUTS = (Triage, Translation)
 
 
@@ -210,7 +215,8 @@ def _fixed() -> set[str]:
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),
             *AGENT_TASK.split("{task}"), RECEIPT_LINE,
             *(field.description for field in AgentStep.model_fields.values()),
-            *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM) for line in system.splitlines()
+            *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE,
+            *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM) for line in system.splitlines()
               if len(line) > 20),
             *(part for template in (SETUP_TURN_HEAD, SETUP_NEXT_HEAD, SETUP_RETRY,
                                     *QUESTIONS.values()) for part in _parts(template)),

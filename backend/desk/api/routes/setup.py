@@ -124,7 +124,7 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
     is covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the
     same answer can be sent again."""
     state = await _moving_on(request, ctx)
-    return await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, cards=cards,
+    return await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card, cards=cards,
                               business_tools_enabled=state.settings.business_tools_enabled)
 
 
