@@ -185,7 +185,9 @@ const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|
 // anywhere under `public/` may only pass `chat.ownerInChat`, with `chat` from `useVisitorChat`.
 const OWNER_IN_CHAT_PROP = /(?<![\w.$'"`])ownerInChat(?![\w$'"`]|\s*\??:)(?:\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|"[^"]*"|'[^']*'))?/g;
 const CHAT_FROM_THE_HOOK = /\bconst\s+chat\s*=\s*useVisitorChat\(/;
-const OWNER_IN_CHAT_ASSIGNED = /[\w$.]*(?:\.ownerInChat|\[\s*['"`]ownerInChat['"`]\s*\])\s*=(?![=>])/g;
+/** An assignment operator, the compound ones included (`=`, `||=`, `??=`, `&&=`, `+=` …), never a comparison or an arrow. */
+const ASSIGN = String.raw`(\|\||&&|\?\?|\*\*|<<|>>>?|[-+*/%&|^])?=(?![=>])`;
+const OWNER_IN_CHAT_ASSIGNED = new RegExp(String.raw`([\w$.]*(?:\.ownerInChat|\[\s*['"${'`'}]ownerInChat['"${'`'}]\s*\]))\s*` + ASSIGN, 'g');
 const OWNER_IN_CHAT_QUOTED_KEY = /['"`]ownerInChat['"`]\s*:/g;
 const CHAT_ASSIGNED = /(?<![\w.$])chat\s*=(?![=>])/g;
 const OTHER_CHAT_DECLARATION = /\b(?:let|var)\s+chat\b|\bfunction\s+\w*\s*\([^)]*(?<![\w.$])chat\b/;
@@ -193,7 +195,16 @@ const OWNER_IN_CHAT_FIELD = /(?<![\w.$'"`])ownerInChat\s*\??:\s*/g;
 /** What could say yes on its own in a value or a body: a literal `true`, an OR, a fallback or a ternary. */
 const ANOTHER_YES = /\btrue\b|\|\||\?(?!\.)/;
 /** A write of a session's mode: a key (quoted or not, but not a variable's type), a shorthand key, or an assignment. */
-const MODE_WRITE = /(?<![\w.$'"`])(?<!(?:const|let|var)\s+)mode\s*:|['"`]mode['"`]\s*:|[{,]\s*mode\s*(?=[,}])|\.mode\s*=(?![=>])|\[\s*['"`]mode['"`]\s*\]\s*=(?![=>])/g;
+const MODE_WRITE = new RegExp(
+  [
+    String.raw`(?<![\w.$'"${'`'}])(?<!(?:const|let|var)\s+)mode\s*:`,
+    String.raw`['"${'`'}]mode['"${'`'}]\s*:`,
+    String.raw`[{,]\s*mode\s*(?=[,}])`,
+    String.raw`\.mode\s*` + ASSIGN,
+    String.raw`\[\s*['"${'`'}]mode['"${'`'}]\s*\]\s*` + ASSIGN,
+  ].join('|'),
+  'g',
+);
 /** The helpers that may give the visitor chat its session: the open path's, and the two that may only lower the mode. */
 const SESSION_HELPER = /^this\.(?:openedSession|laterSession|laterRead)\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)$/;
 /** Exactly one call of `ownerInChatNow`, its arguments balanced, with nothing around it. */
@@ -417,10 +428,21 @@ function expressionAt(code: string, start: number): string {
   return code.slice(start, i).trim();
 }
 
-/** Each spread (`{...x}`) among PublicShell's own props, wherever it is opened, as written. */
+/** The names PublicShell goes by in `code`: its own, and any an import (`as`) or a declaration gives it. */
+function shellNames(code: string): string[] {
+  const aliases = [...code.matchAll(/\bPublicShell\s+as\s+([A-Za-z_$][\w$]*)|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[\w$]+\.)?PublicShell\b/g)];
+  return [...new Set(['PublicShell', ...aliases.map((m) => m[1] ?? m[2] ?? '')])];
+}
+
+/** Where PublicShell is opened as an element in `code`, by any of its names, a namespace's included (`<ds.PublicShell`). */
+function shellElements(code: string): RegExpExecArray[] {
+  return shellNames(code).flatMap((name) => [...code.matchAll(new RegExp(String.raw`<(?:[\w$]+\.)?${name}\b(?![\w$.])`, 'g'))]);
+}
+
+/** Each spread (`{...x}`) among PublicShell's own props, wherever and by whatever name it is opened, as written. */
 function spreadsIntoTheShell(code: string): string[] {
   const spreads: string[] = [];
-  for (const opened of code.matchAll(/<PublicShell\b/g)) {
+  for (const opened of shellElements(code)) {
     // Its opening tag ends at the first `>` outside braces and quotes; a prop's JSX value is inside braces.
     for (let i = opened.index + opened[0].length; i < code.length && code[i] !== '>'; ) {
       const c = code[i] ?? '';
@@ -438,19 +460,28 @@ function spreadsIntoTheShell(code: string): string[] {
 /**
  * Every way in `shellFiles` that something but the visitor chat's own value could reach PublicShell's
  * `ownerInChat`: a prop whose value isn't `{chat.ownerInChat}` (a bare one included), a file that
- * passes it where `chat` doesn't come from `useVisitorChat` alone, a spread into PublicShell, an
- * `ownerInChat` key outside the visitor chat (as an object a spread or `createElement` would pass),
- * a quoted `ownerInChat` key anywhere, and anything assigned to an `ownerInChat`.
+ * passes it where `chat` doesn't come from `useVisitorChat` alone, a spread into PublicShell or a
+ * PublicShell made with `createElement` (by any of its names), an `ownerInChat` key outside the
+ * visitor chat (as an object a spread or `createElement` would pass), a quoted `ownerInChat` key
+ * anywhere, and anything assigned to an `ownerInChat`, by any assignment operator.
  */
 function ownerInChatNotFromTheChat(scanned: Source[]): string[] {
   return scanned.flatMap(({ file, text }) => {
     const code = codeOf(text);
     const bad = spreadsIntoTheShell(code).map((spread) => `${file}: PublicShell takes a spread: ${spread}`);
+    // Made with `createElement` (or the JSX runtime's own calls), PublicShell takes its props whole.
+    for (const name of shellNames(code)) {
+      for (const made of code.matchAll(new RegExp(String.raw`\b(createElement|jsxs?|jsxDEV)\(\s*((?:[\w$]+\.)?${name})\b(?![\w$.])`, 'g'))) {
+        bad.push(`${file}: PublicShell made with ${made[1]}(${made[2]}`);
+      }
+    }
     if (file !== VISITOR_CHAT_FILE) {
       for (const key of code.matchAll(OWNER_IN_CHAT_FIELD)) bad.push(`${file}: ownerInChat: ${expressionAt(code, key.index + key[0].length)}`);
     }
     for (const key of code.matchAll(OWNER_IN_CHAT_QUOTED_KEY)) bad.push(`${file}: ${key[0].replace(/\s*:$/, '')}: ${expressionAt(code, key.index + key[0].length)}`);
-    for (const assigned of code.matchAll(OWNER_IN_CHAT_ASSIGNED)) bad.push(`${file}: ${assigned[0].replace(/\s*=$/, '')} = ${expressionAt(code, assigned.index + assigned[0].length)}`);
+    for (const assigned of code.matchAll(OWNER_IN_CHAT_ASSIGNED)) {
+      bad.push(`${file}: ${assigned[1]} ${assigned[2] ?? ''}= ${expressionAt(code, assigned.index + assigned[0].length)}`);
+    }
     const props = [...code.matchAll(OWNER_IN_CHAT_PROP)].map((m) => m[1] ?? '');
     if (props.length === 0) return bad;
     bad.push(...props.filter((value) => value !== '{chat.ownerInChat}').map((value) => `${file}: ownerInChat${value === '' ? '' : `=${value}`}`));
@@ -460,9 +491,9 @@ function ownerInChatNotFromTheChat(scanned: Source[]): string[] {
   });
 }
 
-/** The files the owner line's guard reads: everything under `public/`, and every other file that renders PublicShell. */
+/** The files the owner line's guard reads: everything under `public/`, and every other file that names PublicShell, under any alias. */
 function shellFiles(all: Source[]): Source[] {
-  return all.filter(({ file, text }) => /\.tsx?$/.test(file) && (file.startsWith('public/') || /<PublicShell\b|\bcreateElement\(\s*PublicShell\b/.test(codeOf(text))));
+  return all.filter(({ file, text }) => /\.tsx?$/.test(file) && (file.startsWith('public/') || /\bPublicShell\b/.test(codeOf(text))));
 }
 
 /** The [start, end) of the body of the class method `name` in `code`, or null when it isn't declared there. */
@@ -882,7 +913,10 @@ describe('app source guards', () => {
     expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell\n  brand={brand}\n  composer={<div onInput={(e) => typed(e)}>{box}</div>}\n  {...rest}\n/>`))).toEqual([
       'sample.tsx: PublicShell takes a spread: {...rest}',
     ]);
-    expect(ownerInChatNotFromTheChat(sample('createElement(PublicShell, { ...props, ownerInChat: enabled });'))).toEqual(['sample.tsx: ownerInChat: enabled']);
+    expect(ownerInChatNotFromTheChat(sample('createElement(PublicShell, { ...props, ownerInChat: enabled });'))).toEqual([
+      'sample.tsx: PublicShell made with createElement(PublicShell',
+      'sample.tsx: ownerInChat: enabled',
+    ]);
     expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell brand={brand} composer={<Composer {...composerProps} />} ownerInChat={chat.ownerInChat} />`))).toEqual([]);
     // Nor assigned to anything, or written as a quoted key.
     expect(ownerInChatNotFromTheChat(sample('shellProps.ownerInChat = true;'))).toEqual(['sample.tsx: shellProps.ownerInChat = true']);
@@ -892,6 +926,29 @@ describe('app source guards', () => {
       'sample.tsx: "ownerInChat": joined',
     ]);
     expect(ownerInChatNotFromTheChat(sample('if (shellProps.ownerInChat === chat.ownerInChat) show();'))).toEqual([]);
+    // Compound assignments are assignments too.
+    expect(ownerInChatNotFromTheChat(sample('chat.ownerInChat ||= true;'))).toEqual(['sample.tsx: chat.ownerInChat ||= true']);
+    expect(ownerInChatNotFromTheChat(sample('shellProps.ownerInChat ??= joined;'))).toEqual(['sample.tsx: shellProps.ownerInChat ??= joined']);
+    expect(ownerInChatNotFromTheChat(sample("shellProps['ownerInChat'] &&= enabled;"))).toEqual(["sample.tsx: shellProps['ownerInChat'] &&= enabled"]);
+    // PublicShell by another name is still PublicShell, in any file that names it, and so is one made
+    // with `createElement`, which takes its props whole.
+    const aliased: Source = { file: 'vision/Aliased.tsx', text: "import { PublicShell as Shell } from '../ds/index.ts';\nexport const Page = () => <Shell {...props} />;" };
+    expect(shellFiles([...sources, aliased]).map(({ file }) => file)).toContain('vision/Aliased.tsx');
+    expect(ownerInChatNotFromTheChat([aliased])).toEqual(['vision/Aliased.tsx: PublicShell takes a spread: {...props}']);
+    expect(ownerInChatNotFromTheChat(sample('const Shell = PublicShell;\nconst page = <Shell brand={brand} {...rest} />;'))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...rest}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample("import * as ds from '../ds/index.ts';\nconst page = <ds.PublicShell {...props} />;"))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...props}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('const page = createElement(PublicShell, props);'))).toEqual(['sample.tsx: PublicShell made with createElement(PublicShell']);
+    expect(ownerInChatNotFromTheChat(sample("import { PublicShell as Shell } from '../ds/index.ts';\nconst page = React.createElement(Shell, { brand });"))).toEqual([
+      'sample.tsx: PublicShell made with createElement(Shell',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample("import { PublicShell as Shell } from '../ds/index.ts';\nconst page = <Shell brand={brand} ownerInChat={chat.ownerInChat} />;"))).toEqual([
+      "sample.tsx: chat doesn't come from useVisitorChat",
+      'sample.tsx: chat is declared or assigned elsewhere',
+    ]);
     expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
     // It is passed where it is meant to be, so the check can't pass by finding nothing.
     expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
@@ -937,6 +994,8 @@ describe('app source guards', () => {
       `${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: mode:`,
     ]);
     expect(sessionModeWrites(chatSample('confirmMode', "    session.mode = 'owner';"))).toEqual([`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: .mode =`]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session.mode ||= 'owner';"))).toEqual([`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: .mode ||=`]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session['mode'] ??= 'owner';"))).toHaveLength(1);
     expect(sessionModeWrites(chatSample('followMode', follow.replace("ev.type === 'owner_joined' ? 'owner'", "ev.type === 'owner_typing' ? 'owner'")))).toEqual([
       `${VISITOR_CHAT_FILE}: followMode sets the owner's mode for something but owner_joined`,
     ]);
