@@ -9,12 +9,13 @@ next message.
 - `resume_after_answer(copy_id, desk_id, session_id, decision, approved=None)`, deferred once the owner answered a
   held request: in one transaction, the optional signed `approved` snapshot as a `receipt`, then the signed outcome
   as `resolved`, each with its owner-only reason stripped and its signed fields unchanged. Only the outcome adds
-  an `action_update` row that wakes Claude and a `run_resumable` control row, which the visitor's next request handles
-  by running Claude's follow-up with the visitor's credential. A decision whose outcome may still change (an `unknown`
-  execution) also leaves a `decision_pending` row, so its final state is shown once it has one. Idempotent: a
-  state already shown writes nothing, so a repeated or retried job, or a status another path showed first, adds
-  nothing. Nor does a job that runs late, once a later state of its decision is shown (the visitor's next request
-  found the approval executed, or an `unknown` outcome reconciled): the visitor never sees a decision go back.
+  an `action_update` row that wakes Claude and a `run_resumable` control row, which the visitor's next request
+  handles by running Claude's follow-up with the visitor's credential. A decision whose outcome may still change
+  (an `unknown` execution) also leaves a `decision_pending` row, so its final state is shown once it has one.
+  Idempotent: a state already shown writes nothing, so a repeated or retried job, or a status another path showed
+  first, adds nothing. Nor does a job that runs late, once a later state of its decision is shown (the visitor's
+  next request found the approval executed, or an `unknown` outcome reconciled): the visitor never sees a decision
+  go back.
 - `surface_due_decisions`, each minute: every decision the visitor was shown as held, or that an unhandled
   `decision_pending` row names, whose final state isn't shown yet, and whose kernel_ro state is final or whose
   `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one `decision_due` control
