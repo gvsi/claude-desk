@@ -211,6 +211,13 @@ class Arrange:
                                        (decision_id,)).fetchall()
         return found[0]
 
+    def recorded_knowledge_created_at(self, desk_id: str) -> dict[str, datetime | None]:
+        """First-added timestamps from the fake's stored state or the real kernel's table, never an API write."""
+        if self._state is not None:
+            return dict(self._state.desks[desk_id].knowledge_created_at)
+        return dict(self._admin.execute(
+            "SELECT item_id, created_at FROM kernel.knowledge_items WHERE desk_id = %s", (desk_id,)).fetchall())
+
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor
         session of the fake), the real kernel's row gets `closed_at`."""
