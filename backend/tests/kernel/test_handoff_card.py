@@ -22,7 +22,7 @@ import sqlalchemy.exc
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import DemoInboxEntry, ReplyVerdict, SessionCreated
+from desk.contracts import Claim, DemoInboxEntry, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Document, Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger, reply_check
@@ -423,6 +423,55 @@ async def test_the_owners_own_preview_opens_no_handoff(app, client):
     # an ordinary visitor's card still opens one
     assert_handed_off(await checked(client, await open_visitor(client, copy), BLOCKED))
     assert len(await handoffs_of(app, copy)) == 1
+
+
+async def test_the_owners_preview_callback_keeps_its_card_and_reconciliation_without_needing_the_owner(app, client):
+    """A preview's call-back writes its own row already done, no Needs-you item or alert, but
+    keeps its window fact for the card and its row for reconciliation, even after another call."""
+    copy = await rivera(app, client)
+    await alert_now(app, copy, "callback")
+    response = await client.post("/sessions", headers=copy.owner, json={
+        "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    previewing = Visitor(session_id=created.state.session_id, token=created.session_token)
+    before = await owner_alerts(client, copy)
+    requests = []
+    for call_id in ("call-1", "call-2"):
+        decision = await decided(client, previewing, "native.request_callback", CALLBACK, call_id=call_id)
+        result = await executed(client, previewing, decision)
+        assert result.state == "succeeded" and result.inbox == []
+        [fact] = result.facts
+        assert fact.fact_id == f"handoff:{result.model_view['handoff_id']}"
+        assert (fact.status, fact.claims, fact.expires_at) == ("committed", [
+            Claim(key="window_start", kind="datetime", value="2026-10-30T11:00:00-07:00"),
+            Claim(key="window_end", kind="datetime", value="2026-10-30T12:00:00-07:00")],
+            datetime(2026, 10, 30, 12, 0, tzinfo=TZ))
+        requests.append((decision, result))
+
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("callback", "done")] * 2
+    assert api_rows(copy.copy_id, "SELECT handoff_id FROM kernel_ro.handoffs WHERE status = 'open'") == []
+    assert await owner_alerts(client, copy) == before
+    assert handoff_entries(await ledger_rows(app, copy)) == []       # no closing entry for a preview
+    for decision, result in requests:
+        reconciled = await run(app, copy.copy_id, decision, "reconcile")
+        assert (reconciled.facts, reconciled.model_view) == (result.facts, result.model_view)
+        [fact] = result.facts
+        verdict = await checked(client, previewing, "", [clause("callback_confirmed", fact.fact_id)])
+        assert verdict.ok
+        [block] = verdict.blocks
+        assert (block.template, block.fact_id, block.title, block.lines) == (
+            "callback_confirmed", fact.fact_id,
+            "Maria Rivera will call you back on Friday, October 30, between 11:00 am and 12:00 pm", [])
+    assert await owner_alerts(client, copy) == before
+
+    # An ordinary visitor still leaves one open call-back and alerts the owner.
+    visitor = await open_visitor(client, copy)
+    result = await callback(client, visitor)
+    assert api_rows(copy.copy_id, "SELECT handoff_id, session_id FROM kernel_ro.handoffs WHERE status = 'open'") == [
+        (result.model_view["handoff_id"], visitor.session_id)]
+    [alert] = [entry for entry in await owner_alerts(client, copy) if entry not in before]
+    assert alert.to == "owner" and "Sam Lee" in alert.body
 
 
 # ---- One open handoff per session, a call-back's included ----------------------------------------------
