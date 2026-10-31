@@ -14,7 +14,7 @@
 .cd-setup__bar {
   display: grid;
   /* The steps lay out by their own width, so their column has one: room for all five on a line. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 560px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 600px) minmax(0, 1fr);
   grid-template-areas: 'brand steps exit';
   align-items: center;
   column-gap: var(--space-16);

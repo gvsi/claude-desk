@@ -28,7 +28,7 @@ import { SETUP_COPY } from './copy.ts';
 const copy = SETUP_COPY.rules;
 
 /** Setup's rules draft: posted once on the way in, and read again by the same post (the API answers the same draft). */
-export function setupRulesQuery(id: string) {
+function setupRulesQuery(id: string) {
   return {
     queryKey: ['setupRules', id] as const,
     queryFn: () => request('setupRules', { params: { id } }),

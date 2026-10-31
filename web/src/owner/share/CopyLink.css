@@ -1,8 +1,9 @@
 /* CopyLink: the link in its field with "Copy link" (and any other buttons) 8 px after it on one
-   line, as N-R2-Setup-14-Live draws it, and the line after a copy under them. On a narrow line the
-   buttons go under the link. */
+   line, as N-R2-Setup-14-Live draws it, and the line after a copy under them. Under 480 px of its
+   own width the link takes its own line and the buttons go together under it. */
 
 .cd-copy-link {
+  container: cd-copy-link / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
@@ -29,4 +30,10 @@
 
 .cd-copy-link__result:empty {
   display: none;
+}
+
+@container cd-copy-link (max-width: 479.98px) {
+  .cd-copy-link__field {
+    flex-basis: 100%;
+  }
 }
