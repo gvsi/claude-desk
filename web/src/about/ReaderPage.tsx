@@ -341,7 +341,7 @@ function Brand() {
     <span className="cd-about-brand">
       {/* The one place the mark keeps its white tile. */}
       <Mark tile />
-      <Wordmark beta />
+      <Wordmark preview />
     </span>
   );
 }

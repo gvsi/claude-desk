@@ -9,7 +9,7 @@
 
 | Where | Size | Look |
 | --- | --- | --- |
-| The owner app's sidebar, in the lockup with the `Wordmark` | 20 px | No tile, light ink |
+| The owner app's sidebar, in the lockup with the `Wordmark` and its "Preview" badge | 36 px | No tile, light ink |
 | The phone top bar, beside the business's name | 20 px | No tile, light ink |
 | "Powered by Claude Desk" in the public page's footer | 16 px | No tile, light ink |
 | The first-visit intro dialog, beside the `Wordmark` | 20 px | No tile, light ink |
@@ -40,9 +40,9 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `beta` | `boolean` | Adds "Beta" beneath the name in `.cd-type-beta`, `text-secondary`. |
+| `preview` | `boolean` | Adds the "Preview" badge 8 px to the name's right: a `Pill` with `caps`, its word drawn in capitals by `.cd-type-badge-caps`, the product's one all-caps label. |
 
-`Wordmark` sets "Claude Desk" in serif (`.cd-type-wordmark`). In the sidebar the lockup is the 20 px mark, 2 px down, then the wordmark, 10 px apart.
+`Wordmark` sets "Claude Desk" in serif (`.cd-type-wordmark`), on one line with its badge, centred. In the sidebar the lockup is the 36 px mark, then the wordmark 10 px on, all centred on one line (owner, 2026-10-30).
 
 ## Geometry
 

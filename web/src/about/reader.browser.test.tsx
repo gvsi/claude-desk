@@ -263,7 +263,7 @@ describe('ReaderPage', () => {
         const topBar = root.querySelector('header');
         const documents = root.querySelector('nav[aria-label="Documents"]');
         expect(readText(documents ?? document.body), where).toBe('Capability prediction Product proposal');
-        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Try Desk prototype Claude Desk Beta$/ : /Try Desk prototype$/);
+        expect(readText(topBar ?? document.body), where).toMatch(phone ? /^Try Desk prototype Claude Desk Preview$/ : /Try Desk prototype$/);
         // "On this page", without the entries, which are the document's section names.
         const contents = without(root.querySelector('nav[aria-label="On this page"]'), 'ol');
         expect(readText(contents), where).toBe(

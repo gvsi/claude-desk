@@ -28,12 +28,10 @@
   fill: var(--mark-ink);
 }
 
+/* The wordmark on one line: the name, then the Preview badge 8 px to its right, centred on it. */
 .cd-wordmark {
   display: inline-flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
   color: var(--text-primary);
-}
-
-.cd-wordmark__beta {
-  color: var(--text-secondary);
 }

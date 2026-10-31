@@ -171,6 +171,29 @@ describe('design tokens', () => {
     expect(buildTokensCss(withStyle({ ...odd, fontVariantNumeric: 'tabular-nums' }))).toContain('.cd-type-odd {');
   });
 
+  test('badge_caps_is_the_one_all_caps_style', () => {
+    // The lockup's "Preview" badge: the product's one all-caps label (owner, 2026-10-30), small and
+    // slightly spaced (0.06em at 11 px), its capitals drawn by its type style over a word written in
+    // sentence case. "Beta" is gone.
+    const ui = tokens.type.groups.find((group) => group.name === 'Interface');
+    const badge = ui?.styles.find((style) => style.name === 'badge-caps');
+    expect(badge).toMatchObject({ fontSize: '11px', lineHeight: '14px', fontWeight: 460, letterSpacing: '0.66px', textTransform: 'uppercase' });
+    expect(ui?.styles.find((style) => style.name === 'beta')).toBeUndefined();
+    // No other style draws capitals.
+    const allStyles = tokens.type.groups.flatMap((group) => group.styles as TypeStyle[]);
+    expect(allStyles.filter((style) => style.textTransform !== undefined).map((style) => style.name)).toEqual(['badge-caps']);
+    const css = buildTokensCss(tokens);
+    expect(new RegExp(String.raw`\.cd-type-badge-caps \{[^}]*\}`).exec(css)?.[0]).toContain('text-transform: uppercase;');
+    expect(css.match(/text-transform/g)).toHaveLength(1);
+    // The builder writes only `uppercase`, and only for the badge's style: another transform, more CSS,
+    // or capitals on any other style is refused.
+    const odd = { name: 'odd', fontSize: '11px', lineHeight: '14px', fontWeight: 460, usage: 'A test style.' };
+    for (const textTransform of ['capitalize', 'lowercase', 'uppercase; color: red']) {
+      expect(() => buildTokensCss(withStyle({ ...odd, name: 'badge-caps', textTransform }))).toThrow(/textTransform/);
+    }
+    expect(() => buildTokensCss(withStyle({ ...odd, textTransform: 'uppercase' }))).toThrow(/textTransform/);
+  });
+
   test('reading_page_tokens_match_the_design_ask', () => {
     // The two About this prototype reading pages: their reading text in serif (the named exception),
     // their headings and captions in the interface's sans, and a phone size of the body and heading.

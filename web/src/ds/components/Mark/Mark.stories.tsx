@@ -109,17 +109,25 @@ export const WithTile: Story = {
 };
 
 export const WithWordmark: Story = {
+  parameters: {
+    canvasNote:
+      'The sidebar\u2019s lockup as the owner signed it on 2026-10-30: the 36 px bell, "Claude Desk" and the "Preview" badge in capitals, on one line.',
+  },
   render: () => (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-10)' }}>
-      <span style={{ display: 'flex', marginTop: 'var(--space-2)' }}>
-        <DeskMark size={20} />
-      </span>
-      <Wordmark beta />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-10)' }}>
+      <DeskMark size={36} />
+      <Wordmark preview />
     </div>
   ),
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     const name = canvas.getByText('Claude Desk');
     await expect(getComputedStyle(name).fontFamily).toMatch(/^"Source Serif 4"/);
-    await expect(canvas.getByText('Beta')).toBeVisible();
+    // wordmark_preview_is_a_caps_badge: "Preview" in the Pill, drawn in capitals, to the name's right.
+    const badge = canvas.getByText('Preview');
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveAttribute('data-ds', 'preview-badge');
+    expectComputed(badge, { textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.66px', height: '20px' });
+    await expect(badge.getBoundingClientRect().left - name.getBoundingClientRect().right).toBe(8);
+    await expect(canvasElement.querySelector('.cd-wordmark')?.textContent).toBe('Claude DeskPreview');
   },
 };

@@ -659,12 +659,8 @@
 
 .cd-about-brand {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-10);
-}
-
-.cd-about-brand .cd-mark {
-  margin-top: var(--space-2);
 }
 
 .cd-about-switch {

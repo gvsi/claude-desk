@@ -169,6 +169,49 @@ export const TwoDesks: Story = {
   },
 };
 
+export const Lockup: Story = {
+  parameters: {
+    canvasNote:
+      'N-Today-Run1 draws the earlier lockup, a 20 px mark beside "Claude Desk" with "Beta" under it. The owner signed the one-line lockup on 2026-10-30: the 36 px bell with no tile, "Claude Desk" and the "Preview" badge in capitals, centred on one line.',
+  },
+  play: async ({ canvasElement }) => {
+    // lockup_on_one_line: the bell, the wordmark and the badge, in that order, each centred on the
+    // same line; 10 px from the bell to the name and 8 px from the name to the badge.
+    const brand = canvasElement.querySelector('.cd-sidebar__brand') as HTMLElement;
+    const mark = brand.querySelector(':scope > svg.cd-mark') as SVGSVGElement;
+    const name = brand.querySelector('.cd-type-wordmark') as HTMLElement;
+    const badge = brand.querySelector('[data-ds="preview-badge"]') as HTMLElement;
+    await expect(mark).not.toBeNull();
+    await expect(brand.textContent).toBe('Claude DeskPreview');
+    await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual(['36', '36']);
+    // The bell with no tile, in its light ink on the panel.
+    await expect(mark.querySelector('rect')).toBeNull();
+    expectComputed(mark.querySelector(':scope > g > g:last-child') as Element, { fill: 'rgb(250, 249, 245)' });
+    const [m, n, b] = [mark, name, badge].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+    await expect(n.left - m.right).toBe(10);
+    await expect(b.left - n.right).toBe(8);
+    const middle = (r: DOMRect) => r.top + r.height / 2;
+    await expect(Math.abs(middle(n) - middle(m))).toBeLessThanOrEqual(0.5);
+    await expect(Math.abs(middle(b) - middle(m))).toBeLessThanOrEqual(0.5);
+    // The name in the serif wordmark style; the badge is the Pill, 20 px tall in its thin outline,
+    // its word written "Preview" and drawn in small, slightly spaced capitals.
+    expectComputed(name, { fontFamily: /^"Source Serif 4"/, fontSize: '18px', lineHeight: '22px' });
+    expectComputed(badge, {
+      height: '20px',
+      borderTopWidth: '1px',
+      borderTopColor: 'rgba(250, 249, 245, 0.22)',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      fontSize: '11px',
+      letterSpacing: '0.66px',
+      textTransform: 'uppercase',
+    });
+    await expect(badge.classList.contains('cd-pill')).toBe(true);
+    await expect(badge.textContent).toBe('Preview');
+    // The row keeps its height, so the business row and the nav stay where they were.
+    expectComputed(brand, { height: '50px', paddingTop: '2px', paddingBottom: '12px' });
+  },
+};
+
 export const OneDesk: Story = {
   args: {
     desks: [MAIN_LINE],

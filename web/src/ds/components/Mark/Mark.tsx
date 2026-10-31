@@ -1,3 +1,4 @@
+import { Pill } from '../Pill/Pill.tsx';
 import { MARK_GEOMETRY } from './markGeometry.ts';
 
 import './Mark.css';
@@ -61,16 +62,16 @@ export function Mark({ size = 20, ground = 'dark', tile = false }: MarkProps) {
 }
 
 export interface WordmarkProps {
-  /** Adds "Beta" beneath the name, as in the owner app's sidebar. */
-  beta?: boolean;
+  /** Adds the "Preview" badge, a `Pill` in capitals, to the name's right, as in the owner app's sidebar. */
+  preview?: boolean;
 }
 
-/** "Claude Desk" in serif, the product's name as a wordmark. Place it beside a `Mark`. */
-export function Wordmark({ beta = false }: WordmarkProps) {
+/** "Claude Desk" in serif, the product's name as a wordmark, on one line. Place it beside a `Mark`. */
+export function Wordmark({ preview = false }: WordmarkProps) {
   return (
     <span className="cd-wordmark">
       <span className="cd-wordmark__name cd-type-wordmark">Claude Desk</span>
-      {beta ? <span className="cd-wordmark__beta cd-type-beta">Beta</span> : null}
+      {preview ? <Pill caps>Preview</Pill> : null}
     </span>
   );
 }

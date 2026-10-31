@@ -125,9 +125,10 @@ export function Sidebar({
   const mainCurrent = about?.links.some((link) => link.current === true) ? null : current;
   return (
     <div className="cd-sidebar">
+      {/* The lockup (owner, 2026-10-30): the 36 px bell, the name and the Preview badge, on one line. */}
       <div className="cd-sidebar__brand">
-        <Mark />
-        <Wordmark beta />
+        <Mark size={36} />
+        <Wordmark preview />
       </div>
       <button
         type="button"

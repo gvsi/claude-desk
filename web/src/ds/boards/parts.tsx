@@ -1031,7 +1031,7 @@ export function SetupFrame({ business, children }: { business: string; children:
       <header className="board-setup__bar">
         <span className="board-setup__brand">
           <Mark size={16} />
-          <Wordmark beta />
+          <Wordmark preview />
         </span>
         <span className="board-setup__business cd-type-control" data-copy="user">
           {business}
