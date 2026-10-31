@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { Steps } from './Steps.tsx';
 
@@ -137,6 +138,70 @@ export const LaptopHasNoLine: Story = {
     // At 480 px of its own width and over, the steps are the row of circles, and the line isn't drawn.
     await expect(canvas.getByRole('list', { name: 'Set up your Desk' })).toBeVisible();
     await expect(compactLine(canvasElement)).not.toBeVisible();
+  },
+};
+
+/** Setup's going-live board, signed on 2026-10-30 as an addition to N-R2-Setup-14-Live. */
+const FINISHED_NOTE =
+  "Drawn on setup's going-live board, signed on 2026-10-30 as an addition to N-R2-Setup-14-Live and not yet in the reference set: once the Desk is live, step 5's number gives way to a check, so all five steps read done.";
+
+const SETUP_STEPS = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'];
+
+/** The last step of a finished setup: done and current, its check on the current step's fill. */
+async function expectFinishedLast(canvasElement: HTMLElement): Promise<SVGPathElement> {
+  const items = within(within(canvasElement).getByRole('list', { name: 'Set up your Desk' })).getAllByRole('listitem');
+  await expect(items).toHaveLength(5);
+  for (const item of items) await expect(item.textContent).toMatch(/, done$/);
+  const last = items[4] as HTMLElement;
+  await expect(last).toHaveTextContent('Live, done');
+  await expect(last).toHaveAttribute('aria-current', 'step');
+  const circle = last.querySelector('.cd-steps__circle');
+  if (!circle) throw new Error('No circle on the last step');
+  await expect(circle.textContent).toBe('');
+  expectComputed(circle, { width: '22px', height: '22px', backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' });
+  expectComputed(within(last).getByText('Live'), { color: 'rgba(250, 249, 245, 0.92)' });
+  const path = circle.querySelector<SVGPathElement>('svg path');
+  if (!path) throw new Error('No check on the last step');
+  return path;
+}
+
+export const SetupFinished: Story = {
+  args: { label: 'Set up your Desk', steps: SETUP_STEPS, current: 4, finished: true },
+  parameters: { canvas: 'none', canvasNote: `${FINISHED_NOTE} Opened on a live Desk, the check is drawn from the start.` },
+  play: async ({ canvasElement }) => {
+    // finished_check_drawn: nothing draws when the page opens on a finished flow.
+    const path = await expectFinishedLast(canvasElement);
+    expectComputed(path, { animationName: 'none', strokeDashoffset: '0px' });
+  },
+};
+
+export const SetupFinishedDrawsCheck: Story = {
+  args: { label: 'Set up your Desk', steps: SETUP_STEPS, current: 4, finished: true, drawCheck: true },
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${FINISHED_NOTE} Reached live, the check draws once. Under reduced motion it doesn't move: it is drawn from the start, with no animation and its stroke whole. Storybook shows the motion your system asks for, and the design system's browser tests render this story under reduced motion.`,
+  },
+  play: async ({ canvasElement }) => {
+    const path = await expectFinishedLast(canvasElement);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // finished_check_still_under_reduced_motion: no draw, the check whole from the start.
+      expectComputed(path, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
+    // finished_check_draws_once: motion-base on the emphasis ease, once, ending drawn.
+    expectComputed(path, {
+      animationName: 'cd-steps-draw',
+      animationDuration: '0.2s',
+      animationIterationCount: '1',
+      animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+      animationFillMode: 'forwards',
+    });
+    // Short arm first, as a hand writes a check, ending whole.
+    await expectDrawsShortArmFirst(path);
+    // Only the last step's check draws: the steps done before it are drawn already.
+    const done = canvasElement.querySelectorAll('.cd-steps__step--done svg path');
+    await expect(done).toHaveLength(4);
+    for (const check of done) expectComputed(check, { animationName: 'none' });
   },
 };
 

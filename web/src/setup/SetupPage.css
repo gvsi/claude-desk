@@ -192,6 +192,46 @@
   border-radius: var(--radius-card);
 }
 
+/* Live: the title and its line, then "Answering now" 10 px under them in primary ink, its handled
+   dot 8 px before it breathing on the presence loop between 60% and full strength; still, at full
+   strength, under reduced motion. */
+.cd-setup-live__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.cd-setup-live__answering {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-setup-live__answering .cd-status-dot {
+  animation: cd-setup-live-breathe var(--motion-breathe) var(--motion-ease) infinite alternate;
+}
+
+/* The breath's faintest point is 60%: the handled dot still stands out from the app's ground by
+   3:1 there, the least a status dot may have (about 2.5:1 at 50%). No token holds an opacity. */
+@keyframes cd-setup-live-breathe {
+  from {
+    opacity: 0.6;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-setup-live__answering .cd-status-dot {
+    animation: none;
+  }
+}
+
 /* Live: "Share it" (N-R2-Setup-14-Live), a card padded 16 px with its title, then 10 px under it the
    link's QR code at 132 px, its corners rounded as a control's, and 24 px to its right "Website
    embed" over its line, 2 px apart, with the "Coming later" pill 12 px to their right. The code

@@ -24,4 +24,4 @@
 
 ## Motion
 
-The presence glyphs are the screen's one small moment: their opacity breathes between 50% and 100% over `motion-breathe`, each half a breath out of step with the one before. Under `prefers-reduced-motion: reduce` they are still, at full opacity.
+The presence glyphs are the screen's one small moment: their opacity breathes between 60% and 100% over `motion-breathe`, each half a breath out of step with the one before. At the faintest point a glyph's initials still read against its circle by 4.5:1, as text must, and its icon by more than 3:1, as a mark must (at 50% the initials fell to about 4.1:1). Under `prefers-reduced-motion: reduce` they are still, at full opacity.

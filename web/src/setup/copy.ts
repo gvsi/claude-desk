@@ -243,6 +243,7 @@ export const SETUP_COPY = {
     isLive: ' is live',
     yourDeskIsLive: 'Your Desk is live',
     liveSubtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
+    answeringNow: 'Answering now',
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',

@@ -201,6 +201,12 @@ export function findDesk(businesses: readonly BusinessOut[], deskId: string): { 
   return null;
 }
 
+/** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
+export function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
+  if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;
+  return businesses.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
+}
+
 /** Of `desks`, the last Desk the owner opened when it is one of them, else the first; null when there are none. */
 export function lastOrFirst(desks: readonly { desk_id: string }[]): string | null {
   const last = readLocal('lastDesk');
