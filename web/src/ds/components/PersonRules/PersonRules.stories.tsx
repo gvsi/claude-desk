@@ -229,3 +229,26 @@ export const MarkedNameNoRules: Story = {
     await expect(marked[0]).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
   },
 };
+
+/** A name holding a right-to-left override (U+202E) with no end: unisolated, it would reorder the words after it. */
+const OVERRIDE_NAME = 'Dana ‮Whitfield';
+
+export const NameWithDirectionOverride: Story = {
+  name: 'A name with a direction override',
+  args: { name: OVERRIDE_NAME, rules: [] },
+  parameters: { canvasNote: `${NOTE} A name holding a right-to-left override (U+202E): the name is isolated, so it can't reorder the words after it.` },
+  play: async ({ canvasElement }) => {
+    // person_name_is_isolated: the "." after the name stays after it, at its right.
+    const line = canvasElement.querySelector<HTMLElement>('.cd-person-rules__none');
+    const name = line?.querySelector<HTMLElement>('[data-copy="user"]');
+    const dot = line?.lastChild;
+    if (!line || !name || !dot || dot.textContent !== '.') throw new Error('No line with the name and its "."');
+    const range = document.createRange();
+    range.selectNodeContents(dot);
+    await expect(range.getBoundingClientRect().left, 'the "." after the name').toBeGreaterThanOrEqual(name.getBoundingClientRect().right - 0.5);
+    expectComputed(name, { unicodeBidi: 'isolate' });
+    const heading = canvasElement.querySelector<HTMLElement>('h2 [data-copy="user"]');
+    if (!heading) throw new Error('No name in the heading');
+    expectComputed(heading, { unicodeBidi: 'isolate' });
+  },
+};

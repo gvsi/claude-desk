@@ -80,7 +80,7 @@ export const CopyFailed: Story = {
 /** A business and an owner whose names the voice rules would flag if they were the list's own words. */
 const BUSINESS = 'AAA Plumbing';
 const OWNER = 'JJ Okafor';
-const theirs = (name: string) => <span data-copy="user">{name}</span>;
+const theirs = (name: string) => <bdi data-copy="user">{name}</bdi>;
 
 export const MarkedNames: Story = {
   name: 'Names marked as theirs',

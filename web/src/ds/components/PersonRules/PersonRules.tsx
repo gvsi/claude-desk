@@ -22,7 +22,11 @@ export interface PersonRuleView {
 }
 
 export interface PersonRulesProps {
-  /** The person's name, as their page shows it. It is theirs: shown marked as user text inside the component's words. */
+  /**
+   * The person's name, as their page shows it. It is theirs: shown marked as user text inside the
+   * component's words, isolated (`<bdi data-copy="user">`) so a direction mark in it can't reorder
+   * the words around it.
+   */
   name: string;
   /** The Desk's rules for this person alone, `person_id` theirs. */
   rules: readonly PersonRuleView[];
@@ -50,7 +54,7 @@ export function PersonRules({ name, rules, rulesHref, linkComponent: Link = Plai
         id={headingId}
         title={
           <>
-            Rules for <span data-copy="user">{name}</span>
+            Rules for <bdi data-copy="user">{name}</bdi>
           </>
         }
         caption={
@@ -79,7 +83,7 @@ export function PersonRules({ name, rules, rulesHref, linkComponent: Link = Plai
         </Card>
       ) : (
         <p className="cd-person-rules__none cd-type-body">
-          No rules just for <span data-copy="user">{name}</span>.
+          No rules just for <bdi data-copy="user">{name}</bdi>.
         </p>
       )}
     </section>

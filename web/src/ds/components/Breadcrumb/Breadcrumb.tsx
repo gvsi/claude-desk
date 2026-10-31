@@ -8,7 +8,8 @@ import './Breadcrumb.css';
 export interface BreadcrumbItem {
   /**
    * The step's name: "Stripe", "Refund". A node when it holds a name someone chose (a customer's, a
-   * business's), so the screen can mark that name as user text: `<span data-copy="user">`.
+   * business's), so the screen can mark that name as user text and isolate it:
+   * `<bdi data-copy="user">`, so a direction mark in the name can't reorder the words around it.
    */
   label: ReactNode;
   href?: string;

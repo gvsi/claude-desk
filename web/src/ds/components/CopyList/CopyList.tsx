@@ -10,8 +10,8 @@ export interface CopyListItem {
   title: string;
   /**
    * The words. A string is shown and copied as it is. A node, when they hold a name someone chose
-   * (the business's, the owner's), lets the screen mark each name as user text:
-   * `<span data-copy="user">`. Copy then copies what is shown, as plain text: a line break for each
+   * (the business's, the owner's), lets the screen mark each name as user text and isolate it:
+   * `<bdi data-copy="user">`. Copy then copies what is shown, as plain text: a line break for each
    * `<br>`, and no words only a screen reader hears (`.cd-sr-only`).
    */
   text: ReactNode;

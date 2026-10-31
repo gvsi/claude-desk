@@ -58,7 +58,7 @@ const MARKED_NAME = 'JJ Okafor';
 export const MarkedName: Story = {
   name: 'A name marked as theirs',
   args: {
-    items: [{ label: 'Customers', href: '/people' }, { label: <span data-copy="user">{MARKED_NAME}</span> }],
+    items: [{ label: 'Customers', href: '/people' }, { label: <bdi data-copy="user">{MARKED_NAME}</bdi> }],
   },
   parameters: {
     canvas: 'none',

@@ -12,7 +12,7 @@ Built against the person page board in review (N-Run2-People-Person); sign-off p
 ## What it shows
 
 - A `section` named by its heading, "Rules for {name}" (`SectionHeader`), with "Change them on Rules" at the right, a link to `rulesHref` in `.cd-type-meta`, `text-secondary`, that turns `text-primary` and underlined on hover.
-- In the heading, "Rules for" is the component's words and the name is the person's, in its own `<span data-copy="user">`.
+- In the heading, "Rules for" is the component's words and the name is the person's, in its own `<bdi data-copy="user">`: marked as user text, and isolated, so a direction mark in the name (such as U+202E) can't reorder the words around it.
 - 8 px under it, a card of rows that reach its edges, each padded 12 px 16 px under a hairline but the first:
   - at the left, what the rule is on (`title`, "Book a visit") in `.cd-type-control` at weight 520, over its reason in `.cd-type-meta`, `text-secondary`, 2 px under it;
   - then what it enforces, the `words` joined by " · " (`ruleWordsLine`), in `.cd-type-meta`, `text-secondary`;
@@ -29,7 +29,7 @@ Built against the person page board in review (N-Run2-People-Person); sign-off p
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `name` | `string` | Required. The person's name, as their page shows it. Shown marked as user text (`data-copy="user"`) in the heading and in the no-rules line. |
+| `name` | `string` | Required. The person's name, as their page shows it. Shown marked as user text and isolated (`<bdi data-copy="user">`) in the heading and in the no-rules line. |
 | `rules` | `PersonRuleView[]` | Required. Their rules alone. |
 | `rulesHref` | `string` | Required. The Rules page. |
 | `linkComponent` | `ComponentType<RulesLinkProps>` | The app's router link; a plain `<a>` by default. |

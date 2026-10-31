@@ -47,7 +47,7 @@ export function ShareCard({ name, url, ownerName, language, qr, onPrint }: Share
           {url}
         </p>
         <figcaption className="cd-share-card__answered cd-type-meta">
-          {answeredBy(<span data-copy="user">{ownerName}</span>)}
+          {answeredBy(<bdi data-copy="user">{ownerName}</bdi>)}
         </figcaption>
       </figure>
       {onPrint === undefined ? null : (

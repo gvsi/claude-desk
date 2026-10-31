@@ -15,7 +15,7 @@
 - The last item is the page itself: plain `text-primary` text with `aria-current="page"`.
 - Between items, the boards' "/" in `text-tertiary`, 8 px from each side, `aria-hidden`, so a screen reader hears only the names.
 - A long trail wraps onto a second line rather than scrolling sideways.
-- A name someone chose (a customer's, a business's) in a label is the screen's to mark as user text: pass the label as a node with the name in its own `<span data-copy="user">`. The rest of the trail stays the screen's words.
+- A name someone chose (a customer's, a business's) in a label is the screen's to mark as user text: pass the label as a node with the name in its own `<bdi data-copy="user">`, which marks it and isolates it, so a direction mark in the name can't reorder the words around it. The rest of the trail stays the screen's words.
 
 ## Props
 

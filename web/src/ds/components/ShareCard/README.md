@@ -9,7 +9,7 @@
 
 ## What the consumer provides
 
-- `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written, each marked as user text (`data-copy="user"`) inside the card's own words.
+- `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written, each marked as user text (`data-copy="user"`) inside the card's own words. The owner's name sits inside a sentence, so it is isolated too (`<bdi data-copy="user">`): a direction mark in it can't reorder the words after it.
 - `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04). It fills a 152 px square, centered. The card never makes, fetches or checks a code. A QR code needs its own light quiet zone to scan, which the web app's code draws; nothing else in the design system is light, so that ground stays inside the code.
 - `language`: the language the card is printed in.
 - `onPrint` to show "Print card" under the card. The screen prints; nothing here does.

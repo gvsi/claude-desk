@@ -123,3 +123,30 @@ export const MarkedName: Story = {
     await expect(within(card).getByText('JJ Okafor')).toHaveAttribute('data-copy', 'user');
   },
 };
+
+export const OwnerNameWithDirectionOverride: Story = {
+  name: 'An owner name with a direction override',
+  args: { ownerName: 'Maria ‮Rivera', onPrint: undefined },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Share’s card for an owner whose name holds a right-to-left override (U+202E): the name is isolated in its sentence, so it can’t reorder the words after it.',
+  },
+  play: async ({ canvas }) => {
+    // share_card_owner_name_is_isolated: "any time." stays after the owner's name, at its right.
+    const caption = canvas.getByRole('figure', { name: 'Rivera Plumbing' }).querySelector('figcaption');
+    const owner = caption?.querySelector<HTMLElement>('[data-copy="user"]');
+    const after = caption?.lastChild;
+    if (!caption || !owner || !after || after.textContent !== ' any time.') throw new Error('No owner name and the words after it');
+    const range = document.createRange();
+    range.setStart(after, 1);
+    range.setEnd(after, 4);
+    const any = range.getBoundingClientRect();
+    // The name may wrap over the caption's two lines: "any" follows its last line box.
+    const rects = [...owner.getClientRects()];
+    const name = rects[rects.length - 1];
+    if (!name) throw new Error('The owner name has no box');
+    await expect(Math.round(any.top), '"any" is on the name’s last line').toBe(Math.round(name.top));
+    await expect(any.left, '"any" after the name').toBeGreaterThanOrEqual(name.right - 0.5);
+    expectComputed(owner, { unicodeBidi: 'isolate' });
+  },
+};
