@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { expect, fn, waitFor } from 'storybook/test';
 
 import type { Decision, SseEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
@@ -126,6 +126,33 @@ async function expectLeadLook(receipt: HTMLElement): Promise<void> {
   expectComputed(text, { color: rest });
 }
 
+/**
+ * check_draws_short_arm_first: 50 ms into its draw (after any beat it waits for), the check's stroke
+ * shows from the path's end, the short arm's tip at (4, 12), while its start, the long arm's tip at
+ * (20, 6), is still hidden, as a hand writes a check. The dash covers the whole path and the offset
+ * runs from minus the dash to 0, so the hidden part is [0, -offset].
+ * Leaves the draw finished, the check whole.
+ */
+async function expectDrawsShortArmFirst(stroke: SVGPathElement): Promise<void> {
+  const [draw] = stroke.getAnimations();
+  if (!draw) throw new Error('no draw on the check');
+  const length = stroke.getTotalLength();
+  await expect(Number.parseFloat(getComputedStyle(stroke).strokeDasharray)).toBeGreaterThanOrEqual(length);
+  draw.pause();
+  draw.currentTime = (draw.effect?.getTiming().delay ?? 0) + 50;
+  const hiddenUpTo = -Number.parseFloat(getComputedStyle(stroke).strokeDashoffset);
+  await expect(hiddenUpTo).toBeGreaterThan(0);
+  await expect(hiddenUpTo).toBeLessThan(length);
+  const tip = (at: number) => {
+    const point = stroke.getPointAtLength(at);
+    return [Math.round(point.x), Math.round(point.y)];
+  };
+  await expect(tip(0)).toEqual([20, 6]);
+  await expect(tip(length)).toEqual([4, 12]);
+  draw.finish();
+  await waitFor(() => expect(getComputedStyle(stroke).strokeDashoffset).toBe('0px'));
+}
+
 const meta = {
   title: 'Conversation/MarginReceipt',
   component: MarginReceipt,
@@ -207,7 +234,8 @@ export const Expired: Story = {
 export const BookedWithCheck: Story = {
   args: { ...booked, drawCheck: true },
   parameters: {
-    canvasNote: "The board's booking note ends with the sage check that draws once; here it follows the kernel's line for the executed booking.",
+    canvasNote:
+      "The board's booking note ends with the sage check that draws once, short arm first; here it follows the kernel's line for the executed booking. Storybook shows the motion your system asks for: under reduced motion the check is drawn from the start.",
   },
   play: async ({ canvas, canvasElement }) => {
     const receipt = canvas.getByRole('button', { name: `${booked.plain} Open the full trace.` });
@@ -216,10 +244,16 @@ export const BookedWithCheck: Story = {
     if (!check) throw new Error('no check on the booked receipt');
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check, { color: 'rgb(111, 168, 89)' });
+    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     const stroke = check.querySelector('path');
     if (!stroke) throw new Error('no check stroke');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
     expectComputed(stroke, { animationName: /^(?!none$).+/, animationIterationCount: '1', animationDuration: '0.2s' });
-    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 
@@ -245,7 +279,7 @@ export const BookedLandsLive: Story = {
     const lines = [...canvasElement.querySelectorAll<HTMLElement>('.cd-margin-receipt')];
     await expect(lines.map(visibleText)).toEqual([bookedReplyChecked.plain, booked.plain]);
     const bookedLine = lines[1] as HTMLElement;
-    const stroke = bookedLine.querySelector('.cd-margin-line__check path');
+    const stroke = bookedLine.querySelector<SVGPathElement>('.cd-margin-line__check path');
     if (!stroke) throw new Error('no check on the booked receipt');
     const dot = dotIn(bookedLine);
 
@@ -263,6 +297,8 @@ export const BookedLandsLive: Story = {
     expectComputed(bookedLine, { animationName: /^(?!none$).+/, animationDelay: beat });
     expectComputed(dot, { animationName: /^(?!none$).+/, animationDelay: beat });
     expectComputed(stroke, { animationName: /^(?!none$).+/, animationDelay: beat, animationDuration: '0.2s', animationIterationCount: '1' });
+    // Landing live doesn't change which way the check draws: short arm first, once its beat comes.
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 
