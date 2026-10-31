@@ -738,7 +738,13 @@ class StartupRebuild:
 
     results: Rebuilt                   # each outdated version it rebuilt, or refused to
     left: list[tuple[str, str]]        # the Desks, `(copy_id, desk_id)`, it found and didn't bring up
-    unscanned: list[str] = field(default_factory=list)   # the copies it didn't look at, in order
+    unscanned: list[str] | None = field(default_factory=list)   # the copies it didn't look at, in order; None
+                                       # when it couldn't list them, so the background lists them too
+
+    @property
+    def pending(self) -> bool:
+        """Whether it left anything for `rebuild_in_background`."""
+        return bool(self.left) or self.unscanned is None or bool(self.unscanned)
 
 
 async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
@@ -751,7 +757,8 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     kernel serves within the budget and one copy's lookup or one Desk's compile, however many
     copies and Desks there are; a copy's lookup gets only what is left of the budget and is cut off
     when it runs out. What it doesn't reach is left, in order, for `rebuild_in_background`: the
-    Desks it found and the copies it didn't look at, and one whose lookup failed or was cut off. Until then a version left as stored refuses every call (`version_outdated`)."""
+    Desks it found and the copies it didn't look at, and one whose lookup failed or was cut off; when
+    listing the copies fails or runs past the budget, it leaves all of it (`unscanned=None`). Until then a version left as stored refuses every call (`version_outdated`)."""
     started = monotonic()
 
     def spent() -> bool:
@@ -760,7 +767,14 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     results: Rebuilt = {}
     left: list[tuple[str, str]] = []
     unscanned: list[str] = []
-    copies = await copy_ids(runtime)
+    try:                                      # listing the copies counts against the budget too
+        copies = await asyncio.wait_for(copy_ids(runtime), STARTUP_REBUILD_S)
+    except TimeoutError:
+        log.info("rebuild_copies_cut_off")
+        return StartupRebuild(results={}, left=[], unscanned=None)
+    except Exception as exc:
+        log_error(log, exc, "rebuild_copies_failed")
+        return StartupRebuild(results={}, left=[], unscanned=None)
     for n, copy_id in enumerate(copies):
         if spent():
             unscanned += copies[n:]
@@ -789,27 +803,62 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     return StartupRebuild(results=results, left=left, unscanned=unscanned)
 
 
+RETRY_WAITS_S = (5.0, 30.0, 60.0)    # a failed lookup's wait before the next; the last one repeats
+
+
+async def wait_to_retry(seconds: float) -> None:
+    """The background rebuild's wait before it looks again at copies whose lookup failed."""
+    await asyncio.sleep(seconds)
+
+
 async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild) -> Rebuilt:
-    """Finishes what startup left (`StartupRebuild`) while the kernel serves: finds the Desks of
-    the copies it didn't look at, tells the owner of each Desk whose version waits that it refuses
-    until it is checked (`_alert_waiting`), then brings them up one at a time, proving live in
-    `symcc` mode, and returns what became of each outdated version. Every owner in the queue is
-    told before the first rebuild starts, not when the queue reaches their Desk. As at startup, a
-    version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached yet keeps
-    refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is killed,
-    and the next start takes it up again."""
-    work = list(startup.left)
-    for copy_id in startup.unscanned:
-        work += [(copy_id, desk_id) for desk_id in await _desks_of(runtime, copy_id) or []]
-    for copy_id, desk_id in work:
-        await _alert_waiting(runtime, copy_id, desk_id)
+    """Finishes what startup left (`StartupRebuild`) while the kernel serves. Each pass lists the
+    copies if startup couldn't, finds the Desks of the copies it is to look at, tells the owner of
+    each Desk whose version waits that it refuses until it is checked (`_alert_waiting`), then
+    brings them up one at a time, proving live in `symcc` mode. A copy whose lookup fails, or a
+    listing that fails, doesn't hold the others up: after the pass it waits (`RETRY_WAITS_S`,
+    longer each time) and looks at only those again, until none are left or it is cancelled, so no
+    copy is lost until the next start. Every owner found in a pass is told before that pass's first
+    rebuild starts. As at startup, a version it can't rebuild is ledgered and alerts the owner, and
+    one it hasn't reached yet keeps refusing. The app cancels it at shutdown: the Desk in hand rolls
+    back, its prover is killed, and the next start takes it up again."""
     results: Rebuilt = {}
-    for copy_id, desk_id in work:
-        done = await _bring_up(runtime, copy_id, desk_id, prove=True)
-        if done is not None:
-            results[(desk_id, done[0])] = done[1]
-    log.info("background_rebuild_done desks=%s", len(work))
+    work: list[tuple[str, str]] = list(startup.left)
+    pending: list[str] | None = startup.unscanned
+    attempt = 0
+    while True:
+        if pending is None:                   # the copies weren't listed yet
+            pending = await _copies(runtime)
+        failed: list[str] | None = None if pending is None else []
+        for copy_id in pending or []:
+            desk_ids = await _desks_of(runtime, copy_id)
+            if desk_ids is None:
+                failed.append(copy_id)
+            else:
+                work += [(copy_id, desk_id) for desk_id in desk_ids]
+        for copy_id, desk_id in work:
+            await _alert_waiting(runtime, copy_id, desk_id)
+        for copy_id, desk_id in work:
+            done = await _bring_up(runtime, copy_id, desk_id, prove=True)
+            if done is not None:
+                results[(desk_id, done[0])] = done[1]
+        if failed == []:
+            break
+        attempt += 1
+        log.info("rebuild_retry attempt=%s copies=%s", attempt, "unlisted" if failed is None else ",".join(failed))
+        await wait_to_retry(RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S)) - 1])
+        pending, work = failed, []
+    log.info("background_rebuild_done desks=%s", len(results))
     return results
+
+
+async def _copies(runtime: KernelRuntime) -> list[str] | None:
+    """Every copy's ID (`repo.copy_ids`), or None when listing them failed, which is logged."""
+    try:
+        return await copy_ids(runtime)
+    except Exception as exc:
+        log_error(log, exc, "rebuild_copies_failed")
+        return None
 
 
 async def _desks_of(runtime: KernelRuntime, copy_id: str) -> list[str] | None:

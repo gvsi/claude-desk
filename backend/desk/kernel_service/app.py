@@ -163,7 +163,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 await execute.reconcile_at_startup(app.state.kernel)
             except Exception as exc:
                 log_error(log, exc, "startup_reconcile_failed")
-            if startup is not None and (startup.left or startup.unscanned):
+            if startup is not None and startup.pending:
                 # the Desks and copies startup left, while the kernel serves; each Desk refuses
                 # until it is rebuilt
                 rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, startup))

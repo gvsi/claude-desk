@@ -329,7 +329,7 @@ async def test_a_version_waiting_for_its_rebuild_alerts_the_owner_at_most_once_a
     for minutes in (0, 30, 31):                                        # starts at 0, 30 and 61 minutes
         frozen_clock.advance(minutes * 60)
         startup = await activation.rebuild_at_startup(app.state.kernel)
-        assert sorted(startup.unscanned) == sorted([copy.copy_id, current.copy_id])
+        assert (startup.results, startup.left, startup.unscanned) == ({}, [], None)   # with no budget, not even listed
         await activation.rebuild_in_background(app.state.kernel, startup)
         refused = await decided(client, visitor, "native.find_slots", call_id=f"slots-{minutes}")
         assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
@@ -415,6 +415,71 @@ async def test_a_copy_whose_lookup_fails_at_startup_is_looked_at_again_in_the_ba
     assert startup == activation.StartupRebuild(results={}, left=[], unscanned=[copy.copy_id])
     assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
     assert calls == [copy.copy_id, copy.copy_id]
+
+
+async def test_a_copy_whose_background_lookup_fails_is_looked_at_again_after_a_wait(app, client, monkeypatch):
+    # the background's lookups fail too: it waits and looks again, longer each time, while the other copies go on,
+    # so the Desk is rebuilt without another start, and refuses until then
+    copy, other = await rivera(app, client), await rivera(app, client)
+    for each in (copy, other):
+        await seed_from_an_earlier_kernel(app, each)
+    discover, calls, waits = activation.desks_to_bring_up, [], []
+
+    async def failing(*args, **kwargs):               # the copy's first six lookups fail, the other's first
+        calls.append(args[1])
+        if calls.count(args[1]) <= (6 if args[1] == copy.copy_id else 1):
+            raise RuntimeError("the lookup's connection dropped")
+        return await discover(*args, **kwargs)
+
+    visitor, other_visitor = await open_visitor(client, copy), await open_visitor(client, other)
+
+    async def waiting(seconds):
+        waits.append(seconds)
+        refused = await decided(client, visitor, "native.find_slots", call_id=f"slots-{len(waits)}")
+        assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
+        allowed = await decided(client, other_visitor, "native.find_slots", call_id=f"other-{len(waits)}")
+        assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
+
+    monkeypatch.setattr(activation, "desks_to_bring_up", failing)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert startup == activation.StartupRebuild(results={}, left=[], unscanned=sorted([copy.copy_id, other.copy_id]))
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None,
+                                                                                 (other.desk_id, 1): None}
+    assert waits == [5.0, 30.0, 60.0, 60.0, 60.0]
+    assert calls.count(copy.copy_id) == 7 and calls.count(other.copy_id) == 2
+    allowed = await decided(client, visitor, "native.find_slots", call_id="slots-rebuilt")
+    assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
+    assert await rules_alerts(app, copy) == [WAITING_ALERT]
+
+
+@pytest.mark.parametrize("how", ["blocks", "raises"])
+async def test_a_copy_listing_that_fails_at_startup_leaves_all_of_it_to_the_background(app, client, monkeypatch, how):
+    # listing the copies counts against startup's budget: one that blocks is cut off, one that raises is logged,
+    # and either way the background lists them and rebuilds the Desk, which refuses until then
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    listing, calls, never = activation.copy_ids, [], asyncio.Event()
+
+    async def failing_once(*args, **kwargs):
+        calls.append(how)
+        if len(calls) == 1:
+            if how == "blocks":
+                await never.wait()                               # never set: cut off by the budget
+            raise RuntimeError("the listing's connection dropped")
+        return await listing(*args, **kwargs)
+
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.05)
+    monkeypatch.setattr(activation, "copy_ids", failing_once)
+    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
+    assert (startup.results, startup.left, startup.unscanned, startup.pending) == ({}, [], None, True)
+    visitor = await open_visitor(client, copy)
+    refused = await decided(client, visitor, "native.find_slots", call_id="slots-waiting")
+    assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    allowed = await decided(client, visitor, "native.find_slots", call_id="slots-rebuilt")
+    assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
+    assert len(calls) == 2
 
 
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
