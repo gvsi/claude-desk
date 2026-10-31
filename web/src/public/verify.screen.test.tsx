@@ -9,6 +9,7 @@ import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { SseEvent } from '../api/contracts.ts';
+import { request } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, UNREACHABLE_COPY } from '../ds/index.ts';
@@ -132,6 +133,64 @@ describe('verification', () => {
     await again.screen.getByRole('button', { name: 'I can’t get the code' }).click();
     await expect.element(again.screen.getByText(ask, { exact: true })).toBeVisible();
     await vi.waitFor(() => expect(requests('sendMessage').map((r) => r.body)).toContainEqual({ text: ask }));
+  });
+
+  it('a_late_verify_answer_never_brings_the_owner_back', async () => {
+    const ownerLine = /^Maria Rivera is in this chat\./;
+    const headLine = () => document.querySelector('.cd-public-shell__disclosure')?.textContent ?? '';
+    /** The head's lines from now on, until `stop`. */
+    const watchHead = () => {
+      const seen = new Set<string>([headLine()]);
+      const watch = new MutationObserver(() => seen.add(headLine()));
+      watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+      onTestFinished(() => watch.disconnect());
+      return { seen: () => [...seen], stop: () => watch.disconnect() };
+    };
+    /** A request held until the test lets it land. */
+    const held = () => {
+      let release = () => {};
+      const until = new Promise<void>((resolve) => (release = resolve));
+      return { until, release };
+    };
+
+    for (const answer of ['the verify answer', 'the read after a lost verify answer'] as const) {
+      // Dana asks for her invoice, and Maria takes the chat over while the form is up.
+      const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+      await ready(screen);
+      await say(screen, 'Can you send my invoice?');
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(headLine()).toMatch(ownerLine));
+
+      // Dana sends the code. Its answer (or, when that is lost, the read of the session after it)
+      // was taken while the chat was in Maria's hands, and lands only after she has handed it back
+      // and Claude has started writing.
+      const late = held();
+      if (answer === 'the verify answer') {
+        mockStore.inject({ route: 'verifyCheck', status: 200, afterCommit: true, until: late.until, body: { state: { ...chat.state, verified: true, assurance: 'demo_code' } } });
+      } else {
+        const read = await request('visitorSession', { params: { slug: RIVERA.slug } });
+        mockStore.inject({ route: 'verifyCheck', status: 'network', afterCommit: true });
+        mockStore.inject({ route: 'visitorSession', status: 200, until: late.until, body: { ...read, state: { ...read.state, verified: true, assurance: 'demo_code' } } });
+      }
+      const route = answer === 'the verify answer' ? 'verifyCheck' : 'visitorSession';
+      const asked = requests(route).length;
+      await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+      await screen.getByRole('button', { name: 'Confirm' }).click();
+      await vi.waitFor(() => expect(requests(route)).toHaveLength(asked + 1));
+      mockStore.world.handBack(chat);
+      mockStore.emit(RIVERA.slug, { type: 'writing' });
+      await vi.waitFor(() => expect(headLine()).toMatch(/^You're chatting with Claude/));
+
+      // It lands: Dana is verified, and the head never says Maria is back in the chat.
+      const head = watchHead();
+      late.release();
+      await expect.element(screen.getByText(VERIFIED)).toBeVisible();
+      head.stop();
+      expect(head.seen().filter((line) => ownerLine.test(line)), answer).toEqual([]);
+      expect(headLine(), answer).toMatch(/^You're chatting with Claude/);
+    }
   });
 
   it('code_goes_only_to_the_verify_route', async () => {

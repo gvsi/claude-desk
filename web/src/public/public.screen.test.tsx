@@ -9,6 +9,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
+import { request } from '../api/http.ts';
 import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMITED_COPY, UNREACHABLE_COPY, type PublicShellScrollerDetail } from '../ds/index.ts';
@@ -1421,6 +1422,82 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
+  it('reload_race_a_stale_owner_mode_with_her_leave_stored_shows_claude', async () => {
+    for (const race of ['her leave and Claude answering', 'Claude answering, her leave never kept'] as const) {
+      // Maria takes the chat over and hands it back, and Claude answers again.
+      const first = await renderRoute(PAGE, { seed: 'rivera' });
+      await ready(first.screen);
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(chatHead(), race).toEqual(withOwner(HEAD.en)));
+      if (race === 'her leave and Claude answering') mockStore.world.handBack(chat);
+      else chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+      await say(first.screen, 'How much is drain clearing?');
+
+      // A reload whose read took the session's mode before the hand-back (the API reads the session,
+      // then the stored conversation and its cursor): the session says she is in the chat, while the
+      // conversation holds what came after, and the stream resumes past all of it, so nothing on it
+      // will correct the head. The conversation says she isn't in, and that is enough to say so.
+      chat.state = { ...chat.state, mode: 'owner' };
+      const lastSeq = chatEvents().length;
+      const second = await renderRoute(PAGE);
+      await ready(second.screen);
+      expect(chatHead(), race).toEqual(withClaude(HEAD.en));
+      await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(new RegExp(`after=${lastSeq}$`)));
+      expect(chatHead(), race).toEqual(withClaude(HEAD.en));
+    }
+  });
+
+  it('back_on_the_page_the_head_waits_for_the_mode_to_be_confirmed', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+
+    // The visitor leaves the page, and Maria hands the chat back meanwhile, but her leave reaches the
+    // stream late. Back on the page, the stream is quiet for longer than the chat waits to call itself
+    // caught up, and the read of the session that would say so is slow too. The stream's silence
+    // doesn't say she is still there: the head shows the AI disclosure until something does.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+    const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
+    mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    const reads = requests('visitorSession').length;
+    const texts = watchTexts();
+    // The page's timers are fake from here, so the chat calls itself caught up only when the test
+    // moves them, past the stream's quiet time, while the read is still out.
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    await settle();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, before anything confirmed her').toBe(false);
+    // The read lands: the chat is in Claude's hands. Then her leave arrives at last.
+    slowRead.release();
+    vi.useRealTimers();
+    await settle();
+    mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+    await vi.waitFor(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']));
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+
+    // She takes it over again, and the visitor leaves and comes back with nothing changed: once the
+    // session, read again, confirms it, the head says she is in the chat.
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    await router.navigate(PAGE);
+    await ready(screen);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)), { timeout: 3_000 });
+  });
+
   it('the_head_goes_back_to_claude_when_the_chat_ends', async () => {
     const takenOver = async () => {
       const chat = mockStore.visitorSession(RIVERA.slug);
@@ -1437,12 +1514,15 @@ describe('public chat page', () => {
     await expect.element(first.screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
     expect(chatHead()).toEqual(withClaude(HEAD.en));
     // Its session is gone, as the API's is once it says so, so the new chat is a new session, and
-    // it starts with Claude.
+    // it starts with Claude, without the old session's mode for a moment as it empties.
     mockStore.dropVisitorCookie(RIVERA.slug);
     const opened = requests('openSession').length;
+    const texts = watchTexts();
     await first.screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
     await vi.waitFor(() => expect(requests('openSession')).toHaveLength(opened + 1));
     await ready(first.screen);
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
     expect(chatHead()).toEqual(withClaude(HEAD.en));
 
     // A send that answers 401 while Maria is in the chat ends it the same way.
@@ -1469,16 +1549,13 @@ describe('public chat page', () => {
     await router.navigate('/d/nobody-here');
     await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
     mockStore.world.handBack(chat);
-    const lines = new Set<string>();
-    const watch = new MutationObserver(() => lines.add(chatHead().line));
-    watch.observe(document.body, { childList: true, subtree: true, characterData: true });
-    onTestFinished(() => watch.disconnect());
+    // Not even for the page's first drawing, before it has picked the stream up again.
+    const texts = watchTexts();
     await router.navigate(PAGE);
-    lines.add(chatHead().line);
     await ready(screen);
     await vi.waitFor(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']));
-    watch.disconnect();
-    expect([...lines]).not.toContain(HEAD.en.ownerInChat);
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
     expect(chatHead()).toEqual(withClaude(HEAD.en));
 
     // Away again, she takes it over again: back on the page, the head says so once it has caught up.
@@ -2373,6 +2450,27 @@ function chatHead(): { line: string; asks: string[] } {
     line: head?.querySelector('.cd-public-shell__disclosure')?.textContent ?? '',
     asks: [...(head?.querySelectorAll('button') ?? [])].map((button) => button.textContent ?? ''),
   };
+}
+
+/** Words only the head's line for the owner in the chat has, in English, whole or in part. */
+const OWNER_IN_CHAT_WORDS = /is in this chat|is paused until/;
+
+/**
+ * Every text the page shows from now on, however briefly: what each change adds, removes or writes
+ * over, so a line drawn and replaced before anything reads the page still counts. Start it while the
+ * page shows nothing it should never show.
+ */
+function watchTexts(): { saw: (pattern: RegExp) => boolean; stop: () => void } {
+  const texts: string[] = [document.body.textContent ?? ''];
+  const watch = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'characterData') texts.push(record.oldValue ?? '', record.target.textContent ?? '');
+      for (const node of [...record.addedNodes, ...record.removedNodes]) texts.push(node.textContent ?? '');
+    }
+  });
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
+  onTestFinished(() => watch.disconnect());
+  return { saw: (pattern) => texts.some((text) => pattern.test(text)), stop: () => watch.disconnect() };
 }
 
 /** The head as it is with Claude answering, and while Maria is in the chat. */

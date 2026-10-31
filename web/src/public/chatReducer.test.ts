@@ -8,7 +8,7 @@ import { EV_ERROR_CODES, type EvMessage, type EvOwnerJoined, type EvOwnerTyping,
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, ownerInChatNow, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, lowerOnly, ownerInChatNow, ownerIsOutIn, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -514,39 +514,86 @@ describe('chatReducer', () => {
   it('owner_in_chat_is_the_sessions_mode', () => {
     const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
     const open = initialChatState();
+    const now = (session: SessionState | null, state: ChatState = open) => ownerInChatNow({ session, state, ready: true, modeKnown: true });
     // The kernel's mode is the only source: the owner's, and nothing else, says she is in the chat.
-    expect(ownerInChatNow(inOwnersHands, open)).toBe(true);
-    expect(ownerInChatNow(rivera.sessions.public, open)).toBe(false);
-    expect(ownerInChatNow({ ...inOwnersHands, mode: 'paused' }, open)).toBe(false);
+    expect(now(inOwnersHands)).toBe(true);
+    expect(now(rivera.sessions.public)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'paused' })).toBe(false);
     // No session yet, or a mode the page doesn't know.
-    expect(ownerInChatNow(null, open)).toBe(false);
-    expect(ownerInChatNow({ ...inOwnersHands, mode: 'owner_soon' as SessionState['mode'] }, open)).toBe(false);
-    // The chat's own lines say nothing of it: a join last with the session in Claude's hands (a
-    // hand-back whose leave was never kept), or no join at all with it in hers.
-    const joinedLast = run(events([ownerJoined]));
-    expect(ownerInChatNow(rivera.sessions.public, joinedLast)).toBe(false);
-    expect(ownerInChatNow(inOwnersHands, run(events([quoteMessage])))).toBe(true);
+    expect(now(null)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'owner_soon' as SessionState['mode'] })).toBe(false);
+    // The chat's own lines never turn it on: a join last with the session in Claude's hands.
+    expect(now(rivera.sessions.public, run(events([ownerJoined])))).toBe(false);
+    expect(now(inOwnersHands, run(events([quoteMessage])))).toBe(true);
   });
 
   it('owner_in_chat_fails_safe_to_false', () => {
     const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
     const joined = run(events([ownerJoined]));
-    expect(ownerInChatNow(inOwnersHands, joined)).toBe(true);
+    const now = (state: ChatState, facts: { ready?: boolean; modeKnown?: boolean } = {}) =>
+      ownerInChatNow({ session: inOwnersHands, state, ready: facts.ready ?? true, modeKnown: facts.modeKnown ?? true });
+    expect(now(joined)).toBe(true);
+    // The chat isn't ready (loading, or it couldn't load), or it doesn't know the mode now: it lost
+    // track of the stream, and nothing has confirmed the mode since.
+    expect(now(joined, { ready: false })).toBe(false);
+    expect(now(joined, { modeKnown: false })).toBe(false);
     // Any error on the stream, the chat ending included, and a send that found it ended (a 401).
-    for (const code of EV_ERROR_CODES) expect(ownerInChatNow(inOwnersHands, run(events([{ type: 'error', code }], 2), joined)), code).toBe(false);
-    expect(ownerInChatNow(inOwnersHands, run([{ type: 'ended' }], joined))).toBe(false);
+    for (const code of EV_ERROR_CODES) expect(now(run(events([{ type: 'error', code }], 2), joined)), code).toBe(false);
+    expect(now(run([{ type: 'ended' }], joined))).toBe(false);
 
     // The stream drops or closes: until it has caught up again, the chat can't know she's still there.
     const dropped = run([{ type: 'connection', connection: 'reconnecting' }], joined);
-    expect(ownerInChatNow(inOwnersHands, dropped)).toBe(false);
-    expect(ownerInChatNow(inOwnersHands, run([{ type: 'connection', connection: 'closed' }], joined))).toBe(false);
+    expect(now(dropped)).toBe(false);
+    expect(now(run([{ type: 'connection', connection: 'closed' }], joined))).toBe(false);
     const reopened = run([{ type: 'connection', connection: 'open' }], dropped);
-    expect(ownerInChatNow(inOwnersHands, reopened)).toBe(false);
-    expect(ownerInChatNow(inOwnersHands, run([{ type: 'caught_up' }], reopened))).toBe(true);
+    expect(now(reopened)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], reopened))).toBe(true);
     // The page coming back to the chat catches up the same way.
     const back = run([{ type: 'catching_up' }], joined);
-    expect(ownerInChatNow(inOwnersHands, back)).toBe(false);
-    expect(ownerInChatNow(inOwnersHands, run([{ type: 'caught_up' }], back))).toBe(true);
+    expect(now(back)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], back))).toBe(true);
+  });
+
+  it('the_stored_conversation_can_say_the_owner_is_out', () => {
+    const left = (n: number): TranscriptItem => ({ ...item(n, 'owner_left'), event: { type: 'owner_left' } });
+    const joinedAt = (n: number): TranscriptItem => ({ ...item(n, 'owner_joined'), event: ownerJoined });
+    const said = (n: number, author: EvMessage['author']): TranscriptItem => ({
+      ...item(n, 'delivered'),
+      event: { ...quoteMessage, message_id: `msg-${n}`, author },
+    });
+    // Her join last, or after it only her words, the Desk's, the visitor's and statuses: it can't say she left.
+    expect(ownerIsOutIn(STORED_TAKEN_OVER)).toBe(false);
+    expect(ownerIsOutIn([joinedAt(1), said(2, 'owner'), said(3, 'desk'), visitorText(4, 'Thanks'), { ...item(5, 'status'), event: quoteReceipt }])).toBe(false);
+    expect(ownerIsOutIn([joinedAt(1), left(2), joinedAt(3)])).toBe(false);
+    expect(ownerIsOutIn([])).toBe(false);
+    // Her leave after her latest join, or any Claude message after it: she isn't in.
+    expect(ownerIsOutIn([...STORED_TAKEN_OVER, left(5)])).toBe(true);
+    expect(ownerIsOutIn([...STORED_TAKEN_OVER, said(5, 'claude')])).toBe(true);
+    expect(ownerIsOutIn([joinedAt(1), left(2), joinedAt(3), said(4, 'claude')])).toBe(true);
+    // No join kept at all: a leave or a Claude message anywhere says she isn't in.
+    expect(ownerIsOutIn([said(1, 'claude')])).toBe(true);
+    expect(ownerIsOutIn([left(1)])).toBe(true);
+    // By `n`, in whatever order the items come; an item that says it is a join and holds something
+    // else is no join.
+    expect(ownerIsOutIn([joinedAt(3), left(2)])).toBe(false);
+    expect(ownerIsOutIn([left(5), ...STORED_TAKEN_OVER])).toBe(true);
+    expect(ownerIsOutIn([said(1, 'claude'), { ...item(2, 'owner_joined'), event: null }])).toBe(true);
+  });
+
+  it('an_answer_after_the_chat_loaded_only_lowers_the_mode', () => {
+    // An answer after the chat has loaded (a verify, a read of the session) may lower the mode to
+    // Claude's or a pause, never raise it to the owner's.
+    expect(lowerOnly('ai', 'owner')).toBe('ai');
+    expect(lowerOnly('paused', 'owner')).toBe('paused');
+    expect(lowerOnly(null, 'owner')).toBe('ai');
+    expect(lowerOnly('owner', 'owner')).toBe('owner');
+    expect(lowerOnly('owner', 'ai')).toBe('ai');
+    expect(lowerOnly('owner', 'paused')).toBe('paused');
+    expect(lowerOnly(null, 'ai')).toBe('ai');
+    // A read older than the stream's latest change of mode says nothing of it: the mode stays.
+    expect(lowerOnly('owner', null)).toBe('owner');
+    expect(lowerOnly('ai', null)).toBe('ai');
+    expect(lowerOnly(null, null)).toBe('ai');
   });
 });
 

@@ -33,6 +33,7 @@ import type {
   EvOwnerJoined,
   EvOwnerLeft,
   EvOwnerTyping,
+  SessionMode,
   SessionState,
   SseEvent,
   StatusEvent,
@@ -149,16 +150,57 @@ export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {
   return Math.min(left, OWNER_TYPING_MAX_MS);
 }
 
+/** What the visitor chat knows when it says whether the owner is in the chat. */
+export interface OwnerInChatFacts {
+  /** The session as the chat holds it: its mode is the kernel's, as `PublicChatProvider` keeps it. */
+  session: SessionState | null;
+  state: ChatState;
+  /** The chat has loaded (its status is `ready`). */
+  ready: boolean;
+  /**
+   * The chat knows the session's mode now: the read it opened with, and since it last lost track of
+   * the stream (a drop, the page going away), an `owner_joined` or a read of the session.
+   */
+  modeKnown: boolean;
+}
+
 /**
  * Whether the page says the owner is in the chat (PublicShell's `ownerInChat`, which changes the AI
- * disclosure's line). Its one source is the kernel's session mode, `session.mode === 'owner'`: the
- * visitor chat reads it with the stored conversation and follows the stream's join and leave. The
- * chat's lines never decide it. It fails safe to no: no session, any other mode, an error (the chat
- * ending included), and a stream that is down or catching up on what it missed (a drop, or the page
- * coming back), since the chat can't know then whether she has left.
+ * disclosure's line). Its one source is the kernel's session mode, `session.mode === 'owner'`, which
+ * only the chat's opening read and the stream's `owner_joined` can set (`PublicChatProvider`). The
+ * chat's lines never turn it on. Everything else only turns it off: no session or any other mode, a
+ * chat not loaded, a mode not confirmed since the chat lost track of the stream, an error (the chat
+ * ending included), and a stream that is down or catching up on what it missed.
  */
-export function ownerInChatNow(session: SessionState | null, state: ChatState): boolean {
-  return session?.mode === 'owner' && state.error === null && state.connection === 'open' && !state.catchingUp;
+export function ownerInChatNow({ session, state, ready, modeKnown }: OwnerInChatFacts): boolean {
+  return session?.mode === 'owner' && modeKnown && ready && state.error === null && state.connection === 'open' && !state.catchingUp;
+}
+
+/**
+ * Whether the stored conversation says the owner isn't in the chat, whatever the session's mode was
+ * read as: her leave after her latest join, or any message of Claude's after it (with no join kept,
+ * anywhere). The API reads the session before the conversation, so a hand-back between the two
+ * leaves an owner's mode beside a conversation that has moved on. This only ever turns her off.
+ */
+export function ownerIsOutIn(items: readonly TranscriptItem[]): boolean {
+  const sorted = [...items].sort((a, b) => a.n - b.n);
+  const joined = sorted.findLastIndex((item) => item.kind === 'owner_joined' && item.event?.type === 'owner_joined');
+  return sorted
+    .slice(joined + 1)
+    .some(
+      ({ kind, event }) =>
+        (kind === 'owner_left' && event?.type === 'owner_left') || (kind === 'delivered' && event?.type === 'message' && event.author === 'claude'),
+    );
+}
+
+/**
+ * The mode an answer after the chat has loaded may give the session: what it `said`, but never the
+ * owner's unless the chat already has it, since the answer may have been taken before a hand-back the
+ * stream has shown since. `said` is null for a read older than the stream's latest change of mode,
+ * which says nothing of it. Only the opening read and `owner_joined` put the chat in her hands.
+ */
+export function lowerOnly(current: SessionMode | null, said: SessionMode | null): SessionMode {
+  return said === null || said === 'owner' ? (current ?? 'ai') : said;
 }
 
 const messageKey = (ev: EvMessage) => `m:${ev.message_id}`;
