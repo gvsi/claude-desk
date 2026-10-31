@@ -7,7 +7,7 @@ Re-create the view with the security barrier and temporary ownership grants used
 from alembic import op
 
 revision = "09_business_tools_view"
-down_revision = "kernel_ro_decision_policy_ids"
+down_revision = "01b_2b_handoff_kind"
 branch_labels = None
 depends_on = None
 
