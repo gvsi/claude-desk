@@ -1,10 +1,11 @@
 /**
  * Safety's words and the few rules behind them: what each kind of record entry is called, where an
- * entry came from, what an attempt was about, which checkpoint stopped it, the one entry an attempt
- * is shown with, the one time an entry shows, and whether the week stopped anything at all.
+ * entry came from, what an attempt was about, why a request was turned down, which checkpoint
+ * stopped it, the one entry an attempt is shown with, the one time an entry shows, and whether the
+ * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
+import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
 
@@ -50,6 +51,44 @@ export const CATEGORY_COPY = {
   injection: 'Hidden instructions',
   other: 'Other',
 } as const satisfies Record<TriageCategory, string>;
+
+/**
+ * Why a request was turned down, by its cause, in the owner's signed words: the label beside a
+ * refused entry. A cause missing here, or one the API's document adds, is a compile error.
+ */
+export const CAUSE_COPY = {
+  owner_rule: 'Your rule says no',
+  not_verified: 'Not verified yet',
+  recipient: 'Only to you or a contact on record',
+  no_such_slot: "That time isn't open",
+  unknown_item: 'Not on the price list',
+  over_quote_ceiling: 'Over the $10,000 quote ceiling',
+  quote_unpayable: "That quote can't be paid now",
+  no_such_charge: "Couldn't find that payment",
+  not_refundable: "That payment can't be refunded",
+  no_such_document: 'No such document',
+  no_amount: 'Not a valid amount',
+  tool_not_available: 'Not a tool this chat can use',
+  incomplete_request: "The request wasn't in a form I can use",
+  paused: 'The chat was paused',
+  no_rules: 'No rules turned on yet',
+  rules_unchecked: "Your rules couldn't be checked, so I said no",
+  agent_pay_out: "Agents can't send money out",
+  agent_limit: "Outside the agent's spending limit",
+  other_copy: 'Not a record on this Desk',
+  no_rule: 'No rule covers this yet',
+} as const satisfies Record<RefusalCause, string>;
+
+/**
+ * The label beside a refused entry, saying why it was turned down, or null: for an entry with no
+ * cause (the API couldn't place it, or sent none), a cause this build has no words for yet, and
+ * anything but a refused request, since a stopped draft or a hold was never turned down.
+ */
+export function causeLabel(a: Pick<Attempt, 'kind' | 'cause'>): string | null {
+  const cause = a.cause ?? null;
+  if (a.kind !== 'refused' || cause === null || !Object.hasOwn(CAUSE_COPY, cause)) return null;
+  return CAUSE_COPY[cause];
+}
 
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';

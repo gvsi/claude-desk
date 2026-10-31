@@ -13,7 +13,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
 import { attemptTime } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -150,6 +150,8 @@ function region(screen: RenderResult, name: string) {
 const REPLAYED = 'Recorded history, replayed into your copy';
 
 const REFUND_REASON = 'Someone in the public chat said they were Maria and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
+
+const HALF_OFF_REASON = 'Asked for 50% off the drain clearing. Your rule says never to discount it, so I didn’t.';
 
 /** An attempt as the API lists it: by default the refused refund, entry 2 of `threeEntries`. */
 function attempt(fields: Partial<Attempt> = {}): Attempt {
@@ -404,6 +406,52 @@ describe('Safety', () => {
     await recordRow(own.screen, 2).click();
     await expect.element(region(own.screen, 'Full trace of entry 2')).toBeVisible();
     expect(own.screen.getByText('Signed with a development key').elements()).toHaveLength(0);
+  });
+
+  it.each(['desktop', 'phone'] as const)('refused_entries_say_why_%s', async (viewport) => {
+    // This week: a request the owner's rule refused, one the API couldn't place (no cause), and a
+    // draft of Claude's the reply check stopped. Only the first says why, over its own detail.
+    const ownerRule = attempt({ ref_id: 'dec-half-off', reason_plain: HALF_OFF_REASON, created_at: '2026-10-29T16:51:00.000000Z', ledger_seq: 2, cause: 'owner_rule' });
+    const unplaced = attempt({ ref_id: 'dec-refund', created_at: '2026-10-29T16:40:00.000000Z', ledger_seq: 1, cause: null });
+    const draft = stoppedDraft(3, '2026-10-29T17:10:00.000000Z');
+    const decided = (seq: number, a: Attempt) =>
+      entry(seq, a.created_at, { kind: 'decide', session_id: 'ses-1', ref_id: a.ref_id, summary: { tool: 'native.quote', outcome: 'refuse', state: 'refused', card_ids: [] } });
+    injectLedger(ledgerPage([decided(1, unplaced), decided(2, ownerRule), draft.entry]));
+    injectAttempts([draft.attempt, ownerRule, unplaced]);
+    await stoppedThisWeek(2);
+    const { screen } = await renderRoute(SAFETY, { viewport });
+    await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
+    const list = screen.getByRole('list', { name: 'Attempts, newest first' });
+    const rows = list.getByRole('link');
+    await expect.element(rows.first()).toBeVisible();
+    const labels = rows.elements().map((row) => row.querySelector('.cd-status-label')?.textContent ?? null);
+    const titles = rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent);
+    expect(labels).toEqual([null, 'Your rule says no', null]);
+    expect(titles).toEqual([STOPPED_REPLY, HALF_OFF_REASON, REFUND_REASON]);
+    // The label is the first thing the row says after its time, and a refused dot stands beside it.
+    await expect.element(list.getByRole('link', { name: /^Oct 29, 9:51 am Your rule says no Asked for 50% off/ })).toBeVisible();
+    expect(rows.elements()[1]?.querySelector('.cd-status-label .cd-status-dot--refused')).not.toBeNull();
+    // Opened, the entry's detail is as it was: no label there, its reason in full.
+    await list.getByRole('link', { name: /Your rule says no/ }).click();
+    await expect.element(detail(screen).getByText(HALF_OFF_REASON, { exact: true })).toBeVisible();
+    expect(detail(screen).getByText('Your rule says no').elements()).toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(/talk me around/);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('mock_refusal_says_why', async () => {
+    // The built-in agent's charge over its signed limit, refused by the baseline's signed-limit
+    // policy, as the mock decides it: its row says why. The seeded stopped draft says nothing more.
+    await refuseTheAgentsCharge();
+    const { screen } = await renderRoute(SAFETY);
+    const list = screen.getByRole('list', { name: 'Attempts, newest first' });
+    const refused = list.getByRole('link', { name: /Stopped by: Action checkpoint$/ });
+    await expect.element(refused).toBeVisible();
+    await expect.element(refused.getByText("Outside the agent's spending limit", { exact: true })).toBeVisible();
+    const draft = list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
+    await expect.element(draft).toBeVisible();
+    expect(draft.element().querySelector('.cd-status-label')).toBeNull();
   });
 
   it('attempt_detail_tiers', async () => {

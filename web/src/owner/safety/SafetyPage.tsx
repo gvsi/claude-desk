@@ -21,6 +21,7 @@ import {
   anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
+  causeLabel,
   originCopy,
   stoppedBy,
   triageOf,
@@ -195,9 +196,10 @@ interface AttemptsViewProps {
 }
 
 /**
- * The attempts, each a link that opens it beside the list: the one the address names, else the
- * newest. With none, the list is left out: the empty state above already says nothing was stopped.
- * A failed read is said above, beside the headline (`Headline`), over the attempts read before, and
+ * The attempts, each a link that opens it beside the list, a refused request's row saying why it
+ * was turned down when the API gave a cause: the one the address names, else the newest. With
+ * none, the list is left out: the empty state above already says nothing was stopped. A failed
+ * read is said above, beside the headline (`Headline`), over the attempts read before, and
  * with nothing read yet it takes the place of "Reading the attempts".
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
@@ -244,6 +246,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
               <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
                 <AttemptRow
                   time={formatWhen(attemptTime(a, page), timezone, now)}
+                  why={causeLabel(a) ?? undefined}
                   title={triageOf(a)?.summary ?? a.reason_plain}
                   who={originCopy(a.origin)}
                   stoppedBy={stoppedBy(a)}
