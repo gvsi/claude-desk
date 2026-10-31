@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "5914a203361b1277",
+ "inputs": "91b0c6ab8d8c0074",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -23,7 +23,7 @@
    "backend/desk/kernel_api.py"
   ],
   [
-   "9a1da88e0e72b70d7fdda65740bfeb46e458fdac",
+   "11288b182dfa47e18fc30cf27a5f6664f1760e59",
    "backend/desk/kernel_service"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "ebf7e0feaacff10d67d91e720781ea32a5b3f441",
- "created_at": "2026-10-31T18:38:42.868249Z",
- "pass_id": "20261031-183842-ca53c7",
+ "git_sha": "ecec6f205f533f8f091b9c49e961416a7b4ed3fa",
+ "created_at": "2026-10-31T18:41:38.304340Z",
+ "pass_id": "20261031-184138-fb7a61",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
