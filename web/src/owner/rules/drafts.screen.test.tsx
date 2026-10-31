@@ -114,10 +114,11 @@ describe('rule draft review', () => {
     const row = screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
     const before = row.getByRole('group', { name: 'Before' });
     const after = row.getByRole('group', { name: 'After' });
-    // The row's title and each side name the tool, so a change of target would show.
-    await expect.element(row.getByText('Quote', { exact: true }).first()).toBeVisible();
-    await expect.element(before.getByText('Quote', { exact: true })).toBeVisible();
-    await expect.element(after.getByText('Quote', { exact: true })).toBeVisible();
+    // The row's title names the tool. The rule stays on it, so neither side repeats it (N-Conn-18):
+    // a side names its target only when the change moves it.
+    await expect.element(row.getByText('Quote', { exact: true })).toBeVisible();
+    expect(before.getByText('Quote', { exact: true }).elements()).toHaveLength(0);
+    expect(after.getByText('Quote', { exact: true }).elements()).toHaveLength(0);
     await expect.element(before.getByText('Anyone · Discounts up to 10%', { exact: true })).toBeVisible();
     await expect.element(after.getByText('Anyone · Discounts up to 50%', { exact: true })).toBeVisible();
     // The line that changed is tagged in words on the After side, and only that line.

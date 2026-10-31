@@ -27,14 +27,15 @@ function connectorFor(card: RuleCard) {
 }
 
 /**
- * A card on one side of a row: its outcome and limit, its reason and its words, and, on a changed
- * row's two sides, what it applies to, so a widened or narrowed target shows. A row's lone side
- * leaves that to the row's title, which names it.
+ * A card on one side of a row: its outcome and limit, its reason and its words, and, when the row's
+ * target moves (a card retargeted, or one that goes to a rule for a whole effect group), what it
+ * applies to, so the widened or narrowed target shows. Otherwise the row's title names the target
+ * and the sides don't repeat it (N-Conn-18).
  */
-function cardSide(card: RuleCard, people: PeopleOut | null | undefined, withTarget: boolean): ChangeSide {
+function cardSide(card: RuleCard, people: PeopleOut | null | undefined, moved: boolean): ChangeSide {
   const amount = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
   return {
-    ...(withTarget ? { appliesTo: targetWords(card.applies_to) } : {}),
+    ...(moved ? { appliesTo: targetWords(card.applies_to) } : {}),
     mode: card.mode,
     ...(amount === undefined ? {} : { limit: amount }),
     reason: card.reason,
@@ -42,9 +43,9 @@ function cardSide(card: RuleCard, people: PeopleOut | null | undefined, withTarg
   };
 }
 
-/** The default ask, for what `appliesTo` names on a changed row's After side. */
-function defaultSide(appliesTo?: string): ChangeSide {
-  return { ...(appliesTo === undefined ? {} : { appliesTo }), ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words] };
+/** The default ask, which is for the row's own tool, so it names no target. */
+function defaultSide(): ChangeSide {
+  return { ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words] };
 }
 
 /** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */
@@ -108,13 +109,14 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     if (card === null) throw new Error('a review change with no card');
     const title = targetWords(card.applies_to);
     const connector = connectorFor(card);
+    const moved = change.before !== null && change.after !== null && change.after.applies_to !== change.before.applies_to;
     return {
       key: card.card_id,
       change: change.change,
       title,
       ...(connector === undefined ? {} : { connector }),
-      before: change.before === null ? null : cardSide(change.before, people, true),
-      after: change.after === null ? defaultSide(title) : cardSide(change.after, people, change.before !== null),
+      before: change.before === null ? null : cardSide(change.before, people, moved),
+      after: change.after === null ? defaultSide() : cardSide(change.after, people, moved),
       changed: change.fields,
     };
   });

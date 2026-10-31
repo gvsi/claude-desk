@@ -367,10 +367,12 @@ describe('rule drafts', () => {
       return found;
     };
 
-    // A tool card: the tool's name and its connector, the fields that changed.
+    // A tool card: the tool's name and its connector, the fields that changed. Its target stays,
+    // so neither side repeats it: the row's title names it (N-Conn-18).
     const quote = rowFor('rv-quote');
     expect(quote).toMatchObject({ change: 'changed', title: 'Quote', connector: view('quotes'), changed: ['limits'] });
-    expect(quote.before).toEqual({ appliesTo: 'Quote', mode: 'auto', reason: ruleCards['rv-quote'].reason, words: ruleWords(ruleCards['rv-quote'], PEOPLE) });
+    expect(quote.before).toEqual({ mode: 'auto', reason: ruleCards['rv-quote'].reason, words: ruleWords(ruleCards['rv-quote'], PEOPLE) });
+    expect(quote.after?.appliesTo).toBeUndefined();
     expect(quote.after?.words).toContainEqual({ field: 'limits', text: 'Discounts up to 10%' });
 
     // An effect card: the group in words, and no connector. An added rule's one side leaves its
@@ -440,7 +442,11 @@ describe('rule drafts', () => {
       'Stripe',
       undefined,
     ]);
-    for (const row of dropped) expect(row.after, row.key).toEqual({ ...DEFAULT_SIDE, appliesTo: row.title });
+    // The default ask is for the same tool, so neither side names a target: the row's title does.
+    for (const row of dropped) {
+      expect(row.after, row.key).toEqual(DEFAULT_SIDE);
+      expect(row.before?.appliesTo, row.key).toBeUndefined();
+    }
     const byKey = new Map(rows.map((row) => [row.key, row]));
     expect(byKey.get('rv-quote')?.changed).toEqual(['mode']);
     expect(byKey.get('rv-refund')?.changed).toEqual([]);
@@ -485,6 +491,8 @@ describe('rule drafts', () => {
       after: { appliesTo: 'Every tool that charges money', mode: 'ask', reason: 'Taking a payment asks you first.' },
     });
     expect(byKey.get('rv-link')?.changed).toEqual(expect.arrayContaining(['applies_to', 'mode']));
+    // The target moves, so both sides name theirs.
+    expect(byKey.get('rv-link')?.before?.appliesTo).toBe('Payment link');
     expect(byKey.get('rv-mandate')?.after).toMatchObject({ appliesTo: 'Every tool that charges money', mode: 'ask' });
     expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that sends money out', mode: 'ask' });
     expect(byKey.get('rv-refund')?.changed).not.toContain('mode');
@@ -492,8 +500,9 @@ describe('rule drafts', () => {
     // Weekday bookings from 8:00 am to 6:00 pm reach outside the preset's 9-to-5 rule and Saturdays lie
     // outside it, so both fall to the default ask rather than claiming "Automatic"; the 9-to-5 rule,
     // which no dropped rule goes to, is added at "Automatic".
-    expect(byKey.get('rv-book-wk')?.after).toEqual({ ...DEFAULT_SIDE, appliesTo: 'Book a visit' });
-    expect(byKey.get('rv-book-sat')?.after).toEqual({ ...DEFAULT_SIDE, appliesTo: 'Book a visit' });
+    expect(byKey.get('rv-book-wk')?.after).toEqual(DEFAULT_SIDE);
+    expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
+    expect(byKey.get('rv-book-sat')?.before?.appliesTo).toBeUndefined();
     expect(byKey.get('preset-book-weekday')).toMatchObject({ change: 'added', title: 'Book a visit', after: { mode: 'auto' } });
     expect(byKey.get('preset-book-weekday')?.after?.appliesTo).toBeUndefined();
     expect(rows.filter((row) => row.change === 'added').map((row) => row.key)).toEqual(['preset-book-weekday']);
