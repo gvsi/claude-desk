@@ -998,7 +998,10 @@ export class MockWorld {
     });
   }
 
-  /** The owner closes a callback request, as the kernel records it. */
+  /**
+   * The owner marks a handoff done, a call-back request or the handoff card's, as the kernel records
+   * it: a `desk_data` entry naming it, on no chat and with no `kind`.
+   */
   closeHandoff(record: HandoffRecord): void {
     const desk = this.desk(record.deskId);
     if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
@@ -1006,9 +1009,9 @@ export class MockWorld {
     this.appendLedger(desk, {
       kind: 'desk_data',
       origin: 'kernel',
-      session_id: record.handoff.session_id,
-      ref_id: record.handoff.handoff_id,
-      summary: { handoff: 'done' },
+      session_id: null,
+      ref_id: null,
+      summary: { part: 'handoffs', refs: [record.handoff.handoff_id] },
     });
   }
 

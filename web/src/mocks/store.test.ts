@@ -919,6 +919,28 @@ describe('the scripted Desk', () => {
     expect(mine()).toHaveLength(2);
   });
 
+  it('handoff_done_is_recorded_as_the_kernel_does', async () => {
+    // The owner marking a handoff done, of either kind, is one `desk_data` entry naming it, on no
+    // chat and with no `kind` (plan 01b, `POST /handoffs/{id}/done`).
+    await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    for (const text of ['Can I talk to Maria?', 'Can you call me back?']) {
+      await send(text);
+      await drain();
+      const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
+      if (handoff?.status !== 'open') throw new Error(`"${text}" opened a handoff`);
+      expect((await call('handoffDone', { params: { handoff_id: handoff.handoff_id } })).status).toBe(200);
+      expect(desk.ledger.at(-1)?.event, handoff.kind).toEqual({
+        kind: 'desk_data',
+        origin: 'kernel',
+        session_id: null,
+        ref_id: null,
+        summary: { part: 'handoffs', refs: [handoff.handoff_id] },
+      });
+    }
+  });
+
   it('events_replay_after_seq', async () => {
     // No stream without this browser's session for the Desk, and none for a Desk that doesn't exist.
     expect(await call('events', { params: { slug } })).toEqual({ status: 401, body: { error: 'no_session' } });

@@ -19,6 +19,7 @@ import {
   anythingStoppedIn,
   anythingTurnedDownIn,
   causeLabel,
+  entryCopy,
   entryFor,
   turnedDownHeadline,
 } from './copy.ts';
@@ -121,6 +122,23 @@ describe('Safety copy', () => {
     for (const table of [LEDGER_KIND_COPY, ORIGIN_COPY, CATEGORY_COPY]) {
       for (const [key, words] of Object.entries(table)) expect(words.trim(), key).not.toBe('');
     }
+  });
+
+  it('handoff_entries_say_which_they_are', () => {
+    // The kernel's two `desk_data` entries about a conversation handed to the owner: the handoff
+    // card opening one (`kind: "card"`) and the owner marking one done (no `kind`).
+    const deskData = (summary: Record<string, unknown>) => ({ kind: 'desk_data' as const, summary });
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: 'card' }))).toBe('Chat handed to you');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'] }))).toBe('Handoff marked done');
+    // Every other `desk_data` entry is unchanged, a handoffs entry of a kind this build doesn't know among them.
+    for (const summary of [{ part: 'tools', refs: ['native.quote'] }, { part: 'desk', created: true }, { part: 'hours', refs: [] }, {}]) {
+      expect(entryCopy(deskData(summary)), JSON.stringify(summary)).toBe('Desk details changed');
+    }
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: 'callback' }))).toBe('Desk details changed');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: null }))).toBe('Desk details changed');
+    // Another kind of entry keeps its own name, whatever its summary says.
+    expect(entryCopy({ kind: 'reply', summary: { part: 'handoffs', refs: ['handoff-1'], kind: 'card' } })).toBe('Reply checked');
+    expect(entryCopy({ kind: 'execute', summary: { part: 'handoffs', refs: ['handoff-1'] } })).toBe('Action ran');
   });
 
   it('entry_for_matches_ledger_seq', () => {

@@ -110,6 +110,32 @@ export function kindCopy(kind: string): string {
   return Object.hasOwn(LEDGER_KIND_COPY, kind) ? LEDGER_KIND_COPY[kind as LedgerEvent['kind']] : 'Other entry';
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The two `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), as the
+ * checkpoint writes them: the handoff card handing one over (`kind: "card"`), and the owner marking
+ * one done, a call-back request or the card's (no `kind`).
+ */
+export const HANDOFF_ENTRY_COPY = {
+  card: 'Chat handed to you',
+  done: 'Handoff marked done',
+} as const;
+
+/**
+ * An entry's name as a row of the record names it: its kind's, but a `desk_data` entry about a
+ * handoff says which of the two it is. Every other `desk_data` entry, one about handoffs with a
+ * `kind` this build doesn't know among them, stays "Desk details changed".
+ */
+export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
+  const { summary } = event;
+  if (event.kind === 'desk_data' && isRecord(summary) && summary.part === 'handoffs') {
+    if (!Object.hasOwn(summary, 'kind')) return HANDOFF_ENTRY_COPY.done;
+    if (summary.kind === 'card') return HANDOFF_ENTRY_COPY.card;
+  }
+  return kindCopy(event.kind);
+}
+
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */
 export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
   return a.kind === 'reply_blocked' ? 'reply' : 'action';
@@ -119,8 +145,6 @@ export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
 export function entryFor(a: Pick<Attempt, 'ledger_seq'>, page: Pick<LedgerPage, 'entries'> | undefined): LedgerEntry | null {
   return page?.entries.find((entry) => entry.seq === a.ledger_seq) ?? null;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * The replay marker inside the signed entry (`event.summary.replayed`, which only the kernel's

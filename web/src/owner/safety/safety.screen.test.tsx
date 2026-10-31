@@ -605,6 +605,33 @@ describe('Safety', () => {
     noOldWords();
   });
 
+  it('handoff_entries_say_which_they_are', async () => {
+    // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
+    // record names the two entries the checkpoint wrote for what they are. Any other change to the
+    // Desk's details reads as before.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    const [handoffId = ''] = mockStore.world.handoffs.keys();
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: handoffId } });
+    const { entries } = await mockLedger();
+    const handoffs = entries.filter((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs');
+    expect(handoffs.map((e) => e.event.summary)).toEqual([
+      { part: 'handoffs', refs: [handoffId], kind: 'card' },
+      { part: 'handoffs', refs: [handoffId] },
+    ]);
+    const [opened, done] = handoffs.map((e) => e.seq);
+    const hours = entries.length + 1;
+    injectLedger(ledgerPage([...entries, entry(hours, isoTime(Date.now()), { kind: 'desk_data', summary: { part: 'hours', refs: [] } })]));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, opened ?? 0).getByText('Chat handed to you', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, done ?? 0).getByText('Handoff marked done', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
+    expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('filters_start_with_all', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const sorted = (summary: string, category: TriageCategory, n: number) =>

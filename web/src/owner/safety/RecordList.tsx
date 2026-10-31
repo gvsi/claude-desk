@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import type { LedgerEntry, LedgerPage } from '../../api/contracts.ts';
 import { EmptyState, FullTrace } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
-import { REPLAYED_LABEL, entryTime, kindCopy, originCopy, replayedOf } from './copy.ts';
+import { REPLAYED_LABEL, entryCopy, entryTime, originCopy, replayedOf } from './copy.ts';
 
 export interface RecordListProps {
   page: LedgerPage;
@@ -24,7 +24,7 @@ interface RecordRowProps {
 /** One entry's row: its number, what it records, who wrote it and when it happened, as one button that opens its trace. */
 function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
   const replayed = replayedOf(entry) !== null;
-  const kind = kindCopy(entry.event.kind);
+  const kind = entryCopy(entry.event);
   const who = originCopy(entry.event.origin);
   const when = formatWhen(entryTime(entry), timezone, new Date());
   // Read as one line, the words shown in order: "Entry 48, Action checked, Recorded by the checkpoint, Today, 9:52 am".
