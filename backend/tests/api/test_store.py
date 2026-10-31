@@ -69,7 +69,8 @@ APP_COLUMNS = {
     "run_events": {"id", "copy_id", "desk_id", "session_id", "kind", "seq", "type", "payload", "handled_at",
                    "created_at", "replay_id"},
     "setup_interviews": {"interview_id", "copy_id", "desk_id", "business_type", "step", "consent", "answers",
-                         "transcript", "draft_cards", "draft_version", "created_at", "updated_at"},
+                         "transcript", "draft_cards", "draft_version", "created_at", "updated_at", "idempotency_key",
+                         "request_sha256", "start_error", "desk_requested_at"},
     "a2a_turns": {"agent_key_id", "session_id", "nonce", "copy_id", "desk_id", "status", "http_status", "response",
                   "through_seq", "created_at", "updated_at"},
     "model_calls": {"model_call_id", "copy_id", "session_id", "route", "model", "input_tokens", "cached_tokens",
@@ -104,6 +105,8 @@ def test_migration_sets_app_columns(db):
                         "'receipt'::text", "'held'::text", "'resolved'::text")
     assert unique_index(db, "run_events", "(payload ->> 'decision_id'::text)", "'decision_due'::text",
                         "handled_at IS NULL")
+    # a start's idempotency key is held by one interview in a copy; starts without one are never compared
+    assert unique_index(db, "setup_interviews", "(copy_id, idempotency_key)", "idempotency_key IS NOT NULL")
     # the columns admit only the plan's values
     for statement in (
         "INSERT INTO app.messages (message_id, copy_id, session_id, kind, author, visibility)"
@@ -121,6 +124,12 @@ def test_migration_sets_app_columns(db):
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at)"
         " VALUES ('c-1', 'chat', 'claude-opus-5-5', 1, 0, 0, 1, 1, 'end_turn', now())",
+        # a key is stored with its request's hash, and a start's failure only on a keyed start
+        "INSERT INTO app.setup_interviews (interview_id, copy_id, idempotency_key) VALUES ('setup-1', 'c-1', 'k')",
+        "INSERT INTO app.setup_interviews (interview_id, copy_id, request_sha256) VALUES ('setup-1', 'c-1', 'h')",
+        "INSERT INTO app.setup_interviews (interview_id, copy_id, start_error)"
+        " VALUES ('setup-1', 'c-1', '{\"status\": 500}')",
+        "INSERT INTO app.setup_interviews (interview_id, copy_id, desk_requested_at) VALUES ('setup-1', 'c-1', now())",
     ):
         with pytest.raises(psycopg.errors.CheckViolation), db.transaction(force_rollback=True):
             db.execute(statement)
