@@ -1114,7 +1114,9 @@ def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
     """Every handoff written before the kind revision was a call-back request, and reads as one;
     from then on each row names its kind, `callback` or `card`, and a card's handoff, which no
     action wrote, names its own id where a call-back names its action, so no action's lookup can
-    find it. The downgrade deletes nothing, and the revision runs again over what it added."""
+    find it, and only a card's does. The downgrade deletes nothing, and the next upgrade reads
+    each kept row's kind back from it, so a card stays a card and a call-back a call-back; the
+    revision runs again over what it added, and keeps them too."""
     admin = scratch.conn
 
     def insert(handoff_id: str, action_id: str, *kind: str) -> None:
@@ -1142,26 +1144,59 @@ def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
         assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
         insert("handoff-card", "handoff-card", "card")
         insert("handoff-callback", "act-callback", "callback")
-        for refused in (("handoff-x", "act-x", "card"), ("handoff-z", "act-z", "other")):
+        for refused in (("handoff-x", "act-x", "card"), ("handoff-y", "handoff-y", "callback"),
+                        ("handoff-z", "act-z", "other")):
             with pytest.raises(psycopg.errors.CheckViolation):
                 insert(*refused)
         with pytest.raises(psycopg.errors.NotNullViolation):
             insert("handoff-unnamed", "act-unnamed")
 
-        # down again with a card's handoff in the table: nothing is deleted, and it stays a valid row, which
-        # the next upgrade reads as a call-back request, as it reads every row from before it
+        # down again with a card's handoff in the table: nothing is deleted, it stays a valid row, and the next
+        # upgrade reads each row's kind back from it
+        kept = {"handoff-before": "callback", "handoff-card": "card", "handoff-callback": "callback"}
+        assert kinds() == kept
         scratch.migrate(command.downgrade, before)
         assert admin.execute("SELECT count(*) FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchone() == (3,)
         scratch.migrate(command.upgrade, "head")
-        assert kinds() == dict.fromkeys(("handoff-before", "handoff-card", "handoff-callback"), "callback")
+        assert kinds() == kept
         scratch.migrate(command.stamp, before)                       # the revision runs again over what it added
         scratch.migrate(command.upgrade, HANDOFF_KIND_REVISION)
+        assert kinds() == kept
         checks = admin.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.handoffs'::regclass"
                                " AND conname IN ('handoffs_kind_check', 'handoffs_card_names_itself')").fetchone()
         assert checks == (2,)
+        assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
     finally:
         admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-kind'")
         scratch.migrate(command.upgrade, "head")
+
+
+def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scratch):
+    """On a managed Postgres the migration role is neither SUPERUSER nor BYPASSRLS, and under the
+    table's forced row security the table's owner sees none of its rows, so an UPDATE would
+    backfill nothing. The kind revision rewrites the column instead, which reads every row
+    whoever runs it: run as such an owner, its downgrade's and upgrade's steps on the table bring
+    each row's kind back from the row."""
+    migration = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).module
+    admin = scratch.conn
+    with admin.transaction(force_rollback=True):
+        for handoff_id, action_id, kind in (("handoff-rls-card", "handoff-rls-card", "card"),
+                                            ("handoff-rls-callback", "act-rls-callback", "callback")):
+            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, status, action_id,"
+                          " kind) VALUES (%s, 'copy-rls', 'desk-rls', 'session-rls', 'open', %s, %s)",
+                          (handoff_id, action_id, kind))
+        admin.execute("DROP VIEW kernel_ro.handoffs")                # the revision drops and creates it around them
+        admin.execute("CREATE ROLE desk_test_handoffs_owner NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE ON SCHEMA kernel TO desk_test_handoffs_owner")
+        admin.execute("ALTER TABLE kernel.handoffs OWNER TO desk_test_handoffs_owner")
+        admin.execute("SET LOCAL ROLE desk_test_handoffs_owner")
+        assert admin.execute("SELECT count(*) FROM kernel.handoffs").fetchone() == (0,)   # it sees no row
+        admin.execute(migration.DROP_KIND)
+        admin.execute(migration.ADD_KIND)
+        admin.execute("RESET ROLE")
+        kinds = dict(admin.execute("SELECT handoff_id, kind FROM kernel.handoffs"
+                                   " WHERE copy_id = 'copy-rls'").fetchall())
+    assert kinds == {"handoff-rls-card": "card", "handoff-rls-callback": "callback"}
 
 
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:

@@ -3,13 +3,14 @@
 Until now only `native.request_callback` wrote a handoff. The kernel's handoff card now opens one
 too (`reply_check.finalize`, the owner's decision of 2026-10-30), with no call-back window, so a
 null window no longer tells the two apart. `kernel.handoffs` gains `kind`, `callback` or `card`,
-NOT NULL. It is added with a default of `callback`, which the rows already written take (each was a
-call-back request), and then has none, so every row written from now on names its kind.
+NOT NULL, with no default once it is added, so every row written from now on names its kind; the
+rows already there take theirs from the row itself (below).
 
 A card's handoff has no action. `action_id` stays NOT NULL and unique: a card's names the
 handoff's own id, which no action's id can equal (an action's id starts `act-`, a handoff's
-`handoff-`), and a check holds every card to that, so a reconciliation that finds a call-back's
-handoff by its action never finds a card's.
+`handoff-`), so a reconciliation that finds a call-back's handoff by its action never finds a
+card's. A check holds the two together both ways (`handoffs_card_names_itself`): a row names
+itself exactly when it is a card's, so each row's kind can always be read back from it.
 
 The column joins kernel_ro.handoffs after `status`, as the master plan's "Data model" table lists
 it, so the API and the web can tell a card's handoff from a call-back request with no time.
@@ -18,16 +19,24 @@ again as 01b_3b_money_cap and 01b_5b_knowledge_view leave a view: a security_bar
 on the transaction's `desk.copy_id`, owned by desk_ro_owner, which may SELECT exactly the view's
 columns, and readable by desk_api alone. Dropping without CASCADE fails if anything depends on it.
 
-Nothing is updated in place (an UPDATE would run under the table's forced row security, which a
-managed Postgres's admin doesn't bypass), and the downgrade deletes nothing: a card's handoff
-written meanwhile is a valid row without the column, and an upgrade after it reads that row as a
-call-back request, as it reads every row from before it.
+Nothing is updated in place: an UPDATE or SELECT runs under the table's forced row security,
+which a managed Postgres's admin doesn't bypass, so it would see no row. The downgrade deletes
+nothing, since a card's handoff written meanwhile is a valid row without the column, and the
+upgrade reads every row's kind back from it: after adding the column it rewrites it (`ALTER
+COLUMN ... TYPE ... USING`, `KIND_OF_ROW`), which reads each row whoever runs it, a card's being
+one that names itself. Rows from before the first upgrade are call-back requests, whose
+`action_id` is their action's, so they read as `callback`, and a downgrade and upgrade keep both
+kinds. Refusing the downgrade while card rows exist was passed over: the admin can't see them
+to count them under forced row security, and the refusal would block a rollback that loses
+nothing.
 
-Any admin role can run this, superuser or not (a managed Postgres's admin isn't): the grants run
-first, while the admin owns the view; the admin owns kernel_ro, so it may drop the view; then
-`_change_owner` lends the admin SET on desk_ro_owner, and desk_ro_owner CREATE on the schema, for
-the ownership change alone, and takes both back. Like the revisions before it, it runs again over
-what it added.
+Any admin role can run this, superuser or not (a managed Postgres's admin isn't): the admin owns
+the table, so it may rewrite its column; the grants run while the admin owns the view; the admin
+owns kernel_ro, so it may drop the view; then `_change_owner` lends the admin SET on
+desk_ro_owner, and desk_ro_owner CREATE on the schema, for the ownership change alone, and takes
+both back. Like the revisions before it, it runs again over what it added: the view, which
+selects the column once the revision has run, is dropped before the column is rewritten and
+created again after.
 
 Revision ID: 01b_2b_handoff_kind
 Revises: 01c_5_mandate_reservations
@@ -46,9 +55,22 @@ CURRENT_COPY = "nullif(current_setting('desk.copy_id', true), '')"
 BEFORE = "handoff_id, copy_id, desk_id, session_id, reason, callback_window, status"
 AFTER = "handoff_id, copy_id, desk_id, session_id, reason, callback_window, status, kind"
 
-CHECKS = {   # name: condition
-    "handoffs_card_names_itself": "kind <> 'card' OR action_id = handoff_id",
-}
+# A row's kind, read back from the row: a card's handoff names itself as its action, and only a card's does.
+KIND_OF_ROW = "CASE WHEN action_id = handoff_id THEN 'card' ELSE 'callback' END"
+
+# The upgrade's steps on the table, and the downgrade's: neither reads rows through row security.
+ADD_KIND = f"""
+    ALTER TABLE kernel.handoffs ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'callback'
+        CONSTRAINT handoffs_kind_check CHECK (kind IN ('callback', 'card'));
+    ALTER TABLE kernel.handoffs ALTER COLUMN kind DROP DEFAULT;
+    ALTER TABLE kernel.handoffs ALTER COLUMN kind TYPE text USING ({KIND_OF_ROW});
+    ALTER TABLE kernel.handoffs DROP CONSTRAINT IF EXISTS handoffs_card_names_itself,
+        ADD CONSTRAINT handoffs_card_names_itself CHECK ((kind = 'card') = (action_id = handoff_id));
+"""
+DROP_KIND = """
+    ALTER TABLE kernel.handoffs DROP CONSTRAINT IF EXISTS handoffs_card_names_itself;
+    ALTER TABLE kernel.handoffs DROP COLUMN IF EXISTS kind;
+"""
 
 
 def _script(sql: str) -> None:
@@ -73,9 +95,8 @@ def _change_owner(role: str, schema: str, statements: str) -> None:
     """)
 
 
-def _recreate_view(columns: str) -> None:
+def _create_view(columns: str) -> None:
     _script(f"""
-        DROP VIEW kernel_ro.handoffs;
         CREATE VIEW kernel_ro.handoffs WITH (security_barrier = true) AS
             SELECT {columns} FROM kernel.handoffs WHERE copy_id = {CURRENT_COPY};
         GRANT SELECT ON kernel_ro.handoffs TO desk_api;
@@ -84,21 +105,13 @@ def _recreate_view(columns: str) -> None:
 
 
 def upgrade() -> None:
-    _script("""
-        ALTER TABLE kernel.handoffs ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'callback'
-            CONSTRAINT handoffs_kind_check CHECK (kind IN ('callback', 'card'));
-        ALTER TABLE kernel.handoffs ALTER COLUMN kind DROP DEFAULT;
-        GRANT SELECT (kind) ON kernel.handoffs TO desk_ro_owner;
-    """)
-    for name, condition in CHECKS.items():
-        op.execute(f"ALTER TABLE kernel.handoffs DROP CONSTRAINT IF EXISTS {name},"
-                   f" ADD CONSTRAINT {name} CHECK ({condition})")
-    _recreate_view(AFTER)
+    _script("DROP VIEW kernel_ro.handoffs;")
+    _script(ADD_KIND)
+    _script("GRANT SELECT (kind) ON kernel.handoffs TO desk_ro_owner;")
+    _create_view(AFTER)
 
 
 def downgrade() -> None:
-    _recreate_view(BEFORE)
-    for name in CHECKS:
-        op.execute(f"ALTER TABLE kernel.handoffs DROP CONSTRAINT IF EXISTS {name}")
-    # drops its CHECK and its column grant too
-    _script("ALTER TABLE kernel.handoffs DROP COLUMN IF EXISTS kind;")
+    _script("DROP VIEW kernel_ro.handoffs;")
+    _script(DROP_KIND)                    # dropping the column drops its CHECK and its column grant too
+    _create_view(BEFORE)
