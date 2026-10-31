@@ -132,8 +132,9 @@ describe('Arrival', () => {
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
+    // Each of Today's reads had been answered, once and successfully, before it started to leave.
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
-    expect(handOff.readsAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
   });
 
   it('returning_owner_opens_today_drawn', async () => {
@@ -980,28 +981,39 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
+/** What the not-found page says. */
+const NOT_FOUND = "This page doesn't exist";
+
 /**
- * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
- * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
- * Today, which is named for what it lacks until it holds its held request and its briefing.
+ * The page drawn now, by name: the preview behind the intro dialog; the owner's loading page or its
+ * error; the not-found page, or another page outside the app's frame (an error); Today, named for
+ * what it lacks until it holds its held request and its briefing; any other page; or nothing.
+ */
+function pageNow(): string {
+  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  const state = document.querySelector('.cd-owner-state');
+  if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+  const standalone = document.querySelector('.cd-standalone-page');
+  if (standalone !== null) return standalone.textContent?.includes(NOT_FOUND) ? 'not found' : 'an error page';
+  if (document.querySelector('.cd-today-preview') !== null) return 'preview';
+  if (document.querySelector('.cd-today') !== null) {
+    if (document.querySelector(held) === null) return 'today without its held request';
+    if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
+    return 'today';
+  }
+  return document.body.textContent?.trim() ? 'a page it can’t name' : 'nothing';
+}
+
+/**
+ * Every page the browser draws from now until the test ends, in order and named as `pageNow` names
+ * it, a page drawn many times in a row named once. Nothing drawn before the first page isn't a step.
  */
 function watchPages(): () => string[] {
-  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
   const seen: string[] = [];
-  const pageNow = (): string | null => {
-    const state = document.querySelector('.cd-owner-state');
-    const preview = document.querySelector('.cd-today-preview') !== null;
-    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
-    if (!preview && document.querySelector('.cd-today') !== null) {
-      if (document.querySelector(held) === null) return 'today without its held request';
-      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
-      return 'today';
-    }
-    return preview ? 'preview' : null;
-  };
   const look = () => {
     const page = pageNow();
-    if (page !== null && seen.at(-1) !== page) seen.push(page);
+    if (seen.length === 0 && page === 'nothing') return;
+    if (seen.at(-1) !== page) seen.push(page);
   };
   look();
   const watch = new MutationObserver(look);
@@ -1010,31 +1022,40 @@ function watchPages(): () => string[] {
   return () => [...seen];
 }
 
+/** Today's first reads: the copy's Desks, Today and Needs you. */
+type TodaysReads = Record<'desks' | 'today' | 'needsYou', number>;
+
 /**
  * The intro dialog's hand-off to Today, from now until the test ends, each step named once: the
- * dialog open, leaving, closed while still on the page, then gone, with Today or still the preview
- * under it. Also how many times Today's reads had gone out as it started to leave.
+ * dialog open, leaving, then closed while still on the page; once it is gone, the page under it, as
+ * `pageNow` names it. Also how many of Today's reads had been answered, successfully, as it started
+ * to leave.
  */
 function watchTheHandOff(dialog: HTMLDialogElement): {
   steps: () => string[];
-  readsAsItLeft: () => Record<string, number> | null;
+  answeredAsItLeft: () => TodaysReads | null;
 } {
   const steps: string[] = [];
-  let readsAsItLeft: Record<string, number> | null = null;
+  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0 };
+  let answeredAsItLeft: TodaysReads | null = null;
+  const stopCounting = observeRequests((outcome) => {
+    if (outcome.ok && Object.hasOwn(answered, outcome.key)) answered[outcome.key as keyof TodaysReads] += 1;
+  });
   const look = () => {
     let step: string;
     if (dialog.isConnected) step = !dialog.open ? 'closed' : dialog.classList.contains('cd-intro--leaving') ? 'leaving' : 'open';
-    else step = document.querySelector('.cd-today-preview') === null ? 'today' : 'gone over the preview';
-    if (step === 'leaving' && readsAsItLeft === null) {
-      readsAsItLeft = Object.fromEntries((['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]));
-    }
+    else step = pageNow();
+    if (step === 'leaving' && answeredAsItLeft === null) answeredAsItLeft = { ...answered };
     if (steps.at(-1) !== step) steps.push(step);
   };
   look();
   const watch = new MutationObserver(look);
   watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'open'] });
-  onTestFinished(() => watch.disconnect());
-  return { steps: () => [...steps], readsAsItLeft: () => readsAsItLeft };
+  onTestFinished(() => {
+    watch.disconnect();
+    stopCounting();
+  });
+  return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
 }
 
 /** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
