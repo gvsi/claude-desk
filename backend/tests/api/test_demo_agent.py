@@ -728,12 +728,26 @@ async def test_repeats_never_count_on_the_limit_and_a_refused_request_claims_not
     assert len(fake.called("POST /agents/demo")) == 5 and len(agent_model.requests) == 5
 
 
+def asked_limits(app: FastAPI, monkeypatch) -> list[str]:
+    """The names of the limits the app is asked to count from now on, in order, whether or not they refuse."""
+    limiter = app.state.runtime.limiter
+    enforce, asked = limiter.enforce, []
+
+    async def counting(name, key, **options):
+        asked.append(name)
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", counting)
+    return asked
+
+
 async def test_keys_are_kept_for_an_hour_in_a_bounded_map_of_their_own(app, browser, fake, kernel_http, agent_model,
-                                                                       clock):
+                                                                       clock, monkeypatch):
     assert (MAX_KEYS, MAX_RUNS) == (1000, 50)
     slug = await new_slug(kernel_http, fake)
     client, _, opened = await open_session(app, browser, slug)
     agents = app.state.runtime.agents
+    asked = asked_limits(app, monkeypatch)
     agent_model.add(*(step("", done=True) for _ in range(3)))
     first = await send_keyed(client, slug)
     run_id = first.json()["run_id"]
@@ -749,24 +763,33 @@ async def test_keys_are_kept_for_an_hour_in_a_bounded_map_of_their_own(app, brow
     assert (await send_keyed(client, slug)).json() == first.json()
     assert len(fake.called("POST /agents/demo")) == 1
 
-    # The key map keeps the newest 1000: one more key pushes out the oldest, this run's, whose repeat is then a first.
+    # The key map holds every key for its run's hour, 1000 at most, and drops none of them early. Full, it refuses a
+    # new key with 429 until the oldest key's hour ends, before the limit counts it, and each held key's repeat still
+    # answers its run.
+    clock.advance(600)
     for n in range(MAX_KEYS - 1):
         agents._keys[("copy-filler", f"key-{n}")] = HeldKey(run_id="run-filler", request_sha256="0" * 64,
                                                              session_id="session-filler", slug=slug,
                                                              claimed_at=clock())
-    newest = await send_keyed(client, slug, key="agent-newest")
-    assert newest.status_code == 202 and len(agents._keys) == MAX_KEYS
-    again = await send_keyed(client, slug)
-    assert again.status_code == 202 and again.json() != first.json()
-    assert len(fake.called("POST /agents/demo")) == 3
+    refused = await send_keyed(client, slug, key="agent-newest")
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 3000})
+    assert refused.headers["retry-after"] == "3000"
+    assert len(agents._keys) == MAX_KEYS and asked.count("demo_agent") == 1
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1
 
-    # A key is kept for its run's hour.
+    # Once the oldest key's hour ends, it goes, and the new key fits. The forgotten key is a new one now: refused while
+    # the map is full again, then starting a run of its own.
+    clock.advance(3000)
+    newest = await send_keyed(client, slug, key="agent-newest")
+    assert newest.status_code == 202, newest.text
+    full = await send_keyed(client, slug)
+    assert (full.status_code, full.json()) == (429, {"error": "rate_limited", "retry_after": 600})
+    clock.advance(600)
+    again = await send_keyed(client, slug)
+    assert again.status_code == 202 and again.json() not in (first.json(), newest.json())
+    assert len(fake.called("POST /agents/demo")) == 3
     await agents.drain()
-    clock.advance(3600)
-    agent_model.add(step("", done=True))
-    later = await send_keyed(client, slug, key="agent-newest")
-    assert later.status_code == 202 and later.json() != newest.json()
-    assert len(fake.called("POST /agents/demo")) == 4
 
 
 @pytest.mark.parametrize("key", ["", "k" * 129, "agent\x00a", "agent\na"], ids=["empty", "129", "NUL", "newline"])

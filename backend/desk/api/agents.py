@@ -25,9 +25,10 @@ then the Desk's, with the blocks and signed statuses the kernel checked. Runs li
 A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
 (`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one
 takes it): a repeat answers the run the first started and starts nothing; one for another task, or from another
-session or to another Desk than the key's, is `KeyReused`; and a run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own (the
-1000 newest, each for its run's hour), so a key outlives a run record the 50-run bound dropped: its repeat answers the
-same run ID, whose poll is then 404, and never starts a second run. Like the runs, keys are this process's alone: a
+session or to another Desk than the key's, is `KeyReused`; and a run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own that
+keeps each for its run's hour, so a key outlives a run record the 50-run bound dropped: its repeat answers the same
+run ID, whose poll is then 404, and never starts a second run. The map holds at most 1000 and never drops a key early:
+full, it refuses a new one (`KeysFull`) until the oldest key's hour ends. Like the runs, keys are this process's alone: a
 process restart, or a repeat routed to the other task during a deploy's overlap, forgets them.
 """
 
@@ -35,6 +36,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -69,7 +71,7 @@ ROUTE = "visiting_agent"
 MAX_EXCHANGES = 6               # model calls a run, and so A2A requests
 MAX_TOKENS = 1024               # one short message as JSON
 MAX_RUNS = 50
-MAX_KEYS = 1000                 # the idempotency keys kept, the newest, each for its run's hour
+MAX_KEYS = 1000                 # the idempotency keys held at once, each for its run's hour
 RUN_LIFE = timedelta(hours=1)
 A2A_TIMEOUT_S = 120.0           # an answer waits for the Desk's turn: up to 30 s for the session's lock, then the turn
 
@@ -84,6 +86,14 @@ class RunFailed(Exception):
 class KeyReused(Exception):
     """The idempotency key's first request in the copy had another body, or came from another session or to another
     Desk."""
+
+
+class KeysFull(Exception):
+    """The key map holds `MAX_KEYS` keys, none of them past its hour: a new one fits in `retry_after` seconds."""
+
+    def __init__(self, retry_after: int):
+        super().__init__(f"the key map is full for {retry_after} s")
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -266,15 +276,27 @@ class DemoAgents:
               launcher: Ids) -> tuple[str, DemoAgentRun | None]:
         """Take the key in the copy for a new `running` run, checked and taken with no await between: the run's ID
         and its record, which the caller then `launch`es or `fail`s. When the copy already holds the key, the ID of
-        the run it started and None (`KeyReused` for another body)."""
+        the run it started and None (`KeyReused` for another body, session or Desk); `KeysFull` when the map holds
+        `MAX_KEYS`."""
         held = self.keyed(copy_id, key, request_sha256, slug, launcher)
         if held is not None:
             return held, None
+        wait = self.key_wait()
+        if wait is not None:
+            raise KeysFull(wait)
         run = self._new_run(task, slug, launcher)
-        self._forget_keys(self._clock(), room=1)
         self._keys[(copy_id, key)] = HeldKey(run_id=run.run_id, request_sha256=request_sha256,
                                              session_id=launcher.session_id, slug=slug, claimed_at=self._clock())
         return run.run_id, run
+
+    def key_wait(self) -> int | None:
+        """None while a new key fits; else the whole seconds, at least 1, until the oldest key's hour ends."""
+        now = self._clock()
+        self._forget_keys(now)
+        if len(self._keys) < MAX_KEYS:
+            return None
+        oldest = next(iter(self._keys.values()))
+        return max(1, math.ceil((oldest.claimed_at + RUN_LIFE - now).total_seconds()))
 
     def fail(self, run: DemoAgentRun, reason: str) -> None:
         """End a claimed run that couldn't start (its agent wasn't minted) `failed`."""
@@ -319,13 +341,11 @@ class DemoAgents:
         while self._runs and len(self._runs) + room > MAX_RUNS:
             del self._runs[next(iter(self._runs))]
 
-    def _forget_keys(self, now: datetime, room: int = 0) -> None:
-        """Drop the keys claimed over an hour ago, then the oldest until `room` more fit."""
+    def _forget_keys(self, now: datetime) -> None:
+        """Drop the keys claimed an hour ago or more, and only those."""
         for copy_key, held in list(self._keys.items()):
             if now - held.claimed_at >= RUN_LIFE:
                 del self._keys[copy_key]
-        while self._keys and len(self._keys) + room > MAX_KEYS:
-            del self._keys[next(iter(self._keys))]
 
     async def drain(self) -> None:
         """Wait until no run is going in this process."""
