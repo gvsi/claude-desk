@@ -534,8 +534,9 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
                           request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> ApprovalAnswerOut | JSONResponse:
     """The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs
-    there and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude
-    follows up, once the resume job ran and the visitor's own credential is present (the open stream or the next
+    there and then, as the visitor's session (also during a take-over); the visitor sees the signed approved status
+    before the outcome when the answer includes it, and Claude follows up once the resume job ran and the visitor's
+    own credential is present (the open stream or the next
     request). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never
     waits on a proof.
 
@@ -556,7 +557,7 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
         return await _no_longer_held(state, ctx, decision_id, failure)
     except KernelUnavailable as failure:
         return await _no_longer_held(state, ctx, decision_id, failure)
-    await _resume(state, ctx, result.decision)
+    await _resume(state, ctx, result.decision, result.approved)
     return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
                              execution_state=result.execution.state if result.execution is not None else None)
 
@@ -575,10 +576,11 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
     return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
 
 
-async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
+async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None) -> None:
     """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
-    queue can't take it, the request does the job's work itself: like the job, it holds only IDs and the signed
-    record and makes no kernel call. If that fails too, the answer still stands, and the due-decisions job surfaces
+    queue can't take it, the request does the job's work itself: like the job, it holds only IDs and signed
+    records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
+    only the outcome waking Claude. If that fails too, the answer still stands, and the due-decisions job surfaces
     the outcome once it is final."""
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
@@ -586,13 +588,13 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
         return
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
     try:
-        await defer_resume_after_answer(state.jobs, ids, decision)
+        await defer_resume_after_answer(state.jobs, ids, decision, approved)
         return
     except Exception as error:
         logger.error("the resume job couldn't be queued (%s); resuming here", type(error).__name__)
     try:
         async with state.database().connect() as conn:
-            await resume_after_answer(conn, ids, decision)
+            await resume_after_answer(conn, ids, decision, approved)
     except Exception as error:
         logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)
 

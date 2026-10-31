@@ -105,18 +105,24 @@ async def session_rows(engine, session_id: str) -> dict[str, list]:
     return {name: [tuple(row) for row in rows] for name, rows in found.items()}
 
 
-async def test_resume_job_is_idempotent(copy, engine, db):
+@pytest.mark.parametrize("approved_shown", [False, True], ids=["both new", "approved already shown"])
+async def test_resume_job_is_idempotent(copy, engine, db, approved_shown):
     caller = await copy.visitor()
     held = await copy.decide(caller, "call-1", discount_bp=1500)
     await show(engine, caller, held, "held")
-    executed = await copy.answer(held)
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": held.decision_id})
+    executed, approved = result.decision, result.approved
+    assert approved is not None
+    if approved_shown:
+        await show(engine, caller, approved, "receipt")
 
     async with engine.connect() as conn:
-        assert await resume_after_answer(conn, caller.ids, executed) is True
-        assert await resume_after_answer(conn, caller.ids, executed) is False      # a repeated or retried job
+        assert await resume_after_answer(conn, caller.ids, executed, approved) is True
+        assert await resume_after_answer(conn, caller.ids, executed, approved) is False  # repeated or retried job
 
     found = await session_rows(engine, caller.session_id)
-    assert found["sse"] == [("held", "held"), ("resolved", "executed")]
+    assert found["sse"] == [("held", "held"), ("receipt", "approved"), ("resolved", "executed")]
     assert found["control"] == [("run_resumable", held.decision_id, False)]
     assert found["action_update"] == [(held.decision_id, executed.visitor_plain, True)]
     async with engine.connect() as conn:
@@ -172,6 +178,7 @@ async def test_a_late_resume_job_never_shows_an_older_state(copy, engine, fake, 
     await show(engine, caller, executed, "resolved")
     before = await everything(caller.session_id)
     async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, executed, approved) is False
         assert await resume_after_answer(conn, caller.ids, approved) is False
     assert await everything(caller.session_id) == before
 
