@@ -7198,7 +7198,8 @@
           "origin",
           "created_at",
           "triage",
-          "ledger_seq"
+          "ledger_seq",
+          "cause"
         ],
         "title": "Attempt",
         "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids` or its ledger summary's `reason`/`check`;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."

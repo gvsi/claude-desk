@@ -528,7 +528,13 @@ class Attempt(BaseModel):
     created_at: AwareDatetime
     triage: Triage | None
     ledger_seq: int
-    cause: RefusalCause | None = None
+    cause: RefusalCause | None
+
+    @model_validator(mode="after")
+    def _cause_requires_refusal(self) -> "Attempt":
+        if self.cause is not None and self.kind != "refused":
+            raise ValueError("Only refused requests can have a cause")
+        return self
 
 
 # The mock checkout (Plan 02b) ------------------------------------------------------------------------------------

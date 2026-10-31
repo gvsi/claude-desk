@@ -115,7 +115,7 @@ export interface Attempt {
   created_at: string;
   triage: Triage | null;
   ledger_seq: number;
-  cause?:
+  cause:
     | (
         | "owner_rule"
         | "not_verified"

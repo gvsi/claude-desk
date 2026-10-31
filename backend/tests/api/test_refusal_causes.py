@@ -69,10 +69,28 @@ def test_refusal_cause_is_closed_and_held_requests_have_no_cause():
     }
     assert set(get_args(RefusalCause)) == expected
     held = Attempt(ref_id="decision", kind="held", reason_plain="Waiting for you", card_ids=[], origin="kernel",
-                   created_at="2026-10-31T00:00:00Z", triage=None, ledger_seq=1)
+                   created_at="2026-10-31T00:00:00Z", triage=None, ledger_seq=1, cause=None)
     assert held.cause is None
     with pytest.raises(ValidationError):
         Attempt.model_validate({**held.model_dump(), "kind": "refused", "cause": "new_code"})
+
+
+@pytest.mark.parametrize("kind", ["held", "reply_blocked"])
+def test_only_refused_attempts_accept_a_cause(kind):
+    data = {"ref_id": "decision", "kind": kind, "reason_plain": "Stopped", "card_ids": [], "origin": "kernel",
+            "created_at": "2026-10-31T00:00:00Z", "triage": None, "ledger_seq": 1}
+    with pytest.raises(ValidationError):
+        Attempt.model_validate({**data, "cause": "owner_rule"})
+    assert Attempt.model_validate({**data, "cause": None}).cause is None
+
+
+def test_attempt_cause_is_required_and_nullable():
+    data = {"ref_id": "decision", "kind": "refused", "reason_plain": "Stopped", "card_ids": [], "origin": "kernel",
+            "created_at": "2026-10-31T00:00:00Z", "triage": None, "ledger_seq": 1}
+    with pytest.raises(ValidationError):
+        Attempt.model_validate(data)
+    assert Attempt.model_validate({**data, "cause": None}).cause is None
+    assert Attempt.model_validate({**data, "cause": "owner_rule"}).cause == "owner_rule"
 
 
 def test_refusal_without_its_ledger_entry_has_no_cause():
