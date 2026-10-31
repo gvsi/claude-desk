@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Once, at the very top of each vision page: the city office, the team Desk, the Claude account and the phone (N-R2-Vision-CityOffice, -TeamDesk, -ClaudeAccount, -Phone).
+- Once, at the very top of each vision page: the team Desk, the Claude account and the phone (N-R2-Vision-TeamDesk, -ClaudeAccount, -Phone), and the city office's page, redrawn from a resident's side, when it comes in a later change.
 - Not on Settings › Channels: the app's Channels page follows N-Run2-Settings-Channels, with no bar. N-R2-Vision-Channels, the same page under the bar, is a vision story only (`Boards/Vision, channels`).
 - Over an owner page, pass it as `AppShell`'s `banner`, so it runs the window's width above the sidebar and the page. Over a public page or a page of its own, put it first, above everything else.
 - Not for a Settings section the prototype only sketches (Notifications, Billing): those open with the vision note inside the page (`Pill` README, "A vision note").

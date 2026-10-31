@@ -10,7 +10,7 @@ const meta = {
   title: 'Layout/VisionBar',
   component: VisionBar,
   args: { backHref: '#today' },
-  parameters: { layout: 'fullscreen', canvas: 'N-R2-Vision-CityOffice' },
+  parameters: { layout: 'fullscreen', canvas: 'N-R2-Vision-TeamDesk' },
 } satisfies Meta<typeof VisionBar>;
 
 export default meta;

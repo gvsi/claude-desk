@@ -31,7 +31,7 @@
 - `peopleLabel`, the business's word for the people it serves ("Customers", "Clients").
 - `counts`, each `{ n, label }`, with the number in the label's words.
 - `answering` and `onAnsweringChange`. The switch shows whatever `answering` the screen passes back, so a failed change can revert it.
-- `answeringDescription`, only where a Desk answers someone other than the public or under someone else's rules, as the vision boards draw it: "Claude answers your team under your rules" on a team Desk (N-R2-Vision-TeamDesk), "Claude answers under the City’s rules" on the city office's (N-R2-Vision-CityOffice). Left out, the owner app's line.
+- `answeringDescription`, only where a Desk answers someone other than the public or under someone else's rules, as the vision boards draw it: "Claude answers your team under your rules" on a team Desk (N-R2-Vision-TeamDesk). Left out, the owner app's line.
 - `about`, for the prototype's own documents: the group's `title` and its `links`, each `{ id, label, href, current? }`. The words are the screen's.
 
 ## Props

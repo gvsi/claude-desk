@@ -5,11 +5,11 @@ import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import './FactCard.css';
 
 export interface FactCardProps {
-  /** What kind of fact it is, on the top line: "Permit status", "Customer history", "Booked". */
+  /** What kind of fact it is, on the top line: "Customer history", "Document, only for Luis", "Booked". */
   label: string;
   /** The 14 px line icon beside the label: `document` for a record, `clock` for a time. */
   icon: IconName;
-  /** The fact itself, as its source wrote it: "Plan check passed", "Tuesday, November 3". */
+  /** The fact itself, as its source wrote it: "Ana Ruiz, customer since 2023", "Tuesday, November 3". */
   title: string;
   /** Any more lines of the fact, in order, each as its source wrote it. Empty lines are left out. */
   lines?: readonly string[];

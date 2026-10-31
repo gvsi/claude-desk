@@ -3,7 +3,8 @@
  * and tokens for the `Boards/Vision, *` stories only, as `parts.tsx` composes the other pages. The web
  * app (plan 04, Task 17) builds the same pages from the same components: the vision bar over each,
  * every fact in a `FactCard`, the phones in `PhoneFrame`, and Luis's access in `AccessPanel`. The
- * data here is the boards' own sample data: a fictional city office and Rivera Plumbing's team.
+ * data here is the boards' own sample data: Rivera Plumbing's team, Dana's visit and the phone apps.
+ * The city office's page is being redrawn from a resident's side and comes in a later change.
  */
 import type { ReactNode } from 'react';
 import { fn } from 'storybook/test';
@@ -13,12 +14,10 @@ import { AccessPanel } from '../components/AccessPanel/AccessPanel.tsx';
 import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { Button } from '../components/Button/Button.tsx';
-import { Card } from '../components/Card/Card.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { FactCard, type FactCardProps } from '../components/FactCard/FactCard.tsx';
-import { Greeting } from '../components/Greeting/Greeting.tsx';
 import { MarginReceipt } from '../components/MarginReceipt/MarginReceipt.tsx';
 import type { ReceiptSource } from '../components/MarginReceipt/receiptTone.ts';
 import type { CopyLanguage } from '../components/Notice/errorCopy.ts';
@@ -26,17 +25,14 @@ import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { PhoneFrame, PhoneTabBar } from '../components/PhoneFrame/PhoneFrame.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
 import { PublicShell } from '../components/PublicShell/PublicShell.tsx';
-import { SectionHeader } from '../components/SectionHeader/SectionHeader.tsx';
 import { Sidebar, initialsOf, type NavCount, type NavKey } from '../components/Sidebar/Sidebar.tsx';
 import { StatusDot, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
 import { SystemLine } from '../components/SystemLine/SystemLine.tsx';
-import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { Transcript } from '../components/Transcript/Transcript.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
 import { cardBlock, proseBlock, rivera } from '../fixtures/index.ts';
-import { Icon } from '../icons/index.tsx';
 import { MAIN_LINE, OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
@@ -96,190 +92,6 @@ function VisionOwnerFrame({ business, owner, desks, currentDeskId, current, peop
 /** Claude's words in a conversation, in serif, as a checked reply's prose block. */
 function Reply({ text, language = 'en' }: { text: string; language?: CopyLanguage }) {
   return <ClaudeMessage blocks={[proseBlock(text)]} language={language} ownerName={rivera.business.ownerName} />;
-}
-
-// ---------------------------------------------------------------------------------------------
-// The city office (N-R2-Vision-CityOffice): Meridian Bay Permits, a fictional city permits office.
-
-export interface CityLiveRow {
-  name: string;
-  level: 'Verified' | 'Public';
-  about: string;
-  reply: string;
-  language: CopyLanguage;
-  fact?: FactCardProps;
-  receipt: { source: ReceiptSource; plain: string };
-  /** The one thing the supervisor can do from the row. */
-  action?: string;
-}
-
-/** Live now, in the board's words: who, their level, what about, Claude's words, the fact and the receipt. */
-export const CITY_LIVE: readonly CityLiveRow[] = [
-  {
-    name: 'Marcus Bell',
-    level: 'Verified',
-    about: 'Permit status, 3 min',
-    // Ruled departure from the board (coordinator, 2026-10-30): the board's "Your kitchen remodel
-    // passed plan check." stated the status; it stays in the card, and Claude's words lead into it.
-    reply: 'Here’s where your kitchen remodel stands.',
-    language: 'en',
-    fact: {
-      label: 'Permit status',
-      icon: 'document',
-      title: 'Plan check passed',
-      lines: ['Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286'],
-    },
-    receipt: { source: decided('executed'), plain: 'Code sent to the email on the application. His own file, so I opened it.' },
-  },
-  {
-    name: 'Visitor in Eastshore',
-    level: 'Public',
-    about: 'Program deadline, in Spanish',
-    reply: 'Esta es la fecha límite del programa.',
-    language: 'es',
-    fact: {
-      label: 'Fecha límite',
-      icon: 'clock',
-      title: 'Programa de refuerzo sísmico',
-      lines: ['Cierra el 15 de diciembre, 5:00 pm'],
-      language: 'es',
-    },
-    receipt: { source: CHECKED, plain: 'From the published program page. Sent in Spanish.' },
-  },
-  {
-    name: 'Visitor',
-    level: 'Public',
-    about: 'Asked about a neighbor’s permit',
-    reply: 'Plans and applicant details go only to the applicant. Here’s what’s public.',
-    language: 'en',
-    fact: { label: 'Public record', icon: 'document', title: 'Permit B-2026-0377', lines: ['Status: issued'] },
-    receipt: { source: decided('refused'), plain: 'Not the applicant, so only public record fields. The file stayed closed.' },
-  },
-  {
-    name: 'Joan Park',
-    level: 'Verified',
-    about: 'Eligibility, waiting 4 min',
-    reply: 'Whether your garage conversion is exempt is a plan checker’s decision. I’ve asked one to join.',
-    language: 'en',
-    receipt: { source: decided('held'), plain: 'Held for a person: exemptions are a staff decision.' },
-    action: 'Assign staff',
-  },
-];
-
-/** The city's always-on lines: what can't be switched off on its Desk, and why. */
-const CITY_ALWAYS_ON = [
-  {
-    title: 'No legal or financial determinations without a qualified person',
-    detail: 'Eligibility, exemptions, fee waivers and code readings go to staff.',
-  },
-  { title: 'Files only to the applicant', detail: 'Codes go to the contact on the application, never one typed into chat.' },
-  { title: 'No promised outcomes', detail: 'Status and published dates only, in cards, never an approval or an outcome.' },
-] as const;
-
-const CITY_TODAY = [
-  '214 questions answered in 6 languages',
-  '38 applicants verified for their own files',
-  '7 handed to staff',
-  '0 determinations made without a person',
-] as const;
-
-/**
- * One live conversation on the city's Today: a row under a hairline, not a card, so its fact card
- * never sits in a card. A ruled departure from the board, which draws each as a card (coordinator,
- * 2026-10-30).
- */
-function CityLiveItem({ row }: { row: CityLiveRow }) {
-  return (
-    <li className="board-vision-live__item">
-      <div className="board-vision-live__head">
-        <span className="cd-type-control" data-copy="user">
-          {row.name}
-        </span>
-        <Pill>{row.level}</Pill>
-        <span className="board-quiet cd-type-meta">{row.about}</span>
-      </div>
-      <Reply text={row.reply} language={row.language} />
-      {row.fact ? <FactCard {...row.fact} /> : null}
-      <MarginReceipt source={row.receipt.source} plain={row.receipt.plain} ledgerSeq={0} />
-      {row.action ? (
-        <div className="board-vision-live__action">
-          <Button variant="secondary" onClick={fn()}>
-            {row.action}
-          </Button>
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-/** Today on the city's Desk, for its Permit Center supervisor. */
-export function CityOfficeToday() {
-  return (
-    <VisionOwnerFrame
-      business="Meridian Bay Permits"
-      owner={{ name: 'Nadia Price', status: 'Permit Center supervisor' }}
-      desks={[{ id: 'desk-meridian-permits', name: 'Permit Center' }]}
-      currentDeskId="desk-meridian-permits"
-      current="today"
-      peopleLabel="Residents"
-      counts={{ conversations: { n: 9, label: '9 live conversations' }, safety: { n: 4, label: '4 attempts stopped today' } }}
-      answeringDescription="Claude answers under the City’s rules"
-    >
-      <div className="board-filled-page board-vision-page">
-        <Greeting
-          text="Good morning, Nadia"
-          presence={{ line: 'Nine residents are talking to the Desk right now.', people: [] }}
-          link={{ label: 'desk.example/meridian-bay-permits', onCopy: fn() }}
-        />
-        <div className="board-vision-city">
-          <section className="board-vision-city__live" aria-labelledby="board-vision-live-now">
-            <SectionHeader
-              id="board-vision-live-now"
-              title="Live now"
-              count={{ n: 9, label: '9 live' }}
-              caption={<TextLink href="#conversations">See all in Conversations</TextLink>}
-            />
-            <ul role="list" className="board-vision-live">
-              {CITY_LIVE.map((row) => (
-                <CityLiveItem key={row.name} row={row} />
-              ))}
-            </ul>
-          </section>
-          <div className="board-vision-city__side">
-            <Card as="section" label="Always on" padding={16}>
-              <h2 className="cd-type-section board-vision-city__title">Always on</h2>
-              <p className="board-quiet cd-type-caption board-vision-city__caption">Can’t be switched off</p>
-              <ul role="list" className="board-vision-always">
-                {CITY_ALWAYS_ON.map((line) => (
-                  <li key={line.title} className="board-vision-always__item">
-                    <Icon name="lock" size={14} className="board-vision-always__lock" />
-                    <span>
-                      <span className="cd-type-control board-vision-always__title">{line.title}</span>
-                      <span className="board-quiet cd-type-meta board-vision-always__detail">{line.detail}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="board-quiet cd-type-caption board-vision-always__also">
-                Also always on: says it’s an AI, and logs every conversation for City records.
-              </p>
-            </Card>
-            <Card as="section" label="Today so far" padding={16}>
-              <h2 className="cd-type-section board-vision-city__title">Today so far</h2>
-              <ul role="list" className="board-vision-today">
-                {CITY_TODAY.map((line) => (
-                  <li key={line} className="cd-type-meta">
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          </div>
-        </div>
-        <ConceptFooter />
-      </div>
-    </VisionOwnerFrame>
-  );
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -4,8 +4,8 @@
 
 ## When to use
 
-- For every price, date, time, status, booking or record a vision page shows (N-R2-Vision-CityOffice, -TeamDesk, -Phone): "Permit status", "Fecha límite", "Public record", "Customer history", "Document, only for Luis", "Booked".
-- On a vision page, as on every Desk, Claude's words never state a price, date or status and never confirm a booking on their own: the reply leads into the card ("Here's where it stands."), and the card carries the fact. A booking is confirmed only next to its card.
+- For every price, date, time, status, booking or record a vision page shows (N-R2-Vision-TeamDesk, -Phone): "Customer history", "Document, only for Luis", "Booked". The city office's vision page, redrawn from a resident's side, uses it too when it comes in a later change.
+- On a vision page, as on every Desk, Claude's words never state a price, date or status and never confirm a booking on their own: the reply leads into the card ("Here's Ana's history."), and the card carries the fact. A booking is confirmed only next to its card.
 - Not in a real conversation. There, every fact reaches the visitor as the kernel's rendered block in a `ReplyCard`, whose label comes from its template. `FactCard` is for the static vision pages, whose facts are sample data with labels no template has.
 
 ## What the card shows
@@ -20,13 +20,13 @@
 
 - `label`: what kind of fact it is, in the page's language.
 - `icon`: `document` for a record or a document, `clock` for a deadline or a booked time.
-- `title` and `lines`: the fact, already written out in the page's language ("Fee due before issue: $1,286", "Cierra el 15 de diciembre, 5:00 pm"). The page's data holds them as typed fields, never as part of Claude's sentences.
+- `title` and `lines`: the fact, already written out in the page's language ("Arriving 2:00 pm to 4:00 pm", "Llegada de 14:00 a 16:00"). The page's data holds them as typed fields, never as part of Claude's sentences.
 - `language`: `es` for a fact in Spanish; it sets `lang` on the card.
 
 ## Layout
 
 - A `Card` at most 420 px wide and never wider than its column, padded 12 px 14 px (`space-12`, `space-14`), as the vision boards draw it. On a phone's 358 px line it takes the line's width, and long words wrap.
-- It never sits inside another card: on the city office's Today, the card sits in a live conversation's row, which is a list row, not a `Card`.
+- It never sits inside another card: in a list of conversations, it sits in the conversation's row, which is a list row, not a `Card`.
 
 ## Props
 

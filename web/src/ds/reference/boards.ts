@@ -96,10 +96,9 @@ export const REFERENCE_BOARDS = [
   // same page under the vision bar, a vision story only.
   'N-Run2-Settings-Channels',
   'N-R2-Vision-Channels',
-  // The vision pages, signed on 2026-10-30, each under the vision bar: a city permits office's
-  // Today, longer than the window; a team Desk's conversations; a returning visitor signed in with
-  // a Claude account; and Today and the public chat as phone apps.
-  'N-R2-Vision-CityOffice',
+  // The vision pages, signed on 2026-10-30, each under the vision bar: a team Desk's conversations;
+  // a returning visitor signed in with a Claude account; and Today and the public chat as phone
+  // apps. The city office's page is being redrawn from a resident's side and comes in a later change.
   'N-R2-Vision-TeamDesk',
   'N-R2-Vision-ClaudeAccount',
   'N-R2-Vision-Phone',
@@ -120,7 +119,6 @@ export const BOARD_VIEWPORTS = {
   sidebar: { name: 'Sidebar alone', width: 264, height: 982 },
   phone: { name: 'Phone', width: 390, height: 844 },
   'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
-  'laptop-1072': { name: '14-inch laptop, a 1072 px page', width: 1512, height: 1072 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
   'laptop-1500': { name: '14-inch laptop, a 1500 px page', width: 1512, height: 1500 },
@@ -160,7 +158,6 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Run2-Settings-Phone': 'phone-900',
   'N-Run2-Settings-Channels': 'laptop',
   'N-R2-Vision-Channels': 'laptop',
-  'N-R2-Vision-CityOffice': 'laptop-1072',
   'N-R2-Vision-TeamDesk': 'laptop',
   'N-R2-Vision-ClaudeAccount': 'laptop',
   'N-R2-Vision-Phone': 'laptop',
