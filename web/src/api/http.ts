@@ -43,6 +43,7 @@ interface ApiErrorInit {
   method: HttpMethod;
   status: number | null;
   code?: string | null;
+  kernel?: boolean;
   retryAfter?: number | null;
   decision?: Decision | null;
   state?: PaymentLinkState | null;
@@ -60,6 +61,8 @@ export class ApiError extends Error {
   readonly status: number | null;
   /** The body's `code` when `error` is "kernel", else its `error`: a snake_case word, or null. */
   readonly code: string | null;
+  /** Whether the body was the kernel's refusal (`{error: "kernel", code}`) rather than the API's own. */
+  readonly kernel: boolean;
   /** Seconds, from a 429's `retry_after`. */
   readonly retryAfter: number | null;
   /** A 409's final decision (an answer that came too late). */
@@ -81,6 +84,7 @@ export class ApiError extends Error {
     this.method = init.method;
     this.status = init.status;
     this.code = init.code ?? null;
+    this.kernel = init.kernel ?? false;
     this.retryAfter = init.retryAfter ?? null;
     this.decision = init.decision ?? null;
     this.state = init.state ?? null;
@@ -96,6 +100,25 @@ export class ApiError extends Error {
  */
 export function isUncertain(err: unknown): boolean {
   return err instanceof ApiError && err.method !== 'GET' && (err.kind === 'network' || err.kind === 'unavailable');
+}
+
+/** What a key is made from: the browser's `crypto`, or a stand-in a test passes. */
+type KeySource = Pick<Crypto, 'getRandomValues'> & { randomUUID?: () => string };
+
+/**
+ * A new client idempotency key for a start whose answer may be lost after it was applied
+ * (`sendAgent`, `startSetup`): one per click, sent again with that click's retries, so the API
+ * answers what the first started rather than starting it twice (plan 02b). A random UUID: the
+ * browser's `randomUUID`, which exists only on a secure page (https or localhost), else a version 4
+ * UUID from `getRandomValues`, which every page has.
+ */
+export function newIdempotencyKey(source: KeySource = crypto): string {
+  if (typeof source.randomUUID === 'function') return source.randomUUID();
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** What the owner reads when a request fails, by kind. */
@@ -246,6 +269,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     method,
     status: answer.status,
     code: codeOf(body),
+    kernel: body.error === 'kernel',
     retryAfter: retryAfterOf(body),
     decision: conflict ? decisionOf(body.decision) : null,
     state: conflict ? stateOf(body.state) : null,

@@ -86,6 +86,9 @@ export function isDemoAgentTask(value: unknown): value is DemoAgentTask {
   return typeof value === 'string' && (DEMO_AGENT_TASKS as readonly string[]).includes(value);
 }
 
+/** How long the API keeps a send's idempotency key: its run's hour (plan 02b's `RUN_LIFE`). */
+export const KEY_LIFE_MS = 60 * 60_000;
+
 /** How far apart a run's turns land: the panel reads the run each second, and sees it build. */
 export const AGENT_TURN_GAP_MS = 300;
 
@@ -216,12 +219,33 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
 /** The built-in agent's runs in one copy, by id, each readable only by the session that launched it. */
 export class AgentRuns {
   private readonly runs = new Map<string, { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null }>();
+  /**
+   * The client keys sends came with, each with the run it started, what the send was and when, kept
+   * for `KEY_LIFE_MS` (plan 02b).
+   */
+  private readonly keys = new Map<string, { runId: string; task: DemoAgentTask; sessionId: string; slug: string; at: number }>();
+
+  /**
+   * The run a send with client key `key` started within the last hour: its id when that send was
+   * the same task from the same session to the same Desk, `conflict` when it wasn't, or null when no
+   * send holds the key (an older one's is forgotten, as the API forgets it).
+   */
+  keyed(key: string, task: DemoAgentTask, launcher: SessionRecord, slug: string): string | 'conflict' | null {
+    const held = this.keys.get(key);
+    if (held === undefined) return null;
+    if (Date.now() - held.at >= KEY_LIFE_MS) {
+      this.keys.delete(key);
+      return null;
+    }
+    return held.task === task && held.sessionId === launcher.state.session_id && held.slug === slug ? held.runId : 'conflict';
+  }
 
   /**
    * Sends the built-in agent to `desk` for `launcher` on `task`: a new signed agent session, and a
-   * run whose turns land `AGENT_TURN_GAP_MS` apart until it is `done`. Returns the run's id.
+   * run whose turns land `AGENT_TURN_GAP_MS` apart until it is `done`. Returns the run's id, which
+   * a repeat with the same client `key` finds again (`keyed`).
    */
-  start(world: MockWorld, desk: DeskRecord, launcher: SessionRecord, task: DemoAgentTask): string {
+  start(world: MockWorld, desk: DeskRecord, launcher: SessionRecord, task: DemoAgentTask, key: string | null = null): string {
     const agent = world.addSession(desk, { agent: AGENT_NAME });
     const run: DemoAgentRun = {
       run_id: world.id('run'),
@@ -233,6 +257,7 @@ export class AgentRuns {
     };
     const record: { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null } = { run, timer: null };
     this.runs.set(run.run_id, record);
+    if (key !== null) this.keys.set(key, { runId: run.run_id, task, sessionId: run.launcher_session_id, slug: run.slug, at: Date.now() });
     const steps = turnsFor(world, desk, agent, task);
     const tick = () => {
       record.timer = setTimeout(() => {
@@ -261,6 +286,7 @@ export class AgentRuns {
   stop(): void {
     for (const record of this.runs.values()) if (record.timer !== null) clearTimeout(record.timer);
     this.runs.clear();
+    this.keys.clear();
   }
 }
 

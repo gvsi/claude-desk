@@ -70,7 +70,12 @@ def safe_ref(value: object) -> str | dict[str, Any]:
     the first 16 hex characters of its sha256, so the attempt is logged without the text."""
     if isinstance(value, str) and SAFE_REF.fullmatch(value):
         return value
-    text = value if isinstance(value, str) else repr(value)
+    return withheld_ref(value if isinstance(value, str) else repr(value))
+
+
+def withheld_ref(text: str) -> dict[str, Any]:
+    """The marker the ledger keeps in place of a ref it must not hold: the first 16 hex characters
+    of its sha256."""
     return {"invalid": True, "sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:16]}
 
 

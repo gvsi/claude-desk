@@ -47,9 +47,6 @@ function closed(node: unknown): unknown {
  * then their entry goes (`pending_fields_wait_for_the_contracts`).
  */
 export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {
-  // Each rules version's money cap, at most the $10,000 platform ceiling (kernel verification plan
-  // 01b Task 3b; master "Money cap").
-  PolicyVersion: { auto_money_cap_cents: { type: 'integer', minimum: 0, maximum: 1_000_000 } },
   // Why a tool waits for review, null unless it does (kernel payments plan 01c Task 4).
   ToolProfile: { review_reason: { enum: ['new', 'changed', 'delisted', null] } },
 };

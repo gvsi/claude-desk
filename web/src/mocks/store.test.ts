@@ -22,6 +22,7 @@ import type {
   PolicyVersionOut,
   RulesDraft,
   RulesView,
+  SetupState,
   Today,
   ToolConfirmedOut,
   VisitorSession,
@@ -33,6 +34,7 @@ import { chatReducer, initialChatState, type ChatState } from '../public/chatRed
 import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
+import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
 const slug = RIVERA.slug;
@@ -1751,5 +1753,94 @@ describe("Today's windows", () => {
     // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
     expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
     expect(today.briefing.total).toBe(1);
+  });
+});
+
+describe('idempotency keys', () => {
+  it('send_agent_repeat_answers_the_same_run', async () => {
+    // As the API does (plan 02b): a repeat with the same key, task, session and Desk answers the run the
+    // first started and starts nothing; the same key with another task is 409 `conflict`.
+    await openChat();
+    const send = (task: string, key?: unknown) => call('sendAgent', { params: { slug }, body: { task, ...(key === undefined ? {} : { idempotency_key: key }) } });
+    const first = await send('book_visit', 'key-1');
+    expect(first.status).toBe(202);
+    const sessions = mockStore.world.sessions.size;
+    expect(await send('book_visit', 'key-1')).toEqual(first);
+    expect(mockStore.world.sessions.size).toBe(sessions);
+    expect(await send('quote_and_deposit', 'key-1')).toEqual({ status: 409, body: { error: 'conflict' } });
+    // A new key, or none, starts a new run each time.
+    const second = await send('book_visit', 'key-2');
+    expect(second.status).toBe(202);
+    expect(second.body).not.toEqual(first.body);
+    expect((await send('book_visit')).body).not.toEqual((await send('book_visit')).body);
+    // A key the API refuses (empty, over 128 characters, a control character, not a string) is 422,
+    // and claims nothing.
+    for (const bad of ['', 'k'.repeat(129), 'a\nb', 7]) expect((await send('book_visit', bad)).status).toBe(422);
+    expect((await send('book_visit', 'k'.repeat(128))).status).toBe(202);
+  });
+
+  it('send_agent_key_is_forgotten_after_its_hour', async () => {
+    // As the API does, a send's key is kept for its run's hour and then forgotten: a repeat within
+    // the hour answers the same run, and one after it starts a new run.
+    await openChat();
+    const send = () => call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
+    const first = await send();
+    vi.advanceTimersByTime(60 * 60_000 - 1);
+    expect(await send()).toEqual(first);
+    vi.advanceTimersByTime(1);
+    const later = await send();
+    expect(later.status).toBe(202);
+    expect(later.body).not.toEqual(first.body);
+  });
+
+  it('setup_start_repeat_answers_the_same_interview', async () => {
+    // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
+    // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
+    const body = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const start = (key?: unknown, description = body.description) =>
+      call('startSetup', { body: { ...body, description, ...(key === undefined ? {} : { idempotency_key: key }) } });
+    const first = await start('key-1');
+    expect(first.status).toBe(201);
+    const desks = mockStore.world.desks.length;
+    expect(await start('key-1')).toEqual(first);
+    expect(await start('key-1', 'Chen Dental. I fix teeth.')).toEqual({ status: 409, body: { error: 'conflict' } });
+    expect(mockStore.world.desks.length).toBe(desks);
+    // A key the API refuses is 422; a new key, or none, makes a new interview each time.
+    for (const bad of ['', 'k'.repeat(129), 'a\u0000b', 7]) expect((await start(bad)).status).toBe(422);
+    expect(mockStore.world.desks.length).toBe(desks);
+    const ids = [await start('key-2'), await start(), await start()].map((r) => (r.body as SetupState).interview_id);
+    expect(new Set([...ids, (first.body as SetupState).interview_id]).size).toBe(4);
+  });
+
+  it('held_setup_start_answers_in_progress_until_it_ends', async () => {
+    // A keyed start that runs long: its own answer is lost (a 504 from the proxy in front), and a
+    // repeat with its key meanwhile is 409 `in_progress` with `retry_after` 2 s. Once it has made
+    // the Desk, a repeat answers its interview, and only one Desk was made.
+    const start = (key: string) => call('startSetup', { body: { description: 'Rivera Plumbing. I fix leaks.', timezone: 'UTC', idempotency_key: key } });
+    const desks = mockStore.world.desks.length;
+    let end = holdNextStart(mockStore.world);
+    expect((await start('key-1')).status).toBe(504);
+    expect(await start('key-1')).toEqual({ status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    end('made');
+    const made = await start('key-1');
+    expect(made.status).toBe(201);
+    expect(await start('key-1')).toEqual(made);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
+
+    // One that failed before its Desk was asked for frees its key: the same request starts again.
+    end = holdNextStart(mockStore.world);
+    expect((await start('key-2')).status).toBe(504);
+    end('freed');
+    expect((await start('key-2')).status).toBe(201);
+    expect(mockStore.world.desks.length).toBe(desks + 2);
+
+    // One whose Desk may or may not exist spends its key for good: 409 `key_spent`, and only a new
+    // key starts again.
+    end = holdNextStart(mockStore.world);
+    expect((await start('key-3')).status).toBe(504);
+    end('spent');
+    expect(await start('key-3')).toEqual({ status: 409, body: { error: 'key_spent' } });
+    expect(mockStore.world.desks.length).toBe(desks + 2);
+    expect((await start('key-4')).status).toBe(201);
   });
 });

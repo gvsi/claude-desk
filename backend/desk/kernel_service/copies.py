@@ -2,7 +2,8 @@
 
 `POST /copies` (the API checks the passcode first; the kernel is loopback only) writes a copy row,
 the Rivera seed through `desks.create_desk`, its rule cards activated from their CI-proved report
-(`activation.activate_shipped`), the held request waiting on Today (`seed.seed_held_request`) and
+at the seed's money cap of $500 (`activation.activate_shipped`), the held request waiting on Today
+(`seed.seed_held_request`) and
 the copy's owner session, all in one transaction. Without a report for the cards as compiled,
 nothing is created: 503 `seed_unproved`. The owner token in the answer is the copy's credential:
 it is shown once and stored only as its hash.
@@ -29,7 +30,7 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     ctx.db.add(Copy(copy_id=copy_id, created_at=now))
     business, desk = seed.rivera_seed(now)
     created = await desks.create_desk(ctx, copy_id, business, desk, answering=True)
-    await activation.activate_shipped(ctx, created.desk_id, "rivera")
+    await activation.activate_shipped(ctx, created.desk_id, "rivera", desk.auto_money_cap_cents)
     await seed.seed_held_request(ctx, copy_id, created.desk_id)
     token = auth.new_token()
     owner = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=None, kind="owner",

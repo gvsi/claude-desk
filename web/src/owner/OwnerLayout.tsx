@@ -23,6 +23,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
+import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
 
@@ -68,10 +69,16 @@ const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations', 'setti
 /** Of those, the pages that center the content column: a notice above one keeps to that column. */
 const CENTERED_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['settings']);
 
+/**
+ * Every row a page can be: the rows above and Connectors, which the sidebar draws only once its
+ * pages are built (`connectorPageHref`); until then, as Connectors it marks no row.
+ */
+const CURRENT_KEYS: readonly NavKey[] = [...NAV_KEYS, 'connectors'];
+
 /** The sidebar row for the page at `pathname`: the segment after the Desk, Today when it names no row. */
 function currentNav(pathname: string): NavKey {
   const segment = pathname.split('/')[3] ?? '';
-  return NAV_KEYS.find((key) => key === segment) ?? 'today';
+  return CURRENT_KEYS.find((key) => key === segment) ?? 'today';
 }
 
 /** Whether the page at `pathname` is the Desk's Today, which the Desk's own address opens too. */
@@ -80,10 +87,15 @@ function opensToday(pathname: string): boolean {
   return (page === '' || page === 'today') && rest.every((segment) => segment === '');
 }
 
-/** No Connectors href yet: the Connectors page comes with run 2, so its row stays hidden. */
+/**
+ * The sidebar's rows under the Desk. Connectors only once its pages are built (`connectorPageHref`):
+ * until then it has no href, so its row stays hidden.
+ */
 function hrefsFor(deskId: string): SidebarHrefs {
   const base = `/app/${encodeURIComponent(deskId)}`;
-  return Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
+  const hrefs = Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
+  const connectors = connectorPageHref(deskId, 'connectors');
+  return connectors === undefined ? hrefs : { ...hrefs, connectors };
 }
 
 /** The sidebar's rows (and a page's SubNav rows) as router links, so moving between pages keeps the app loaded. */

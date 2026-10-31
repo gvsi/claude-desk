@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, type ReactNode } from 'react';
+import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
@@ -26,6 +26,22 @@ export function setupQuery(id: string) {
 /** Where "Save and exit" goes: the new Desk's Today once there is one, else the start. */
 const todayPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/today`;
 
+/**
+ * The bar's compact breakpoint, the About pages' and the setup board's: below it a top bar is a
+ * phone's, and a phone's top bar carries no lockup badge (owner, 2026-10-30).
+ */
+const COMPACT_BAR = '(max-width: 1099.98px)';
+
+function subscribeCompactBar(onChange: () => void): () => void {
+  const query = window.matchMedia(COMPACT_BAR);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function isCompactBar(): boolean {
+  return window.matchMedia(COMPACT_BAR).matches;
+}
+
 interface SetupShellProps {
   /** The business's name, once the API knows it. Someone's own words. */
   business: string | null;
@@ -38,18 +54,21 @@ interface SetupShellProps {
 }
 
 /**
- * Setup's frame, as the signed setup boards draw it: the bar with the mark, the business once known,
- * the five steps and "Save and exit"; one column; the concept footer at the window's foot.
+ * Setup's frame, as the signed setup boards draw it: the bar with the bell (no tile, 20 px at every
+ * width, as on a standalone page) and the wordmark, with its Preview badge from 1100 px up, the
+ * business once known, the five steps and "Save and exit"; one column; the concept footer at the
+ * window's foot.
  */
 function SetupShell({ business, step, exitTo, wide = false, children }: SetupShellProps) {
   const navigate = useNavigate();
+  const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   return (
     <div className="cd-setup" onClick={followInAppLinks(navigate)}>
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
-            <Mark size={16} />
-            <Wordmark preview />
+            <Mark size={20} />
+            <Wordmark preview={!compact} />
           </span>
           {business ? (
             <span className="cd-setup__business cd-type-control" data-copy="user">

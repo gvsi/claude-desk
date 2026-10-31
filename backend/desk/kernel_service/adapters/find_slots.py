@@ -85,6 +85,7 @@ class FindSlotsAdapter:
     Args = FindSlotsArgs
     free_text_fields: frozenset[str] = frozenset()
     model_view_keys = frozenset({"fact_id", "slots"})
+    releases_private_data = False         # open times from the calendar, labelled for the session
 
     async def normalize(self, nctx: NormalizeCtx, args: FindSlotsArgs) -> Normalized:
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))

@@ -4,30 +4,114 @@ The public page's header and charter: the business and Desk names, the owner's d
 brand colors, and the Desk's `public`-labelled charter facts rendered by the clause templates in
 the language asked for (`?lang=es`, else English): its hours, its contact, then its policies. A
 charter fact with nothing to show (hours with no windows) or carrying a document canary is left
-out. Nothing else is read: no people, prices, quotes, bookings or documents. `agent_card` stays
-empty until Plan 01c, and `open_status` is left out until the contract carries it.
+out; owner writes of the charter refuse a canary (`desks.refuse_public_canaries`), so only one
+stored before that check could carry it. Nothing else is read: no people, prices, quotes,
+bookings or documents. `agent_card` stays empty until Plan 01c.
+
+`open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
+fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text
+in the language asked for. It is None when the Desk has no current hours fact or no windows in it,
+so a Desk without hours claims neither open nor closed, and None, logged as `open_status_failed`
+with nothing of the Desk's, when computing it fails or it can't name its boundary: the rest of the
+page is still served.
+
+The header's names and brand colors are the owner's words as typed, which owner writes check for
+document canaries (`desks.refuse_public_canaries`), as they check the slug a new Desk's address is
+made from. One stored before that check and holding a canary of the copy's documents, even split
+or disguised (`labels.canary_fields`), is withheld: the page shows the field's fallback (an empty
+name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
+defaults, at most once an hour per Desk.
 
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
-Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing,
-so it has no ledger entry.
+Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
+but that alert, so it has no ledger entry.
 """
 
+import logging
 import re
+from collections.abc import Sequence
+from copy import deepcopy
+from datetime import datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from sqlalchemy import select
 
-from desk.contracts import Clause, RenderedBlock
+from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock
 from desk.db.models import Business, Desk
+from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact as FactRow
-from desk.kernel_api import PublicDesk
-from desk.kernel_service import labels, render, reply_check, repo
-from desk.kernel_service.render.cards import DeskInfo
+from desk.kernel_api import OpenStatus, PublicDesk
+from desk.kernel_service import demo_inbox, desks, labels, render, reply_check, repo
+from desk.kernel_service.render.cards import DeskInfo, NothingToShow, hours_windows
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
+
+log = logging.getLogger(__name__)
 
 SLUG = re.compile(r"[a-z0-9-]{1,64}")
 CHARTER_TEMPLATES = ("hours", "contact", "policy")          # in the order the page shows them
 PUBLIC = frozenset({"public"})
+
+# The header's owner-typed fields, each with what the page shows when it is withheld, and what the
+# owner's alert calls it (owner-only, in English, like every alert).
+HEADER_FALLBACKS: dict[str, Any] = {"business_name": "", "desk_name": "", "owner_display_name": "", "brand": {}}
+HEADER_WORDS = {"business_name": "business name", "desk_name": "Desk name", "owner_display_name": "display name",
+                "brand": "brand colors"}
+WITHHELD_ALERT_EVERY = timedelta(hours=1)
+
+
+def withheld_alert(fields: Sequence[str]) -> str:
+    """The owner's alert that the page left out `fields` (header field names)."""
+    words = [HEADER_WORDS[field] for field in fields]
+    named = words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+    it = "it" if len(words) == 1 else "them"
+    return (f"Text from one of your private documents is in your {named}, so your public page doesn't show {it}. "
+            f"Change {it} to show {it} again.")
+
+
+async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str]) -> None:
+    """Tells the owner the page left out `fields`, unless it did within the hour."""
+    preview, now = render.owner_preview("public_page"), ctx.clock.now()
+    recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(
+        DemoInboxRow.desk_id == desk_id, DemoInboxRow.kind == "alert", DemoInboxRow.preview == preview,
+        DemoInboxRow.created_at > now - WITHHELD_ALERT_EVERY).limit(1)))
+    if recent.first() is not None:
+        return
+    await demo_inbox.deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
+                             body=withheld_alert(fields), preview=preview)
+
+
+def open_status(hours: Sequence[HoursWindow], timezone: str, now: datetime, lang: render.Language) -> OpenStatus | None:
+    """The open-now line for weekly `hours` in the business's `timezone` at `now`, its text in
+    `lang`; None without windows. A closed business with no opening in the week ahead (windows only
+    in hours the clocks skip), like any failure, raises; so does a line `OpenStatus` refuses."""
+    tz = ZoneInfo(timezone)
+    window = desks.open_window_status(hours, tz, now)
+    if window is None:
+        return None
+    boundary = window.until if window.open else window.opens_at
+    if not window.open and boundary is None:
+        raise ValueError("closed with no opening in the week ahead")
+    return OpenStatus(open=window.open, until=window.until, opens_at=window.opens_at,
+                      text=render.open_status_text(window.open, boundary, now, lang, tz), as_of=now,
+                      refresh_at=window.refresh_at)
+
+
+def _open_status(facts: list[Fact], info: DeskInfo, now: datetime, lang: render.Language) -> OpenStatus | None:
+    """`open_status` from the Desk's current public hours fact, None without one; a failure is
+    logged, naming only the error's type, and answered None."""
+    hours = render.TEMPLATES["hours"]
+    fact = next((fact for fact in facts if hours.reads(fact) and hours.current(fact, now)), None)
+    if fact is None:
+        return None
+    try:
+        return open_status(hours_windows(fact), info.timezone, now, lang)
+    except NothingToShow:
+        return None                                       # hours with no windows
+    except Exception as error:
+        log.warning("open_status_failed error=%s", type(error).__name__)
+        return None
 
 
 async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> PublicDesk:
@@ -43,8 +127,13 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     rows = await ctx.db.scalars(copy.scoped(select(FactRow).where(
         FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
-    info = DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
-    canaries = await reply_check.desk_canaries(ctx, desk.desk_id)
+    canaries = await labels.copy_canaries(ctx)
+    header: dict[str, Any] = {"business_name": business.name, "desk_name": desk.name,
+                              "owner_display_name": business.owner_display_name, "brand": business.brand}
+    if withheld := labels.canary_fields(header, canaries):
+        header |= {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}
+        await _alert_withheld(ctx, desk.desk_id, withheld)
+    info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)
     now = ctx.clock.now()
     charter: list[RenderedBlock] = []
     for name in CHARTER_TEMPLATES:
@@ -58,8 +147,7 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                 continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)
-    return PublicDesk(business_name=business.name, desk_name=desk.name, owner_display_name=business.owner_display_name,
-                      brand=business.brand, charter=charter, agent_card=[])
+    return PublicDesk(**header, charter=charter, agent_card=[], open_status=_open_status(facts, info, now, lang))
 
 
 router = APIRouter()

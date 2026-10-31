@@ -1,15 +1,20 @@
 """The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
-row, then the rows an adapter's hooks lock, then the ledger head, so two kernel transactions never
-deadlock.
+row, then the policy row, people and their verification codes, payment links, document links,
+documents, the rows an adapter's hooks lock (a handoff) and facts, then the ledger head, so two
+kernel transactions never deadlock.
 
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
-transaction of a path takes (`LockLog`) and check that they come in that order.
+transaction of a path takes (`LockLog`) and check that they come in that order: executions and
+their reconciliation (a private action's too, refused once its session closed), answers, cancels
+and reads, a verification start allowed or approved, a right code checked, a document link
+opened, a person removed or given another contact, a Desk deleted, and a handoff closed, after
+the Desk row an owner's write holds first.
 """
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -20,22 +25,29 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import Connection
 
 from desk.contracts import Decision, ExecResult, NormalizedAction
-from desk.db.models import DemoInboxEntry, PolicyVersion
+from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PolicyVersion
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import demo_inbox, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
-from .helpers import kernel_ctx, ledger_rows
-from .test_adapters import visitor_of
-from .test_approvals import ASK_QUOTES, answered, held_on, post_cancel
+from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
+from .test_adapters import book, visitor_of
+from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
 from .test_compiler import card
-from .test_decide import decided, desk_with, owner_decide, set_mode
-from .test_execute import executed, fake_quote_desk, post_execute, read, store_intent
+from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
+from .test_desk_writes import slot_body, updated
+from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
+from .test_lead_tools import callback, handoff_done
+from .test_private_release import verified_fake_desk
+from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
+from .test_verification import check, code_in, entry_of, started
 
-# The tables whose rows the kernel locks, in the order it locks them (repo.py).
-LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "payment_links", "ledger_heads")
+# The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
+# for an adapter's own rows.
+LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
+              "payment_links", "document_links", "documents", "calendar_slots", "handoffs", "facts", "ledger_heads")
 _LOCKING = re.compile(
     r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
     r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
@@ -44,12 +56,14 @@ _LOCKING = re.compile(
 
 class LockLog:
     """The row locks each kernel transaction takes while the log is open, as the tables of
-    `LOCK_ORDER` in the order the transaction first locks a row of each: a `SELECT ... FOR UPDATE`
-    or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it. It goes by table, not
-    row, so a second lock on a table counts as one the transaction holds already; each path here
-    works on one session, one decision and one execution."""
+    `tables` (`LOCK_ORDER` unless given) in the order the transaction first locks a row of each: a
+    `SELECT ... FOR UPDATE` or `FOR SHARE` on the table, or an `INSERT`, `UPDATE` or `DELETE` on it.
+    It goes by table, not row, so a second lock on a table counts as one the transaction holds
+    already; each path here works on one session, one decision and one execution, and a removal on
+    one person; a Desk's deletion takes all its open sessions in one statement, in ID order."""
 
-    def __init__(self) -> None:
+    def __init__(self, tables: Sequence[str] = LOCK_ORDER) -> None:
+        self.tables = tables
         self.transactions: list[list[str]] = []
         self._open: dict[Connection, list[str]] = {}
 
@@ -59,7 +73,7 @@ class LockLog:
     def statement(self, conn: Connection, cursor, statement: str, parameters, context, executemany) -> None:
         found = _LOCKING.match(statement)
         table = found and (found["written"] or found["read"])
-        if table in LOCK_ORDER and table not in self._open.setdefault(conn, []):
+        if table in self.tables and table not in self._open.setdefault(conn, []):
             self._open[conn].append(table)
 
     def end(self, conn: Connection) -> None:
@@ -67,10 +81,15 @@ class LockLog:
             self.transactions.append(locked)
 
 
+def in_lock_order(tables: list[str]) -> bool:
+    """Whether a transaction's tables come in `LOCK_ORDER`."""
+    return tables == sorted(tables, key=LOCK_ORDER.index)
+
+
 @contextmanager
-def lock_log(app: FastAPI) -> Iterator[LockLog]:
-    """A `LockLog` of the kernel app's transactions until the block ends."""
-    log, engine = LockLog(), app.state.kernel.engine.sync_engine
+def lock_log(app: FastAPI, tables: Sequence[str] = LOCK_ORDER) -> Iterator[LockLog]:
+    """A `LockLog` of the kernel app's transactions, over `tables`, until the block ends."""
+    log, engine = LockLog(tables), app.state.kernel.engine.sync_engine
     listeners = [("begin", log.begin), ("before_cursor_execute", log.statement), ("commit", log.end),
                  ("rollback", log.end)]
     for name, listener in listeners:
@@ -157,7 +176,9 @@ async def test_reconciliation_runs_in_the_lock_order(app, client, registry, froz
             assert (await read(client, rows.owner, allowed)).state == "failed"
         else:
             assert await execute.reconcile_at_startup(app.state.kernel) == [allowed.action.action_id]
-    assert log.transactions == [["decisions", "executions", "ledger_heads"]]
+    # each commits at once; a read then goes on holding the decision again, in a transaction of its own
+    reread = [["decisions"]] if how == "read" else []
+    assert log.transactions == [["decisions", "executions", "ledger_heads"], *reread]
 
 
 async def hold_the_active_version(xctx: ExecCtx, action: NormalizedAction) -> None:
@@ -191,12 +212,57 @@ async def test_reconciliation_runs_the_adapter_before_it_ledgers(app, client, re
     frozen_clock.advance(31)
     with lock_log(app) as log:
         assert (await read(client, rows.owner, allowed)).state == state
-    # the rows the adapter's hooks lock come before the ledger head, like any step's
-    assert log.transactions == [["decisions", "executions", "policy_versions", "ledger_heads"]]
+    # the rows the adapter's hooks lock come before the ledger head, like any step's; the reconciliation commits at
+    # once, and the read goes on in a new transaction holding the decision again, as a caller that held it would
+    assert log.transactions == [["decisions", "executions", "policy_versions", "ledger_heads"], ["decisions"]]
     base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
     outcome = [] if state == "unknown" else [{**base, "state": state, "reconciled": True}]
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [
         {**base, "state": "unknown", "orphaned": True}, *outcome]   # the same record, in the same order
+
+
+async def hold_the_active_version_and_fail(xctx: ExecCtx, action: NormalizedAction) -> None:
+    """An `on_failed` that holds the active version, then can't undo what `prepare` reserved."""
+    await hold_the_active_version(xctx, action)
+    raise RuntimeError("the provider can't release the reservation")
+
+
+@pytest.mark.parametrize(("on_failed", "state"), [
+    (hold_the_active_version, "refused_at_execution"),                 # undone, then refused
+    (hold_the_active_version_and_fail, "unknown"),                     # not undone: still unknown
+], ids=["undone", "undo-failed"])
+async def test_a_private_actions_refused_recovery_undoes_before_it_ledgers(app, client, registry, frozen_clock,
+                                                                         monkeypatch, on_failed, state):
+    """An approved hold of an action that releases private data, its intent left by a kernel that
+    died after the answer, recovered once its session closed: the adapter isn't asked, and the rows
+    its `on_failed` locks come before the ledger head, as in every other step. If it can't undo,
+    the action stays `unknown`, with nothing in its result."""
+    release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
+    rows, visitor, _, _ = await verified_fake_desk(app, client, release,
+                                                   [card("ask-quote", "native.quote", mode="ask")])
+    _, held = await held_on(client, rows, visitor=visitor)
+    with monkeypatch.context() as patch:
+        patch.setattr(execute, "_after_intent", crash)
+        with pytest.raises(Crash):
+            await post_answer(client, rows.owner, held.decision_id, "allow_once")     # dies after the intent
+    release.script["on_failed"] = on_failed
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+    frozen_clock.advance(31)
+
+    with lock_log(app) as log:
+        assert (await read(client, rows.owner, held)).state == state
+
+    # the reconciliation commits at once, and the read goes on in a new transaction holding the decision again
+    assert log.transactions == [["sessions", "decisions", "executions", "policy_versions", "ledger_heads"],
+                                ["decisions"]]
+    assert "reconcile" not in release.calls and release.calls[-1] == "on_failed"
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view) == (
+        "failed" if state == "refused_at_execution" else "unknown", [], {})
+    entries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"]
+    refused = [("refused_at_execution", None, "session_ended", True)] if state == "refused_at_execution" else []
+    assert [(s["state"], s.get("orphaned"), s.get("reason"), s.get("reconciled")) for s in entries] == [
+        ("unknown", True, None, None), *refused]
 
 
 async def test_reconciliation_and_a_running_execution_never_deadlock(app, client, registry, frozen_clock):
@@ -277,7 +343,7 @@ async def test_an_approved_hold_runs_in_the_lock_order(app, client, registry):
         assert (await answered(client, rows.owner, held.decision_id, "allow_once")).decision.state == "executed"
     assert log.transactions == [
         ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
-        ["decisions", "executions", "ledger_heads"],                # T2 on the approved path
+        ["sessions", "decisions", "executions", "ledger_heads"],    # T2 on the approved path, holding the session
     ]
 
 
@@ -308,3 +374,144 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert verdict.ok
     # the session is seen at the check's end (no lock across the model call), just before its entry
     assert log.transactions == [["sessions", "ledger_heads"]]
+
+
+async def test_an_allowed_verification_start_runs_in_the_lock_order(app, client):
+    _, visitor = await visitor_of(app, client)
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert allowed.outcome == "allow", allowed.reason_plain
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2: the session row FOR UPDATE, then the start's own rows: Dana's row, her live challenges
+        # (cancelled, then the new one), then its `verify` entry and the outcome
+        ["sessions", "decisions", "executions", "people", "verification_challenges", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_an_approved_verification_start_runs_in_the_lock_order(app, client):
+    copy, visitor = await visitor_of(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        await activate_cards(ctx, copy.desk_id, [card("ask-verify", "native.start_verification", mode="ask")])
+    held = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert held.state == "held", held.reason_plain
+    with lock_log(app) as log:
+        assert (await answered(client, copy.owner, held.decision_id, "allow_once")).decision.state == "executed"
+    assert log.transactions == [
+        ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
+        # T2 on the approved path: the held session's row FOR UPDATE, as an allow's, then the same rows
+        ["sessions", "decisions", "executions", "people", "verification_challenges", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_document_link_opens_in_the_lock_order(app, client):
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    [link] = await links(app, copy)
+    with lock_log(app) as log:
+        assert (await open_link(client, link.token)).status_code == 200
+    # one UPDATE marks the link opened, then its fact expires, then the open is ledgered
+    assert log.transactions == [["document_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_removing_a_person_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session, her invoice's link is unopened, and a code is on its way to her
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    await started(client, await open_visitor(client, copy), DANA)
+    with lock_log(app) as log:
+        await updated(client, copy, "people", {"remove": ["dana"]})
+    # the owner's write holds the Desk row first (not a table of the order); then the session
+    # verified as her, her row and her live code, her link, her invoice, their facts, and last the
+    # session's close and the write, ledgered
+    assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "documents",
+                                 "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_changing_a_contact_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session, her invoice's link is unopened, and a code is on its way to
+    # her in another
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    await started(client, await open_visitor(client, copy), DANA)
+    with lock_log(app) as log:
+        await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                           "contact": "dana.w@example.net"}]})
+    # after the Desk row: the session verified as her, her row and her live code, her link and its
+    # fact (her invoice stays hers), then the session's close and the write, ledgered
+    assert log.transactions == [["sessions", "people", "verification_challenges", "document_links", "facts",
+                                 "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_right_code_verifies_in_the_lock_order(app, client):
+    # a fresh session asks for a code as Dana, and checks the one her Demo inbox shows
+    _, visitor = await visitor_of(app, client)
+    [notice] = (await started(client, visitor, DANA)).inbox
+    code = code_in(await entry_of(client, visitor, notice))
+    with lock_log(app) as log:
+        response = await check(client, visitor, code)
+    assert (response.status_code, response.json()["verified"]) == (200, True), response.text
+    # the session row FOR UPDATE, then Dana's row and her live code (consumed), then the facts the
+    # session holds, relabelled for her (`labels.relabel_on_verify`; none in a fresh session, but the
+    # lock is asked for), then its `verify` entry
+    assert log.transactions == [["sessions", "people", "verification_challenges", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
+    # Dana is verified in one session and her invoice's link is unopened
+    copy, _ = await visitor_of(app, client)
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    with lock_log(app) as log:
+        response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    # after the Desk row: its open sessions closed, its live codes cancelled (none, but the lock is
+    # asked for), its links voided in one UPDATE (`ON_DELETE`), their facts expired, then the deletion
+    # ledgered
+    assert log.transactions == [["sessions", "verification_challenges", "document_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
+    copy, visitor = await visitor_of(app, client)
+    handoff_id = (await callback(client, visitor)).model_view["handoff_id"]
+    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
+        assert (await handoff_done(client, handoff_id, copy.owner)).status_code == 200
+    # an owner's write to the Desk's data: the Desk row first, before any table of the order, then
+    # the handoff (an adapter's own row), its fact, and the close, ledgered
+    assert log.transactions == [["desks", "handoffs", "facts", "ledger_heads"]]
+    assert all(in_lock_order(tables[1:]) for tables in log.transactions)
+
+
+async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
+    copy, visitor = await visitor_of(app, client)
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, "S-20261102-1400")
+    assert allowed.state == "allowed"
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2 takes the slot it books (an adapter's own row) after the session, decision and execution
+    t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
+    assert len(t2) == 1 and t2[0][:3] == ["sessions", "decisions", "executions"], log.transactions
+    assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
+
+
+async def test_a_calendar_write_runs_in_the_lock_order(app, client):
+    copy, _ = await visitor_of(app, client)
+    slots = [slot_body(slot) for slot in await rows_of(app, copy.copy_id, select(CalendarSlot)
+                                                       .order_by(CalendarSlot.slot_id))]
+    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
+        await updated(client, copy, "calendar", {"calendar_slots": slots[1:]})
+    # an owner's write to the Desk's data: the Desk row first, then the Desk's slots, then the entry
+    assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions

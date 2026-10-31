@@ -377,16 +377,16 @@ async def test_weekday_booking_is_auto_allowed_and_confirmed(app, client, review
     # the slot is no longer open
     assert "S-20261102-1000" not in slot_ids(await open_times(app, client, copy, visitor, "call-times"))
 
-    # an owner who wants bookings at once gets an alert, with no code in it
+    # an owner who wants bookings at once gets an alert, with no code in it, in the owner's Demo
+    # inbox alone: the visitor's result carries no owner alert
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         prefs = (await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))).one()
         prefs.now = [*prefs.now, "booking"]
     second = await book(client, visitor, "S-20261102-1200", call_id="call-2")
-    [notice] = (await run(app, copy.copy_id, second)).inbox
-    assert (notice.to, notice.preview) == ("owner", "New booking")
-    [entry] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(
-        DemoInboxEntry.entry_id == notice.entry_id))
+    assert (await run(app, copy.copy_id, second)).inbox == []
+    [entry] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == "New booking"))
+    assert (entry.to, entry.kind, entry.person_id) == ("owner", "alert", None)
     assert entry.body == "A stranger booked Monday, November 2, from 12:00 pm to 2:00 pm."
     assert entry.decision_id is None                           # only a held request's alert names its decision
 
@@ -539,7 +539,7 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert (entries[3].seq, entries[3].event.session_id, entries[3].event.summary) == (decision.ledger_seq,
                                                                                        seeded.session_id, {
         "decision_id": row.decision_id, "action_id": action.action_id, "tool": "native.quote", "outcome": "hold",
-        "card_ids": ["rv-quote"], "policy_version": 1, "reviewed": False})
+        "card_ids": ["rv-quote"], "policy_version": 1, "auto_money_cap_cents": 50_000, "reviewed": False})
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry))
     assert (alert.kind, alert.to, alert.preview, alert.body) == (
         "alert", "owner", "A request needs your answer", decision.reason_plain)

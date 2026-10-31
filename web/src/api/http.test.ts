@@ -12,6 +12,7 @@ import {
   OWNER_ERROR_COPY,
   RULES_UNAVAILABLE_COPY,
   isUncertain,
+  newIdempotencyKey,
   ownerErrorCopy,
   request,
   type ApiErrorKind,
@@ -302,5 +303,22 @@ describe('request', () => {
       expect([String(path), err.kind]).toEqual([String(path), 'unavailable']);
       expect(fetchMock).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe('newIdempotencyKey', () => {
+  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('makes_a_random_uuid_with_or_without_random_uuid', () => {
+    // The browser's own `randomUUID` where it has one; it exists only on a secure page (https or
+    // localhost), so elsewhere the key is a version 4 UUID built from `getRandomValues`.
+    expect(newIdempotencyKey({ randomUUID: () => '00000000-0000-4000-8000-000000000000', getRandomValues: crypto.getRandomValues.bind(crypto) })).toBe(
+      '00000000-0000-4000-8000-000000000000',
+    );
+    const insecure = { getRandomValues: crypto.getRandomValues.bind(crypto) };
+    const keys = Array.from({ length: 50 }, () => newIdempotencyKey(insecure));
+    for (const key of keys) expect(key).toMatch(V4);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(newIdempotencyKey()).toMatch(V4);
   });
 });

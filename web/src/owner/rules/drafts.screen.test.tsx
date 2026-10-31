@@ -292,6 +292,31 @@ describe('rule draft review', () => {
     expect(desk().tools.find((tool) => tool.tool === refund)).toMatchObject({ status: 'needs_review', pending_sha256: 'a'.repeat(64) });
   });
 
+  it('turn_on_review_leads_back_to_rules_until_connectors_are_built', async () => {
+    // Refund's definition changed, and the owner turns it on at the changed hash.
+    const refund = 'payments.create_refund';
+    const sha = 'e'.repeat(64);
+    desk().tools = desk().tools.map((row) => (row.tool === refund ? { ...row, status: 'needs_review', pending_definition_text: 'Changed', pending_sha256: sha } : row));
+    const turned = mockStore.world.confirmTools(desk(), [{ tool: refund, definition_sha256: sha }], true);
+    if (turned === 'not_found' || turned === 'conflict' || turned.draft == null) throw new Error('the tool confirm drafts a version');
+    const row = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools.find((tool) => tool.tool === refund);
+    if (row === undefined) throw new Error('the mock lists Refund');
+    const element = <RuleDraftReview deskId={RIVERA.deskId} draft={draftFromVersion(desk().policy, turned.draft, [row])} />;
+
+    // While the Connectors pages aren't built, its trail starts at Rules.
+    const before = await renderRoute('/review', { routes: [{ path: '/review', element }] });
+    const trail = before.screen.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
+    expect(trail.getByRole('link', { name: 'Connectors' }).elements()).toEqual([]);
+    expect(before.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
+
+    // Once they are, at Connectors.
+    const built = await renderRoute('/review', { routes: [{ path: '/review', element }], connectorPages: true });
+    const builtTrail = built.screen.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect.element(builtTrail.getByRole('link', { name: 'Connectors' })).toHaveAttribute('href', `${DESK}/connectors`);
+    expect(builtTrail.getByRole('link', { name: 'Rules' }).elements()).toEqual([]);
+  });
+
   it('reload_loads_the_draft', async () => {
     // "Ask me first", as the Rules page hands it over, titled with the preset's name.
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
