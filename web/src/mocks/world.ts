@@ -296,9 +296,13 @@ export class MockWorld {
   /**
    * Takes `desk` out of the copy, as deleting a Desk does: its public link and its owner pages
    * answer not found from now on, and so do its chats, which reach it by its slug. Its id is kept
-   * in `deletedDesks`, so what names one of its chats is refused as closed.
+   * in `deletedDesks`, so what names one of its chats is refused as closed. Its open payment links
+   * are cancelled first, as the kernel cancels them in the delete, so none can be paid after it.
    */
   deleteDesk(desk: DeskRecord): void {
+    for (const [token, link] of this.links) {
+      if (link.deskId === desk.summary.desk_id && link.view.state === 'issued') this.cancelLink(token, link, 'desk_deleted');
+    }
     const index = this.desks.indexOf(desk);
     if (index !== -1) this.desks.splice(index, 1);
     this.deletedDesks.add(desk.summary.desk_id);
@@ -784,12 +788,13 @@ export class MockWorld {
   }
 
   /**
-   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of, or by a
-   * change to the business's rules, as the kernel cancels an open link the new rules no longer
-   * allow when the owner confirms them. That one says why on the checkout (`cancel_reason`), and
-   * its chat gets the kernel's `link_cancelled` line, author `desk`.
+   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of; by its
+   * Desk's delete, whose chat is closed; or by a change to the business's rules, as the kernel
+   * cancels an open link the new rules no longer allow when the owner confirms them. That one says
+   * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` line,
+   * author `desk`.
    */
-  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'rules_changed'): void {
+  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
     link.view = { ...link.view, state: 'cancelled' };

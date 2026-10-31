@@ -1064,6 +1064,38 @@ describe('deleting a Desk', () => {
     await drain();
     expect(chat.events).toHaveLength(heard);
   });
+
+  it('deleted_desk_payment_links_are_cancelled', async () => {
+    // The visitor asked for the deposit link on the main Desk, and has it open, when the Desk goes.
+    // A link on the copy's other Desk is open too.
+    mockStore.reset('rivera_two_desks');
+    await openChat();
+    await send('Can I pay the deposit?');
+    await drain();
+    const [token, link] = [...mockStore.world.links].find(([, l]) => l.deskId === deskId) ?? [];
+    const emergencies = mockStore.world.desk(RIVERA.emergenciesDeskId);
+    if (token === undefined || !link || !emergencies) throw new Error('the main Desk issued a link, and the copy has its other Desk');
+    const elsewhere = mockStore.world.issueLink(mockStore.world.addSession(emergencies), { title: 'Call-out', amountCents: 5000, language: 'en' });
+    expect(link.view.state).toBe('issued');
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+
+    // Its open link goes with it, as the kernel cancels a deleted Desk's open links: the checkout
+    // reads it cancelled, with no reason to give and no customer's name.
+    expect(link.view.state).toBe('cancelled');
+    expect(await call('paymentLink', { params: { token } })).toMatchObject({
+      status: 200,
+      body: { state: 'cancelled', cancel_reason: null, customer_name: null },
+    });
+    // Paying it now, or cancelling it, is refused with the state it's in, and changes nothing.
+    const refused = { status: 409, body: { error: 'kernel', code: 'conflict', state: 'cancelled', cancel_reason: null } };
+    expect(await call('completePayment', { params: { token } })).toEqual(refused);
+    expect(await call('cancelPayment', { params: { token } })).toEqual(refused);
+    expect(link.view.state).toBe('cancelled');
+
+    // The other Desk's link is still open, and can be paid.
+    expect(mockStore.world.links.get(elsewhere)?.view.state).toBe('issued');
+    expect(await call('completePayment', { params: { token: elsewhere } })).toMatchObject({ status: 200, body: { state: 'paid' } });
+  });
 });
 
 describe('planted faults', () => {
