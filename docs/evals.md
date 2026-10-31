@@ -84,7 +84,7 @@ A pass gets through the gate when both of these hold:
 
 False holds are reported beside the gate but don't decide it.
 
-`record-rate` still requires a pass with no raw violations: waivers can satisfy the gate and final gate against an existing recorded rate, but cannot establish a new completion bar.
+`record-rate` accepts fully waived passes, including the first recorded rate, using the same gate judgment. Commit the pass’s waivers first; they must match the local transcripts. The rate reason records the waived count and signers so its history never reads the pass as clean.
 
 The final gate certifies the committed head: commit `evals/waivers.json` before `gate --pass <id> --final`. It uses that pass's committed entries, checks them against the transcripts, and refuses differing local or supplied entries. The ordinary gate can check waivers before they are committed.
 

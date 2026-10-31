@@ -265,6 +265,62 @@ async def test_exports_and_final_gate_use_transcript_checked_waivers(tmp_path):
                    waivers=[entries[0].model_copy(update={"message_sha256": "b" * 64})])
 
 
+async def test_fully_waived_pass_records_first_rate_with_waiver_history(tmp_path):
+    from evals.results import final_gate
+    from evals.tests.eval_repo import commit
+    from evals.tier2.passes import record_rate
+    from evals.tier2.suite import load_recorded_rates
+    from evals.waivers import sign_waivers
+
+    root, finished, ids = await flagged_pass(tmp_path, runs=3)
+    sign_waivers(finished.pass_id, ids, root=root, reason="Read both refusals.", signed_off_by="Waiver signer")
+    commit(root, "commit fixture waivers")
+    rate = record_rate(finished, root=root, reason="First held-out run", signed_off_by="Rate signer")
+    assert "2 waived, signed by Waiver signer" in rate.reason
+    assert "First held-out run" in rate.reason and rate.signed_off_by == "Rate signer"
+    recorded = load_recorded_rates(root / "evals/recorded_rates.json")
+    assert recorded.current == rate
+    commit(root, "record fixture rate")
+    assert final_gate(finished, recorded, root=root).passed
+
+
+async def test_partially_waived_pass_cannot_record_a_rate(tmp_path):
+    from evals.tests.eval_repo import commit
+    from evals.tier2.passes import PassRefused, record_rate
+    from evals.waivers import sign_waivers
+
+    root, finished, ids = await flagged_pass(tmp_path, runs=3)
+    sign_waivers(finished.pass_id, ids[:1], root=root, reason="Read one refusal.", signed_off_by="Test owner")
+    commit(root, "commit partial fixture waivers")
+    path = root / "evals/recorded_rates.json"
+    before = path.read_bytes()
+    with pytest.raises(PassRefused, match="clean pass"):
+        record_rate(finished, root=root, reason="First held-out run", signed_off_by="Test owner")
+    assert path.read_bytes() == before
+
+
+async def test_stale_or_uncommitted_waivers_cannot_record_a_rate(tmp_path):
+    from evals.tests.eval_repo import commit
+    from evals.tier2.passes import PassRefused, record_rate
+    from evals.waivers import WAIVERS_PATH, sign_waivers
+
+    root, finished, ids = await flagged_pass(tmp_path, runs=3)
+    sign_waivers(finished.pass_id, ids, root=root, reason="Read both refusals.", signed_off_by="Test owner")
+    args = {"root": root, "reason": "First held-out run", "signed_off_by": "Test owner"}
+    path = root / "evals/recorded_rates.json"
+    before = path.read_bytes()
+    with pytest.raises(PassRefused, match="commit evals/waivers.json first"):
+        record_rate(finished, **args)
+    registry = root / WAIVERS_PATH
+    data = json.loads(registry.read_text())
+    data[0]["message_sha256"] = "b" * 64
+    registry.write_text(json.dumps(data))
+    commit(root, "commit stale fixture waivers")
+    with pytest.raises(PassRefused, match="waivers can't be checked.*exact text hash"):
+        record_rate(finished, **args)
+    assert path.read_bytes() == before
+
+
 async def test_final_gate_uses_committed_waivers_and_refuses_local_or_supplied_divergence(tmp_path):
     from evals.results import RATE_MODEL_IDS, ResultsRefused, final_gate
     from evals.tests.eval_repo import commit, write

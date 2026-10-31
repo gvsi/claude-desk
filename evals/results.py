@@ -685,7 +685,8 @@ _USES = {
 
 
 def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
-                   use: Literal["final gate", "recorded rate"]) -> Reconciled:
+                   use: Literal["final gate", "recorded rate"],
+                   waivers: Sequence[Waiver] | None = None) -> Reconciled:
     """Whether a finished pass (`PassResult`) stands for the head, as the final gate and a recorded rate
     both need, judged against `rates` (the working tree's): returns what its results file was reconciled
     with at the head, or raises `ResultsRefused` with the first reason it doesn't, in this order. The pass
@@ -696,7 +697,8 @@ def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
     results file can be written (`results_file`, which reconciles it with the whole suite at its commit);
     and that file reconciles with the head as `results-check` would (`reconcile`, so `rates` must name the
     head's current rate; `record_rate` also holds the whole of `rates` to the returned history with
-    `history_refusal`). `use` names the caller in the reasons."""
+    `history_refusal`). Local or supplied waivers for this pass must equal the head's committed entries,
+    which are checked against transcripts before returning. `use` names the caller in the reasons."""
     who, lead, at_inputs = _USES[use]
     if refusal := p.config.whole_pass_refusal():
         raise ResultsRefused(f"{lead} a pass that could write the results file, and pass {p.pass_id} couldn't: "
@@ -708,7 +710,19 @@ def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
             raise ResultsRefused(f"pass {p.pass_id} ran at gated inputs {p.inputs}, and the head's are {head}: "
                                  f"{at_inputs}; run a new pass")
         file = results_file(p, rates, root=root)
-        return reconcile(file, root, "HEAD", name=f"pass {p.pass_id}'s results file")
+        at_head = reconcile(file, root, "HEAD", name=f"pass {p.pass_id}'s results file")
+        def entries_for_pass(entries: Sequence[Waiver]) -> list[str]:
+            return sorted(w.model_dump_json() for w in entries if w.pass_id == p.pass_id)
+
+        committed = entries_for_pass(at_head.waivers)
+        offered: list[Sequence[Waiver]] = [load_waivers(root)]
+        if waivers is not None:
+            offered.append(waivers)
+        if any(entries_for_pass(entries) != committed for entries in offered):
+            raise ResultsRefused(f"pass {p.pass_id}'s local or supplied waivers differ from the head's; "
+                                 "commit evals/waivers.json first")
+        checked_waivers(p, list(at_head.waivers), root=root)
+        return at_head
     except CheckFailed as failure:
         raise ResultsRefused(str(failure)) from None
     except GitError as failure:
@@ -757,19 +771,8 @@ def final_gate(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
     Refused unless the pass stands for the head (`reconcile_pass`, the checks a recorded rate shares);
     then its rows are judged against the head's committed rate, waivers and whole suite. Local or
     supplied entries for this pass must match the committed entries; other passes don't affect it."""
-    at_head = reconcile_pass(p, rates, root=root, use="final gate")
-    def entries_for_pass(entries: Sequence[Waiver]) -> list[str]:
-        return sorted(w.model_dump_json() for w in entries if w.pass_id == p.pass_id)
-
-    committed = entries_for_pass(at_head.waivers)
-    offered: list[Sequence[Waiver]] = [load_waivers(root)]
-    if waivers is not None:
-        offered.append(waivers)
-    if any(entries_for_pass(entries) != committed for entries in offered):
-        raise ResultsRefused(f"pass {p.pass_id}'s local or supplied waivers differ from the head's; "
-                             "commit evals/waivers.json first")
-    checked = checked_waivers(p, list(at_head.waivers), root=root)
-    return gate_of(p, at_head.rates, final=True, target=at_head.target, waivers=checked)
+    at_head = reconcile_pass(p, rates, root=root, use="final gate", waivers=waivers)
+    return gate_of(p, at_head.rates, final=True, target=at_head.target, waivers=at_head.waivers)
 
 
 # The check CI runs
