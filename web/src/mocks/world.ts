@@ -1032,8 +1032,10 @@ export class MockWorld {
       const old = was.get(card.card_id);
       return old !== undefined && canonicalCard(old) !== canonicalCard(card) ? [[{ ...old }, card]] : [];
     });
-    // Each reason once, in card order, as the API's summary lists them (`desk.api.versions.rules_draft`):
-    // rules lowered to the same payment limit share one sentence, and it shows once.
+    // Each reason once, in card order, as the API's summary lists them (`desk.api.versions.rules_draft`),
+    // so rules lowered to the same payment limit share one entry. This is to match the API's data only:
+    // the payment limit's review shows a row per changed rule, not the summary, which only a draft
+    // with nothing to compare with (setup's) shows.
     const reasons = (mode: RuleCard['mode']) => [...new Set(next.filter((c) => c.mode === mode).map((c) => c.reason))];
     const proof = desk.policy.proof;
     desk.lastVersion += 1;
