@@ -820,6 +820,42 @@ describe('Conversations', () => {
     expect(landed.rows()).toEqual([quotes().at(-1)?.closest('.cd-transcript-row')]);
   });
 
+  it('a_receipt_shown_before_its_reply_doesnt_land_again', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+
+    // Dana asks, and Claude runs the quote. A read before the reply shows its receipt under her question.
+    const world = mockStore.world;
+    const price = SCRIPT.find((rule) => rule.name === 'price');
+    if (!price) throw new Error('the script has its price row');
+    const question = 'How much is drain clearing?';
+    world.visitorText(chat, question);
+    const turn = world.context(chat, 'en', question);
+    const [quoted, ...rest] = price.steps;
+    if (!quoted) throw new Error('the price row runs the quote first');
+    world.emit(chat, quoted(turn));
+    const asked = () => log(screen).getByText(question, { exact: true }).element().closest('.cd-transcript-row');
+    await expect.poll(() => asked()?.querySelectorAll('.cd-margin-receipt').length ?? 0).toBe(1);
+    const read = asked()?.querySelector('.cd-margin-receipt')?.textContent;
+
+    // The reply comes, and the receipt moves under it, after the reply's own check. The reply and its
+    // check land; the receipt the owner has already read shows at once.
+    for (const step of [...rest, turnEnd]) world.emit(chat, step(turn));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    const reply = quotes().at(-1)?.closest('.cd-transcript-row');
+    if (!reply) throw new Error('the reply has its row');
+    expect(landed.rows()).toEqual([reply]);
+    const lines = [...reply.querySelectorAll('.cd-margin-receipt')];
+    expect(lines).toHaveLength(2);
+    expect(lines[1]?.textContent).toBe(read);
+    expect(landed.lines(reply)).toEqual([lines[0]]);
+  });
+
   it('the_owners_own_words_never_land', async () => {
     const chat = named(DANA_LIVE, DANA);
     const landed = watchLandings();

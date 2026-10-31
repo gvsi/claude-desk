@@ -10,27 +10,13 @@ import { composeStory } from '@storybook/react-vite';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { expect, it, onTestFinished, vi } from 'vitest';
-import { cdp } from 'vitest/browser';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { motion, reduceMotion } from '../../test/reducedMotion.ts';
 import { MarginNote } from '../MarginNote/MarginNote.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import meta, { LiveReply } from './TranscriptRow.stories.tsx';
 import { TranscriptRow } from './TranscriptRow.tsx';
-
-/** Sets prefers-reduced-motion for the page, as a visitor's system setting would. */
-async function reduceMotion(reduce: boolean): Promise<void> {
-  await cdp().send('Emulation.setEmulatedMedia', {
-    features: [{ name: 'prefers-reduced-motion', value: reduce ? 'reduce' : 'no-preference' }],
-  });
-}
-
-/** Lets motion play for the rest of the test; reduced motion, as the project has it, comes back after. */
-async function motion(): Promise<void> {
-  await reduceMotion(false);
-  onTestFinished(() => reduceMotion(true));
-  expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(false);
-}
 
 /** A root to draw rows into, gone after the test. */
 function host() {

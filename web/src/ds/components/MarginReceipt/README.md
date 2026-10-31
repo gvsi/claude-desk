@@ -18,6 +18,7 @@
   - `cardBelow`: the request's `ApprovalCard` is drawn right under this receipt's row.
 - `drawCheck` for an executed booking or a paid link. The sage check draws once, and only when the receipt is handled.
 - Nothing for a reply that arrives live: under a `TranscriptRow` with `live`, the receipt lands on its own `motion-stagger` beat, its dot growing from half size with it and its check drawing as it lands. Its words, order and dot color don't change. One attached after the row has landed, and any under reduced motion, shows at once.
+- `shownBefore` for a receipt the reader has already seen, now attached under a reply that arrives live (shown under the question while the reply was on its way): it shows at once while the reply and its new lines land. Read when the receipt is first drawn.
 
 ## The line
 
@@ -72,5 +73,6 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 | `cardBelow` | `boolean` | Owner screens only. The request's `ApprovalCard` is right under this row: a `held` decision reads "Held for you" alone. Ignored on a `reply` and on any other state. |
 | `onOpenTrace` | `(ledgerSeq: number) => void` | Owner screens only. Makes the receipt a button named "{line} Open the full trace.", e.g. "Stopped. Someone asked for another customer's invoice. Open the full trace."; Enter or a click calls it once with `ledgerSeq`. |
 | `drawCheck` | `boolean` | Adds the check that draws once, only when the tone is handled. Static under reduced motion. |
+| `shownBefore` | `boolean` | The reader has already seen this receipt, now under a reply that arrives live: it shows at once instead of landing. Read when the receipt is first drawn. |
 
 The dot is `aria-hidden`: the line names the state, in the kernel's words or, on an owner's decision receipt, the owner's words that lead it. Every tone reaches 3:1 on the app, panels, raised surfaces and cards (`CONTRAST_PAIRS`).

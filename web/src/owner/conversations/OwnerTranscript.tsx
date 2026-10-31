@@ -140,6 +140,19 @@ function useArrivals(rows: readonly OwnerRow[], recorded: boolean, readSinceOpen
   return (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.ev.author !== 'owner' && row.item.n > before;
 }
 
+/**
+ * The receipts this view has shown, by ledger seq, as of its last draw. A turn's receipt shown
+ * under the question while the reply was on its way moves under the reply when it comes, already
+ * read, so it doesn't land with it (`MarginReceipt`'s `shownBefore`, read when the line is drawn).
+ */
+function useShownReceipts(groups: ReturnType<typeof rowsOf>): ReadonlySet<number> {
+  const shown = useRef(new Set<number>());
+  useEffect(() => {
+    for (const source of [...groups.leading, ...groups.rows.flatMap((row) => row.receipts)]) shown.current.add(source.event.ledger_seq);
+  }, [groups]);
+  return shown.current;
+}
+
 /** The decisions held under `receipts`: the ones whose hold is among them. */
 function holdsUnder(receipts: readonly OwnerReceiptSource[]): string[] {
   return receipts.flatMap(({ event }) => (event.type === 'held' ? [event.decision_id] : []));
@@ -167,11 +180,13 @@ interface ReceiptLineProps {
   done: boolean;
   /** The held requests whose cards are drawn right after this receipt's row. */
   cards: readonly string[];
+  /** The owner has seen it already, under another row: it doesn't land with a reply that arrives. */
+  shownBefore: boolean;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
 /** One receipt: the owner's line for it, a button that opens its trace. */
-function ReceiptLine({ source, done, cards, onOpenTrace }: ReceiptLineProps) {
+function ReceiptLine({ source, done, cards, shownBefore, onOpenTrace }: ReceiptLineProps) {
   const view = useOwnerReceipt(source.event, source.first);
   const { event } = source;
   // The hold that reports what the kernel decided, with its card right under the row: the card says why.
@@ -185,6 +200,7 @@ function ReceiptLine({ source, done, cards, onOpenTrace }: ReceiptLineProps) {
       cardBelow={cardBelow}
       onOpenTrace={onOpenTrace}
       drawCheck={done && view.source.kind === 'decision' && view.source.state === 'executed'}
+      shownBefore={shownBefore}
     />
   );
 }
@@ -195,17 +211,26 @@ interface RowViewProps {
   live: boolean;
   /** The held requests whose cards are drawn right after this row. */
   cards: readonly string[];
+  /** The receipts shown so far, by ledger seq. */
+  shown: ReadonlySet<number>;
   agentName: string;
   ownerName: string;
   timezone: string;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, live, cards, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const margin = row.receipts.map((source, index) => (
-    <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={done} cards={cards} onOpenTrace={onOpenTrace} />
+    <ReceiptLine
+      key={`${source.event.ledger_seq}-${index}`}
+      source={source}
+      done={done}
+      cards={cards}
+      shownBefore={shown.has(source.event.ledger_seq)}
+      onOpenTrace={onOpenTrace}
+    />
   ));
   let message: ReactNode;
   switch (item.kind) {
@@ -258,6 +283,7 @@ export function OwnerTranscript({
 }: OwnerTranscriptProps) {
   const groups = useMemo(() => rowsOf(items), [items]);
   const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
+  const shown = useShownReceipts(groups);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const traceBox = useRef<HTMLDivElement>(null);
@@ -354,6 +380,7 @@ export function OwnerTranscript({
           row={row}
           live={arrived(row)}
           cards={cards}
+          shown={shown}
           agentName={agentName}
           ownerName={ownerName}
           timezone={timezone}
@@ -372,7 +399,14 @@ export function OwnerTranscript({
         <>
           <TranscriptRow
             margin={leading.map((source, index) => (
-              <ReceiptLine key={`${source.event.ledger_seq}-${index}`} source={source} done={false} cards={leadingCards} onOpenTrace={openTrace} />
+              <ReceiptLine
+                key={`${source.event.ledger_seq}-${index}`}
+                source={source}
+                done={false}
+                cards={leadingCards}
+                shownBefore={shown.has(source.event.ledger_seq)}
+                onOpenTrace={openTrace}
+              />
             ))}
           >
             {null}
