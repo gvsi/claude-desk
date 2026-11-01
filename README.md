@@ -13,7 +13,7 @@ The passcode comes with the link. Each visitor gets a fresh copy of the Rivera P
 ## Things to try
 
 1. **Chat as a customer.** Rivera's public page opens in a new tab. Ask for a quote or a booking. Each reply is checked before it appears, and a receipt under each message shows what the checks did.
-2. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Maria never made. The receipts show what was held or blocked, and Safety, in Maria's app, lists every attempt.
+2. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Maria never made. Claude declines what the rules don't allow. When it tries an action or a reply that the kernel stops, the receipt under its message shows what was held or blocked, and Safety, in Maria's app, lists the attempt. A request Claude turns down in its own words, such as someone else's invoice, makes no tool call, so nothing is held or logged.
 3. **Answer a held request.** One is waiting on Today: a customer asked for 15% off a drain clearing, which Maria's rules don't allow without asking her.
 4. **Create your own Desk.** "+ New business", in the switcher at the top left, starts a setup interview. Describe the business and answer the memory question. With your yes, Claude reads your website and searches the web for how this kind of business works, then asks its questions and proposal cards one at a time. At the end it can add you as a test client, and you review the tools, rules and customer-facing text, try the preview and publish a live link.
 5. **Ask Claude about your rules.** Open Ask Claude in Rules and ask what it can handle without you. Its answers and setup's replies render Markdown, including lists and bold text.
