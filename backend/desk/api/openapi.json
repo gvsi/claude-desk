@@ -12837,6 +12837,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -13105,7 +13106,7 @@
               "$ref": "#/components/schemas/ToolPin"
             },
             "type": "array",
-            "maxItems": 13,
+            "maxItems": 14,
             "minItems": 1,
             "title": "Tools"
           },

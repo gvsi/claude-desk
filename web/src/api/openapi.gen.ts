@@ -1020,7 +1020,7 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -1036,6 +1036,22 @@ export interface ToolsConfirmIn {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,
