@@ -455,7 +455,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // Setup and Today open the owner's own preview with a Desk id; its session is still a visitor.
   const ownerPreview = typeof previewDeskId === 'string' && previewDeskId.length > 0;
   const chat = useVisitorChat(slug, previewDeskId);
-  const paymentBlock = usePaymentLinks(chat.state.rows);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
   const copy = PUBLIC_COPY[language];
@@ -467,6 +466,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);

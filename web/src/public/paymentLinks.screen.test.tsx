@@ -1,7 +1,7 @@
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { request } from '../api/http.ts';
+import { observeRequests, request, type RequestOutcome } from '../api/http.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
@@ -11,6 +11,37 @@ const CHAT = `/d/${RIVERA.slug}`;
 const reads = () => mockStore.requests.filter((r) => r.key === 'paymentLink');
 const card = (screen: RenderResult) => screen.getByRole('article', { name: 'Payment link', exact: true });
 const action = (screen: RenderResult) => screen.getByRole('link', { name: 'Open payment page' });
+
+let outcomes: RequestOutcome[];
+beforeEach(() => {
+  outcomes = [];
+  onTestFinished(observeRequests((outcome) => {
+    if (outcome.key === 'paymentLink') outcomes.push(outcome);
+  }));
+});
+afterEach(() => {
+  expect(mockStore.pendingInjections, 'every planted payment read was consumed').toEqual([]);
+  vi.restoreAllMocks();
+});
+
+async function settledReads(count: number) {
+  await vi.waitFor(() => {
+    expect(reads()).toHaveLength(count);
+    expect(outcomes).toHaveLength(count);
+  });
+}
+
+async function remountChat(router: Awaited<ReturnType<typeof renderRoute>>['router']) {
+  await router.navigate('/missing');
+  await router.navigate(CHAT);
+}
+
+async function payInOtherTab(token: string) {
+  // This tab only observes the other checkout's change. Set it up through the mock route so a
+  // service-worker/proxy bypass in the runner cannot turn the external event into a failed POST.
+  // The checkout interaction above/below still exercises the app's actual HTTP payment flow.
+  expect(await mockStore.dispatch('completePayment', { params: { token } })).toMatchObject({ status: 200, body: { state: 'paid' } });
+}
 
 function visibility(state: 'hidden' | 'visible') {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
@@ -27,6 +58,7 @@ async function issue(viewport: Viewport) {
   const href = action(view.screen).element().getAttribute('href') ?? '';
   const token = href.slice('/pay/'.length);
   await vi.waitFor(() => expect(mockStore.visitorSession(RIVERA.slug)?.events.at(-1)?.ev.type).toBe('turn_end'));
+  await settledReads(1);
   return { ...view, token, href, words: card(view.screen).element().querySelector('.cd-reply-card__data')?.textContent };
 }
 
@@ -37,6 +69,14 @@ async function unchanged(screen: RenderResult, words: string | null | undefined)
 }
 
 describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', (viewport) => {
+  it('returns keyboard focus to the composer when the focused payment action closes', async () => {
+    const { screen, token } = await issue(viewport);
+    action(screen).element().focus();
+    await expect.element(action(screen)).toHaveFocus();
+    await payInOtherTab(token);
+    await expect.element(action(screen)).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
+  });
   it('removes a rule-cancelled action live and from history without reading the cancelled token', async () => {
     const { screen, token, words } = await issue(viewport);
     const desk = mockStore.world.desk(RIVERA.deskId);
@@ -61,22 +101,31 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     await expect.element(screen.getByRole('button', { name: 'Pay $20.00' })).toBeVisible();
     await screen.getByRole('button', { name: 'Pay $20.00' }).click();
     await expect.element(screen.getByText('Paid. Go back to the chat to see it there.')).toBeVisible();
-    const beforeReturn = reads().length; // Checkout has its own StrictMode reads.
+    await settledReads(reads().length); // Checkout's StrictMode reads have both settled.
+    const beforeReturn = reads().length;
+    const link = mockStore.world.links.get(href.slice('/pay/'.length));
+    if (!link) throw new Error('the chat issued its link');
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(release);
+    mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view }, until });
     await router.navigate(CHAT);
     await expect.element(screen.getByRole('article', { name: 'Paid', exact: true })).toBeVisible();
+    await vi.waitFor(() => expect(reads()).toHaveLength(beforeReturn + 1));
+    release(); // The pending answer is terminal, so the queued confirmation needs no follow-up.
     await unchanged(screen, words);
-    // The retained chat first draws its old card, then receives the missed confirmation.
+    await settledReads(beforeReturn + 1);
     const afterReturn = reads().length;
-    expect(afterReturn - beforeReturn).toBeGreaterThanOrEqual(1);
-    expect(afterReturn - beforeReturn).toBeLessThanOrEqual(2); // Concurrent triggers share a read.
+    await remountChat(router);
+    await unchanged(screen, words);
+    expect(reads()).toHaveLength(afterReturn); // The provider retains known closure.
     const reload = await renderRoute(CHAT, { viewport, strict: true });
     await expect.element(reload.screen.getByRole('article', { name: 'Paid', exact: true })).toBeVisible();
     await unchanged(reload.screen, words);
     expect(reads()).toHaveLength(afterReturn + 1);
   });
   it('refreshes a visitor-cancelled checkout on visibility and keeps it closed after reload', async () => {
-    const { screen, token, words } = await issue(viewport);
-    await vi.waitFor(() => expect(reads()).toHaveLength(1));
+    const { screen, router, token, words } = await issue(viewport);
     visibility('hidden');
     const before = mockStore.visitorSession(RIVERA.slug)?.events.length;
     await request('cancelPayment', { params: { token } }); // Checkout's own mutation in another tab.
@@ -86,6 +135,9 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     await unchanged(screen, words);
     expect(reads()).toHaveLength(2);
     visibility('visible'); // A duplicate event while already visible isn't a return.
+    expect(reads()).toHaveLength(2);
+    await remountChat(router);
+    await unchanged(screen, words);
     expect(reads()).toHaveLength(2);
     const reload = await renderRoute(CHAT, { viewport, strict: true });
     await expect.element(card(reload.screen)).toBeVisible();
@@ -104,7 +156,7 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     const link = mockStore.world.links.get(token);
     if (!link) throw new Error('the chat issued its link');
     mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view, state: 'paid' }, until, times: 1 });
-    await request('completePayment', { params: { token } }); // Confirmation arrives live, without a link id.
+    await payInOtherTab(token); // Confirmation arrives live, without a link id.
     await expect.element(screen.getByRole('article', { name: 'Paid', exact: true })).toBeVisible();
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     visibility('hidden');
@@ -116,9 +168,35 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     expectNoHorizontalScroll();
     expect(reads()).toHaveLength(2);
   });
-  it('removes an expired action after a read and preserves the title and lines on reload', async () => {
+  it('follows a stale issued read after a live payment confirmation without a visibility change', async () => {
     const { screen, token, words } = await issue(viewport);
-    await vi.waitFor(() => expect(reads()).toHaveLength(1));
+    const link = mockStore.world.links.get(token)!;
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(release);
+    mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view }, until });
+    visibility('hidden');
+    visibility('visible');
+    await vi.waitFor(() => expect(reads()).toHaveLength(2));
+    await payInOtherTab(token);
+    await expect.element(screen.getByRole('article', { name: 'Paid', exact: true })).toBeVisible();
+    await expect.element(action(screen)).toBeVisible();
+    expect(reads()).toHaveLength(2);
+    release();
+    await unchanged(screen, words);
+    await settledReads(3); // One follow-up sees the payment; no second visibility event.
+  });
+  it('keeps the issued button after a successful JSON null read', async () => {
+    const { screen } = await issue(viewport);
+    mockStore.inject({ route: 'paymentLink', status: 200, body: null });
+    visibility('hidden');
+    visibility('visible');
+    await settledReads(2);
+    expect(outcomes.at(-1)).toMatchObject({ ok: true });
+    await expect.element(action(screen)).toBeVisible();
+  });
+  it('removes an expired action after a read and preserves the title and lines on reload', async () => {
+    const { screen, router, token, words } = await issue(viewport);
     const content = (view: RenderResult) => ({
       title: card(view).element().querySelector('.cd-reply-card__headline')?.textContent,
       lines: [...card(view).element().querySelectorAll('.cd-reply-card__detail')].map((line) => line.textContent),
@@ -127,12 +205,15 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     const before = content(screen);
     const link = mockStore.world.links.get(token);
     if (!link) throw new Error('the chat issued its link');
-    // The mock has no expiry transition; return the contract's expired state on this read.
-    mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view, state: 'expired' }, times: 2 });
+    // The mock has no expiry clock; settle its link to the contract's terminal state.
+    link.view = { ...link.view, state: 'expired' };
     visibility('hidden');
     visibility('visible');
     await unchanged(screen, words);
     expect(content(screen)).toEqual(before);
+    expect(reads()).toHaveLength(2);
+    await remountChat(router);
+    await unchanged(screen, words);
     expect(reads()).toHaveLength(2);
     const reload = await renderRoute(CHAT, { viewport, strict: true });
     await expect.element(card(reload.screen)).toBeVisible();
@@ -146,37 +227,43 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     const link = mockStore.world.links.get(token);
     if (!link) throw new Error('the chat issued its link');
     let count = 1;
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now');
     for (const state of ['issued', 'unknown']) {
       mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view, state }, times: 1 });
+      now += 30_000;
+      clock.mockReturnValue(now);
       visibility('hidden');
       visibility('visible');
       count += 1;
-      await vi.waitFor(() => expect(reads()).toHaveLength(count));
+      await settledReads(count);
       await expect.element(action(screen)).toBeVisible();
     }
     for (const status of ['network', 404, 429, 503] as const) {
       mockStore.inject({ route: 'paymentLink', status, times: 1 });
+      now += 30_000;
+      clock.mockReturnValue(now);
       visibility('hidden');
       visibility('visible');
       count += 1;
-      await vi.waitFor(() => expect(reads()).toHaveLength(count));
+      await settledReads(count);
+      expect(outcomes.at(-1)).toMatchObject({ ok: false, error: { status: status === 'network' ? null : status } });
       await expect.element(action(screen)).toBeVisible();
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(reads()).toHaveLength(count);
     expectNoHorizontalScroll();
   });
-  it('does not reopen a known paid link when a later refresh fails', async () => {
+  it('does not read a known paid link on later visibility returns', async () => {
     const { screen, token, words } = await issue(viewport);
-    await request('completePayment', { params: { token } });
+    await payInOtherTab(token);
     await expect.element(screen.getByRole('article', { name: 'Paid', exact: true })).toBeVisible();
     await unchanged(screen, words);
     const before = reads().length;
-    mockStore.inject({ route: 'paymentLink', status: 503, times: 1 });
     visibility('hidden');
     visibility('visible');
-    await vi.waitFor(() => expect(reads()).toHaveLength(before + 1));
     await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reads()).toHaveLength(before);
     await unchanged(screen, words);
   });
 });
