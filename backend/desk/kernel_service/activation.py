@@ -143,14 +143,18 @@ async def run_selftest() -> ProofMode:
     mode: ProofMode = "bounded"
     try:
         code, stdout = await _run([prover_path(), "--selftest"], kill_after=SELFTEST_TIMEOUT_S)
-        report = ProofReport.model_validate_json(stdout) if code == 0 else None
-        if (report is not None and report.ok and report.method == "symcc" and not report.timed_out
+        report = ProofReport.model_validate_json(stdout) if stdout else None
+        if (code == 0 and report is not None and report.ok and report.method == "symcc" and not report.timed_out
                 and report.checks and all(check.ok for check in report.checks)):
             mode = "symcc"
         else:
-            log.warning("proof_selftest_failed exit=%s", code)
+            # Selftest names come from compiled-in fixtures; report details and stderr stay private.
+            checks = ",".join(check.name for check in report.checks if not check.ok) or "none" \
+                if report is not None else "unavailable"
+            timed_out = True if code is None else report.timed_out if report is not None else "unknown"
+            log.warning("proof_selftest_failed exit=%s checks=%s timed_out=%s", code, checks, timed_out)
     except Exception:                    # a missing binary, an unreadable report, anything: bounded
-        log.warning("proof_selftest_failed", exc_info=True)
+        log.warning("proof_selftest_failed checks=unavailable timed_out=unknown", exc_info=True)
     _proof_mode = mode
     log.info("proof_mode mode=%s", mode)
     return mode

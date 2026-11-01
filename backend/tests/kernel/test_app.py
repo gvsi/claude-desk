@@ -302,6 +302,34 @@ async def test_prover_stderr_logs_only_its_size(caplog):
     assert [record.getMessage() for record in caplog.records] == [f"prover_stderr bytes={len(stderr)}"]
 
 
+@pytest.mark.parametrize(("code", "timed_out"), [(0, False), (2, False), (2, True), (None, True)])
+async def test_selftest_failure_logs_checks_and_timeout(monkeypatch, caplog, code, timed_out):
+    canary = "selftest-diagnostic-never-log-this"
+    payload = json.dumps({
+        "ok": False, "method": "symcc", "timed_out": timed_out,
+        "checks": [{"name": name, "ok": ok, "counterexample_plain": canary}
+                   for name, ok in [("selftest.gated_implies_ungated", True),
+                                    ("selftest.or_gate_counterexample", False)]]}).encode()
+    run = activation._run
+
+    async def selftest(argv, *, kill_after):
+        assert argv[-1] == "--selftest"
+        if code is None:                    # the process-level backstop killed the prover
+            return None, b""
+        script = (f"import sys; sys.stdout.buffer.write({payload!r}); "
+                  f"sys.stderr.write({canary!r}); sys.exit({code})")
+        return await run([sys.executable, "-c", script], kill_after=kill_after)
+
+    monkeypatch.setattr(activation, "_run", selftest)
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service.activation"):
+        assert await activation.run_selftest() == "bounded"
+    checks = "unavailable" if code is None else "selftest.or_gate_counterexample"
+    messages = [record.getMessage() for record in caplog.records]
+    assert f"proof_selftest_failed exit={code} checks={checks} timed_out={timed_out}" in messages
+    assert all(canary not in message for message in messages)
+    assert messages[-1] == "proof_mode mode=bounded"
+
+
 async def test_error_logs_carry_no_request_text(app, client, caplog):
     """An error that isn't a refusal can quote what the request carried (a visitor's arguments, a
     statement's parameters). The kernel logs its kind and the frames it rose through, never its
