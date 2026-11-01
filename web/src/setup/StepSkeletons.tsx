@@ -59,7 +59,7 @@ function useLineWidths(box: RefObject<HTMLElement | null>, words: string): reado
       const probe = document.createElement('span');
       probe.textContent = words;
       probe.setAttribute('aria-hidden', 'true');
-      Object.assign(probe.style, { position: 'absolute', display: 'block', width: `${element.clientWidth}px`, visibility: 'hidden', pointerEvents: 'none' });
+      Object.assign(probe.style, { position: 'absolute', display: 'block', width: `${element.getBoundingClientRect().width}px`, visibility: 'hidden', pointerEvents: 'none' });
       element.append(probe);
       try {
         const range = document.createRange();
