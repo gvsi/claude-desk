@@ -159,6 +159,152 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == set(fields)
 
 
+async def ask_topic(owner, engine, interview_id, topic):
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.transcript.append(setup.Entry(role="claude", text="Your business?", question=topic))
+        await setup._save(conn, interview)
+
+
+async def test_held_website_price_promoted_by_bare_number(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    reply = await answer(owner, model, interview_id, "We repair plumbing. It's a 1-person shop.",
+                         turn(summary="We repair plumbing.", price_items=[{"title": "Repair", "unit_cents": 100}]))
+    assert reply.status_code == 200, reply.text
+    assert "price_items" in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+    await ask_topic(owner, engine, interview_id, "quote_limit")
+    reply = await answer(owner, model, interview_id, "Drain cleaning is $150.",
+                         turn(price_items=[{"title": "Drain cleaning", "unit_cents": 15000}]), question="quote_limit")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert "price_items" in answers.suggested_fields
+    assert [(item.title, item.unit_cents) for item in answers.price_items] == [("Repair", 100), ("Drain cleaning", 15000)]
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" not in said.get("owner_fields", [])
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.prices == []
+
+    await ask_topic(owner, engine, interview_id, "quote_limit")
+    reply = await answer(owner, model, interview_id, "Repair costs $1 and Drain cleaning costs $150.",
+                         turn(price_items=[{"title": " REPAIR ", "unit_cents": 100},
+                                           {"title": "Drain cleaning", "unit_cents": 15000}]), question="quote_limit")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert [(item.title, item.unit_cents) for item in parts.prices] == [("Repair", 100), ("Drain cleaning", 15000)]
+
+
+async def test_quote_patch_checks_only_named_prices(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers.price_items = [setup.PriceAnswer(title="Repair", unit_cents=100)]
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, "quote_limit")
+    reply = await answer(owner, model, interview_id, "Drain cleaning is $150.",
+                         turn(price_items=[{"title": "Drain cleaning", "unit_cents": 15000}]), question="quote_limit")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert [(item.title, item.unit_cents) for item in parts.prices] == [("Repair", 100), ("Drain cleaning", 15000)]
+
+
+async def test_owner_typed_contact_twice_stays_held(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    reply = await answer(owner, model, interview_id, "We repair plumbing, call 415-555-0118.",
+                         turn(summary="We repair plumbing.", public_contact="(415) 555-0118"))
+    assert reply.status_code == 200, reply.text
+    assert "public_contact" in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.", turn(public_contact="(415) 555-0118"),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert "public_contact" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "public_contact" in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert [claim.value for claim in parts.charter if claim.key == "contact"] == ["(415) 555-0118"]
+
+
+async def test_owner_hours_demoted_by_unchanged_reemission(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "9am to 5pm weekdays.", turn(hours=hours), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    assert "hours" not in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118; after 5pm we take messages.",
+                         turn(public_contact="415-555-0118", after_hours="Take a message.", hours=hours),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert "hours" not in answers.suggested_fields
+    assert answers.hours == [HoursAnswer(**window).window() for window in hours]
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "hours" not in said.get("owner_fields", [])
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.hours == answers.hours and parts.calendar
+
+
+@pytest.mark.parametrize("source", ["owner", "suggested", "empty"])
+async def test_off_topic_contact_preserves_owner_facts(proposals, model, engine, caplog, source):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        if source != "empty":
+            interview.answers.public_contact = "office@example.test"
+            if source == "suggested":
+                interview.answers.suggested_fields.append("public_contact")
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    caplog.clear()
+    reply = await answer(owner, model, interview_id, "9am to 5pm weekdays.",
+                         turn(public_contact="attacker@example.test"), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.public_contact == ("office@example.test" if source == "owner" else "attacker@example.test")
+    assert ("public_contact" in answers.suggested_fields) is (source != "owner")
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "public_contact" not in said.get("owner_fields", [])
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    contacts = [claim.value for claim in parts.charter if claim.key == "contact"]
+    assert contacts == (["office@example.test"] if source == "owner" else [])
+    if source == "owner":
+        logs = [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"]
+        assert logs == ["setup dropped off-topic field public_contact"]
+
+
 @pytest.mark.parametrize("topic,text,fields,held,owner_fields", [
     ("contact_and_after_hours", "Call 415-555-0118, after hours we take messages",
      {"public_contact": "(415) 555-0118", "after_hours": "Take a message."}, False,
@@ -168,7 +314,11 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     ("hours_and_area", "9am to 5pm weekdays, around Oakland",
      {"hours": [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}],
       "service_area": "The Oakland area"}, False, {"hours", "service_area"}),
-    ("contact_and_after_hours", "Call 415-555-0118", {"public_contact": "(415) 555-0118"}, True, set()),
+    ("contact_and_after_hours", "Call 415-555-0118", {"public_contact": "(415) 555-0118"}, True, {"public_contact"}),
+    ("hours_and_area", "9am to 5pm weekdays", {"hours": [
+        {"days": ["mon"], "start": "09:00", "end": "17:00"}]}, True, {"hours"}),
+    ("quote_limit", "Repair costs $1", {"price_items": [{"title": "Repair", "unit_cents": 100}]}, True, {"price_items"}),
+    ("contact_and_after_hours", "Use the suggestion", {"after_hours": "Take a message."}, True, set()),
     ("hours_and_area", "Remove the old hours", {"hours": []}, True, {"hours"}),
     ("what_you_do", "Remove the old prices", {"price_items": []}, True, {"price_items"}),
     ("quote_limit", "A repair costs $150", {"price_items": [{"title": "Repair", "unit_cents": 15000}]},

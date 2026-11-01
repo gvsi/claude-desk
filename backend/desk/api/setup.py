@@ -1635,16 +1635,20 @@ def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswer
     fields = []
     for name in _fact_patch_fields(patch, key):
         value = getattr(patch, name)
-        if name not in FACT_TOPICS or value == []:
+        if name not in FACT_TOPICS or (value == [] and getattr(after, name) == []):
             fields.append(name)
             continue
         if FACT_TOPICS[name] != key:
             continue
-        if name in before.suggested_fields and getattr(before, name) == getattr(after, name):
+        if (name not in {"public_contact", "price_items", "hours"}
+                and name in before.suggested_fields and getattr(before, name) == getattr(after, name)):
             continue
-        # Quote turns add/update prices by title; held items left in that list need support too.
-        checked = after.price_items if name == "price_items" else value
-        if name in {"public_contact", "price_items", "hours"} and not owner_supports(name, checked, owner_text):
+        # A partial quote patch cannot take ownership of held items it never named.
+        if name == "price_items" and name in before.suggested_fields:
+            named = {_title(item.title) for item in value}
+            if any(_title(item.title) not in named for item in after.price_items):
+                continue
+        if name in {"public_contact", "price_items", "hours"} and not owner_supports(name, value, owner_text):
             continue
         fields.append(name)
     return fields
@@ -1655,7 +1659,8 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
     its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
     on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
     question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
-    logged (by its label or field name, never its value). Names are reduced as the Desk takes them."""
+    logged (by its label or field name, never its value). Off-topic facts cannot replace owner facts.
+    Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
@@ -1681,6 +1686,11 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
             value = reduce_name(value) or None
         elif name == "business_name":
             value = " ".join(value.split()) or None
+        if (name in FACT_TOPICS and FACT_TOPICS[name] != key
+                and getattr(answers, name) and name not in answers.suggested_fields):
+            if value != getattr(answers, name):
+                logger.warning("setup dropped off-topic field %s", name)
+            continue
         if value is not None:
             values[name] = value
     return SetupAnswers.model_validate(values)
@@ -2064,6 +2074,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 continue
             if name in said.owner_fields:
                 updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
+            elif getattr(interview.answers, name) == getattr(updated, name):
+                continue
             elif name not in updated.suggested_fields:
                 updated.suggested_fields.append(name)
         interview.answers = updated
