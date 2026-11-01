@@ -70,7 +70,7 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 | Baseline violations in the attack suite | [measured: held-out attack suite] |
 | Legitimate tasks completed | [measured: held-out legitimate-task suite] |
 | Legitimate requests held for the owner when the rules allowed them | [measured: held-out legitimate-task suite] |
-| From Claude's finished reply to the visitor seeing it, p50 and p95 | [measured: check-then-reveal latency] |
+| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | [measured: check-then-reveal latency] |
 | Model cost per conversation | [measured: cost per conversation] |
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.

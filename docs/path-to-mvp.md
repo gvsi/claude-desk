@@ -1,12 +1,12 @@
 # Path to MVP
 
-An MVP needs real identity, real providers and recovery from model and provider failures. The [architecture decisions](architecture-decisions.md) explain the choices; the [threat model](threat-model.md) sets their limits.
+What the prototype needs to become a minimum viable product (MVP) for real businesses: real identity, real payment and message providers, and recovery when a model or a provider fails. The [architecture decisions](architecture-decisions.md) explain today's choices, and the [threat model](threat-model.md) says what they claim and what they don't.
 
 ## Architecture
 
 Today the API runs conversations; the kernel holds business credentials, compiles and proves rules, and checks actions and replies. Postgres roles prevent API writes to kernel records. Both processes trust their shared host. Keep that authority boundary for an MVP, add browser-signed approvals and rule confirmations, and verify signed replies in the browser. Separating the kernel onto another host would require authenticated calls and credential isolation.
 
-Read safety and usefulness together. Pending results cover only the attacks and assumptions in the [evals guide](evals.md).
+Read the safety and usefulness numbers together: a Desk that refused everything would have no violations and complete nothing. The results cover only the attacks and assumptions the [evals guide](evals.md) lists.
 
 | Metric | Value | Source |
 |---|---|---|
@@ -15,33 +15,33 @@ Read safety and usefulness together. Pending results cover only the attacks and 
 | Held-out legitimate completion, completed / trials and Wilson 95% interval | [measured: held-out legitimate completion and interval, final held-out pass] | [measured: source, final held-out pass] |
 | False holds on tools legitimate tasks expect allowed, count / eligible decisions and rate | [measured: held-out false holds, final held-out pass] | [measured: source, final held-out pass] |
 
-A waiver stays visible and does not silently change the gate.
+A waived violation stays in the report, counted apart and with who signed the waiver, and never quietly changes whether the gate passes.
 
 ## Infrastructure
 
-The [service configuration](../infra/stacks/compute_express.py) fixes capacity at one task, with [separate container secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic at the same origin; the fallback uses an internal load balancer. These describe configuration, not a live audit.
+The [service configuration](../infra/stacks/compute_express.py) runs exactly one task, a single copy of the API and kernel containers, each with [its own secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic at the same origin; the fallback uses an internal load balancer. This describes the configuration in the repository, not an audit of the live deployment.
 
-For an MVP, use multi-AZ RDS, rehearse restores and failover, and share rate and spend coordination before adding tasks. Add WAF controls and alerts for spend, pool and ledger waits, holds, reconciliation and reply failures. Assign an availability target and on-call ownership. The [deploy guide](deploy.md) covers releases and infrastructure costs.
+For an MVP, run the database across availability zones, rehearse restores and failover, and move rate and spend limits into shared storage before adding tasks, since today each task keeps its own. Add a web application firewall, and alerts for spend, waits for database connections and the ledger, holds, payment reconciliation and failed replies. Set an availability target and name who is on call. The [deploy guide](deploy.md) covers releases and infrastructure costs.
 
 ## Model integration
 
-Opus handles conversation, Sonnet reviews actions and Haiku checks replies. [Caching](../backend/desk/api/model.py) covers the static prefix and history. Keep routing explicit, with no silent fallback: reviewer failures hold. Compare completion, violations, holds, cost and latency before changing models.
+Opus handles conversation, Sonnet reviews actions and Haiku checks replies. [Prompt caching](../backend/desk/api/model.py) covers the unchanging start of each prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
 
 | Metric | Value | Source |
 |---|---|---|
 | Reviewer skipped, share of tool decisions | [measured: reviewer skip rate, final held-out pass] | [measured: source, final held-out pass] |
 | Reviewer reached, share of tool decisions | [measured: share of tool decisions reaching the reviewer, final held-out pass] | [measured: source, final held-out pass] |
 
-The shares are complements. Today's API budget excludes kernel model calls. An MVP needs per-Desk reservations across all routes, concurrency-safe settlement and owner-visible spend limits.
+The two shares add up to the whole. Today's daily model budget counts the API's model calls but not the kernel's. An MVP needs each Desk's model spend reserved before every call on every route, settled correctly when calls run at once, and limits the owner can see.
 
 ## Scaling and what breaks first
 
-Model cost and latency may constrain useful traffic first; measurement must decide. Proofs run on rule changes. The PR's local proving measurements include contention from other suites.
+Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The proof times below were measured locally while other test suites ran on the same machine.
 
 | Constraint | Value | Source |
 |---|---|---|
-| Mean Opus cost per visitor turn, including calls after tools | [measured: Opus cost per turn, final held-out pass] | [measured: source, final held-out pass] |
-| Mean Opus model time per visitor turn, including calls after tools | [measured: Opus latency per turn, final held-out pass] | [measured: source, final held-out pass] |
+| Mean Opus cost per Desk reply (one reply the visitor waits for), including calls after tools | [measured: Opus cost per turn, final held-out pass] | [measured: source, final held-out pass] |
+| Mean Opus model time per Desk reply (one reply the visitor waits for), including calls after tools | [measured: Opus latency per turn, final held-out pass] | [measured: source, final held-out pass] |
 | Proof, Rivera seed, local p50 / p95 | 381 / 702 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | Proof, 30 cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I counted client addresses; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes address-exempt streams and brief overlap while an evicted stream closes. |
@@ -49,11 +49,11 @@ Model cost and latency may constrain useful traffic first; measurement must deci
 | Postgres demand with T app tasks | estimate: up to 76T, plus admin and operational connections | estimate: T × (46 + 2 × (5 pool + 10 overflow)) = 76T; SQLAlchemy defaults left implicit by the [kernel](../backend/desk/kernel_service/app.py) and [mock provider](../backend/desk/mockpay/store.py). Database connection capacity is not pinned. |
 | Ledger writes to one busy Desk | estimate: at most 1,000 / L entries/s, L = amortized locked time per entry in ms through commit | estimate: 1 exclusive ledger-head lock / (L / 1,000) = 1,000 / L; [ledger append](../backend/desk/kernel_service/ledger.py), [lock order](../backend/desk/kernel_service/repo.py). L is not measured. |
 
-Load-test slow SSE readers and reconnects for memory and lag, pool checkout waits as tasks increase, and ledger lock wait and hold time through commit. More tasks multiply connections without removing a Desk's ledger bottleneck. Pin implicit pool sizes and reserve operational connections first.
+Before scaling, load-test three things: slow and reconnecting readers of the live-update stream (server-sent events), for memory and lag; waits for a database connection as tasks are added; and how long a Desk's ledger lock is waited for and held until each write commits. More tasks multiply database connections without easing one Desk's ledger, which takes one write at a time. Set the pool sizes left at library defaults, and keep connections in reserve for operators, first.
 
 ## Latency and cost per conversation
 
-Fill sources with report link, pass ID, date and latency-run ID. Conversation cost includes Desk-side checks, triage and translation; simulator and setup costs are separate. The [report reader](../evals/reports/README.md) defines samples. Add [master budget](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) estimates only beside filled measurements, naming their assumed conversation size.
+Each source names its report, pass, date and latency run. Cost per conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column sets the [master plan's budget](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) beside a measurement only where it gave one, with the conversation size it assumed.
 
 | Metric | Environment | Value | Source | Master estimate beside measurement |
 |---|---|---|---|---|
@@ -63,16 +63,16 @@ Fill sources with report link, pass ID, date and latency-run ID. Conversation co
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | No separate estimate specified |
 | Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | — |
-| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured; Monday follow-up | [Hosted metering restriction](../evals/latency.py) | No full-turn estimate specified |
-| Reviewer when called, p50 / p95 | Hosted | Not measured; Monday follow-up | [Hosted metering restriction](../evals/latency.py) | Await hosted measurement |
+| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | No full-turn estimate specified |
+| Reviewer when called, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | Await hosted measurement |
 
-Run `make evals-latency PASS=<id>` for local intervals. Hosted measurement is Monday's follow-up, requiring spend metering first; today's harness refuses an unmetered hosted run.
+All latency here is local: `make evals-latency PASS=<id>` measures it. Hosted latency wasn't measured. The harness refuses a run against the deployment until the deployment reports what its model calls cost, so that a run can stop at its spending limit.
 
 ## What changes for real users
 
-Replace the Demo inbox with contact possession checks that resist customer enumeration. Add a real payment provider and reviewed MCP server, retaining approvals, idempotency, reservations and reconciliation. Bind approvals and rule confirmations to the owner's browser key before real money moves.
+Replace the Demo inbox with real codes by email or text that prove a visitor holds the contact, without revealing which contacts are on record. Connect a real payment provider through a reviewed MCP server, keeping approvals, protection against charging twice, spending reservations and reconciliation. Bind approvals and rule confirmations to the owner's browser key before real money moves.
 
-Replace demo copies with authenticated tenants, membership and recovery, tested row and credential isolation, and retention rules. Add shared abuse and spend limits, real notifications and on-call recovery. Ask visitors before involving the owner; keep chat useful after holds and handoffs. Measure self-service and false holds alongside safety before expanding coverage.
+Replace per-visitor demo copies with real accounts: sign-in, team membership and account recovery, tested isolation of each business's data and credentials, and rules for how long data is kept. Add shared abuse and spend limits, real notifications and on-call recovery. Ask visitors before involving the owner; keep chat useful after holds and handoffs. Measure self-service and false holds alongside safety before expanding coverage.
 
 ## Trade-offs made and deferred
 
