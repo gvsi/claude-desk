@@ -37,6 +37,7 @@ const HANDOFF_LINES = {
   replaced: 'Chat moved to a call-back.',
   took_over: 'Handoff closed when you took over.',
   wrote: 'Handoff closed when you wrote in the chat.',
+  booked: 'Handoff closed when they booked a time.',
 } as const satisfies Record<HandoffEntry, string>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
