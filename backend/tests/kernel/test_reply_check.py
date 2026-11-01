@@ -2316,7 +2316,7 @@ def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 
-POLICY_AI_DENIAL_CASES = [
+POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] + [
     f"{opening} {verb} {preposition} {person}."
     for opening in ("You are", "You're")
     for verb in ("chatting", "talking", "speaking")
@@ -2344,6 +2344,7 @@ POLICY_AI_DENIAL_CASES = [
 ]
 # Directions to reach a person, explicit AI disclosures and role words that name no speaker.
 POLICY_HONEST_PERSON_CASES = [
+    *policy_cases.AI_DENIAL_CONTROLS,
     "Talk to a real person by phone.", "Call to speak with a live agent.",
     "This is an AI assistant, not a real person.", "I'm an AI assistant, not a person.",
     "A human receptionist answers our phone line.", "A real person reads every message.",
@@ -2351,7 +2352,7 @@ POLICY_HONEST_PERSON_CASES = [
     "A real person will call back in the morning.", "Call to speak with a live person.",
     "Our photos are not AI-generated.", "This is not AI-generated.", "This is a human-run business.",
     "Una persona real le devolverá la llamada.",
-    "You'll be talking to a real person when you call.", "You're not talking to a real person.",
+    "You're not talking to a real person.",
     "Habla con una persona real por teléfono.", "Llame para hablar con un agente humano.",
     "Este asistente es una IA, no una persona real.", "No soy una persona real, soy una IA.",
     "No está hablando con una persona: soy un asistente de IA.",
