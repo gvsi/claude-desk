@@ -138,7 +138,6 @@ export function RulesPage() {
   const question = current && !skipHoldQuestion ? holdQuestion(needsYou.data ?? []) : null;
   const failure = useReadFailure(rules, { pausedRoute: 'rules' });
   const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
-  const suggestionsFailure = useReadFailure(suggestions, { pausedRoute: 'suggestions' });
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
   const [limit, setLimit] = useState<LimitField | null>(null);
@@ -306,9 +305,9 @@ export function RulesPage() {
       {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
         {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
-        {[peopleFailure, suggestionsFailure].map((failed, i) => failed === null ? null : (
-          <Notice key={i} tone="error" action={<Button variant="secondary" busy={failed.retrying} onClick={failed.retry}>Try again</Button>}>{failed.line}</Notice>
-        ))}
+        {peopleFailure === null ? null : (
+          <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
+        )}
         {body}
         {waitingForOpening ? null : <AlwaysOnList />}
       </SkeletonScreen>

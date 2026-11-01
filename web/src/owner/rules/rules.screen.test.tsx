@@ -1019,6 +1019,28 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
   });
 
+  it('a_suggestions_failure_after_the_opening_cap_stays_silent_and_keeps_connectors_in_place', async () => {
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'suggestions', status: 503, until, times: 10_000 });
+    let failures = 0;
+    onTestFinished(observeRequests(({ key, ok }) => { if (key === 'suggestions' && !ok) failures += 1; }));
+    const tops = watchTop(() => pagePart('.cd-connector-list'));
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100, retryScale: 0 });
+    await expect.poll(() => requests('suggestions').length).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' }), { timeout: 5_000 }).toBeVisible();
+    await settled(screen.container);
+    const before = tops();
+    expect(before).toHaveLength(1);
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    release();
+    await expect.poll(() => failures).toBe(2);
+    await settled(screen.container);
+    expect(screen.getByRole('alert').elements(), 'optional suggestions fail silently').toHaveLength(0);
+    expect(tops(), 'a late optional failure never moves landed connectors').toEqual(before);
+  });
+
   it.each(['desktop', 'phone'] as const)('suggested_rules_and_connectors_land_together_when_suggestions_are_held at %s', async (viewport) => {
     const finished = finishedReads();
     let release!: () => void;
