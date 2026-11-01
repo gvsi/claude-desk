@@ -1593,7 +1593,8 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     await consent(owner, state["interview_id"], True, model)
 
     calls = [call for call in fake.calls if call.route in SETUP_TOOL_ROUTES]
-    assert sorted(call.route for call in calls) == sorted(list(SETUP_TOOL_ROUTES) * 2)
+    assert sorted(call.route for call in calls) == sorted([
+        "GET /context/{session_id}?desk_id=", *(["POST /decide", "POST /execute"] * 2)])
     for call in calls:                                    # the owner's credential, never a visitor's or an agent's
         assert call.headers["x-owner-session"] == owner.token and "x-session-token" not in call.headers
         assert not any(name.startswith("x-agent") for name in call.headers)
@@ -1694,9 +1695,10 @@ async def test_search_suggestions_require_owner_provenance(
         assert not drops
 
 
-def test_suggestion_provenance_drops_an_unknown_future_field(monkeypatch, caplog):
+@pytest.mark.parametrize("default", [..., "Unsupported default"], ids=["required", "defaulted"])
+def test_suggestion_provenance_drops_an_unknown_future_field(monkeypatch, caplog, default):
     class FutureFacts(desk_setup.SuggestedFacts):
-        new_fact: str
+        new_fact: str = default
 
     # Model a required field added to the schema, not just unvalidated extra input.
     monkeypatch.setattr(desk_setup, "SuggestedFacts", FutureFacts)

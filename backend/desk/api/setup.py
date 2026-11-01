@@ -1446,6 +1446,9 @@ def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> Suggeste
         "after_hours": "",
     }
     filtered = SuggestedFacts.model_construct(**kept)
+    # model_construct fills schema defaults too; unreviewed future defaults must not become facts.
+    for name in filtered.__dict__.keys() - kept.keys():
+        delattr(filtered, name)
     filtered_values = filtered.model_dump()
     for name, value in suggested.model_dump().items():
         if name not in kept or value != filtered_values[name]:
