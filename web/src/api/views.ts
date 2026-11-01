@@ -67,6 +67,8 @@ export interface BusinessOut {
 // Today
 
 export interface ConversationSummary {
+  /** Confirmed agent result from stored decisions/cards; a later hold or handoff clears it. */
+  latest_outcome?: import('./openapi.gen.ts').ConversationSummary['latest_outcome'];
   session_id: string;
   kind: ActorKind;
   /** The verified person's name, else the session's lead's, else null. Untrusted. */

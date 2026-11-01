@@ -99,6 +99,40 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
+  it.each([
+    ['book_visit', 'visit_booked'],
+    ['quote_and_deposit', 'deposit_paid'],
+    ['push_the_limit', 'turned_down'],
+  ])('agent_summary_records_%s', async (task, expected) => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task, idempotency_key: task } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBe(expected);
+  });
+
+  it('agent_summary_does_not_restore_success_after_a_hold_is_answered', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-answered' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const held = mockStore.world.context(agent, 'en', 'Ask Maria').decide({ ...DECISIONS.quote, outcome: 'hold', executed: false });
+    mockStore.world.answer(mockStore.world.decisions.get(held.decision_id)!, 'allow_once');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
+  it('agent_summary_clears_success_after_a_handoff', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-handoff' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    mockStore.world.reply(agent, [rivera.blocks.handoff.en], 'en');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
   it('answers_each_first_view_starter_in_its_language', () => {
     const cases = [
       ['How much is drain clearing?', 'price', 'en'],
