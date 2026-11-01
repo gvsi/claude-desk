@@ -61,7 +61,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
-from desk.contracts import MONEY_TOOLS, Effect, PolicyVersion, RuleCard, money_tool
+from desk.contracts import MONEY_TOOLS, Effect, PolicyVersion, RuleCard, money_tools_of
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, auto_money, lower_to_cap
 from desk.presets import PRESETS, PresetName
@@ -138,7 +138,7 @@ def _money_tools(rows: Iterable[Mapping[str, Any]]) -> frozenset[str]:
 
     Include every status: a card may name a tool before its owner enables it.
     """
-    return frozenset(row["tool"] for row in rows if money_tool(row["tool"], row["effects"]))
+    return money_tools_of((row["tool"], row["effects"]) for row in rows)
 
 
 def moves_money_alone(card: RuleCard, money_tools: Collection[str] = frozenset()) -> bool:

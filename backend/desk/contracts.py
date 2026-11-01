@@ -307,9 +307,11 @@ def money_tool(tool: str, effects: Iterable[str]) -> bool:
     read it too."""
     return tool in MONEY_TOOLS or not MONEY_EFFECTS.isdisjoint(effects)
 
-def money_tools_of(profiles: Iterable[ToolProfile]) -> frozenset[str]:
-    """Names of profiles that take or pay out money, whatever their source or review status."""
-    return frozenset(p.tool for p in profiles if money_tool(p.tool, p.effects))
+def money_tools_of(tools: Iterable[tuple[str, Iterable[str]]]) -> frozenset[str]:
+    """Names of tools that take or pay out money, from (tool, effects) pairs of any source or status.
+    Kernel profile callers and the API's rules and setup reads share this definition; the API
+    projects pairs from its read view without needing full profiles."""
+    return frozenset(tool for tool, effects in tools if money_tool(tool, effects))
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"

@@ -1191,7 +1191,7 @@ async def _money_tools(ctx: KernelCtx, desk_id: str) -> frozenset[str]:
     A rule can name a business tool before it is enabled; enabling checks its cards again.
     """
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id)))
-    return money_tools_of(row.profile for row in rows)
+    return money_tools_of((row.profile.tool, row.profile.effects) for row in rows)
 
 
 async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *,

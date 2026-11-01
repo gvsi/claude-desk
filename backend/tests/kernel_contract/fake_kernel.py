@@ -3807,7 +3807,7 @@ class FakeKernelState:
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
         cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
-        money_tools = money_tools_of(desk.tools.values())
+        money_tools = money_tools_of((profile.tool, profile.effects) for profile in desk.tools.values())
         ids = [card.card_id for card in body.cards]
         if len(set(ids)) != len(ids) or any(
                 card.is_default or changes_always_on(card)

@@ -58,7 +58,7 @@ def test_business_money_predicate_needs_the_desks_money_tools():
     assert contracts.moves_money(card, frozenset({"desk.deposit"}))
 
 
-def test_money_tools_of_profiles_uses_effects_for_every_source_and_status():
+def test_money_tools_of_pairs_uses_effects_for_every_source_and_status():
     from .test_compiler import profile
 
     profiles = [profile("native.payment_link", ["charge"], "desk"),
@@ -68,7 +68,7 @@ def test_money_tools_of_profiles_uses_effects_for_every_source_and_status():
                 profile("desk.old-deposit", ["charge"], "desk", "business").model_copy(
                     update={"status": "disabled"}),
                 profile("desk.intake", ["change"], "desk", "business")]
-    assert contracts.money_tools_of(iter(profiles)) == frozenset({
+    assert contracts.money_tools_of((p.tool, iter(p.effects)) for p in profiles) == frozenset({
         "native.payment_link", "payments.create_refund", "desk.deposit", "desk.old-deposit"})
 
 
@@ -80,7 +80,7 @@ async def test_business_money_cards_need_an_amount_within_the_cap(app, client):
         "block": "purpose_payment", "purpose": "Deposit", "amount_cents": 5000})])).status_code == 200
     rows = await business_rows(app, desk)
     assert rows["desk.deposit"].status == "needs_review"
-    money_tools = contracts.money_tools_of(row.profile for row in rows.values())
+    money_tools = contracts.money_tools_of((row.profile.tool, row.profile.effects) for row in rows.values())
     card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone", reason="Deposits.")
     for maximum in (None, 2001, 2000, 1999):
         candidate = card.model_copy(update={"max_amount_cents": maximum})
