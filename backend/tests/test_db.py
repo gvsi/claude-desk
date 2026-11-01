@@ -963,6 +963,39 @@ class StatementsOn:
         self.conn.execute(statement)
 
 
+def test_desk_memory_migration_goes_down_and_up_as_non_superuser(scratch, monkeypatch):
+    script = ScriptDirectory.from_config(alembic_config())
+    module = script.get_revision("desk_simulated_memory").module
+    assert module.down_revision == "kernel_ro_knowledge_created_at"
+    admin = scratch.conn
+    assert "simulated_memory" in columns(admin, "kernel", "desks")
+    assert "simulated_memory" not in columns(admin, "kernel_ro", "desks")
+    assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.desks',"
+                            " 'simulated_memory', 'SELECT')").fetchone()[0]
+    scratch.migrate(command.downgrade, module.down_revision)
+    try:
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    monkeypatch.setattr(module, "op", StatementsOn(admin))
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
+                      " VALUES ('desk-memory', 'copy-memory', 'biz', 'CPA', 'memory-migrate')")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
+        admin.execute("CREATE ROLE desk_memory_migrator NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE, CREATE ON SCHEMA kernel TO desk_memory_migrator")
+        admin.execute("ALTER TABLE kernel.desks OWNER TO desk_memory_migrator")
+        admin.execute("SET LOCAL ROLE desk_memory_migrator")
+        assert admin.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user").fetchone() == (False, False)
+        module.downgrade()
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+        module.upgrade()
+        module.upgrade()  # safe to run over its own column, like the recent revisions
+        assert "simulated_memory" in columns(admin, "kernel", "desks")
+        admin.execute("RESET ROLE")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
+
+
 def test_agent_tables_go_down_and_up_under_an_owner_bound_by_row_security(scratch, monkeypatch):
     """The agents and mandate reservations revisions go down and up again over populated tables
     when their owner is bound by row security, as on a managed Postgres: the owner sees none of the
