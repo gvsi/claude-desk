@@ -108,8 +108,8 @@ def test_seed_parts_withholds_each_suggested_field(suggested):
                            suggested_fields=[suggested])
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="office",
                             today=date(2026, 11, 2))
-    assert [claim.key for claim in parts.charter] == [key for field, key in (
-        ("public_contact", "contact"), ("service_area", "policy:service_area")) if field != suggested]
+    published = (("public_contact", "contact"), ("summary", "policy:about"), ("service_area", "policy:service_area"))
+    assert [claim.key for claim in parts.charter] == [key for field, key in published if field != suggested]
     assert bool(parts.hours) is (suggested != "hours")
     assert bool(parts.calendar) is (suggested != "hours")
     assert bool(parts.prices) is (suggested != "price_items")
@@ -140,8 +140,10 @@ async def test_first_rules_draft_publishes_only_owner_facts(proposals, model, en
     response = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert response.status_code == 200, response.text
     charter, = fake.called("PUT /desks/{id}/charter")
-    assert [claim["key"] for claim in charter.body["charter"]] == [key for field, key in (
-        ("public_contact", "contact"), ("service_area", "policy:service_area")) if field not in suggested]
+    published = (("public_contact", "contact"), ("summary", "policy:about"), ("service_area", "policy:service_area"),
+                 ("how_we_help", "policy:how_we_help"))
+    assert [claim["key"] for claim in charter.body["charter"]] == [
+        key for field, key in published if field not in suggested and saved[field]]
     for route, part, field in (("hours", "hours", "hours"), ("calendar", "calendar_slots", "hours"),
                                ("prices", "price_items", "price_items")):
         call, = fake.called(f"PUT /desks/{{id}}/{route}")
@@ -172,10 +174,13 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     model.add(unparseable(), unparseable())
     reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert reply.status_code == 200, reply.text
-    for route, part in (("charter", "charter"), ("hours", "hours"), ("prices", "price_items"),
-                        ("calendar", "calendar_slots")):
+    for route, part in (("hours", "hours"), ("prices", "price_items"), ("calendar", "calendar_slots")):
         calls = fake.called(f"PUT /desks/{{id}}/{route}")
         assert calls and all(call.body[part] == [] for call in calls)
+    # The owner's own summary is the one claim published; the off-topic contact and area stay held.
+    calls = fake.called("PUT /desks/{id}/charter")
+    assert calls and all(call.body["charter"] == [{"key": "policy:about", "kind": "text",
+                                                    "value": "We repair plumbing."}] for call in calls)
     assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == set(fields)
 
 
@@ -424,15 +429,18 @@ async def test_suggested_facts_stay_unpublished_from_setup_to_live(
     assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == held
 
     async def assert_unpublished():
-        for route, part in (("charter", "charter"), ("hours", "hours"), ("prices", "price_items"),
-                            ("calendar", "calendar_slots")):
+        for route, part in (("hours", "hours"), ("prices", "price_items"), ("calendar", "calendar_slots")):
             calls = fake.called(f"PUT /desks/{{id}}/{route}")
             assert calls and all(call.body[part] == [] for call in calls), route
+        # The charter carries only the summary of the owner's own description, never a held fact.
+        calls = fake.called("PUT /desks/{id}/charter")
+        assert calls and all([claim["key"] for claim in call.body["charter"]] == ["policy:about"] for call in calls)
         desk = fake.desks[state["desk_id"]]
         assert desk.hours == [] and not desk.prices and not desk.slots
         public = await owner.browser.get(f"/api/public/{state['slug']}")
         assert public.status_code == 200, public.text
-        assert public.json()["charter"] == [] and public.json()["open_status"] is None
+        assert [card["fact_id"] for card in public.json()["charter"]] == ["charter:policy:about"]
+        assert public.json()["open_status"] is None
         assert "attacker@example.test" not in public.text
 
     path = f"/api/owner/policy/setup/{interview_id}"
