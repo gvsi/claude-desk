@@ -388,14 +388,14 @@ async def test_model_routes_stop_past_the_daily_budget(passcode_hash, engine):
         async with engine.begin() as conn:             # Opus output at $20 per million tokens
             await record_model_call(conn, "copy-budget", None, "setup", usage_row(output_tokens, at))
 
-    await spend(3_999_000, now)                        # $79.98 today
+    await spend(7_499_000, now)                        # $149.98 today
     await spend(4_000_000, now - timedelta(days=1))    # yesterday's spend doesn't count
     await require_model_budget(request_to(production, "203.0.113.7"))
-    await spend(1_000, now)                            # $80.00: the budget is reached
+    await spend(1_000, now)                            # $150.00: the budget is reached
     with pytest.raises(ApiProblem) as refused:
         await require_model_budget(request_to(production, "203.0.113.7"))
     assert (refused.value.status, refused.value.error) == (503, "demo_budget")
-    assert DAILY_MODEL_BUDGET_CENTS == 8000
+    assert DAILY_MODEL_BUDGET_CENTS == 15000
     await require_model_budget(request_to(local, "127.0.0.1"))   # only production spends the shared monthly limit
 
 
