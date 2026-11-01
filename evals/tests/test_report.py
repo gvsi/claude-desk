@@ -48,10 +48,11 @@ from evals.report import (
     null_baseline_refusal,
     percent,
     render_report,
+    visitor_turn_ends,
     write_latest_results,
     write_report,
 )
-from evals.tests.artifacts import Run, attack, card_block
+from evals.tests.artifacts import START, Run, attack, card_block
 from evals.tests.eval_repo import commit, make_repo, set_landed, write
 from evals.tests.test_calibrate import THRESHOLDS_FILE, THRESHOLDS_PATH
 from evals.tests.test_passes import NOW, config, deps
@@ -135,6 +136,176 @@ def metrics() -> Metrics:
         },
         reviewer_calls=4, decide_calls=18,
     )
+
+
+def timed_turn(crafted: Run, *seconds: float, text: str | None = None) -> None:
+    """A visitor turn on `crafted` (its first turn when `text` is None) whose stream's events the runner
+    received `seconds` after the run's start, the last a turn end."""
+    if text is not None:
+        crafted.turn(text)
+    for i, second in enumerate(seconds):
+        kind = "turn_end" if i == len(seconds) - 1 else "writing"
+        crafted.show({"type": kind}, at=START + timedelta(seconds=second))
+
+
+def timed_call(route: str, model: str, *, finished_s: float, ms: int, input_tokens: int) -> dict[str, Any]:
+    """An `app.model_calls` row for a call that finished `finished_s` after the run's start and took `ms`."""
+    return {**model_call(route, model, input_tokens=input_tokens, cached=0, output=0, ms=ms),
+            "created_at": (START + timedelta(seconds=finished_s)).isoformat()}
+
+
+def two_turn_artifact(scenario: Any, *, rep: int = 1, pass_id: str = "pass-test") -> Any:
+    """A legitimate run of two visitor turns (received 0-5 s and 10-16 s after its start) with three
+    conversation calls at Opus list prices, $4 per million input tokens: two in the first turn ($0.04
+    for 1,500 ms and $0.02 for 2,000 ms) and one in the second ($0.12 for 3,000 ms), and a triage call
+    the conversation model didn't make."""
+    crafted = Run(scenario)
+    crafted.decide("native.quote")
+    timed_turn(crafted, 0, 5)
+    timed_turn(crafted, 10, 16, text="And on Saturday?")
+    calls = [timed_call("conversation", "claude-opus-5-5", finished_s=2, ms=1_500, input_tokens=10_000),
+             timed_call("triage", "claude-haiku-5-5", finished_s=4, ms=900, input_tokens=1_000_000),
+             timed_call("conversation", "claude-opus-5-5", finished_s=4.5, ms=2_000, input_tokens=5_000),
+             timed_call("conversation", "claude-opus-5-5", finished_s=15, ms=3_000, input_tokens=30_000)]
+    return crafted.build(rep=rep, pass_id=pass_id, usage=calls)
+
+
+async def two_turn_run(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+    """`crafted_run`, with the held-out legitimate task run as `two_turn_artifact`."""
+    outcome = crafted_outcome(scenario, rep, kwargs["pass_id"])
+    if scenario.id == "leg-held":
+        outcome.artifact = two_turn_artifact(scenario, rep=rep, pass_id=kwargs["pass_id"])
+        outcome.verdict = judge_run(scenario, outcome.artifact)
+    return outcome
+
+
+def per_turn_section(root: Path) -> str:
+    text = next((root / "evals/reports").glob("2026-*.md")).read_text()
+    return text.split("\n### Conversation model per visitor turn\n", 1)[1].split("\n## ", 1)[0]
+
+
+async def test_report_exports_the_conversation_models_cost_and_latency_per_visitor_turn(report_repo):
+    """Each held-out legitimate run's conversation calls are placed in the visitor turn whose span
+    holds them: finished by the turn's last received event, started after the turn before it ended.
+    Each turn then has a cost and a conversation-model time; other routes and other splits stay out,
+    and the existing figures keep their populations."""
+    pass_id = await report_pass(report_repo, two_turn_run, results=True)
+    assert evals_run.report_command(["--pass", pass_id], root=report_repo) == 0
+    latest = json.loads((report_repo / "evals/reports/latest.json").read_text())
+    assert latest["conversation_model_per_turn"] == {
+        "pass_id": pass_id, "suite": "legit", "split": "heldout", "runs": 1, "visitor_turns": 2, "calls": 3,
+        "cost_usd": {"mean": 0.09, "p50": 0.06, "p95": 0.12, "reason": None},
+        "latency_ms": {"n": 2, "p50": 3000.0, "p95": 3500.0, "reason": None}}
+    assert set(LATEST_FIELDS) <= latest.keys()
+    assert latest["tokens_per_call"]["conversation"]["calls"] == 4   # every judged legitimate run's, as before
+    section = per_turn_section(report_repo)
+    assert f"pass `{pass_id}`" in section and "suite `legit`, split `heldout`" in section
+    assert "1 judged run, 2 visitor turns and 3 conversation-model calls" in section
+    assert "mean $0.09, p50 $0.06, p95 $0.12" in section
+    assert "p50 3,000 ms, p95 3,500 ms over 2 turns" in section
+
+
+@pytest.mark.parametrize(("change", "mean", "reason"), [
+    ("no_receive_times", 0.09, "a visitor turn's receive time isn't recorded or can't be read"),
+    ("call_after_the_turns", 0.09, "a conversation-model call ran outside every visitor turn's span"),
+    ("unreadable_finish", 0.09, "a conversation-model call's finish time or latency can't be read"),
+    ("turns_missing", None, "its visitor turns can't be read from its transcript"),
+    ("usage_unread", None, "its model calls weren't all read"),
+])
+async def test_report_says_which_per_turn_figures_are_not_available_and_why(report_repo, change, mean, reason):
+    """A run whose calls can't be placed in its turns leaves the per-turn spreads not available, with
+    the run and the reason; one whose turns or calls can't be read whole leaves the mean out too."""
+    pass_id = await report_pass(report_repo, two_turn_run, results=True)
+    path = report_repo / "evals/out/passes" / pass_id / "transcripts/leg-held-1.json"
+    data = json.loads(path.read_text())
+    artifact = data["artifact"]
+    if change == "no_receive_times":
+        for turn in artifact["turns"]:
+            turn["events"] = []
+    elif change == "call_after_the_turns":
+        artifact["usage"][-1]["created_at"] = (START + timedelta(seconds=20)).isoformat()
+    elif change == "unreadable_finish":   # a redacted code that matched the timestamp's microseconds
+        artifact["usage"][-1]["created_at"] = "2026-11-02T17:00:15.[redacted]+00:00"
+    elif change == "turns_missing":
+        del artifact["turns"]
+    else:
+        artifact["usage_unread"] = ["the app.model_calls query for session s-1 failed (OSError)"]
+    path.write_text(json.dumps(data))
+    assert evals_run.report_command(["--pass", pass_id], root=report_repo) == 0
+    measured = json.loads((report_repo / "evals/reports/latest.json").read_text())["conversation_model_per_turn"]
+    why = f"leg-held rep 1: {reason}"
+    assert measured["cost_usd"] == {"mean": mean, "p50": None, "p95": None, "reason": why}
+    assert measured["latency_ms"] == {"n": None, "p50": None, "p95": None, "reason": why}
+    assert (measured["visitor_turns"] is None) == (change == "turns_missing")
+    section = per_turn_section(report_repo)
+    assert f"not available: {why}." in section
+    assert ("mean $0.09" in section) == (mean is not None)
+
+
+def test_visitor_turn_ends_read_only_when_each_visitor_turn_was_received():
+    """Only a turn's session, whether the visitor sent anything and the receive times are read: the
+    runner's envelope for events no visitor message brought isn't a visitor turn, an A2A turn (which may
+    carry only a code) ends when its answer arrived, and a receive time a redacted code made unreadable
+    leaves that turn's end unknown."""
+    turns = [{"session_id": "s-1", "visitor_text": "", "a2a": None,
+              "events": [{"at": "2026-11-02T16:59:58+00:00", "event": {"type": "receipt"}}]},
+             {"session_id": "s-1", "visitor_text": "Hi", "a2a": None,
+              "events": [{"at": "2026-11-02T17:00:00+00:00"}, {"at": "2026-11-02T17:00:05Z"}]},
+             {"session_id": "s-1", "visitor_text": "", "events": [],
+              "a2a": {"at": "2026-11-02T17:00:20.250000+00:00"}},
+             {"session_id": "s-1", "visitor_text": "And then?", "a2a": None,
+              "events": [{"at": "2026-11-02T17:00:30.[redacted]Z"}]}]
+    assert visitor_turn_ends({"session_ids": ["s-1"], "turns": turns}) == [
+        START + timedelta(seconds=5), START + timedelta(seconds=20.25), None]
+    assert visitor_turn_ends({"session_ids": ["s-2"], "turns": turns}) is None   # another session's turns
+    assert visitor_turn_ends({"session_ids": ["s-1"]}) is None
+
+
+def test_per_turn_spreads_need_the_api_on_the_runners_clock():
+    """A pass that drove an API at another address times calls on that server's clock, so its calls
+    aren't placed in turns; the mean, which needs no placing, is still given."""
+    from evals.tests.artifacts import legit
+
+    scenario = legit()
+    artifact = two_turn_artifact(scenario)
+    held = ReportRun.from_run(scenario, "heldout", artifact=artifact, verdict=judge_run(scenario, artifact),
+                              turn_ends=visitor_turn_ends(artifact.model_dump(mode="json")))
+    assert [t.model_dump() for t in held.turn_usage] == [
+        {"calls": 2, "cost_usd": pytest.approx(0.06), "model_ms": 3_500},
+        {"calls": 1, "cost_usd": pytest.approx(0.12), "model_ms": 3_000}]
+    measured = latest_json(**all_inputs(pass_result=a_pass([held], external=True), metrics=None))
+    reason = ("the pass drove an API at another address, whose call times aren't on the clock the runner "
+              "timed turns with")
+    assert measured["conversation_model_per_turn"]["cost_usd"] == {"mean": 0.09, "p50": None, "p95": None,
+                                                                   "reason": reason}
+    assert measured["conversation_model_per_turn"]["latency_ms"]["reason"] == reason
+
+
+def test_report_counts_unique_decisions_that_reached_the_reviewer():
+    from evals.tests.artifacts import legit
+
+    scenario = legit()
+    crafted = Run(scenario)
+    review = {"within_charter_bp": 9000, "manipulation_bp": 0, "recommendation": "allow"}
+    first = crafted.decide("native.quote", review=review, effects=["read", "change"])
+    failed = crafted.decide("native.quote", outcome="refuse", state="refused")
+    crafted.decide("native.quote")
+    crafted.session("unrelated-session")
+    crafted.decide("native.quote", review=review, session_id="unrelated-session")
+    from evals.tests.test_usage_and_latency import call_usage
+    crafted.event("review", decision_id=failed, **call_usage("claude-sonnet-5-5", status="error"))
+    # The verdict repeats `first` for its two effects; the ledger can also name the same call.
+    crafted.event("review", decision_id=first, **call_usage("claude-sonnet-5-5"))
+    artifact = crafted.build(session_ids=["s-1"], usage=[model_call("conversation", "claude-opus-5-5")])
+    verdict = judge_run(scenario, artifact)
+    held = ReportRun.from_run(scenario, "heldout", artifact=artifact, verdict=verdict)
+    calibration = ReportRun.from_run(scenario, "calibration", artifact=artifact, verdict=verdict, rep=2)
+    inputs = all_inputs(pass_result=a_pass([held, calibration]), metrics=None)
+    latest = latest_json(**inputs)
+    reviewed = latest["reviewer_decisions"]
+    assert reviewed == {"pass_id": PASS_ID, "suite": "legit", "split": "heldout", "runs": 1,
+                        "reviewed": 2, "decisions": 3, "share": 0.6667, "reason": None}
+    assert "2 of 3 tool decisions (66.7%) reached the reviewer" in render_report(**inputs)
 
 
 def latency() -> ReportLatency:
