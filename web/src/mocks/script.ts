@@ -986,9 +986,20 @@ export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[
   return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
 }
 
-/** The turn the visitor's words start on a Desk whose owner is `owner`: their rule's steps, as the session may run them. */
-export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner): readonly Step[] {
+/** Whether the chat's verified person (`person`, null when it has none) is the one the invoice belongs to. */
+function ownsInvoice(person: { personId: string } | null): boolean {
+  return person !== null && person.personId === DECISIONS.releaseInvoice.resource.owner_person_id;
+}
+
+/**
+ * The turn the visitor's words start on a Desk whose owner is `owner`, in a chat whose verified
+ * person is `person`: their rule's steps, as the session may run them. Verification lasts for the
+ * chat, as the API's does, so the invoice's owner asking for it again once verified gets Claude's
+ * turn after a confirmed code (`afterVerify`), with no second code.
+ */
+export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner, person: { personId: string } | null): readonly Step[] {
   const rule = matchRule(text, owner);
+  if (rule.name === 'invoice' && ownsInvoice(person)) return afterVerify(allTools);
   return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 
