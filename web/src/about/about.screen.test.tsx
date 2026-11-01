@@ -11,7 +11,7 @@ import { writeLocal } from '../lib/storage.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, nextFrames } from '../test/screen.ts';
 
 const PAGES = [
   { path: '/about/proposal', title: 'Product proposal' },
@@ -62,12 +62,16 @@ describe('About pages', () => {
     await expect.poll(() => router.state.location.pathname).toBe('/vision/phone');
     const bar = screen.getByRole('note', { name: 'Vision', exact: true });
     await expect.element(bar).toBeVisible();
+    // The bar can be visible before StrictMode replays the opening effect, which starts this page
+    // at zero again. Let that opening paint before placing the reader for the history checks.
+    await nextFrames();
     await expect.poll(() => window.scrollY).toBe(0);
     const box = bar.element().getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
 
     const phonePlace = await scrollTo(100);
+    expect(phonePlace).toBe(100);
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
     await expect.poll(() => window.scrollY).toBe(articlePlace);
@@ -194,6 +198,57 @@ describe('About pages', () => {
       await expect.poll(() => router.state.location.pathname).toBe(next.path);
     }
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Capability prediction', exact: true })).toBeVisible();
+  });
+
+  it('the_reading_pages_share_the_vision_articles_paper', async () => {
+    // The two reading pages are drawn in the Vision article's light reading style, so the set looks like one: the
+    // same paper, ink and secondary ink, hairlines, link color, sticky bar, switch, way into the prototype, "Read
+    // next" card and footer, read off the article itself at each size.
+    const PAPER = 'rgb(244, 242, 236)';
+    const INK = 'rgb(28, 27, 25)';
+    const LINK = 'rgb(45, 91, 138)';
+    /** What each page's set of parts computes to, by the part's role on the page. */
+    const look = (container: HTMLElement, secondary: Element | null, compact: boolean) => {
+      const bar = container.querySelector('header') as HTMLElement;
+      const root = bar.parentElement as HTMLElement;
+      const documents = container.querySelector('nav[aria-label="About this prototype"]') as HTMLElement;
+      const current = documents.querySelector('[aria-current="page"]') as HTMLElement;
+      const other = documents.querySelector('a:not([aria-current])') as HTMLElement;
+      const tryIt = bar.querySelector('a.cd-about-try') as HTMLElement;
+      const card = container.querySelector('[data-next-label]')?.parentElement as HTMLElement;
+      const footer = container.querySelector('p[data-ds="concept-footer"]') as HTMLElement;
+      const style = (el: Element | null) => getComputedStyle(el as Element);
+      return {
+        page: [style(root).backgroundColor, style(root).color, style(root).colorScheme],
+        bar: [style(bar).position, style(bar).backgroundColor, style(bar).borderBottomColor],
+        current: [style(current).backgroundColor, style(current).color],
+        other: style(other).color,
+        tryIt: style(tryIt).color,
+        // The phone's top bar draws the link without its outline (PrototypeLink), so its edge is read on a desktop.
+        tryEdge: compact ? null : style(tryIt).boxShadow,
+        card: [style(card).backgroundColor, style(card).borderTopColor],
+        footer: style(footer).color,
+        secondary: style(secondary).color,
+      };
+    };
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const vision = await renderRoute('/about/vision', { viewport });
+      await expect.element(vision.screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+      const paper = look(vision.screen.container, vision.screen.container.querySelector('[data-meta]'), viewport === 'phone');
+      expect(paper.page, viewport).toEqual([PAPER, INK, 'light']);
+
+      for (const { path, title } of PAGES) {
+        const where = `${path} at ${viewport}`;
+        const { screen } = await renderRoute(path, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
+        expect(look(screen.container, screen.container.querySelector('[data-summary]'), viewport === 'phone'), where).toEqual(paper);
+        // The figures sit on the article's paper cards, and a link in the text is in the article's link color.
+        const frame = screen.container.querySelector('[data-hero] .cd-about-frame') as HTMLElement;
+        expect(getComputedStyle(frame).backgroundColor, where).toBe(paper.card[0]);
+        const link = screen.container.querySelector('a.cd-text-link') as HTMLElement;
+        expect(getComputedStyle(link).color, where).toBe(LINK);
+      }
+    }
   });
 
   it('about_pages_make_no_requests', async () => {

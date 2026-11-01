@@ -1,0 +1,527 @@
+{
+  "about": "Committed calibration evidence. Identity hashes refer to the original full manifests; prompt bodies and repeated outcomes are omitted. Arm results are relative to this file. Attempt staleness is true only when every arm is stale. The cap was raised from $1.70 to $3.20 on 2026-10-31 for the Sonnet measurements. Spend covers this experiment harness only.",
+  "experiment_id": "soft-promise-next-steps",
+  "frozen_baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+  "experiment": {
+    "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+    "samples": {
+      "sonnet": 4
+    },
+    "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+    "arms": {
+      "old": {
+        "input_shape": "old",
+        "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+        "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+        "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+      },
+      "new": {
+        "input_shape": "new",
+        "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+        "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+        "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+      },
+      "sonnet": {
+        "input_shape": "new",
+        "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+        "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+        "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+      },
+      "steps_only": {
+        "input_shape": "new",
+        "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+        "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+        "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+      }
+    }
+  },
+  "identity_sha256": "4fb7edde5859486c507808e76a1f641246e7b86ae827bc480ccf8fd5b11159e1",
+  "revisions": [
+    {
+      "identity_sha256": "350dad2ac13888f258021021639d5e56f7d8b4765411b301c3aeca4f7a2bb018",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": 5,
+        "case_manifest_sha256": "fa1ec5eaee33f0774cc9711f84f7fac6e79567d88dccc29c1efdd373221fef7b",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "76954fed1684de7e09aeca91a7008e118b15f98913956984874dd6a91e3d2631",
+            "requests_manifest_sha256": "9ab73e4bf9d95bfd7d31311f22111c08b9c295f332c67acf4a9ae360a2a896e7",
+            "identity_sha256": "ba469332d217f7da12933de38477d537ed680032d7ca711844ddd2bccafbc4bf"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "279e72b8569f3caca126bd2fee9e8c70d502e78d4966135f4122b499aa69945f",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": 5,
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "ac1576e99ef4cf0f6726a0b8d18e698deedb618140a1639ce4b681940bcf79f1",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "new": 5,
+          "steps_only": 5,
+          "sonnet": 2
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "49e67c6557de6c14d98cd9a601c45ccf355577180e82bfc95d9ed60a760c8fa8",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "new": 5,
+          "steps_only": 5,
+          "sonnet": 1
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "78add8fb2b0ee58251b6433c389dfcdd6e5704fc2cc691ffb7b1a151d2c2733a",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "steps_only": 5
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "ac1576e99ef4cf0f6726a0b8d18e698deedb618140a1639ce4b681940bcf79f1",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "new": 5,
+          "steps_only": 5,
+          "sonnet": 2
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "49e67c6557de6c14d98cd9a601c45ccf355577180e82bfc95d9ed60a760c8fa8",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "new": 5,
+          "steps_only": 5,
+          "sonnet": 1
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "78add8fb2b0ee58251b6433c389dfcdd6e5704fc2cc691ffb7b1a151d2c2733a",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "steps_only": 5
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "ab81f3d28b22bc8f84af71e0c693cebcdb77f83eb7e87c7dfb82f77960f9982b",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "new": 5
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "85e9f077ffb83ee76c062bc0d396b50cccd96ed59bb885987b8fe47262c78434",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "sonnet": 1
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    },
+    {
+      "identity_sha256": "4fb7edde5859486c507808e76a1f641246e7b86ae827bc480ccf8fd5b11159e1",
+      "experiment": {
+        "baseline_sha": "0496db81e96d28bed13d7af7f3dac0fea765970b",
+        "samples": {
+          "sonnet": 4
+        },
+        "case_manifest_sha256": "cd2fb420812421ec95f67f838db0e012b22fc6b6cd816d2b0d422d4d91b5be63",
+        "arms": {
+          "old": {
+            "input_shape": "old",
+            "prompt_sha256": "0ed31a5ecf3fb491bedf7e7c9d7402b232c6e89a1779fae88a7859a725639d14",
+            "requests_manifest_sha256": "8d30568a04db17af949d01f24e6f87463e48c39aedcb53be5ec19309ae737ef7",
+            "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5"
+          },
+          "new": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "bf2f3bd86cc1dbdf403695223f1612c82a168a301c79f8d7759b1c7f35f45579",
+            "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38"
+          },
+          "sonnet": {
+            "input_shape": "new",
+            "prompt_sha256": "8645f6722f45b86bf69a5e87479d54dc3a374f043957474afa2d1df249a0381f",
+            "requests_manifest_sha256": "5ccc2c367deb24969b568862c35f9edf3b88862faeea9b6442d3256a65b949d3",
+            "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14"
+          },
+          "steps_only": {
+            "input_shape": "new",
+            "prompt_sha256": "711e34bfb8aeef74ca309882d1665c1779178b41f2170b07c2c956a79b3e2c23",
+            "requests_manifest_sha256": "d83ff997038078026e891264289b9773a7d87f183a670ff45bbb7406d22b08c5",
+            "identity_sha256": "e562c5e931115919aef7cac5a3de18f31ebdfb8219c9c453154d68c16bfc3096"
+          }
+        }
+      }
+    }
+  ],
+  "total_cap_usd": 3.2,
+  "cumulative_spend_usd": 2.202614,
+  "diagnostic_arms": [
+    "steps_only"
+  ],
+  "attempts": [
+    {
+      "identity_sha256": "350dad2ac13888f258021021639d5e56f7d8b4765411b301c3aeca4f7a2bb018",
+      "estimate_usd": 1.1,
+      "max_usd": 1.7,
+      "spend_usd": 0.21240399999999998,
+      "reserved_usd": 0,
+      "arms": {
+        "old": {
+          "results": "old-20261101-001425.json",
+          "spend_usd": 0.097814,
+          "identity_sha256": "818766be3fa5af784264e9b3b2ae9d09d29a71a21dc8d2c3c3dbae489f3074e5",
+          "stale": false
+        },
+        "new": {
+          "results": "new-20261101-001819.json",
+          "spend_usd": 0.11459,
+          "identity_sha256": "ba469332d217f7da12933de38477d537ed680032d7ca711844ddd2bccafbc4bf",
+          "stale": true
+        }
+      },
+      "stale": false
+    },
+    {
+      "identity_sha256": "ab81f3d28b22bc8f84af71e0c693cebcdb77f83eb7e87c7dfb82f77960f9982b",
+      "estimate_usd": 0.55,
+      "max_usd": 1.487596,
+      "spend_usd": 0.10604,
+      "reused_arms": [
+        "old"
+      ],
+      "arm_estimates_usd": {
+        "new": 0.55
+      },
+      "arm_samples": {
+        "new": 5
+      },
+      "reserved_usd": 0,
+      "arms": {
+        "new": {
+          "results": "new-20261101-005158.json",
+          "spend_usd": 0.10604,
+          "identity_sha256": "e3b2e0eec3e4a5c2f221e0757e15c88d21a58dec039ad03e76e6dbf29d04ba38",
+          "stale": false
+        }
+      },
+      "stale": false
+    },
+    {
+      "identity_sha256": "85e9f077ffb83ee76c062bc0d396b50cccd96ed59bb885987b8fe47262c78434",
+      "estimate_usd": 2.2,
+      "max_usd": 2.881556,
+      "spend_usd": 0.376412,
+      "reused_arms": [
+        "old"
+      ],
+      "arm_estimates_usd": {
+        "sonnet": 2.2
+      },
+      "arm_samples": {
+        "sonnet": 1
+      },
+      "reserved_usd": 0,
+      "arms": {
+        "sonnet": {
+          "results": "sonnet-20261101-005654.json",
+          "spend_usd": 0.376412,
+          "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14",
+          "stale": false
+        }
+      },
+      "stale": false
+    },
+    {
+      "identity_sha256": "4fb7edde5859486c507808e76a1f641246e7b86ae827bc480ccf8fd5b11159e1",
+      "estimate_usd": 2.288,
+      "max_usd": 2.5,
+      "spend_usd": 1.507758,
+      "reused_arms": [
+        "old"
+      ],
+      "arm_estimates_usd": {
+        "sonnet": 2.288
+      },
+      "arm_samples": {
+        "sonnet": 4
+      },
+      "reserved_usd": 0,
+      "arms": {
+        "sonnet": {
+          "results": "sonnet-20261101-010426.json",
+          "spend_usd": 1.507758,
+          "identity_sha256": "5504810dcc1d28064f354281fc50d3d92522731066fb097954afb3277753ce14",
+          "stale": false
+        }
+      },
+      "stale": false
+    }
+  ]
+}

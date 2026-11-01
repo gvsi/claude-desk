@@ -10,6 +10,7 @@ import type {
   ActorKind,
   ApprovalAnswer,
   Assurance,
+  BusinessToolDef,
   Decision,
   DecisionState,
   EvHeld,
@@ -36,7 +37,7 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
-import type { DeskSetup, DeskSummary } from './openapi.gen.ts';
+import type { Attempt as ApiAttempt, DeskSetup, DeskSummary, Triage } from './openapi.gen.ts';
 
 // Copy and Desks
 
@@ -79,7 +80,7 @@ export interface ConversationSummary {
   replayed?: boolean;
 }
 
-export type BriefingKind = 'blocked' | 'booking' | 'lead' | 'answer';
+export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
 
 /** One thing that happened since last night, as the API core's briefing lists it. */
 export interface BriefingItem {
@@ -90,13 +91,15 @@ export interface BriefingItem {
   session_id: string | null;
   /** As `ConversationSummary.display_name`. Untrusted. */
   display_name: string | null;
-  /** The `Attempt.ref_id` for `blocked`; the decision for a booking; the `lead_id`; the session for an answer. */
+  /** The refused decision for `turned_down` (its `Attempt.ref_id`); the decision for a booking; the `lead_id`; the session for an answer. */
   ref_id: string;
   /**
    * A refusal's or a booking's `reason_plain` (the kernel's owner text); a lead's note (untrusted, and
-   * it may hold the contact as typed); null for a blocked reply and for an answer.
+   * it may hold the contact as typed); null for an answer.
    */
   line: string | null;
+  /** Why a `turned_down` request was refused, as a closed code; null for the other kinds and for a refusal the API can't place. */
+  cause: RefusalCause | null;
 }
 
 /** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
@@ -106,11 +109,12 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
+  turned_down: number;
   /** The full list's length (`BriefingList.items`). */
   total: number;
   newest: {
-    blocked: BriefingItem | null;
+    turned_down: BriefingItem | null;
     booking: BriefingItem | null;
     /** The newer of the newest lead and the newest answer. */
     lead_or_answer: BriefingItem | null;
@@ -179,14 +183,23 @@ export interface Reports {
   needed_you: number;
 }
 
+/**
+ * A conversation handed to the owner: a visitor's call-back request (`callback`), or one the
+ * handoff card handed over in a chat (`card`), which promises no call back.
+ */
 export interface Handoff {
   handoff_id: string;
   session_id: string;
-  /** `<name> · <contact> · <reason>` as the visitor typed them. Untrusted. */
+  /**
+   * A call-back request's `<name> · <contact> · <reason>` as the visitor typed them; a card's, the
+   * Desk's own words ("The Desk handed this to you."). Untrusted.
+   */
   reason: string;
-  /** `<start>/<end>`, or null when the visitor named no open hour. */
+  /** `<start>/<end>`, or null when the visitor named no open hour. Always null for a card. */
   callback_window: string | null;
   status: string;
+  /** Optional until the API sends it (plan 02b); a handoff without one is a call-back request. */
+  kind?: 'callback' | 'card';
 }
 
 export interface NeedsYouSession {
@@ -204,7 +217,7 @@ interface NeedsYouBase {
 }
 
 /**
- * One held request or one open callback that waits for the owner. The API sends every field, the
+ * One held request or one open handoff that waits for the owner. The API sends every field, the
  * other alternative's as null (openapi.json), so code tells them apart with `!= null`.
  */
 export type NeedsYouItem =
@@ -259,7 +272,7 @@ export interface VisitorTranscript {
 
 export interface OwnerTranscript {
   state: SessionState;
-  items: TranscriptItem[];
+  items: OwnerTranscriptItem[];
   /**
    * Until when the visitor is typing, while that is in the future, else null (plan 02b Task 1,
    * owner view only). Optional until the API sends it.
@@ -269,23 +282,24 @@ export interface OwnerTranscript {
   replayed?: boolean;
 }
 
+/** Owner-only annotation beside the signed event, absent on older API responses. */
+export interface OwnerTranscriptItem extends TranscriptItem {
+  owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
+}
+
 // Safety
 
-/** What a stopped attempt was about, as the API owner plan's triage task sorts it (plan 02b, Task 10). */
-export type TriageCategory =
-  | 'impersonation'
-  | 'discount_push'
-  | 'private_data'
-  | 'code_redirect'
-  | 'injection'
-  | 'over_limit'
-  | 'other';
+/** A checkpoint event's subject, as the API's descriptive triage names it. */
+export type TriageCategory = Triage['category'];
 
-/** An attempt's AI-written summary and category: owner-facing only, and labelled as written by Claude. */
-export interface Triage {
-  summary: string;
-  category: TriageCategory;
-}
+/** The API's AI-written summary and category, for the owner alone. */
+export type { Triage };
+
+/**
+ * Why the kernel refused a request: a closed code from the API's own document, which the web holds
+ * the words for. A value the document adds is a compile error until the words are written.
+ */
+export type RefusalCause = NonNullable<ApiAttempt['cause']>;
 
 export interface Attempt {
   ref_id: string;
@@ -297,6 +311,11 @@ export interface Attempt {
   /** Null until the API owner plan's triage task (plan 02b) writes one; screens check its shape before using it. */
   triage: Triage | null;
   ledger_seq: number;
+  /**
+   * Why a refused request was refused, or null: for a held request, a stopped draft, and a
+   * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
+   */
+  cause: RefusalCause | null;
 }
 
 /** `GET /api/health`. */
@@ -322,10 +341,16 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
+/** Owner configuration is untrusted text, with its shape from the kernel's generated contract. */
+export type { BusinessToolDef, IntakeConfig, TypedBookingConfig, PurposePaymentConfig, UrgentConfig } from './contracts.ts';
+
+/** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
+export type AnyToolName = ToolName | `desk.${string}`;
+
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
 export interface ToolRow {
-  tool: ToolName;
-  source: ToolProfile['source'];
+  tool: AnyToolName;
+  source: ToolProfile['source'] | 'business';
   effects: ToolProfile['effects'];
   reversible: boolean;
   status: ToolProfile['status'];
@@ -340,6 +365,8 @@ export interface ToolRow {
    * here, and optional, until the regenerated contract types have it: a row without it gives no reason.
    */
   review_reason?: ToolReviewReason | null;
+  /** Typed here and optional until the regenerated contract types carry business definitions. */
+  business?: BusinessToolDef | null;
   /**
    * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
    * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
@@ -436,9 +463,64 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
+export type Choice = { text: string; recommended: boolean };
+
+/** One proposal per Claude card message; stable id `p-` + 12 hex for the interview. */
+export type ProposalCard = {
+  proposal_id: string;
+  kind: 'job' | 'connector';
+  state: 'proposed' | 'accepted' | 'declined' | 'changed';
+  superseded_by: string | null;
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
+};
+
+/** The closed catalog of jobs setup can propose. */
+export type JobKind = 'answer' | 'intake' | 'schedule' | 'price' | 'documents' | 'status' | 'payment' | 'urgent';
+
+/** Title and who ≤ 60, why ≤ 200, how ≤ 300; model text is untrusted. */
+export type JobProposal = {
+  job: JobKind;
+  title: string;
+  why: string;
+  how: string;
+  who?: string | null;
+  can_do_today: boolean;
+  autonomy: 'auto' | 'ask';
+  config: BlockConfig | null;
+};
+
+/**
+ * Intake: 1..5 questions, each ≤ 120. Booking: appointment type ≤ 60, minutes 15..60 (one slot).
+ * Payment: purpose ≤ 60, amount_cents null until the owner enters integer cents 0..1_000_000.
+ * Urgent: urgent_when ≤ 300.
+ */
+export type BlockConfig =
+  | { block: 'intake'; questions: string[] }
+  | { block: 'typed_booking'; appointment_type: string; minutes: number }
+  | { block: 'purpose_payment'; purpose: string; amount_cents: number | null }
+  | { block: 'urgent'; urgent_when: string };
+
+/** Setup's closed connector catalog. */
+export type ConnectorKey = 'google_calendar' | 'gmail' | 'google_drive' | 'quickbooks' | 'stripe' | 'square' | 'calendly';
+
+/** Why ≤ 200; catalog apps connect in simulation. False remains an unavailable-app fallback. */
+export type ConnectorProposal = {
+  app: ConnectorKey;
+  label: string;
+  why: string;
+  connectable: boolean;
+  /** True only once the connection succeeded; older responses omit it (false). */
+  connected?: boolean;
+};
+
+/** Card messages have role Claude, empty text and no choices; ordinary messages have card null. */
 export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
+  choices: Choice[];
+  card: ProposalCard | null;
 }
 
 export interface SetupState {
@@ -449,13 +531,70 @@ export interface SetupState {
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
   consent: boolean | null;
+  /**
+   * Derived from the stored transcript: Claude is working on the owner's last message with no
+   * reply yet. Absent means false on older APIs.
+   */
+  busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
+  /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
+  pending_card?: string | null;
 }
 
 export interface SetupTools {
   tools: ToolRow[];
   connectable: 'mock_payments'[];
+}
+
+/** Line keys understood by setup's public-lines review, shared without importing UI code. */
+export const SETUP_PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+
+/** The public charter lines the owner reviews before the safety check. */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: 'owner' | 'suggested';
+  editable: boolean;
+  /** Stored owner words held from publication; absent on older answers means false. */
+  held?: boolean;
+}
+
+export type PublicHoursWindow = HoursWindow;
+
+export interface SetupPublicHours {
+  source: 'owner' | 'suggested';
+  windows: HoursWindow[];
+}
+
+export type PublicPriceItem = SetupPublicPriceItem;
+
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+
+export interface SetupPublicPrices {
+  source: 'owner' | 'suggested';
+  items: SetupPublicPriceItem[];
+}
+
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+  revision: string;
+}
+
+export interface SetupPublicLinesConfirmIn {
+  keys: string[];
+  revision: string;
+}
+
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
 }
 
 /** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
@@ -603,6 +742,8 @@ export interface KnowledgeBody {
   item: KnowledgeItem;
 }
 
+export type { KnowledgeRow } from './openapi.gen.ts';
+
 export interface TextBody {
   text: string;
 }
@@ -625,7 +766,7 @@ export interface ConfirmRulesBody {
 
 /** One tool of a `confirmTool` batch, with the hash of the definition the owner confirms. */
 export interface ToolConfirmEntry {
-  tool: ToolName;
+  tool: AnyToolName;
   /**
    * The row's `definition_sha256`, the hash it was listed at; only the changed-tool review sends its
    * `pending_sha256`, the hash of the definition the owner just read.
@@ -666,10 +807,16 @@ export interface StartSetupBody {
  * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
-export interface SetupAnswerBody {
-  question: QuestionKey;
-  text: string;
-}
+export type SetupAnswerBody = { text: string } & (
+  | { question: QuestionKey; card?: never }
+  | { question: null; card: string }
+);
+
+/** Changes always accept: title 1..60, job autonomy, payment-only integer cents 0..1_000_000. */
+export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number; autonomy?: 'auto' | 'ask' };
+
+/** Sent as an empty JSON object. */
+export type SetupSuggestionsBody = Record<string, never>;
 
 export interface ConsentBody {
   allow: boolean;

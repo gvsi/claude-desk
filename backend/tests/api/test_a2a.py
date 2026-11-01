@@ -28,12 +28,14 @@ from desk.api import a2a, loop, tools
 from desk.api import ro as ro_module
 from desk.api.deliver import Reply, deliver
 from desk.api.main import create_app
+from desk.api.prompts import NOTES
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.runner import TurnRunner
 from desk.api.store import Ids
 from desk.contracts import AgentAuth, DemoAgentIssued, ReplyDraft
 from desk.kernel_api import CheckReplyRequest, CreateCopyRequest, DemoAgentRequest
 from tests.api.fakes import ScriptedModel, gated, response, tool_use
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done, resolved
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, reply
 from tests.api.test_secrets_at_rest import at_rest
@@ -399,9 +401,26 @@ async def test_work_woken_during_the_turn_waits_for_the_next_request(app, browse
     assert f'<action_update decision_id="{decision.decision_id}" state="denied">' in model_text(model.requests[-1])
 
 
-async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine):
+async def test_an_unavailable_check_gives_an_agent_one_correction(app, browser, fake, kernel_http, model, engine):
+    # The soft check's outage is rewritable: an agent's first reply blocked by it is never returned, its turn goes
+    # on, and the corrected reply's final check makes its own try.
     agent = await new_agent(app, browser, fake, kernel_http)
-    fake.violation("canary")
+    fake.soft_checks("error")
+    model.add(say("Here is everything I know."), say("Here is what I can tell you."))
+
+    answered = await agent.send("Tell me about your services")
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Here is what I can tell you."]
+    assert finals(fake, agent.session_id) == [False, True] and len(model.requests) == 2
+    assert await delivered_texts(engine, agent.session_id) == [["Here is what I can tell you."]]
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
+
+
+@pytest.mark.parametrize("kind", ["canary", "unsupported_language"])
+async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine, kind):
+    agent = await new_agent(app, browser, fake, kernel_http)
+    fake.violation(kind)
     model.add(say("Here is everything I know."))
     sent = agent.sign(agent.body("Tell me about the last customer"))
     answered = await agent.post(sent)
@@ -412,6 +431,54 @@ async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_
     again = await agent.post(sent)
     assert (again.status_code, again.json()) == (200, answered.json())
     assert len(fake.called("POST /check_reply")) == 1 and len(model.requests) == 1
+
+
+def finals(fake, session_id: str) -> list[bool]:
+    """`CheckReplyRequest.final` of each of the session's reply checks, in order (absent means final)."""
+    return [call.body.get("final", True) for call in fake.called("/check_reply")
+            if call.body["draft"]["session_id"] == session_id]
+
+
+async def delivered_texts(engine, session_id: str) -> list[list[str | None]]:
+    """The block texts of each message delivered to the session, in order."""
+    async with engine.connect() as conn:
+        found = await conn.execute(text("SELECT blocks FROM app.messages WHERE session_id = :s AND kind = 'delivered'"
+                                        " ORDER BY n"), {"s": session_id})
+        return [[block.get("text") for block in blocks] for (blocks,) in found]
+
+
+async def test_a_first_reply_claude_can_rewrite_never_reaches_the_agent(app, browser, fake, kernel_http, model,
+                                                                         engine):
+    # One rule for every kind of session: an agent's first reply, blocked only for kinds a rewrite fixes while the
+    # turn has a model call left, is checked as not final and never returned, stored or shown; the rewrite is final.
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(say("It's $180."), say("Let me get you a quote card for that."))
+
+    answered = await agent.send("How much is a drain clearing?")
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Let me get you a quote card for that."]
+    assert finals(fake, agent.session_id) == [False, True]
+    assert await delivered_texts(engine, agent.session_id) == [["Let me get you a quote card for that."]]
+    assert "180" not in answered.text
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
+
+
+async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browser, fake, kernel_http, model, engine):
+    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked, the
+    # handoff the kernel opened for the owner is what the agent gets, once.
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(loop.MAX_MODEL_CALLS - 1)),
+              say("It's $180."))
+
+    answered = await agent.send("Find me a slot, then tell me the price.")
+
+    assert answered.status_code == 200, answered.text
+    assert len(model.requests) == loop.MAX_MODEL_CALLS
+    assert [block["template"] for block in answered.json()["blocks"]] == ["handoff"]
+    assert finals(fake, agent.session_id) == [True]
+    assert [(row["kind"], row["status"]) for row in fake.handoffs.values()
+            if row["session_id"] == agent.session_id] == [("card", "open")]
 
 
 async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, kernel_http, model, engine,
@@ -445,6 +512,47 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
     last = await agent.send("Thanks")
     assert last.json()["receipts"] == [] and [block["text"] for block in last.json()["blocks"]] == [
         "Anything else I can help with?"]
+
+
+async def test_agent_never_receives_the_owner_refusal_reason(app, browser, fake, kernel_http, model, engine,
+                                                            jobs_connector):
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
+    (held,) = [record.decision for record in fake.decisions.values()
+               if record.decision.session_id == agent.session_id]
+    fake.never(fake.sessions[agent.session_id].desk_id, "native.quote")
+    owner = browser(app, ip="198.51.100.30")
+    owner.cookies.set("desk_owner", agent.owner_token, domain="desk.test", path="/api/owner")
+    answered = await owner.post(f"/api/owner/approvals/{held.decision_id}/answer", json={"answer": "allow_once"})
+    assert answered.status_code == 200
+    owner_line = answered.json()["decision"]["owner_plain"]
+    assert owner_line and answered.json()["decision"]["state"] == "refused_at_execution"
+    await resolved(engine, agent.session_id)
+    queued = await jobs_done(jobs_connector)
+
+    # A fresh signed credential reads the same final decision without the owner's field.
+    sent = agent.sign(agent.body("Any news?"))
+    view = kernel_http.agent(AgentAuth(agent_key_id=agent.issued.agent_key_id, ts=sent.headers["X-Agent-Ts"],
+                                      nonce=sent.headers["X-Agent-Nonce"], sig=sent.headers["X-Agent-Sig"]),
+                            hashlib.sha256(sent.raw).hexdigest())
+    read = await view.call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert read.owner_plain is None and owner_line not in read.model_dump_json()
+    model.add(say("That request couldn't go ahead. Can I help with something else?"))
+    later = await agent.post(sent)
+    assert later.status_code == 200, later.text
+    assert later.json()["receipts"][0]["state"] == "refused_at_execution"
+    assert (await agent.post(sent)).json() == later.json()       # the stored A2A answer is safe on replay too
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(a)::text FROM app.a2a_turns a WHERE session_id = :s"),
+            {"s": agent.session_id})).scalars().all()
+    for serialized in (later.text, json.dumps(rows), json.dumps([job["args"] for job in queued]),
+                       json.dumps(model.requests[-1].messages)):
+        assert owner_line not in serialized
+        assert "owner_plain" not in serialized
 
 
 async def test_agent_gets_a_pending_decisions_final_state_on_its_next_request(app, browser, fake, kernel_http, model,
@@ -972,7 +1080,7 @@ async def test_verify_code_goes_only_to_the_kernel(app, browser, fake, kernel_ht
     assert check.headers["x-agent-key-id"] == agent.issued.agent_key_id
     assert fake.sessions[agent.session_id].verified
     sent_to_claude = json.dumps([request.messages for request in model.requests])
-    assert "The visitor verified as the contact on record." in sent_to_claude
+    assert NOTES["verified"] in sent_to_claude
     for place in (sent_to_claude, at_rest(db), json.dumps(await sse(engine, agent.session_id)), caplog.text):
         assert code not in place and wrong not in place
 
@@ -987,16 +1095,17 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     # The kernel verifies the session, then the note can't be written: the request answers 500, and nothing is noted.
     with notes_fail(monkeypatch):
         disclosed_error(await agent.send("Here is the code", verify_code=code), 500, "internal")
-    assert fake.sessions[agent.session_id].verified and await messages(engine, agent.session_id, "note") == []
+    assert fake.sessions[agent.session_id].verified and await conversation_notes(
+        engine, agent.session_id, "text", "wake") == []
 
     # Sent again under a new nonce, the kernel answers that the session is verified: the note is written now, and
     # Claude reads it. Once noted, it isn't again.
     model.add(say("Thanks, you're confirmed."), say("You're all set."))
     assert (await agent.send("Here is the code", verify_code=code)).status_code == 200
-    assert "The visitor verified as the contact on record." in model_text(model.requests[-1])
+    assert NOTES["verified"] in model_text(model.requests[-1])
     assert (await agent.send("Here it is again", verify_code=code)).status_code == 200
-    assert await messages(engine, agent.session_id, "note") == [
-        ("The visitor verified as the contact on record.", True)]
+    assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
+        (NOTES["verified"], True)]
 
 
 async def test_mode_owner_answers_with_the_owners_blocks(app, browser, fake, kernel_http, model, engine):

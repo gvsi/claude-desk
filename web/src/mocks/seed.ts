@@ -1,19 +1,20 @@
 /**
  * What a fresh mock copy holds, by seed. `rivera` is the master plan's Rivera seed as far as the
  * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk with its rule cards and
- * open status, and the seeded hold) plus Dana's live chat and Alex Kim's assistant's, a visiting
- * agent's; `rivera_quiet` has no hold and no chats; `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
+ * open status, the public website and price list knowledge, and the seeded hold) plus Dana's live
+ * chat and Alex Kim's assistant's, a visiting agent's; `rivera_quiet` has no hold and no chats;
+ * `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
  * script's own steps, so their ledger entries, receipts and transcript items line up the way the
  * live ones do.
  */
-import type { HoursWindow, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
+import type { HoursWindow, KnowledgeItem, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
 import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { seedAgentChat } from './agents.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
-export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
+export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document';
 
 export interface CopyIds {
   copyId: string;
@@ -136,6 +137,7 @@ const STARTER_CARDS: RuleCard[] = [
   }),
   presetCard({ card_id: 'preset-fetch-website', applies_to: 'native.fetch_website', mode: 'auto', who: 'anyone', reason: 'Claude can read your website to learn about your business.' }),
   presetCard({ card_id: 'preset-read-memory', applies_to: 'native.read_memory', mode: 'auto', who: 'anyone', reason: 'Claude can read the notes you brought in to learn about your business.' }),
+  presetCard({ card_id: 'preset-web-search', applies_to: 'native.web_search', mode: 'auto', who: 'anyone', reason: 'Claude can search the web to learn how businesses like yours work.' }),
 ];
 
 const RECOMMENDED_CARDS: RuleCard[] = [
@@ -203,6 +205,7 @@ function nativeTool(
   return {
     tool,
     source: 'native',
+    business: null,
     adapter: tool.slice('native.'.length),
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     definition_sha256: placeholderHex(`sha256:profile:${tool}`, 32),
@@ -247,8 +250,9 @@ export function riveraTools(): ToolRecord[] {
     }),
     nativeTool('native.fetch_website', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: "Read the business's website." }),
     nativeTool('native.read_memory', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Read the notes the owner brought in.' }),
-    { ...rivera.toolProfiles.listCharges, review_reason: null },
-    { ...rivera.toolProfiles.createRefund, review_reason: null },
+    nativeTool('native.web_search', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Searches the web to learn how businesses like yours work.' }),
+    { ...rivera.toolProfiles.listCharges, business: null, review_reason: null },
+    { ...rivera.toolProfiles.createRefund, business: null, review_reason: null },
   ];
 }
 
@@ -288,6 +292,26 @@ export function seedWorld(world: MockWorld): void {
     hours: RIVERA_HOURS,
     openStatus: RIVERA_OPEN_STATUS,
   });
+  const knowledge: KnowledgeItem[] = [
+    {
+      item_id: 'kn-website',
+      source: 'website',
+      label: { readers: ['public'], record_owner: null },
+      title: 'Your website, rivera-plumbing.example, read during setup',
+      text: "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+    },
+    {
+      item_id: 'kn-price-list',
+      source: 'setup',
+      label: { readers: ['public'], record_owner: null },
+      title: 'Price list, from your answers in setup',
+      text: 'The price list Maria gave in setup covers the service call deposit, drain clearing, a water heater flush and leak repair. Each price is given in a quote from this list.',
+    },
+  ];
+  // The kernel stores these one after another on its live clock: website first, then price list.
+  for (const [i, item] of knowledge.entries()) {
+    world.knowledge.set(`${ids.deskId}:${item.item_id}`, { deskId: ids.deskId, item, createdAt: opened - (knowledge.length - i), forced: false });
+  }
   if (seed === 'rivera_two_desks') {
     world.addDesk({
       desk_id: ids.emergenciesDeskId,
@@ -298,6 +322,23 @@ export function seedWorld(world: MockWorld): void {
     });
   }
   if (seed === 'rivera_quiet') return;
+  if (seed === 'rivera_ended_document') {
+    const rule = main.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
+    const draft = world.draft(main, [{ ...rule, mode: 'ask', reason: 'Ask me before sharing a customer’s document.' }]);
+    world.confirmDraft(main, draft.version);
+    const chat = world.addSession(main);
+    world.verify(chat, rivera.people.dana);
+    world.replay(chat, opened - MINUTE, [{ text: 'Please send me my drain clearing invoice.', steps: [
+      (ctx) => ctx.status('held', ctx.decide({ ...DECISIONS.releaseInvoice, outcome: 'hold', executed: false, hold: 'ask',
+        reasonPlain: 'Dana Whitfield asked for her drain clearing invoice. Your rule asks before sharing documents.' })),
+      writing,
+      (ctx) => ctx.reply([rivera.blocks.handoff[ctx.language]]),
+    ] }]);
+    // The chat ends for good: the visitor's page hears the session error, and a new chat can't resume it.
+    world.emit(chat, { type: 'error', code: 'session' });
+    chat.ended = true;
+    return;
+  }
 
   // Alex Kim's assistant, a signed visiting agent, got a quote for the service call deposit and paid
   // it within its signed limit, forty minutes before the copy opened.

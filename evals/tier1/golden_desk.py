@@ -69,6 +69,8 @@ STAND_IN_PRICES = [
     {"item_id": "drain", "title": "Drain clearing", "unit_cents": P},
     {"item_id": "heater", "title": "Water heater flush", "unit_cents": 15_000},
     {"item_id": "leak", "title": "Leak repair", "unit_cents": 25_000},
+    {"item_id": "pipe", "title": "Pipe repair (starting price)", "unit_cents": 10_000},
+    {"item_id": "short-notice", "title": "Short-notice fee", "unit_cents": 5_000},
 ]
 SEED_ITEMS = tuple(row["item_id"] for row in STAND_IN_PRICES)
 SEED_TITLES = {row["item_id"]: row["title"] for row in STAND_IN_PRICES}   # the item text a quote card names
@@ -109,7 +111,7 @@ RESOURCE_KINDS = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
     "native.payment_link": "quote", "native.charge_mandate": "quote", "native.capture_lead": "desk",
     "native.request_callback": "desk", "native.start_verification": "desk", "payments.list_charges": "charge",
-    "payments.create_refund": "charge", "native.fetch_website": "desk", "native.read_memory": "desk",
+    "payments.create_refund": "charge", "native.fetch_website": "desk", "native.read_memory": "desk", "native.web_search": "desk",
 }
 
 REVIEWER_MODEL = "claude-sonnet-5-5"

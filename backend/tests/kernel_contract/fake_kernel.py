@@ -12,7 +12,7 @@ contract test, before the task that first uses them.
 - Signatures are `"fake:" + sha256 hex` of the fields the kernel signs. Times come from `state.now`.
 - Every non-2xx body is a `KernelError`; a body that isn't the route's request model is 422 `invalid`;
   every answer is checked against the route's response model before it leaves.
-- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`,
+- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `soft_checks`, `verify`, `never`,
   `lower_link_limit`, `reconcile`, `in_flight` (with `finish`), `owner_verdict` (an owner's say, as
   `POST /owner/messages` answers it) and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle
   close. A `"timeout"` or `"connect"` failure is raised as httpx's own exception, which reaches the client through
@@ -22,6 +22,20 @@ contract test, before the task that first uses them.
   `set_mode`. `POST /owner/messages` takes a say or a whisper in any mode: a say is looked at for document canaries
   only, and a clean one is an `owner_statement` fact and one `owner_said` card of the text verbatim, signed at the
   session's generation; a whisper is ledgered with its length alone.
+- The handoff card's owner handoff (#96): a verdict of Claude's that shows the handoff card and that the session
+  will see opens a `handoffs` row of kind `card` for the session (open, no call-back window, the kernel's reason):
+  a reply that passed citing the card, or a blocked draft when its check is `final` (`CheckReplyRequest.final`) or
+  any violation is outside `desk.rewrites.REWRITABLE` (a non-final draft blocked only for those is the API's to
+  rewrite, never shown). It opens none for the owner's preview session, while the session has a held request
+  awaiting the owner, or while it has an open handoff of either kind (one per session); otherwise it alerts the
+  owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
+  ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
+  non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
+  call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
+  owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
+  call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
+  mark of done on a closed one is 409.
+  `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
   every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
@@ -54,7 +68,8 @@ contract test, before the task that first uses them.
   minutes), the key must be the one bound to the session at creation, and a failure is 401, ledgered `agent_auth
   {route, reason, agent_key_id}` with the kernel's reason.
   A nonce is bound at its first use to one session and body hash and lasts one A2A turn: it is spent by a passing
-  verdict, an immediate-handoff violation, the second reply check or 5 minutes, after which the same request is 409
+  verdict, an immediate-handoff violation (any kind outside `desk.rewrites.REWRITABLE`), a blocked check sent with
+  `final: true`, the second reply check or 5 minutes, after which the same request is 409
   `replayed`; another body or session under it is 401. An opening `POST /sessions` whose nonce is bound or spent
   with the same body hash returns the bound session and creates nothing. An agent session is never given refunds,
   and gets `native.payment_link` and `native.charge_mandate` only with a verified mandate; a mandate charge is
@@ -68,9 +83,11 @@ contract test, before the task that first uses them.
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
   owner's `/whoami` no longer lists it, and opening a session on it or an owner route naming it answers 409 `closed`;
-  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy. An owner
+  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
+  call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
-  `native.read_memory` answers from `MEMORY_ITEMS` (the simulated memory) and `native.fetch_website` reads any
+  `native.read_memory` answers from the Desk's stored simulated memory (only the Rivera seed falls back to
+  `MEMORY_ITEMS`; other unwritten Desks read nothing) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
   owner-only knowledge; `/context` serves the knowledge a session's labels read.
 - Setup's rules (Plans 01a, 01b and 01c): `PUT /desks/{id}/charter`, `hours`, `prices`, `calendar` and
@@ -81,12 +98,12 @@ contract test, before the task that first uses them.
   and enabled tools but for a timed-out rejection, which proves again; `POST /policy/confirm` activates only a proved
   draft whose parent is still active (else 409); `POST /policy/{version}/probe` decides each `Probe` through the
   fake's card rules below, changing nothing. `POST /tools/connect` pins the mock payments tools `needs_review`, and
-  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` with its
-  changed definition pending. `POST /documents` adds a document through the seed path's writer and `POST /knowledge`
-  upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a route's calls until a test lets
-  them through, as a slow proof does. The fake's rules are cards read plainly (a `never` refuses, an `auto` card whose
-  limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no specificity order between overlapping
-  cards, and an effect card covers a tool by any one of its effects.
+  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` (a disabled
+  one stays disabled) with its changed definition pending. `POST /documents` adds a document through the seed path's
+  writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
+  route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
+  `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
+  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -107,11 +124,11 @@ import secrets
 import string
 import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -122,6 +139,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route, Router
 
+from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
+from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ITEM_ID_PATTERN,
@@ -182,6 +202,7 @@ from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
+    ContextClock,
     CreateCopyRequest,
     CreateDeskRequest,
     CreateSessionRequest,
@@ -193,6 +214,7 @@ from desk.kernel_api import (
     DeskCharterRequest,
     DeskCreated,
     DeskHoursRequest,
+    DeskMemoryRequest,
     DeskNotificationsRequest,
     DeskPeopleRequest,
     DeskPricesRequest,
@@ -216,6 +238,9 @@ from desk.kernel_api import (
     PublicDesk,
     SessionContext,
     ToolsConnectRequest,
+    ToolsConfirmRequest,
+    ToolConfirmed,
+    ToolPin,
     ToolsSimulateChangeRequest,
     TurnRequest,
     TurnStarted,
@@ -225,6 +250,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -235,9 +261,10 @@ PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify again
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, detail: dict[str, list[str]] | None = None):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+        self.detail = detail
 
 
 class AdapterCheckRefused(Exception):
@@ -274,7 +301,9 @@ SLOT_HOURS = {0: (8, 10, 12, 14, 16), 1: (8, 10, 12, 14, 16), 2: (8, 10, 12, 14,
 RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit_cents=2000),
                  PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
                  PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
-                 PriceItem(item_id="leak", title="Leak repair", unit_cents=25000)]
+                 PriceItem(item_id="leak", title="Leak repair", unit_cents=25000),
+                 PriceItem(item_id="pipe", title="Pipe repair (starting price)", unit_cents=10000),
+                 PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000)]
 RIVERA_KNOWLEDGE = [
     KnowledgeItem(item_id="kn-website", source="website",
                   title="Your website, rivera-plumbing.example, read during setup",
@@ -283,7 +312,8 @@ RIVERA_KNOWLEDGE = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
@@ -298,13 +328,32 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
-NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout"], "briefing": ["lead", "callback", "booking"]}
-# The owner's simulated Claude memory (the kernel's fixtures/memory.json, Plan 01c): (title, text).
-MEMORY_ITEMS = [("Business", "Rivera Plumbing, run by Maria Rivera."),
-                ("Trade", "Plumbing: leaks, drains and water heaters."),
-                ("Service area", "Oakland, Berkeley, Alameda and Emeryville."),
-                ("Hours", "Weekdays 8 to 6, Saturday mornings."),
-                ("Website", "rivera-plumbing.example")]
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
+STARTER_KEY = "starter:"   # a seed-only question's claim key is `starter:<n>:<lang>`, its fact `charter:<key>`
+
+
+def is_starter_fact(fact_id: str) -> bool:
+    """A seed-only starter question's fact: out of Claude's context, kept by a charter replace, never an owner's."""
+    return fact_id.startswith(f"charter:{STARTER_KEY}")
+
+
+NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
+                 "briefing": ["lead", "booking"]}
+# The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
+MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
+    {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],
+     "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."},
+    {"id": "trade", "title": "Trade", "topics": ["trade", "services", "work", "plumbing"],
+     "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
+    {"id": "service-area", "title": "Service area", "topics": ["area", "cities", "where"],
+     "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
+    {"id": "hours", "title": "Hours", "topics": ["hours", "open", "opening", "schedule", "when"],
+     "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."},
+    {"id": "website", "title": "Website", "topics": ["website", "site", "web", "online"],
+     "text": "The business's website is https://rivera-plumbing.example."}]})
 OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
@@ -364,6 +413,7 @@ INPUT_SCHEMAS = {
     "payments.create_refund": _closed({"charge_id": TEXT}, ("charge_id",)),
     "native.fetch_website": _closed({"url": {**TEXT, "maxLength": 2048}}, ("url",)),
     "native.read_memory": _closed({"query": {**TEXT, "maxLength": 200}}, ("query",)),
+    "native.web_search": _closed({"query": {**TEXT, "maxLength": 200}}, ("query",)),
 }
 # tool: (effects, reversible, resource kind, what Claude is told)
 TOOL_FACTS = {
@@ -384,12 +434,13 @@ TOOL_FACTS = {
                                "Refund one of the verified customer's charges in full."),
     "native.fetch_website": (["read"], True, "desk", "Read the business's website during setup."),
     "native.read_memory": (["read"], True, "desk", "Search the owner's Claude memory during setup."),
+    "native.web_search": (["read"], True, "desk", "Search the web to learn how businesses like this one work."),
 }
 # The mock payments server's simulated change (Plan 01c): appended to the tool's description for the copy.
 SIMULATED_CHANGE = "Refunds may be sent to any card the caller names."
 TOOL_LABELS = {"payments.list_charges": "Payment history", "payments.create_refund": "Refunds"}
 # The owner's setup tools (Plan 01c): given to owner sessions only, and the only tools an owner session has.
-OWNER_TOOLS = ("native.fetch_website", "native.read_memory")
+OWNER_TOOLS = ("native.fetch_website", "native.read_memory", "native.web_search")
 # The ten tools a visitor could ever be given, and those an unverified or a verified visitor has now.
 VISITOR_DECLARED = tuple(tool for tool in TOOL_FACTS if tool not in ("native.charge_mandate", *OWNER_TOOLS))
 # An agent is never given refunds; it gets the mandate charge and payment links only with a verified mandate.
@@ -419,6 +470,12 @@ STATUS_TEXT = {
            "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
            "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
+}
+# Owner-only refusal lines for the fake's two refusal paths: a changed policy and exhausted mandate.
+# The owner has no language setting yet, so these stay English whatever the session's language.
+OWNER_REFUSAL_TEXT = {
+    "rules_changed": "Your rules changed before this ran, so it wasn't done.",
+    "fallback": "This couldn't run, so it wasn't done.",
 }
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
@@ -516,7 +573,7 @@ def tool_profile(tool: str) -> ToolProfile:
     return ToolProfile(tool=tool, source=source, effects=effects, reversible=reversible, adapter=f"fake.{tool}",
                        resource_kind=resource_kind, description_confirmed=description,
                        input_schema=INPUT_SCHEMAS[tool],
-                       definition_sha256=sha256_hex(tool) if source == "mcp" else None, status="enabled")
+                       definition_sha256=sha256_hex(tool), status="enabled")
 
 
 def signed_time(moment: datetime) -> str:
@@ -719,6 +776,15 @@ def in_hours(moment: datetime, windows: list[HoursWindow], tz: ZoneInfo = RIVERA
 _JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
 
 
+def storable(text: str) -> bool:
+    """Mirror repo.storable: Postgres text and JSONB require valid UTF-8 without NUL."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
+
+
 def matches(schema: dict, value: Any) -> bool:
     """Whether `value` fits one of the closed input schemas above (the subset of JSON Schema they use).
     Integers are strict: `"1"`, `1.0` and `true` are not integers."""
@@ -762,7 +828,15 @@ FACTLESS_TEMPLATES = ("handoff", "verify_prompt")
 OTHER_LANGUAGE_WORDS = {"bonjour", "merci", "je", "vous", "nous", "olá", "obrigado", "você", "ciao", "grazie",
                         "danke"}
 SPANISH_WORDS = {"hola", "gracias", "puedo", "usted", "ayudar", "ayudarle", "con", "para", "buenos", "buenas", "días",
-                 "tardes", "quiero", "necesito", "cuánto", "cuando", "está", "estoy"}
+                 "tardes", "quiero", "necesito", "cuánto", "cuando", "está", "estoy", "el", "la", "los", "las",
+                 "un", "una", "claro", "aquí", "soy", "es", "hay", "su", "sus", "tu", "te"}
+ENGLISH_WORDS = frozenset("""
+    the an and or but of to in on at for with from by about into is are was were be been being am can could will
+    would should may might must have had does did this that these those there here what which who whom when where
+    how why i you she it we they my your his her its our their him us them not if just only also any some all more
+    very please thanks thank hello hi yes sure help need want like know get let see look call down up out off then
+    now until after before than too
+""".split())
 # The cards the fake renders plainly, and a verdict's status lines in the kernel's own words (its `reply_checked`,
 # `reply_handed_off`, `owner_said` and `owner_say_blocked` lines).
 REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply checked against {owner}'s rules",
@@ -776,12 +850,14 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+# The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
+CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
-NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
+NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent_sign", re.compile(r"%")))
 
 
 def detect_language(prose: str) -> str:
-    """`en`, `es`, `other` (prose opening "Bonjour", or in another language) or `none` (no words)."""
+    """A small language stub: supported markers, positive other markers, or unmarked Latin prose."""
     words = re.findall(r"[^\W\d_]+", prose.lower())
     if not words:
         return "none"
@@ -789,6 +865,8 @@ def detect_language(prose: str) -> str:
         return "other"
     if set(words) & SPANISH_WORDS or any(mark in prose for mark in "ñ¿¡"):
         return "es"
+    if not set(words) & ENGLISH_WORDS:
+        return "unmarked" if len(words) >= 4 else "none"
     return "en"
 
 
@@ -849,6 +927,199 @@ def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
+# The kernel's policy-only phrase lists (`lexicon/policy_ai_denial.txt`, `lexicon/policy_free_price.txt`),
+# one entry per line, read on the accent-folded text.
+POLICY_AI_DENIAL = (
+    r"(?<!no\s)(?:hablaras?|vas?\s+a\s+hablar)\s+con\s+(?:una\s+persona(?:\s+real)?|un\s+(?:ser\s+)?humano)(?=\s*(?:[^\w\s-]|$)|\s+(?:y|tambien|aqui|que)\b)(?![^.!?]{0,40}\b(?:cuando|si)\s+(?:usted\s+)?(?:llam[ae]s?|visite?s?)\b|\s+por\s+telefono\b)",
+    r"you(?:['’]ll|\s+will)\s+be\s+(?:talking|chatting|speaking)\s+(?:to|with)\s+an?\s+(?:real\s+)?(?:human|person)(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b)(?![^.!?]{0,40}\b(?:when|if|once)\s+you\s+(?:call|phone|ring|visit)\b|\s+(?:by|on\s+the|over\s+the)\s+phone\b)",
+    r"you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)",
+    r"you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))",
+    r"I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|a\s+human\s+(?:receptionist|agent|assistant|representative|operator)\b|(?:a\s+)?human(?:\s+being)?(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b))",
+    r"(?:I(?:\s+am|['’]m)\s+not|this\s+(?:is\s+not|isn['’]t))\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?<!no\s)esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con\s+(?:una\s+persona|un\s+(?:ser\s+)?humano|una?\s+(?:agente|asistente|recepcionista)\s+human[oa])",
+    r"no\s+(?:esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con|soy)\s+(?:un\s+(?:bot|robot|chatbot)|una\s+(?:IA|maquina))(?!-)",
+    r"(?<!no\s)soy\s+(?:una\s+persona(?:\s+(?:real|de\s+verdad))?(?=\s*(?:[^\w\s-]|$)|\s+que\b)|un(?:a)?\s+(?:recepcionista|agente|asistente)\s+human[oa]|un\s+(?:ser\s+)?humano|human[oa])",
+    r"(?:esto|este\s+chat)\s+no\s+es\s+(?:un\s+(?:bot|robot|chatbot)|una\s+IA)(?!-)",
+    r"(?:este\s+(?:chat|asistente)|quien\s+(?:(?:le|te|les)\s+)?(?:responde|atiende|contesta|escribe))\s+es\s+(?:una\s+persona|un\s+(?:ser\s+)?humano)",
+)
+POLICY_FREE_PRICE = (
+    r"costs?\s+nothing",
+    r"at\s+no\s+cost",
+    r"no\s+cost\s+to\s+you",
+    r"nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)",
+    r"won['’]t\s+cost\s+you\s+anything",
+    r"cuestan?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
+    r"cobra(?:mos|n)?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
+    r"nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)",
+)
+
+
+PUBLIC_POLICY_PATTERNS = (
+    ("policy.ai_denial", r"(?<!\w)(?:" + "|".join(POLICY_AI_DENIAL) + r")(?!\w)"),
+    ("policy.free_price", r"(?<!\w)(?:" + "|".join(POLICY_FREE_PRICE) + r")(?!\w)"),
+    ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves|hundreds?)\b"),
+    ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
+     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad|cien)\b"),
+    ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|"
+     r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
+    ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana|ma[nñ]anas?)\b"),
+    ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|garant(?:o|imos|em)|"
+     r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
+     r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )free(?! to\b))\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))\b"),
+    ("lex.en.promise", r"\b(?:no[\s-]+costs?|complimentary|discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
+    ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
+)
+
+
+def unsupported_public_policy_language(text: str) -> bool:
+    """Mirror positive other-language evidence; unmarked names and lists keep passing."""
+    text = unicodedata.normalize("NFKC", text)
+    letters = [char for char in text if char.isalpha()]
+    non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
+    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+
+
+def public_commitment_reading(text: str) -> tuple[str, list[int]]:
+    """Fold accents for the fake's examples, retaining original offsets for attribution."""
+    chars, origin = [], []
+    for index, char in enumerate(text):
+        for part in unicodedata.normalize("NFKD", char):
+            if unicodedata.category(part) not in ("Mn", "Me"):
+                chars.append(part)
+                origin.append(index)
+    return "".join(chars), origin
+
+
+SERVICE_AREA_BLANK = r"[\s\-‐‑]"
+SERVICE_AREA_UNIT = r"(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b"
+SERVICE_AREA_CARDINAL = (
+    r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
+    r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
+    r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
+SERVICE_AREA_AFTER_DIGITS = (
+    rf"(?:(?:{SERVICE_AREA_BLANK}*[-–—]{SERVICE_AREA_BLANK}*|{SERVICE_AREA_BLANK}+(?:to|a|hasta){SERVICE_AREA_BLANK}+)"
+    rf"[0-9]+(?:[.,][0-9]+)*)?{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+"
+    rf"a{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b")
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
+SERVICE_AREA_HALF_OR_HUNDRED = rf"half|(?:one{SERVICE_AREA_BLANK}+)?hundred|cien"
+SERVICE_AREA_BEFORE_UNIT = rf"{SERVICE_AREA_BLANK}+(?:an?{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_UNIT}"
+SERVICE_AREA_DAY_WORDS = (
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
+    rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
+    rf"{SERVICE_AREA_BLANK}+semana|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches")
+
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+
+
+def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
+    """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
+    number before a distance unit (or a range to one) or "days a week", a year, a marked ZIP code or road number, or literal "24/7"; any cardinal word, half or a hundred before a unit, "miles" as
+    the unit, and weekdays, weekends and parts of the day."""
+    if key not in {"policy:service_area", "charter:policy:service_area"}:
+        return False
+    hit, after = text[start:end], text[end:]
+    if rule == "digit":
+        return ((re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
+                or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
+                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
+                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
+    if rule in ("lex.en.number", "lex.es.number"):
+        return (re.fullmatch(rf"miles|millas|{SERVICE_AREA_CARDINAL}", hit, re.IGNORECASE) is not None
+                or (re.fullmatch(SERVICE_AREA_HALF_OR_HUNDRED, hit, re.IGNORECASE) is not None
+                    and re.match(SERVICE_AREA_BEFORE_UNIT, after, re.IGNORECASE) is not None))
+    if rule in ("lex.en.date", "lex.es.date"):
+        return (re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
+                or (hit.casefold() in {"mañana", "manana"}
+                    and re.search(r"\b(?:por|en|de)\s+la\s+$", text[:start], re.IGNORECASE) is not None))
+    return False
+
+
+def public_policy_rules(text: str, key: str | None = None) -> list[str]:
+    """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
+
+    The real scan imports kernel-service modules; this API test fake stays outside that boundary.
+    Exhaustive lexicon behavior is covered by the real kernel's own tests.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id
+             for hit in scan_prose(text, {}) if hit.rule_id != "digit"}
+    for match in re.finditer(r"\d+(?:[.,:]\d+)*", text):
+        if not allowed_service_area_hit(key, text, match.start(), match.end(), "digit"):
+            rules.add("digit")
+    if unsupported_public_policy_language(text):
+        rules.add("language")
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    for rule, pattern in PUBLIC_POLICY_PATTERNS:
+        reading, origin = (public_commitment_reading(text) if rule == "language" or rule.startswith("policy.")
+                           else (text, list(range(len(text)))))
+        if any(not ((rule == "policy.ai_denial" and future_person_direction(text, origin[match.start()]))
+                    or allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+                    or ((rule.endswith(".promise") or rule == "policy.free_price")
+                        and offers_amenity(text, origin[match.start()], origin[match.end() - 1] + 1)))
+               for match in re.finditer(pattern, reading, re.IGNORECASE)):
+            rules.add(rule)
+    if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
+        rules.add("language")
+    return sorted(rules)
+
+
+def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[str]]:
+    """Attribute the contract's policy examples in the actual public or reply order."""
+    fields = {key: set(public_policy_rules(value, key)) for key, value in parts if key is not None}
+    ranges, pieces, offset = [], [], 0
+    for key, value in parts:
+        value = unicodedata.normalize("NFKC", value)
+        ranges.append((key, offset, offset + len(value)))
+        pieces.append(value)
+        offset += len(value) + 1
+    combined = "\n".join(pieces)
+    if unsupported_public_policy_language(combined):
+        for key in fields:
+            fields[key].add("language")
+    for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
+        reading, origin = (public_commitment_reading(combined)
+                           if (rule == "language" and "grátis" not in pattern) or rule.startswith("policy.")
+                           else (combined, list(range(len(combined)))))
+        for match in re.finditer(pattern, reading, re.IGNORECASE):
+            start, end = origin[match.start()], origin[match.end() - 1] + 1
+            if rule == "policy.ai_denial" and future_person_direction(combined, start):
+                continue
+            # A service area's allowed number or a free amenity passes when its own card holds it ("Free parking.").
+            if any(key is not None and low <= start and end <= high
+                   and (allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
+                        or ((rule.endswith(".promise") or rule == "policy.free_price")
+                            and offers_amenity(combined[low:high], start - low, end - low)))
+                   for key, low, high in ranges):
+                continue
+            for key, low, high in ranges:
+                if key is not None and low < end and start < high:
+                    fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
+
+
 # Signed agents ---------------------------------------------------------------------------------------
 AGENT_HEADERS = ("x-agent-key-id", "x-agent-ts", "x-agent-nonce", "x-agent-sig", "x-agent-body-sha256")
 # The headers' forms the kernel checks before anything else (else `malformed`).
@@ -860,7 +1131,8 @@ SAFE_REF = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 SIGNED_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 AGENT_TS_SKEW = timedelta(minutes=5)    # an agent's `ts` is within this of the kernel's clock
 NONCE_TTL = timedelta(minutes=5)        # a nonce's turn ends this long after its first use at the latest
-IMMEDIATE_HANDOFF = frozenset({"canary", "unsupported_language", "session_paused"})
+# the violations that hand off at once: every kind but those a rewrite can fix, as the kernel's
+IMMEDIATE_HANDOFF = frozenset(get_args(Violation.model_fields["kind"].annotation)) - REWRITABLE
 DEMO_AGENTS_PER_COPY_PER_HOUR = 10
 DEMO_WALLET = "demo-wallet"
 DEMO_MANDATE = {"per_charge_cents": 2_000, "total_cents": 10_000}   # the master's "Agent demo" row
@@ -1026,7 +1298,8 @@ class PaymentLink:
 @dataclass
 class VersionRecord:
     """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
-    proof and status, the key a repeat of the same draft finds it by, and its money cap (Plan 01b)."""
+    proof and status, the key a repeat of the same draft finds it by, its money cap (Plan 01b), the tools it enables
+    and the profiles it was proved against (`_draft_profiles`)."""
 
     version: int
     parent: int | None
@@ -1036,7 +1309,8 @@ class VersionRecord:
     key: tuple
     created_at: datetime
     auto_money_cap_cents: int = 0               # the most its auto money cards take or pay out per action
-    enables: tuple[tuple[str, str], ...] = ()
+    enables: tuple[ToolPin, ...] = ()
+    profiles: tuple[tuple[str, str | None], ...] = ()
     enable_profiles: dict[str, str] = field(default_factory=dict)
 
 
@@ -1055,6 +1329,8 @@ class Desk:
     timezone: str = RIVERA_TZ.key                                     # the business's
     answering: bool = True
     deleted_at: datetime | None = None                                # `DELETE /desks/{id}`: its routes are closed
+    simulated_memory: DeskMemoryRequest | None = None                 # private; never mirrored in fake_kernel_ro
+    rivera_seed: bool = False                                         # set only when the original seed is created
     people: dict[str, Person] = field(default_factory=dict)          # by person_id
     documents: dict[str, Document] = field(default_factory=dict)     # by document_id
     prices: dict[str, PriceItem] = field(default_factory=dict)
@@ -1062,10 +1338,12 @@ class Desk:
     facts: dict[str, Fact] = field(default_factory=dict)
     tools: dict[str, ToolProfile] = field(default_factory=dict)
     knowledge: dict[str, KnowledgeItem] = field(default_factory=dict)   # by item_id
+    knowledge_created_at: dict[str, datetime] = field(default_factory=dict)   # first added; kept on replacement
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
+    notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -1202,6 +1480,7 @@ class FakeKernelState:
         self._drops: dict[str, int] = {}
         self._scripts: dict[str, Script] = {}
         self._forced: list[str] = []                   # violation kinds the next reply checks carry
+        self._soft_checks: list[str] = []             # scripted soft-check tries, one per reply check that reaches it
         self._in_flight: dict[str, int] = {}           # tool -> executions left that find themselves running
         self._args: dict[str, dict] = {}                # action_id -> the call's args, as the action row binds them
         self.agent_keys: dict[str, AgentKey] = {}       # agent_key_id -> its public key
@@ -1416,6 +1695,17 @@ class FakeKernelState:
         Violation(kind=kind, span="", rule_id="fake")           # refuses an unknown kind
         self._forced.extend([kind] * times)
 
+    def soft_checks(self, *results: str) -> None:
+        """Stage the soft check's tries, one for each later reply check that reaches it (clean prose, as the kernel's
+        step 5 runs it): `pass`, `flag` (`soft.promise`), `denies_ai` (`soft.denies_ai`), or a try with no verdict,
+        `error`, `timeout`, `unparsable` or `refusal`, which is `check_unavailable` (`soft.unavailable`) with no
+        recheck inside the check, as the kernel's one try; a first attempt blocked by it is rewritable, and the final
+        check reads its own staged try. A check with nothing staged passes."""
+        if any(result not in {"pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"}
+               for result in results):
+            raise ValueError("unknown soft-check result")
+        self._soft_checks.extend(results)
+
     def called(self, route: str) -> list[FakeCall]:
         keys = route_keys(route)
         return [call for call in self.calls if call.route in keys]
@@ -1505,7 +1795,7 @@ class FakeKernelState:
         return PolicyVersion(desk_id=desk.desk_id, version=record.version, parent_version=record.parent,
                              cards=record.cards, cedar_sha256=sha256_hex(canonical(cards)),
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
-                             profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
+                             profiles_sha256=sha256_hex(canonical(list(record.profiles))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
                              auto_money_cap_cents=record.auto_money_cap_cents, status=record.status, proof=record.proof)
 
@@ -1567,8 +1857,17 @@ class FakeKernelState:
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
-        for item in RIVERA_KNOWLEDGE:
-            self._store_knowledge(desk, item.model_copy(deep=True))
+        desk.rivera_seed = True
+        for lang, questions in RIVERA_STARTERS.items():
+            for n, question in enumerate(questions, start=1):
+                key = f"{STARTER_KEY}{n}:{lang}"
+                self._put_fact(desk, Fact(fact_id=f"charter:{key}", kind="charter", status="available",
+                                          source="kernel", claims=[Claim(key=key, kind="text", value=question)],
+                                          label=Label(readers=["public"])))
+        for index, item in enumerate(RIVERA_KNOWLEDGE):
+            # Preserve insertion order without moving the shared clock used by other fake activity.
+            self._store_knowledge(desk, item.model_copy(deep=True),
+                                  created_at=self.now + timedelta(microseconds=index))
         return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
@@ -1611,6 +1910,7 @@ class FakeKernelState:
         for slot in seed.calendar_slots:
             desk.slots[slot.slot_id] = slot
             self._put("calendar_slots", (desk.desk_id, slot.slot_id), {**slot.model_dump(), **ids})
+        desk.notify_now = list(seed.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
         for tool in tools:
             self._put_tool(desk, tool_profile(tool))
@@ -1794,12 +2094,13 @@ class FakeKernelState:
         request.state.agent_nonce = bound
         return session
 
-    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict) -> None:
-        """A reply check ends its nonce's turn when it passes, hands off at once, or is the turn's second check."""
+    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict, *, final: bool = False) -> None:
+        """A reply check ends its nonce's turn when it passes, hands off at once, was sent with `final: true` (so its
+        handoff is shown and nothing rewrites it), or is the turn's second check."""
         nonce: AgentNonce = request.state.agent_nonce
         nonce.check_replies += 1
         immediate = {violation.kind for violation in verdict.violations} & IMMEDIATE_HANDOFF
-        if verdict.ok or immediate or nonce.check_replies >= 2:
+        if verdict.ok or immediate or final or nonce.check_replies >= 2:
             nonce.spent_at = self.now
 
     def _check_mandate(self, desk: Desk, key: AgentKey, mandate: Mandate) -> None:
@@ -2016,12 +2317,38 @@ class FakeKernelState:
                 named = fact_id == key if template != "policy" else fact_id.startswith(key)
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
-                    charter.append(self._render(desk, template, fact, language))
+                    block = self._render(desk, template, fact, language)
+                    if template != "contact" or valid_public_contact(block.text):
+                        charter.append(block)
+        # Scan the final rendered group: filtering can bring separate promise fragments together.
+        refused = {key for block in charter if block.template == "policy"
+                   for key in public_policy_fields([(block.fact_id, block.text)])}
+        charter = [block for block in charter if block.fact_id not in refused]
+        while refused := public_policy_fields([
+                (block.fact_id, block.text) for block in charter if block.template == "policy"]):
+            charter = [block for block in charter if block.fact_id not in refused]
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
-                          agent_card=card, open_status=self._open_status(desk, language))
+                          agent_card=card, open_status=self._open_status(desk, language),
+                          starters=self._starters(desk, language))
+
+    def _starters(self, desk: Desk, language: str) -> list[str]:
+        canaries = self._canaries(desk.copy_id)
+        questions = []
+        for n in (1, 2, 3):
+            key = f"{STARTER_KEY}{n}:{language}"
+            fact = desk.facts.get(f"charter:{key}")
+            if (fact is None or "public" not in fact.label.readers or fact.status != "available"
+                    or not self._current(fact)):
+                continue
+            claim = next((claim for claim in fact.claims if claim.key == key and claim.kind == "text"), None)
+            if claim is not None:
+                text = claim.value.strip()
+                if 0 < len(text) <= 80 and not canary_spans(text, canaries):
+                    questions.append(text)
+        return questions
 
     def _agent_tools(self, desk: Desk) -> set[str]:
         """What an agent session may be given on the Desk now: its enabled tools an agent could ever be given, kept to
@@ -2162,10 +2489,19 @@ class FakeKernelState:
             declared += tuple(tool for tool, profile in desk.tools.items()
                               if profile.status == 'enabled' and self._business_profile(desk, tool) is not None)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
+        try:
+            local = self.now.astimezone(ZoneInfo(desk.timezone))
+        except ZoneInfoNotFoundError:
+            raise Refusal(500, "internal") from None
         return SessionContext(
+            clock=ContextClock(as_of_utc=signed_time(self.now), local_now=local.isoformat(timespec="minutes"),
+                               local_date=local.date().isoformat(),
+                               weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                               timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
-            facts=[fact for fact in facts if self._readable(session, fact)],
+            facts=[fact for fact in facts if self._readable(session, fact)
+                   and not is_starter_fact(fact.fact_id)],
             knowledge=[item for item in desk.knowledge.values()
                        if self._readers(session) & set(item.label.readers)])
 
@@ -2191,7 +2527,7 @@ class FakeKernelState:
             record = self.decisions[known]
             if record.call_sha256 != digest:
                 raise Refusal(409, "conflict")
-            return self._refresh(record)
+            return self._refresh(record).model_copy(update={"owner_plain": None})
         if session.mode == "paused":
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="paused")
         if call.tool not in TOOL_NAMES and self._business_profile(desk, call.tool) is None:
@@ -2259,7 +2595,7 @@ class FakeKernelState:
             # The fake has no provider charge records to resolve during refund normalization.
             raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
-        if profile.source == 'business':
+        if profile.source == 'business' and profile.business.config.block == 'intake':
             if len(args['answers']) != len(profile.business.config.questions):
                 raise AdapterCheckRefused('answer_count')
         from desk.kernel_service.adapters import profile_sha256
@@ -2449,8 +2785,13 @@ class FakeKernelState:
         line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
                            owner=desk.owner_display_name,
                            business=desk.tools[record.tool].business if record.tool in desk.tools else None)
+        owner_plain = None
+        if state == "refused_at_execution":
+            owner_plain = OWNER_REFUSAL_TEXT[
+                "rules_changed" if summary.get("reason") == "rules_changed"
+                and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
         record.decision = self._signed(decision.model_copy(update={
-            "state": state, "visitor_plain": line,
+            "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
         self._put_decision(record)
         return record.decision
@@ -2507,7 +2848,7 @@ class FakeKernelState:
                 raise Refusal(404, "not_found")
             return self._refresh(record)
         _, record = self._own_decision(request, None, decision_id)
-        return self._refresh(record)
+        return self._refresh(record).model_copy(update={"owner_plain": None})
 
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
         session, record = self._own_decision(request, body.session_id, body.decision_id)
@@ -2537,7 +2878,9 @@ class FakeKernelState:
             record.running = True
             raise Refusal(409, "conflict")
         if decision.action.tool == "native.charge_mandate" and not self._room_for(session, decision.action):
-            self._transition(record, "refused_at_execution", kind="execute", reason="mandate_exhausted")
+            desk = self.desks[record.desk_id]
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
+            self._transition(record, "refused_at_execution", kind="execute", reason="rules_changed", check=check)
             raise Refusal(409, "conflict")           # the reservation failed: nothing was charged
         return self._run(record, session)
 
@@ -2640,7 +2983,8 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
-        elif tool == "native.capture_lead" or self._business_profile(desk, tool) is not None:
+        elif tool == "native.capture_lead" or (
+                self._business_profile(desk, tool) is not None and desk.tools[tool].business.config.block == 'intake'):
             lead_id = new_id("lead")
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
@@ -2655,12 +2999,50 @@ class FakeKernelState:
                                    Claim(key=f'answer:{index}', kind='text', value=answer)])
                 self._put_fact(desk, Fact(fact_id=f'lead:{lead_id}', kind='knowledge', status='committed',
                                           source='kernel', claims=claims, label=Label(readers=['owner'])))
+        elif ((urgent := self._business_profile(desk, tool)) is not None
+              and urgent.business.config.block == 'urgent'):
+            from desk.kernel_service import desks
+            from desk.kernel_service.adapters.base import quoted
+            from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body, window_claims
+
+            window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
+            start, end = window or (None, None)
+            handoff_id = new_id('handoff')
+            closed = [] if session.preview else [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
+                      and row['session_id'] == session.session_id and row['status'] == 'open']
+            for row in closed:
+                row['status'] = 'done'
+                self._put('handoffs', (row['handoff_id'],), dict(row))
+                old_fact = desk.facts.get('handoff:' + row['handoff_id'])
+                if old_fact is not None:
+                    self._put_fact(desk, old_fact.model_copy(update={'status': 'expired'}))
+            self.handoffs[handoff_id] = {
+                'handoff_id': handoff_id, **ids, 'session_id': session.session_id,
+                'reason': f"{args['name']} · {args['contact']} · {args['reason']}",
+                'callback_window': f'{start.isoformat()}/{end.isoformat()}' if start and end else None,
+                'status': 'done' if session.preview else 'open', 'kind': 'callback'}
+            self._put('handoffs', (handoff_id,), dict(self.handoffs[handoff_id]))
+            callback_label = Label(readers=['owner', f'session:{session.session_id}']) if session.preview else label
+            facts.append(Fact(fact_id=f'handoff:{handoff_id}', kind='handoff', status='committed', source='kernel',
+                              label=callback_label, claims=window_claims(window), expires_at=end))
+            view = {'fact_id': facts[0].fact_id, 'handoff_id': handoff_id}
+            for row in closed:
+                self.append(desk, 'desk_data', {'part': 'handoffs', 'refs': [row['handoff_id']],
+                                               'replaced_by': handoff_id})
+            # Urgent delivery is immediate even when no notification settings request it.
+            if not session.preview:
+                self.inbox.append((desk.copy_id, DemoInboxEntry(
+                    entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
+                    body=f'Reported as urgent through {quoted(urgent.business.title)}. '
+                         + alert_body(window, RequestCallbackArgs(**args)))))
         elif tool == "native.request_callback":
+            # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")
+            self._close_open_handoffs(session, desk, replaced_by=handoff_id)
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
-                "status": "open", "kind": "callback"}
+                "status": "done" if session.preview else "open", "kind": "callback"}
             self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
             facts.append(Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))
@@ -2725,14 +3107,26 @@ class FakeKernelState:
             view = {"fact_id": facts[0].fact_id, "charge_id": charge_id, "status": "paid"}
         elif tool == "payments.list_charges":
             view = {"charges": []}
+        elif tool == "native.web_search":
+            view = {"results": [{"title": "Plumbing services", "url": "https://plumbing.example/services",
+                                  "snippet": "Plumbers repair leaks and clear drains."}],
+                    "simulated": False, "kind": "cited_excerpts"}
+            for hit in view["results"]:
+                self._store_knowledge(desk, KnowledgeItem(
+                    item_id="search-" + sha256_hex(hit["url"])[:16], source="web_search",
+                    title="Web search: " + hit["title"], text=hit["snippet"] or hit["title"],
+                    label=Label(readers=["owner"])))
         elif tool == "native.read_memory":
-            words = set(re.findall(r"[a-z]+", args["query"].lower()))
-            found = [(title, text) for title, text in MEMORY_ITEMS
-                     if words & set(re.findall(r"[a-z]+", f"{title} {text}".lower()))]
-            for title, text in found:
-                self._store_knowledge(desk, KnowledgeItem(item_id=f"memory:{slugify(title)}", source="memory_import",
-                                                          title=title, text=text, label=Label(readers=["owner"])))
-            view = {"items": [{"title": title, "text": text} for title, text in found], "simulated": True}
+            words = {word.casefold() for word in re.findall(r"\w+", args["query"])}
+            memory = desk.simulated_memory if desk.simulated_memory is not None else (
+                MEMORY_ITEMS if desk.rivera_seed else None)
+            found = [item for item in (memory.items if memory is not None else []) if words & (
+                {word.casefold() for word in re.findall(r"\w+", item.title)} |
+                {topic.casefold() for topic in item.topics})]
+            for item in found:
+                self._store_knowledge(desk, KnowledgeItem(item_id=f"mem-{item.id}", source="memory_import",
+                    title=item.title, text=item.text, label=Label(readers=["owner"])))
+            view = {"items": [{"title": item.title, "text": item.text} for item in found], "simulated": True}
         elif tool == "native.fetch_website":
             host = (urlsplit(args["url"]).hostname or "")
             if urlsplit(args["url"]).scheme not in ("http", "https") or not host.endswith(".example"):
@@ -2745,12 +3139,14 @@ class FakeKernelState:
             self._put_fact(desk, fact)
         return facts, view, inbox
 
-    def _store_knowledge(self, desk: Desk, item: KnowledgeItem) -> KnowledgeItem:
+    def _store_knowledge(self, desk: Desk, item: KnowledgeItem, *,
+                         created_at: datetime | None = None) -> KnowledgeItem:
         """Upsert a knowledge item by its ID, mirrored and ledgered `desk_data` (no text in the entry)."""
         desk.knowledge[item.item_id] = item
+        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now if created_at is None else created_at)
         self._put("knowledge_items", (desk.desk_id, item.item_id), {
             "item_id": item.item_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "source": item.source,
-            "title": item.title, "text": item.text, "readers": list(item.label.readers)})
+            "title": item.title, "text": item.text, "readers": list(item.label.readers), "created_at": created_at})
         self.append(desk, "desk_data", {"part": "knowledge", "item_id": item.item_id, "owner_only_forced": False})
         return item
 
@@ -2780,13 +3176,15 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
+        approved = None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
-            # the re-check at execution (step 6): the rules in force no longer let the owner approve it
+            # Step 6: distinguish changed rules from changed inputs under the decision's own rules.
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
-                             approval_id=approval_id, reason="rules changed")
+                             approval_id=approval_id, reason="rules_changed", check=check)
         elif body.answer in ("allow_once", "allow_person"):
-            self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
+            approved = self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
             if body.answer == "allow_person":
                 name = next(person.display_name for person in desk.people.values()
@@ -2801,30 +3199,33 @@ class FakeKernelState:
                 who = {"who": "person", "person_id": session.person_id} if session.person_id else {"who": "anyone"}
                 card_diff = [RuleCard(card_id=f"never-{session.person_id or 'anyone'}-{action.tool}",
                                       applies_to=action.tool, mode="never", reason="You said never for this.", **who)]
-        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
+        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff, approved=approved)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
-        """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's
+        """Check Claude's draft; a prose-only failure may keep checked cards. An agent's
         check may end its nonce's turn (`_end_agent_turn`)."""
         draft = body.draft
         session, desk = self.session_call(request, draft.session_id)
         self._check_generation(session, draft.generation)
         if session.mode == "owner":
             raise Refusal(409, "mode_owner")
-        verdict = self._check_draft(session, desk, draft)
+        verdict = self._check_draft(session, desk, draft, final=body.final)
         if session.kind == "agent":
-            self._end_agent_turn(request, verdict)
+            self._end_agent_turn(request, verdict, final=body.final and "final" in body.model_fields_set)
         return verdict
 
-    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft) -> ReplyVerdict:
+    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft, *, final: bool = True) -> ReplyVerdict:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
-                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [])
+                                 [Violation(kind="session_paused", span="", rule_id="session_paused")], [],
+                                 final=final)
         detected = detect_language(draft.prose)
         violations = []
         if detected == "other":
             violations.append(Violation(kind="unsupported_language", span=draft.prose[:40], rule_id="language"))
+        elif detected == "unmarked":
+            violations.append(Violation(kind="uncertain_language", span=draft.prose[:40], rule_id="language_uncertain"))
         elif detected in ("en", "es"):
             language = session.last_language = detected
             self._put_session(session)
@@ -2838,9 +3239,23 @@ class FakeKernelState:
             card = self._clause(session, desk, clause, language, violations)
             if card is not None:
                 cards.append(card)
+        policies = [(card.fact_id, card.text) for card in cards if card.template == "policy"
+                    and card.fact_id is not None and card.fact_id.startswith("charter:policy:")]
+        if policies:
+            refused = public_policy_fields([(None, draft.prose), *policies])
+            fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+            if fact_ids:
+                violations.append(Violation(kind="unknown_fact", span="policy", rule_id="policy_combined",
+                                            fact_ids=fact_ids))
+        if not violations and draft.prose.strip() and self._soft_checks:
+            result = self._soft_checks.pop(0)              # one try, no recheck (the kernel's `soft_promises`)
+            if result != "pass":
+                kind = "soft_promise" if result in {"flag", "denies_ai"} else "check_unavailable"
+                rule_id = {"flag": "soft.promise", "denies_ai": "soft.denies_ai"}.get(result, "soft.unavailable")
+                violations.append(Violation(kind=kind, span=draft.prose[:40], rule_id=rule_id))
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
-                             [clause.fact_id for clause in draft.clauses if clause.fact_id])
+                             [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
 
     def _canaries(self, copy_id: str) -> dict[str, str]:
         """The canary of each document of the copy, on any of its Desks, by document ID in ID order (the kernel's
@@ -2868,30 +3283,33 @@ class FakeKernelState:
                 violations: list[Violation]) -> RenderedBlock | None:
         """The clause's card, or None after adding the violation it earns."""
         def refuse(kind: str, rule_id: str) -> None:
-            violations.append(Violation(kind=kind, span=clause.template, fact_ids=[clause.fact_id or ""][:1],
-                                        rule_id=rule_id))
+            violations.append(Violation(kind=kind, span=clause.template, rule_id=rule_id,
+                                        fact_ids=[clause.fact_id] if clause.fact_id is not None else []))
 
         template = clause.template
         if template in KERNEL_ONLY_TEMPLATES:
             return refuse("unknown_fact", "kernel_only_template")
         if template in FACTLESS_TEMPLATES:
             if clause.fact_id is not None:
-                return refuse("unknown_fact", "template_mismatch")
+                return refuse("unknown_fact", "names_no_fact")
             key = "handoff" if template == "handoff" else "verify"
             text = REPLY_TEXT[language][key].format(owner=desk.owner_display_name)
             return RenderedBlock(kind="card", template=template, text=text, title=text)
         fact = desk.facts.get(clause.fact_id or "")
         if fact is None:
-            return refuse("unknown_fact", "unknown_fact")
+            return refuse("unknown_fact", "no_such_fact")
+        if not self._readable(session, fact):
+            return refuse("unentitled_fact", "not_a_reader")
         named = {"hours": fact.fact_id == "charter:hours", "contact": fact.fact_id == "charter:contact",
                  "policy": fact.fact_id.startswith("charter:policy:")}
         if fact.kind != TEMPLATE_KINDS.get(template) or not named.get(template, True):
             return refuse("unknown_fact", "template_mismatch")
         if not self._current(fact):
-            return refuse("stale_fact", "stale_fact")
-        if not self._readable(session, fact):
-            return refuse("unentitled_fact", "unentitled_fact")
-        return self._render(desk, template, fact, language)
+            return refuse("stale_fact", "not_current")
+        block = self._render(desk, template, fact, language)
+        if template == "contact" and not valid_public_contact(block.text):
+            return refuse("unknown_fact", "contact_format")
+        return block
 
     def _render(self, desk: Desk, template: str, fact: Fact, language: str) -> RenderedBlock:
         """A card from the fact's claims (the kernel renders en/es templates; the fake keeps it plain)."""
@@ -2927,24 +3345,43 @@ class FakeKernelState:
 
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
-                 message_id: str | None = None) -> ReplyVerdict:
-        """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
+                 message_id: str | None = None, final: bool = True) -> ReplyVerdict:
+        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
+        clause when the draft has one, else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
-        handoff."""
+        handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
+        the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
+        owner handoff (`_open_card_handoff`); one the session won't see (the API rewrites it) has no blocks. The
+        reply entry records `final`."""
         ok = not violations
         if not ok and author == "owner":
             blocks = []
         elif not ok:
+            kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
-            blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+            handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
+            if kept and all(violation.kind in PROSE_ONLY for violation in violations):
+                drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
+                blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
+            else:
+                blocks = [handoff]
+        shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
+        if author == "claude" and not shown:
+            blocks = []                     # the API rewrites it: no handoff card is signed that no handoff backs
+        # a replayed night holds only finished things and no Demo inbox entry (Plan 01d): its blocked drafts open none
+        if (author == "claude" and shown and self._replaying is None
+                and any(block.template == "handoff" for block in blocks)):
+            self._open_card_handoff(session, desk)
         message_id = message_id or new_id("msg")
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
-            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids},
+            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids,
+            "dropped": [],                  # cards refused at signing: the fake rechecks none
+            "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
-            "checked" if ok else "handed_off")
+            "handed_off" if not shown or any(block.template == "handoff" for block in blocks) else "checked")
         visitor_plain = REPLY_TEXT[language][plain].format(owner=desk.owner_display_name)
         blocks_sha256 = sha256_hex(canonical([block.model_dump(mode="json") for block in blocks]))
         return ReplyVerdict(
@@ -2953,6 +3390,55 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
+        """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's
+        `reply_check.open_card_handoff`: none for the owner's preview session, while the session has a held request
+        awaiting the owner (one not answered, cancelled or expired), or while it has an open handoff of either kind
+        (an earlier card's or a call-back request); else one of kind `card`, open, with no call-back window and the
+        kernel's reason, its
+        owner alert (`handoff`, only when the Desk's preferences alert it at once; no decision) naming only who is
+        waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
+        if session.preview or self._open_handoff(session) is not None:
+            return None
+        if any(record.decision.session_id == session.session_id and record.decision.state == "held"
+               and record.decision.expires_at > self.now for record in self.decisions.values()):
+            return None
+        handoff_id = new_id("handoff")
+        self.handoffs[handoff_id] = {
+            "handoff_id": handoff_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
+            "session_id": session.session_id, "reason": CARD_HANDOFF_REASON, "callback_window": None,
+            "status": "open", "kind": "card"}
+        self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
+        if "handoff" in desk.notify_now:
+            person = desk.people.get(session.person_id or "") if session.verified else None
+            who = person.display_name if person is not None else "A visitor"
+            entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", created_at=self.now,
+                                   body=f"{who} is waiting in a conversation the Desk handed to you.")
+            self.inbox.append((desk.copy_id, entry))
+        self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
+                    session_id=session.session_id)
+        return handoff_id
+
+    def _close_open_handoffs(self, session: Session, desk: Desk, *, replaced_by: str) -> None:
+        """Close the session's open handoffs before a call-back opens its own (`replaced_by`), each as the owner's mark
+        of done closes one: `done`, its `handoff:<id>` fact (a call-back's) expired, ledgered `desk_data` naming it
+        and the call-back's handoff, so the owner's history reads it as replaced, not marked done. A row's kind
+        never changes, so the owner's stale mark of done on one is 409."""
+        for handoff_id, row in self.handoffs.items():
+            if row["session_id"] != session.session_id or row["status"] != "open":
+                continue
+            row["status"] = "done"
+            self._put("handoffs", (handoff_id,), dict(row))
+            fact = desk.facts.get(f"handoff:{handoff_id}")
+            if fact is not None:
+                self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
+            self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "replaced_by": replaced_by})
+
+    def _open_handoff(self, session: Session) -> str | None:
+        """The ID of the session's open handoff, of either kind; a session holds at most one."""
+        return next((handoff_id for handoff_id, row in self.handoffs.items()
+                     if row["session_id"] == session.session_id and row["status"] == "open"), None)
 
     def owner_message(self, request: Request, body: OwnerMessageRequest) -> OwnerMessageResult:
         """The owner's say or whisper into an open visitor or agent session of their copy, in any mode (Plan 01b):
@@ -3022,6 +3508,7 @@ class FakeKernelState:
         if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
+        self._refuse_policy_promises(copy.copy_id, body.desk.charter, "desk")
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
         desk = self._create_desk(copy.copy_id, body.business, body.desk, tools=native, cards=ASK_FIRST_CARDS)
         copy.desk_ids.append(desk.desk_id)
@@ -3069,7 +3556,8 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": "desk", "deleted": True})
 
     def handoff_done(self, request: Request, body: Any) -> DeskUpdated:
-        """The owner closes a callback request: `open` → `done` once, ledgered `desk_data` naming it."""
+        """The owner closes a handoff, a call-back request's or the handoff card's: `open` → `done` once, ledgered
+        `desk_data` naming it."""
         copy, _ = self.owner_of(request)
         handoff = self.handoffs.get(request.path_params["id"])
         if handoff is None or handoff["copy_id"] != copy.copy_id:
@@ -3093,21 +3581,75 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": part, "refs": []})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
-    def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
-        """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
-        stays, since the hours write it); a key given twice is 422."""
-        desk = self._owners_desk(request, request.path_params["id"])
-        keys = [claim.key for claim in body.charter]
+    def _refuse_policy_promises(self, copy_id: str, charter: list[Claim], part: str,
+                                desk: Desk | None = None) -> None:
+        keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        starters = {key: ["starter_seed_only"] for key in keys if is_starter_fact(f"charter:{key}")}
+        if starters:
+            raise Refusal(422, "invalid", starters)
+        targets = [desk] if desk is not None else sorted(
+            (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+        contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+                             for claim in charter)
+        values = {claim.key: claim.value for claim in charter
+                  if claim.key.startswith("policy:") and claim.kind == "text"}
+        count, total_characters = len(values), sum(map(len, values.values()))
+        limit = "policy_count_limit" if count > 40 else "policy_text_limit" if total_characters > 8_000 else None
+        fields = {"charter": [limit]} if limit else public_policy_fields(sorted(values.items()))
+        if fields or contact_format:
+            # One refusal names the contact and every refused policy; the ledger names the contact by its fact ID.
+            contact = {"contact": ["contact_format"]} if contact_format else {}
+            summary = {"part": part, "refused": "promise" if fields else "contact",
+                       "fields": fields | ({"charter:contact": ["contact_format"]} if contact_format else {})}
+            if limit:
+                summary.update(keys=[safe_ref(key) for key in sorted(values)[:40]], policy_count=count,
+                               total_characters=total_characters, reason=limit)
+            for target in targets:
+                self.append(target, "desk_data", summary)
+            raise Refusal(422, "invalid", contact | fields)
+
+    def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
+        """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
+        and seed-only starters stay); a key given twice or a `starter:` key is 422."""
+        desk = self._owners_desk(request, request.path_params["id"])
+        self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
-                        if fact.kind == "charter" and fact_id != "charter:hours"]:
+                        if fact.kind == "charter" and fact_id != "charter:hours"
+                        and not is_starter_fact(fact_id)]:
             del desk.facts[fact_id]
             self._drop("facts", (desk.desk_id, fact_id))
         for claim in body.charter:
             self._put_fact(desk, Fact(fact_id=f"charter:{claim.key}", kind="charter", status="available",
                                       source="kernel", claims=[claim], label=Label(readers=["public"])))
         return self._part_updated(desk, "charter")
+
+    def _memory_desk(self, request: Request) -> Desk:
+        if "x-session-token" in request.headers:
+            raise Refusal(401, "auth")
+        return self._owners_desk(request, request.path_params["id"])
+
+    def desk_memory(self, request: Request, body: DeskMemoryRequest) -> DeskUpdated:
+        desk = self._memory_desk(request)
+        values = {"about": body.about, "items": " ".join(
+            value for item in body.items for value in (item.id, item.title, *item.topics, item.text))}
+        if not all(storable(value) for value in values.values()):
+            self.append(desk, "desk_data", {"part": "memory", "refused": "invalid"})
+            raise Refusal(422, "invalid")
+        canaries = self._canaries(desk.copy_id)
+        fields = [name for name, value in values.items() if canary_spans(value, canaries)]
+        rest = " ".join(value for name, value in values.items() if name not in fields)
+        if canary_spans(rest, canaries):
+            fields = list(values)
+        if fields:
+            found = {document_id for document_id, _, _ in canary_spans(" ".join(values.values()), canaries)}
+            self.append(desk, "desk_data", {"part": "memory", "refused": "canary", "fields": fields,
+                                            "fact_ids": [f"document:{key}" for key in sorted(found)]})
+            raise Refusal(422, "invalid")
+        desk.simulated_memory = body.model_copy(deep=True)
+        self.append(desk, "desk_data", {"part": "memory", "refs": [item.id for item in body.items]})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def desk_hours(self, request: Request, body: DeskHoursRequest) -> DeskUpdated:
         """The opening hours, and the `charter:hours` fact written again from them."""
@@ -3193,29 +3735,41 @@ class FakeKernelState:
     def desk_notifications(self, request: Request, body: DeskNotificationsRequest) -> DeskUpdated:
         """What alerts the owner at once and what waits for the briefing."""
         desk = self._owners_desk(request, request.path_params["id"])
+        desk.notify_now = list(body.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {"copy_id": desk.copy_id, "desk_id": desk.desk_id,
                                                           **body.notifications.model_dump()})
         return self._part_updated(desk, "notifications")
 
     # Rules drafts, probes and confirms (Plans 01a and 01c) --------------------------------------------
 
-    def _default_cards(self, desk: Desk, cards: list[RuleCard], enabled: tuple[str, ...] | None = None) -> list[RuleCard]:
+    def _default_cards(self, desk: Desk, cards: list[RuleCard], enables: tuple[ToolPin, ...] = ()) -> list[RuleCard]:
         """The compiler's default asks: an `ask` card for anyone on each enabled tool that no card for anyone covers,
         by itself or through one of its effects."""
         covered = {card.applies_to for card in cards if card.who == "anyone"}
+        enabling = {pin.tool for pin in enables}
         return [RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                          reason=DEFAULT_REASON)
-                for tool, profile in sorted(desk.tools.items()) if (
-                    tool in enabled if enabled is not None else profile.status == "enabled")
+                for tool, profile in sorted(desk.tools.items()) if (profile.status == "enabled" or tool in enabling)
                 and tool not in covered and not any(f"effect:{effect}" in covered for effect in profile.effects)]
 
-    def policy_draft(self, request: Request, body: PolicyDraftRequest) -> PolicyVersion:
+    @staticmethod
+    def _draft_profiles(desk: Desk, enables: tuple[ToolPin, ...] = ()) -> tuple[tuple[str, str | None], ...]:
+        """What a draft is proved against, as the kernel's `current_hashes` takes it: each tool enabled now with its
+        pin, plus the draft's enables at theirs, by tool. Confirming a draft whose tools no longer match is refused."""
+        pins = {tool: profile.definition_sha256 for tool, profile in desk.tools.items() if profile.status == "enabled"}
+        pins.update((pin.tool, pin.definition_sha256) for pin in enables)
+        return tuple(sorted(pins.items()))
+
+    def policy_draft(self, request: Request, body: PolicyDraftRequest, *,
+                     enables: tuple[ToolPin, ...] = ()) -> PolicyVersion:
         """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
         version with the compiler's default asks, `proved` or `rejected` (or `draft` when bounded), ledgered `policy`.
         The same cards on the same parent and tools return that version, except that a timed-out rejection proves
         again. A card id given twice, a default card among the owner's, a card that could change starting a
         verification (`changes_always_on`), or an auto money card above the draft's money cap (the one it names,
         else the active version's) is 422 `invalid`, with nothing drafted or ledgered."""
+        from desk.kernel_service.adapters import profile_sha256
+
         desk = self._owners_desk(request, body.desk_id)
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
@@ -3226,9 +3780,9 @@ class FakeKernelState:
                 or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
                 for card in body.cards):
             raise Refusal(422, "invalid")
-        enabled = tuple(sorted(tool for tool, profile in desk.tools.items() if profile.status == "enabled"))
+        profiles = self._draft_profiles(desk, enables)
         key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
-               enabled, cap)
+               profiles, cap, tuple(sorted((pin.tool, pin.definition_sha256) for pin in enables)))
         record = next((record for record in desk.versions.values() if record.key == key), None)
         if record is not None and not (record.status == "rejected" and record.proof.timed_out):
             return self._policy_version(desk, record)
@@ -3236,8 +3790,10 @@ class FakeKernelState:
         status = "draft" if proof.method == "bounded" else "proved" if proof.ok else "rejected"
         if record is None:
             record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
-                                   cards=[*body.cards, *self._default_cards(desk, body.cards)], status=status,
-                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap)
+                                   cards=[*body.cards, *self._default_cards(desk, body.cards, enables)], status=status,
+                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap, enables=enables,
+                                   profiles=profiles,
+                                   enable_profiles={pin.tool: profile_sha256(desk.tools[pin.tool]) for pin in enables})
             desk.versions[record.version] = record
         else:
             record.status, record.proof = status, proof
@@ -3246,8 +3802,9 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
-        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`), so
-        its money cap becomes the Desk's; anything else is 409, ledgered as refused. An unknown version is 404."""
+        """Activate a proved draft whose parent is still the active version, and whose enables' pins and tools are
+        still those it was proved against, superseding it (ledgered `policy`), so its money cap becomes the Desk's;
+        anything else is 409, ledgered as refused. An unknown version is 404."""
         desk = self._owners_desk(request, body.desk_id)
         record = desk.versions.get(body.version)
         if record is None:
@@ -3257,14 +3814,25 @@ class FakeKernelState:
             self.append(desk, "policy", {"version": record.version, "refused": refused})
             raise Refusal(409, "conflict")
         from desk.kernel_service.adapters import profile_sha256
-        if any(tool not in desk.tools or desk.tools[tool].definition_sha256 != pin
-               or profile_sha256(desk.tools[tool]) != record.enable_profiles[tool]
-               for tool, pin in record.enables):
-            self.append(desk, 'policy', {'version': record.version, 'refused': 'pin_changed'})
-            raise Refusal(409, 'conflict')
-        for tool, _ in record.enables:
-            self._put_tool(desk, desk.tools[tool].model_copy(update={'status': 'enabled', 'review_reason': None}))
+        if any(pin.tool in desk.tools and desk.tools[pin.tool].source == "business"
+               and profile_sha256(desk.tools[pin.tool]) != record.enable_profiles.get(pin.tool)
+               for pin in record.enables):
+            self.append(desk, "policy", {"version": record.version, "refused": "pin_changed"})
+            raise Refusal(409, "conflict")
+        if any(pin.tool not in desk.tools
+               or pin.definition_sha256 != self._current_tool_pin(desk.tools[pin.tool]) for pin in record.enables):
+            self.append(desk, "policy", {"version": record.version, "refused": "pin_changed"})
+            raise Refusal(409, "conflict")
+        if self._draft_profiles(desk, record.enables) != record.profiles:
+            self.append(desk, "policy", {"version": record.version, "refused": "hash_changed"})
+            raise Refusal(409, "conflict")
         self._supersede_active(desk)
+        for pin in record.enables:
+            profile = desk.tools[pin.tool]
+            self._put_tool(desk, profile.model_copy(update={
+                "status": "enabled", "review_reason": None, "definition_sha256": pin.definition_sha256,
+                "pending_definition_text": None, "pending_sha256": None}))
+            self.append(desk, "tool_pin", {"tool": pin.tool, "event": "enabled", "version": record.version})
         desk.cards, desk.policy_version, record.status = list(record.cards), record.version, "active"
         desk.auto_money_cap_cents = record.auto_money_cap_cents
         self._put_version(desk, record)
@@ -3338,12 +3906,29 @@ class FakeKernelState:
         if record is None and version != desk.policy_version:
             raise Refusal(404, "not_found")
         cards = record.cards if record is not None else desk.cards
-        results = [self._probe(desk, cards, probe) for probe in body.probes]
+        probe_desk = desk
+        if record is not None and record.status not in ('active', 'superseded'):
+            from desk.kernel_service.adapters import profile_sha256
+
+            # A hypothetical overlay only: probing must never turn a stored tool on.
+            tools = dict(desk.tools)
+            for pin in record.enables:
+                tool = pin.tool
+                profile = desk.tools.get(tool)
+                tools.pop(tool, None)     # a stale draft cannot borrow a newer enabled pin
+                if (profile is not None and self._current_tool_pin(profile) == pin.definition_sha256
+                        and record.enable_profiles.get(tool) == profile_sha256(profile)
+                        and (profile.source != 'business' or self._business_profile(desk, tool) is not None)):
+                    tools[tool] = profile.model_copy(update={'status': 'enabled',
+                                                            'definition_sha256': pin.definition_sha256,
+                                                            'pending_definition_text': None, 'pending_sha256': None})
+            probe_desk = replace(desk, tools=tools)
+        results = [self._probe(probe_desk, cards, probe) for probe in body.probes]
         self.append(desk, "policy", {"version": version, "probes": len(results),
                                      "outcomes": [result.outcome for result in results]})
         return results
 
-    def _probe_tools(self, desk: Desk, probe: Probe) -> tuple[str, ...]:
+    def _probe_tools(self, desk: Desk, probe: Probe, enables: tuple[ToolPin, ...] = ()) -> tuple[str, ...]:
         """The tools a stand-in session of the probe's caller would be given (Answering aside: a probe asks what the
         rules would do once the Desk answers)."""
         if probe.actor == "owner":
@@ -3354,8 +3939,10 @@ class FakeKernelState:
             mandate = probe.agent_mandate_remaining_cents is not None
             given = tuple(tool for tool in given if tool != "payments.create_refund"
                           and (tool not in MANDATE_TOOLS or mandate)) + (("native.charge_mandate",) if mandate else ())
+        enabling = {pin.tool for pin in enables}
         given += self._business_tools_given(desk, given)
-        return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
+        return tuple(tool for tool in given if tool in desk.tools
+                     and (desk.tools[tool].status == "enabled" or tool in enabling))
 
     @staticmethod
     def _scope_matches(card: RuleCard, probe: Probe, verified: bool, own: bool) -> bool:
@@ -3368,7 +3955,8 @@ class FakeKernelState:
         subject = probe.subject_id if probe.who == card.who else None
         return subject is not None and subject in (card.person_id, card.agent_key_id)
 
-    def _probe(self, desk: Desk, cards: list[RuleCard], probe: Probe) -> ProbeResult:
+    def _probe(self, desk: Desk, cards: list[RuleCard], probe: Probe, *,
+               enables: tuple[ToolPin, ...] = ()) -> ProbeResult:
         """One probe through the fake's rules: the tool must be given and its args fit; the baseline (private data
         only to its verified record owner, no payouts for agents, an agent's charge within its mandate, an amount
         on every money tool); then a `never` card refuses, an `auto` card whose limits hold allows (a reviewed one
@@ -3382,7 +3970,7 @@ class FakeKernelState:
             return ProbeResult(probe=probe, outcome=outcome, depends_on_review=review, card_ids=card_ids,
                                reason_plain=f"{caller} asked to use {tool}. {reason}")
 
-        if tool not in self._probe_tools(desk, probe) or not matches(desk.tools[tool].input_schema, probe.call.args):
+        if tool not in self._probe_tools(desk, probe, enables) or not matches(desk.tools[tool].input_schema, probe.call.args):
             return result("refuse", [], "Claude has no such tool for them here.")
         profile = desk.tools[tool]
         discount = probe.call.args.get("requested_discount_bp", 0) if tool == "native.quote" else 0
@@ -3448,19 +4036,22 @@ class FakeKernelState:
 
     # Connected tools (Plan 01c) -----------------------------------------------------------------------
 
+
     def put_business_tools(self, request: Request, body: dict) -> DeskUpdated:
         from desk.contracts import BusinessToolDef
         from desk.kernel_api import BusinessToolsRequest
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
-        from desk.kernel_service.business_tools import config_texts, free_allow_words, public_fields, public_promise_fields
+        from desk.kernel_service import reply_check
+        from desk.kernel_service.business_tools import (card_refusal, config_texts, free_allow_words, hidden_fields,
+                                                        public_fields)
         from desk.kernel_service.repo import storable
 
         desk = self._owners_desk(request, request.path_params["id"])
 
-        def refuse(reason: str) -> None:
+        def refuse(reason: str, *, detail: dict[str, list[str]] | None = None) -> None:
             self.append(desk, "business_tools", {"tools": [], "refused": reason})
-            raise Refusal(422, "invalid")
+            raise Refusal(422, "invalid", detail=detail)
 
         try:
             batch = BusinessToolsRequest.model_validate(body)
@@ -3474,9 +4065,14 @@ class FakeKernelState:
         if "\x00" in text or any(document.canary in text for each in self.desks.values()
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
+        # The kernel's card-text check: hidden characters first, then one shared scan per tool in render order.
+        detail = {}
         for tool in batch.tools:
-            if public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool)):
-                refuse("public_promise")
+            values = public_fields(tool)
+            detail.update(hidden_fields(values) or card_refusal(
+                tool, reply_check.scan_public_policies(values, allow_words=free_allow_words(tool), amenities=False)))
+        if detail:
+            refuse("public_promise", detail=detail)
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
                     for tool in batch.tools]
@@ -3500,6 +4096,52 @@ class FakeKernelState:
         self.append(desk, "business_tools", {"tools": changes})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
+    @staticmethod
+    def _current_tool_pin(profile: ToolProfile) -> str | None:
+        return None if profile.review_reason == "delisted" else profile.pending_sha256 or profile.definition_sha256
+
+    def tools_confirm(self, request: Request, body: ToolsConfirmRequest) -> ToolConfirmed:
+        """Review one batch atomically: disabling is immediate; enabling drafts the active cards and cap.
+        The draft's pins are checked again at explicit policy confirmation."""
+        desk = self._owners_desk(request, body.desk_id)
+
+        def refuse(status: int, code: str, reason: str) -> None:
+            self.append(desk, "tool_pin", {"tools": [pin.tool for pin in body.tools],
+                                          "enable": body.enable, "refused": reason})
+            raise Refusal(status, code)
+
+        if not body.enable and any(pin.tool == "native.start_verification" for pin in body.tools):
+            refuse(422, "invalid", "always_on")
+        if any(pin.tool not in desk.tools for pin in body.tools):
+            refuse(404, "not_found", "unknown_tool")
+        for pin in body.tools:
+            profile = desk.tools[pin.tool]
+            if profile.source == "business" and self._business_profile(desk, pin.tool) is None:
+                refuse(404, "not_found", "unknown_tool")
+            hashes = ({self._current_tool_pin(profile)} if body.enable else
+                      {profile.definition_sha256, profile.pending_sha256, self._current_tool_pin(profile)
+                       if profile.source == "native" else None})
+            if pin.definition_sha256 not in hashes:
+                refuse(409, "conflict", "hash_changed")
+        draft = None
+        if body.enable:
+            enables = tuple(pin for pin in body.tools if desk.tools[pin.tool].status != "enabled"
+                            or desk.tools[pin.tool].definition_sha256 != pin.definition_sha256)
+            if enables:
+                if not desk.policy_version:
+                    refuse(409, "conflict", "no_active_version")
+                draft = self.policy_draft(request, PolicyDraftRequest(
+                    desk_id=desk.desk_id, cards=[card for card in desk.cards if not card.is_default],
+                    expected_parent=desk.policy_version, auto_money_cap_cents=desk.auto_money_cap_cents),
+                    enables=enables)
+        else:
+            for pin in body.tools:
+                profile = desk.tools[pin.tool]
+                if profile.status != "disabled":
+                    self._put_tool(desk, profile.model_copy(update={"status": "disabled", "review_reason": None}))
+                    self.append(desk, "tool_pin", {"tool": pin.tool, "event": "disabled"})
+        return ToolConfirmed(profiles=[desk.tools[pin.tool] for pin in body.tools], draft=draft)
+
     def tools_connect(self, request: Request, body: ToolsConnectRequest) -> list[ToolProfile]:
         """The mock payments server's tools, each pinned by its definition's hash and `needs_review` (`review_reason`
         "new") until the owner confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
@@ -3513,48 +4155,12 @@ class FakeKernelState:
         self.append(desk, "tool_pin", {"server": body.server, "tools": [profile.tool for profile in profiles]})
         return profiles
 
-    def tools_confirm(self, request: Request, body):
-        from desk.always_on import ALWAYS_ON_TOOLS
-        from desk.kernel_api import ToolConfirmed
-        from desk.kernel_service.adapters import profile_sha256
-
-        desk = self._owners_desk(request, body.desk_id)
-        for pin in body.tools:
-            profile = desk.tools.get(pin.tool)
-            if profile is None:
-                raise Refusal(404, 'not_found')
-            if profile.definition_sha256 != pin.definition_sha256:
-                raise Refusal(409, 'conflict')
-            if profile.source == 'business' and self._business_profile(desk, pin.tool) is None:
-                raise Refusal(404, 'not_found')
-        if not body.enable:
-            if any(pin.tool in ALWAYS_ON_TOOLS for pin in body.tools):
-                raise Refusal(422, 'invalid')
-            for pin in body.tools:
-                self._put_tool(desk, desk.tools[pin.tool].model_copy(update={'status': 'disabled', 'review_reason': None}))
-            self.append(desk, 'tool_pin', {'tools': [pin.tool for pin in body.tools], 'enabled': False})
-            return ToolConfirmed(profiles=[desk.tools[pin.tool] for pin in body.tools], draft=None)
-        enabled = tuple(sorted({tool for tool, profile in desk.tools.items() if profile.status == 'enabled'}
-                               | {pin.tool for pin in body.tools}))
-        cards = [card for card in desk.cards if not card.is_default]
-        proof = self._next_proof()
-        status = 'draft' if proof.method == 'bounded' else 'proved' if proof.ok else 'rejected'
-        record = VersionRecord(version=self._next_version(desk), parent=desk.policy_version,
-                               cards=[*cards, *self._default_cards(desk, cards, enabled)], status=status,
-                               proof=proof, key=(desk.policy_version, 'tool_review', enabled, desk.auto_money_cap_cents),
-                               created_at=self.now, auto_money_cap_cents=desk.auto_money_cap_cents,
-                               enables=tuple((pin.tool, pin.definition_sha256) for pin in body.tools),
-                               enable_profiles={pin.tool: profile_sha256(desk.tools[pin.tool]) for pin in body.tools})
-        desk.versions[record.version] = record
-        self._put_version(desk, record)
-        self.append(desk, 'policy', {'version': record.version, 'status': status, 'method': proof.method})
-        return ToolConfirmed(profiles=[desk.tools[pin.tool] for pin in body.tools], draft=self._policy_version(desk, record))
-
     def tools_simulate_change(self, request: Request, body: ToolsSimulateChangeRequest) -> ToolProfile:
         """The owner's demo action: the mock payments server changes the tool's definition for this copy, and the
-        re-listing finds it at once (ledgered `tool_pin`, simulated then drift, with the owner alerted): the tool is
-        `needs_review` ("changed"), the changed definition waiting as quoted text under its own hash, its pin
-        unchanged. A tool the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
+        re-listing finds it at once (ledgered `tool_pin`, simulated then drift): the changed definition waits as quoted
+        text under its own hash, its pin unchanged. An enabled or waiting tool is `needs_review` ("changed") and the
+        owner is alerted; a disabled tool stays disabled, with no alert (`mcp_pins.check_pin`). A tool the Desk doesn't
+        have is 404; a native tool, which no server defines, is 422 `invalid`."""
         desk = self._owners_desk(request, body.desk_id)
         profile = desk.tools.get(body.tool)
         if profile is None:
@@ -3563,13 +4169,16 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         listed = canonical({"name": profile.tool.removeprefix("payments."), "inputSchema": profile.input_schema,
                             "description": f"{TOOL_FACTS[profile.tool][3]} {SIMULATED_CHANGE}"})
-        changed = profile.model_copy(update={"status": "needs_review", "review_reason": "changed",
-                                             "pending_definition_text": listed, "pending_sha256": sha256_hex(listed)})
+        disabled = profile.status == "disabled"
+        review = {} if disabled else {"status": "needs_review", "review_reason": "changed"}
+        changed = profile.model_copy(update={**review, "pending_definition_text": listed,
+                                             "pending_sha256": sha256_hex(listed)})
         self._put_tool(desk, changed)
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
                                        "pending_sha256": changed.pending_sha256})
-        self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
+        if not disabled:
+            self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
         return changed
 
     # Verification --------------------------------------------------------------------------------
@@ -3866,7 +4475,7 @@ class FakeKernelState:
         known = self._by_call.get((session_id, generation, self._query(request, "call_id")))
         if known is None:
             raise Refusal(404, "not_found")
-        return self._refresh(self.decisions[known])
+        return self._refresh(self.decisions[known]).model_copy(update={"owner_plain": None})
 
 
 def first_bad_seq(entries: list[LedgerEntry]) -> int | None:
@@ -3919,7 +4528,6 @@ FAILURE_CODES = {"500": "internal", "422": "invalid", "409": "conflict"}
 
 # The routes this fake answers, by KERNEL_ROUTES key, with the state method that answers each.
 FAKE_ROUTES: dict[str, str] = {
-    "POST /tools/confirm": "tools_confirm",
     "PUT /desks/{id}/business_tools": "put_business_tools",
     "GET /health": "health",
     "POST /copies": "create_copy",
@@ -3943,6 +4551,7 @@ FAKE_ROUTES: dict[str, str] = {
     "PUT /desks/{id}/business": "put_business",
     "PUT /desks/{id}/answering": "answering",
     "PUT /desks/{id}/charter": "desk_charter",
+    "PUT /desks/{id}/memory": "desk_memory",
     "PUT /desks/{id}/hours": "desk_hours",
     "PUT /desks/{id}/prices": "desk_prices",
     "PUT /desks/{id}/calendar": "desk_calendar",
@@ -3953,6 +4562,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /policy/confirm": "policy_confirm",
     "GET /policy/{version}/cancelled_links?desk_id=": "cancelled_links",
     "POST /tools/connect": "tools_connect",
+    "POST /tools/confirm": "tools_confirm",
     "POST /knowledge": "knowledge",
     "POST /documents": "documents",
     "POST /tools/simulate_change": "tools_simulate_change",
@@ -3970,8 +4580,9 @@ FAKE_ROUTES: dict[str, str] = {
 }
 
 
-def _error(status: int, code: str) -> Response:
-    return Response(KernelError(code=code).model_dump_json(), status_code=status, media_type="application/json")
+def _error(status: int, code: str, detail: dict[str, list[str]] | None = None) -> Response:
+    return Response(KernelError(code=code, detail=detail).model_dump_json(exclude_none=True),
+                    status_code=status, media_type="application/json")
 
 
 def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any], Any]):
@@ -4007,7 +4618,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if state._take_drop(key):
             raise httpx.ReadTimeout("the fake kernel committed, then timed out")
         if isinstance(result, Refusal):
-            return _error(result.status, result.code)
+            return _error(result.status, result.code, result.detail)
         if isinstance(result, Response):                # a document's bytes
             return result
         if response_adapter is None:

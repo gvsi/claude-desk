@@ -29,13 +29,14 @@ import {
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
+import { afterName } from '../lib/names.ts';
 
 export type Language = 'en' | 'es';
 
 /** How far apart a turn's events arrive. */
 export const EVENT_GAP_MS = 150;
 
-const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola'] as const;
+const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola', 'tarjetas'] as const;
 
 /** A turn is in Spanish when the visitor's text has one of the markers, else in English. */
 export function turnLanguage(text: string): Language {
@@ -97,6 +98,7 @@ export const VISITOR_PLAIN = {
 const NO_EXECUTED_LINE = {
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
 function hasExecutedLine(tool: string): tool is ExecutedTool {
@@ -217,7 +219,7 @@ export const HELD_PROSE: Record<Language, string> = {
  */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
 };
 
 /**
@@ -225,9 +227,9 @@ export const LINK_CANCELLED: Record<Language, string> = {
  * fact, in the chat's language: the link's amount as its title, then what the link was for and the
  * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
+export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language, factId = blocks.payment_link[language].fact_id ?? null): CardBlock {
   return cardBlock('link_cancelled', {
-    fact_id: blocks.payment_link[language].fact_id ?? null,
+    fact_id: factId,
     title: moneyText(link.amount_cents),
     lines: [link.title, LINK_CANCELLED[language]],
   });
@@ -275,6 +277,11 @@ export interface DecisionSpec {
   /** For an `allow`: the action ran, so the decision is `executed`. */
   executed: boolean;
   cardIds: string[];
+  /**
+   * The policies that decided it, as the kernel names them, when they aren't the cards' own (a
+   * baseline refusal): Safety's cause is read from them, as the API reads it.
+   */
+  policyIds?: string[];
   reasonPlain: string;
   /** A refusal with the kernel's more specific visitor status line. */
   visitorStatus?: 'refused_over_mandate';
@@ -343,7 +350,7 @@ export const DECISIONS = {
     outcome: 'allow',
     executed: true,
     cardIds: ['rv-book-wk'],
-    reasonPlain: 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.',
+    reasonPlain: rivera.bookingReasonPlain,
     resource: { kind: 'slot', id: 'S-20261103-1400', owner_person_id: null },
   },
   paymentLink: {
@@ -456,12 +463,21 @@ export interface TurnContext {
   readonly text: string;
   /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
   readonly person: { personId: string; name: string } | null;
+  /**
+   * Whom the Desk's handoff card names (`handoffBlock`): its owner, by their display name, or the
+   * business when its owner gave no name (`MockWorld.handoffNameOf`).
+   */
+  readonly handoffName: string;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
-  /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
-  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
+  /**
+   * A checked reply's shown blocks and ledger entry; `blocked` when Claude's draft failed the
+   * check, and `paused` when the check stopped it because the chat is paused. Shown blocks may
+   * keep checked cards after a prose failure, with or without a drafted handoff.
+   */
+  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
    * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
    * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
@@ -497,12 +513,14 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'cards-only' | 'cards-kept-handoff' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** A demo command: one of `words` picks the rule only as the whole message, never inside a question. */
+  command?: true;
   /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
   tools: readonly ToolName[];
   steps: readonly Step[];
@@ -536,10 +554,55 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118'
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
-/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
-const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+/**
+ * The kernel's handoff card (its `handoff` template), in `language`, naming `name`: whom the Desk
+ * hands the visitor to (`TurnContext.handoffName`), with one stop after a name that ends in one
+ * ("Chen & Co."). For Maria Rivera it is the fixtures' own card.
+ */
+export function handoffBlock(language: Language, name: string): CardBlock {
+  const stop = afterName(name, '.');
+  return language === 'es'
+    ? cardBlock('handoff', { fact_id: null, title: `Déjame consultarlo con ${name}${stop}`, lines: [`${name} te responderá aquí.`] })
+    : cardBlock('handoff', { fact_id: null, title: `Let me check with ${name}${stop}`, lines: [`${name} will reply here.`] });
+}
+
+/** The turn's handoff card: the Desk's own, in the turn's language. */
+const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.handoffName);
+
+/** Claude hands the visitor to the Desk's owner: the kernel's handoff card, as asking for them gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([handoff(ctx)])];
+
+/**
+ * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
+ * the kernel's handoff, which its check stops as paused.
+ */
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([handoff(ctx)], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
+  {
+    // A final prose-only failure: the checked card stays, and none of the draft's prose is shown.
+    name: 'cards-only',
+    words: ['cards-only', 'solo-tarjetas'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true }),
+    ],
+  },
+  {
+    // The same failure with Claude's drafted handoff kept after the checked card.
+    name: 'cards-kept-handoff',
+    words: ['cards-kept-handoff', 'tarjetas-con-traspaso'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true }),
+    ],
+  },
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
@@ -583,7 +646,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         return ctx.status('receipt', decision);
       },
       // The card points at the link this turn issued, by its own token.
-      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
+      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], fact_id: `payment_link:${ctx.latestLink()}`, href: `/pay/${ctx.latestLink()}` }]),
     ],
   },
   {
@@ -599,7 +662,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
   {
     name: 'book',
-    words: ['book', 'tuesday', 'reservar'],
+    words: ['book', 'tuesday', 'reservar', 'martes'],
     tools: ['native.find_slots'],
     steps: [
       writing,
@@ -616,6 +679,12 @@ export const SCRIPT: readonly ScriptRule[] = [
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
     ],
+  },
+  {
+    name: 'area',
+    words: ['alameda'],
+    tools: [],
+    steps: [writing, (ctx) => ctx.reply([rivera.blocks.policy[ctx.language]])],
   },
   {
     name: 'callback',
@@ -688,12 +757,12 @@ export function afterVerify(allTools: boolean): readonly Step[] {
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
  * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
- * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ * Safety shows; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
-  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+  (ctx) => ctx.reply([handoff(ctx)], { blocked: true }),
 ];
 
 /**
@@ -719,7 +788,7 @@ function ruleNamed(name: RuleName): ScriptRule {
  */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   if (rule.name !== 'discount') return rule;
   const asked = askedDiscountBp(text);
@@ -758,23 +827,36 @@ export function allows(answer: ApprovalAnswer): boolean {
   return answer === 'allow_once' || answer === 'allow_person';
 }
 
+/** The owner annotation never enters a queued visitor turn, even when it is null. */
+export function visitorSafe(decision: Decision): Decision {
+  const { owner_plain: _ownerPlain, ...visitor } = decision;
+  return visitor;
+}
+
 /**
- * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
- * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
- * The receipt reports what the answer already did, so a take-over doesn't fence it; the follow-up
+ * What the visitor's chat gets once the owner has answered: the signed approved receipt when
+ * allowed, then the resolved outcome, then Claude's follow-up (the quote, refund or handoff).
+ * The receipts report what the answer already did, so a take-over doesn't fence them; the follow-up
  * is Claude's, so it does.
  */
-export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
+export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  decision = visitorSafe(decision);
+  // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
+  if (approved !== null && (approved.decision_id !== decision.decision_id
+    || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
+  if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
-  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  if (decision.state === 'refused_at_execution') return [resolved];
+  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([handoff(ctx)])];
+  const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
-    return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
+    return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
   // The quote at the discount Maria allowed, the one the visitor asked for.
   const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
   const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
   const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
+  return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**
@@ -840,6 +922,12 @@ function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'w
 /** Monday to Friday, all day. */
 const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
 
+/** Whether `card` applies on a Saturday or a Sunday: with no hours, it applies every day. */
+function coversAWeekend(card: RuleCard): boolean {
+  const hours = card.hours ?? null;
+  return hours === null || hours.days.some((day) => day === 'sat' || day === 'sun');
+}
+
 /** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
 export interface HeldForChat {
   tool: string;
@@ -873,7 +961,7 @@ export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
 
 /**
  * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
- * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
+ * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rules for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
  * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
  * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
@@ -883,7 +971,8 @@ export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
 export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
   if (lower.includes('weekend') && lower.includes('quot')) {
-    const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quotes = active.filter((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quote = quotes[0];
     const weekdays = draftCard({
       card_id: 'card-weekday-quotes',
       applies_to: 'native.quote',
@@ -893,9 +982,12 @@ export function ruleChatReply(text: string, active: readonly RuleCard[], held: r
       hours: WEEKDAYS_ALL_DAY,
       reason: 'Quotes from your price list on weekdays. Weekend quotes wait for your answer.',
     });
+    // Every other one that still quotes on its own at weekends, such as a water heater rule added
+    // since, moves to weekdays too, so the change isn't "No rules change" while one does.
+    const others = quotes.slice(1).filter(coversAWeekend).map((card) => ({ ...card, hours: WEEKDAYS_ALL_DAY, reason: `${card.reason.replace(/\.$/, '')}, on weekdays.` }));
     return {
       answer: "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.",
-      add: [weekdays],
+      add: [weekdays, ...others],
     };
   }
   if (lower.includes('water heater')) {

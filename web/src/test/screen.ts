@@ -11,7 +11,9 @@ import type { Locator } from 'vitest/browser';
 
 import { ROUTES } from '../api/routes.ts';
 import { pollMs } from '../app/poll.ts';
+import { animationDeadline, animationLabel, animationWithin } from '../ds/test/animationWithin.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
+import { framesWithin } from '../ds/test/framesWithin.ts';
 
 /** The axe rule tags a screen must pass with zero violations. */
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] as const;
@@ -77,7 +79,7 @@ async function animationsSettled(root: HTMLElement): Promise<void> {
   const ending = root.ownerDocument
     .getAnimations()
     .filter((animation) => animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
-  await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+  await Promise.all(ending.map((animation) => animationWithin(animation.finished.catch(() => undefined), animationLabel(animation), animationDeadline(animation))));
 }
 
 /** The id of the style that holds the screen at rest. */
@@ -109,8 +111,10 @@ function holdAtRest(): void {
 }
 
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
+  await vi.waitFor(() => expect(root.ownerDocument.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
   await animationsSettled(root);
-  const footers = root.querySelectorAll('[data-ds="concept-footer"]');
+  const footers = [...root.querySelectorAll('[data-ds="concept-footer"]')].filter((footer) => !footer.closest('.cd-skeleton-screen__layer'));
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
   assertCleanCopy(root);
@@ -130,11 +134,14 @@ export function expectNoWindowScroll(): void {
   expect(document.documentElement.scrollHeight).toBe(window.innerHeight);
 }
 
-/** The color a token computes to, read off a probe element. */
-export function tokenColor(token: string): string {
+/**
+ * The color a token computes to, read off a probe element: in the app's palette, or inside `within`, where a page
+ * on a palette of its own (the About set's paper) points the token elsewhere.
+ */
+export function tokenColor(token: string, within: Element = document.body): string {
   const probe = document.createElement('span');
   probe.style.color = `var(${token})`;
-  document.body.append(probe);
+  within.append(probe);
   const color = getComputedStyle(probe).color;
   probe.remove();
   return color;
@@ -152,8 +159,8 @@ export function focusIsOn(el: Element): boolean {
 }
 
 /** Two animation frames: long enough for a change, such as a navigation's transition, to be drawn. */
-export function nextFrames(): Promise<void> {
-  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+export async function nextFrames(): Promise<void> {
+  await framesWithin('screen redraw frames', 2);
 }
 
 /**

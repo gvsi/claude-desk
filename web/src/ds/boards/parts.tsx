@@ -196,7 +196,7 @@ export const THINGS_TO_TRY = {
   chat: {
     icon: 'conversations',
     title: 'Chat as a customer',
-    detail: 'Your public page opens in a new tab. Ask about a leak, a price or a time.',
+    detail: 'Your public page opens in a new tab. Ask about a price or a time.',
     action: 'Open your public page',
   },
   breakIt: {
@@ -904,14 +904,14 @@ export interface RulesPageProps {
   chips: readonly string[];
   /** A line under the page's title about what just changed. */
   notice?: ReactNode;
-  /** The header's actions: the "Start from a preset" menu, on a line of its own on a phone. */
+  /** The header's actions: "See all rules" before the preset menu, sharing a row on a phone. */
   actions?: ReactNode;
   /** Each section's line above its tools, by connector id: the payment limit on Payments and Stripe. */
   aboveTools?: Readonly<Record<string, ReactNode>>;
 }
 
 /**
- * The Rules page: its title and line, with the preset menu when the page offers it, the composer
+ * The Rules page: its title and line, with See all rules before the preset menu when offered, the composer
  * that asks Claude for a change right under them, the Desk's connectors, a section each, with the
  * payment limit above the tools of the money groups when given, and the always-on rules.
  * Connectors are added from the Connectors page, so it has no "Add a connector".
@@ -1186,8 +1186,10 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         <SectionHeader id="board-settings-business" title="Your business" />
         <DetailList items={GENERAL_DETAILS} />
       </section>
-      <Card as="section" label="Answering">
-        <Switch label="Answering" description={answering} checked onChange={fn()} />
+      <Card as="section" label="Answering" padding={0}>
+        <div className="board-settings__answering">
+          <Switch label="Answering" description={answering} checked onChange={fn()} />
+        </div>
       </Card>
       <section aria-labelledby="board-settings-delete" className="board-settings__section board-settings__delete">
         <SectionHeader id="board-settings-delete" title="Delete this Desk" />

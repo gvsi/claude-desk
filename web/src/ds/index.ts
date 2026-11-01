@@ -43,6 +43,14 @@ export {
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
 export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 export { LoadingLine, type LoadingLineProps } from './components/LoadingLine/LoadingLine.tsx';
+export {
+  Skeleton,
+  SkeletonCard,
+  type SkeletonCardProps,
+  type SkeletonProps,
+  type SkeletonText,
+} from './components/Skeleton/Skeleton.tsx';
+export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './components/Skeleton/SkeletonScreen.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -85,6 +93,8 @@ export {
   type PublicShellScrollerDetail,
 } from './components/PublicShell/PublicShell.tsx';
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
+export { PublicShellSkeleton } from './components/PublicShell/PublicShellSkeleton.tsx';
+export { PublicBrandHeaderSkeleton } from './components/PublicShell/PublicBrandHeaderSkeleton.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Vision pages
@@ -154,7 +164,7 @@ export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInbox
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';
 export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyCheckRow/SafetyCheckRow.tsx';
-export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow } from './components/SetupToolsList/SetupToolsList.tsx';
+export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow, type SetupJobRow } from './components/SetupToolsList/SetupToolsList.tsx';
 
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
@@ -177,7 +187,7 @@ export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
@@ -198,6 +208,7 @@ export {
   type TranscriptRowProps,
 } from './components/TranscriptRow/TranscriptRow.tsx';
 export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
+export { RulesReceipt, type RulesReceiptProps } from './components/MarginReceipt/RulesReceipt.tsx';
 export {
   OWNER_REASON_STATES,
   OWNER_STATE_WORDS,
@@ -252,7 +263,7 @@ export {
   type ConnectorDirectoryProps,
   type DirectoryRowView,
 } from './components/ConnectorDirectory/ConnectorDirectory.tsx';
-export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export { ALWAYS_ON, AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,
   type ChangeReviewProps,
@@ -261,7 +272,7 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
-export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit
@@ -317,3 +328,7 @@ export {
 
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';
+
+export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
+export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
+export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';

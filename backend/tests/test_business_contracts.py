@@ -20,6 +20,7 @@ MAIN_PROFILE_HASHES = {
     'native.release_document': 'f7e94adab9732ba92da89a52f2d9df2445a0f7f35796af3ad29ba1d909647fc2',
     'native.request_callback': '99ea4a4cb10bf346990de859cc9b236d452c8aaf47c1440c99906c7e68fd2ee6',
     'native.start_verification': '05862a9d5b638eb085f1587f818d3155d42d5c0ca4b5f916fbce8e7f099337fe',
+    'native.web_search': '61c46dc11c428801d9d324aec988bd4547d2b243f3b39e81fb554d95c7aac5a3',
     'payments.create_refund': 'a43273334b833085d8fc11ff69e59ef51b8193365a4c87f60880651e1e470c04',
     'payments.list_charges': 'd4491d255587e35f86017c3171ccbcc18059c24f6b43fb15ef94c8105a18fb9c',
 }
@@ -74,13 +75,15 @@ def test_intake_receipt_uses_block_and_quoted_title_in_both_languages():
 def test_api_model_tools_and_owner_row_accept_an_enabled_business_tool():
     from desk.api.tools import from_api_name, model_tools
     from desk.api.versions import tool_row
-    from desk.kernel_api import SessionContext
+    from desk.kernel_api import ContextClock, SessionContext
     from desk.kernel_service.adapters.blocks import profile
 
     definition = contracts.BusinessToolDef(title='Customer enquiry', description='Take details.',
                                           config={'block': 'intake', 'questions': ['What do you need?']})
     stored = profile('desk.enquiry', definition).model_copy(update={'status': 'enabled', 'review_reason': None})
-    context = SessionContext(tools=[stored], tools_declared=[stored], facts=[], knowledge=[])
+    clock = ContextClock(as_of_utc='2026-10-31T17:00:00.000000Z', local_now='2026-10-31T10:00-07:00',
+                         local_date='2026-10-31', weekday='sat', timezone='America/Los_Angeles')
+    context = SessionContext(clock=clock, tools=[stored], tools_declared=[stored], facts=[], knowledge=[])
     entry = model_tools(context)[0]
     assert from_api_name(entry['name']) == stored.tool
     assert entry['input_schema'] == stored.input_schema

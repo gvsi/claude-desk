@@ -43,6 +43,7 @@ import type {
   GenerationBody,
   HealthOut,
   KnowledgeBody,
+  KnowledgeRow,
   MessageAccepted,
   MoneyCapIn,
   NeedsYouItem,
@@ -51,6 +52,9 @@ import type {
   PasscodeBody,
   PaymentLinkOut,
   PeopleOut,
+  SetupPublicLines,
+  SetupPublicLineIn,
+  SetupPublicLinesConfirmIn,
   PolicyVersionOut,
   PresetBody,
   Reports,
@@ -59,6 +63,8 @@ import type {
   RulesView,
   SafetyCheck,
   SetupAnswerBody,
+  SetupProposalBody,
+  SetupSuggestionsBody,
   SetupState,
   SetupTools,
   SituationResult,
@@ -126,6 +132,7 @@ export const ROUTES = {
   suggestions: { method: 'GET', path: '/api/owner/desks/{desk_id}/suggestions', owner: true },
   simulateToolChange: { method: 'POST', path: '/api/owner/desks/{desk_id}/tools/simulate_change', owner: true },
   addKnowledge: { method: 'POST', path: '/api/owner/desks/{desk_id}/knowledge', owner: true },
+  knowledge: { method: 'GET', path: '/api/owner/desks/{desk_id}/knowledge', owner: true },
   people: { method: 'GET', path: '/api/owner/desks/{desk_id}/people', owner: true },
 
   // Proving: every route under /api/owner/policy/
@@ -147,8 +154,15 @@ export const ROUTES = {
   setup: { method: 'GET', path: '/api/owner/setup/{id}', owner: true },
   setupConsent: { method: 'POST', path: '/api/owner/setup/{id}/consent', owner: true, model: true },
   setupAnswer: { method: 'POST', path: '/api/owner/setup/{id}/answer', owner: true, model: true },
+  setupProposal: { method: 'POST', path: '/api/owner/setup/{id}/proposals/{proposal_id}', owner: true, model: true },
+  setupSuggestions: { method: 'POST', path: '/api/owner/setup/{id}/suggestions', owner: true, model: true },
   setupTools: { method: 'GET', path: '/api/owner/setup/{id}/tools', owner: true },
   setupConnect: { method: 'POST', path: '/api/owner/setup/{id}/tools/connect', owner: true },
+  setupPublicLines: { method: 'GET', path: '/api/owner/setup/{id}/public_lines', owner: true },
+  setupPublicLine: { method: 'PUT', path: '/api/owner/setup/{id}/public_lines', owner: true },
+  setupPublicLinesConfirm: { method: 'POST', path: '/api/owner/setup/{id}/public_lines/confirm', owner: true },
+  removePublicLine: { method: 'DELETE', path: '/api/owner/setup/{id}/public_lines/{key}', owner: true },
+  removePublicPrice: { method: 'DELETE', path: '/api/owner/setup/{id}/public_lines/prices/{item_id}', owner: true },
 
   // Public: the visitor cookie (set by openSession) on all but publicDesk, openSession and agentCard
   publicDesk: { method: 'GET', path: '/api/public/{slug}', owner: false },
@@ -209,6 +223,7 @@ interface RouteShapes {
   suggestions: { body: undefined; response: Suggestion[] };
   simulateToolChange: { body: ToolBody; response: ToolProfile };
   addKnowledge: { body: KnowledgeBody; response: KnowledgeItem };
+  knowledge: { body: undefined; response: KnowledgeRow[] };
   people: { body: undefined; response: PeopleOut };
 
   ruleChat: { body: TextBody; response: RuleChatOut };
@@ -228,8 +243,15 @@ interface RouteShapes {
   setup: { body: undefined; response: SetupState };
   setupConsent: { body: ConsentBody; response: SetupState };
   setupAnswer: { body: SetupAnswerBody; response: SetupState };
+  setupProposal: { body: SetupProposalBody; response: SetupState };
+  setupSuggestions: { body: SetupSuggestionsBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
+  setupPublicLines: { body: undefined; response: SetupPublicLines };
+  setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
+  setupPublicLinesConfirm: { body: SetupPublicLinesConfirmIn; response: SetupPublicLines };
+  removePublicLine: { body: undefined; response: SetupPublicLines };
+  removePublicPrice: { query: { title: string; unit_cents: number }; body: undefined; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };
@@ -265,8 +287,10 @@ type ParamNames<P extends string> = P extends `${string}{${infer Name}}${infer R
 /** The path parameters a route needs, each a string. */
 export type RouteParams<K extends RouteKey> = { [Name in ParamNames<(typeof ROUTES)[K]['path']>]: string };
 
-/** Query values; `undefined` leaves the parameter out. */
-export type RouteQuery = Record<string, string | number | boolean | undefined>;
+/** Required query values where declared; otherwise `undefined` leaves a parameter out. */
+export type RouteQuery<K extends RouteKey = RouteKey> = RouteShapes[K] extends { query: infer Query }
+  ? Query
+  : Record<string, string | number | boolean | undefined>;
 
 /**
  * The path for `key` with each `{name}` filled from `params` through `encodeURIComponent`, and

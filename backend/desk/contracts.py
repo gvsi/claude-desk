@@ -109,7 +109,7 @@ class CalendarSlot(BaseModel):
     minutes: int
 
 class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's Demo inbox
-    now: list[str]                        # event kinds that alert at once ("approval", "emergency", "breaker")
+    now: list[str]                        # event kinds that alert at once ("approval", "callback", "breaker")
     briefing: list[str]
 
 class BusinessSeed(BaseModel):
@@ -160,7 +160,7 @@ Effect = Literal["read", "private_data", "change", "charge", "pay_out", "send_me
 ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.release_document",
                    "native.payment_link", "native.charge_mandate", "native.capture_lead",
                    "native.request_callback", "native.start_verification",
-                   "native.fetch_website", "native.read_memory",
+                   "native.fetch_website", "native.read_memory", "native.web_search",
                    "payments.list_charges", "payments.create_refund"]
 MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
 MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects that take or pay out money: the one set
@@ -242,6 +242,9 @@ class Decision(BaseModel):
     card_ids: list[str]
     review: Review | None = None
     reason_plain: str                     # owner-facing kernel template from the action and deciding cards; the call's free text quoted, labelled "Claude's note"
+    owner_plain: str | None = None        # owner-facing kernel template: why an approved or allowed action didn't run (`refused_at_execution`); None otherwise.
+                                          # Owner-authenticated reads only (GET /decisions/{id}, the approval answer); None on every answer to a session or
+                                          # agent. Fixed templates in the owner's language, never free text; like reason_plain, the signature doesn't cover it
     visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits
     answers: list[ApprovalAnswer] = []    # held only; allow_person only where "Decision lifecycle" allows it
     expires_at: AwareDatetime             # allow: 60 s; hold: 24 h; evaluated lazily by the kernel
@@ -375,9 +378,12 @@ class Fact(BaseModel):
     label: Label
     expires_at: AwareDatetime | None = None
 
+KnowledgeSource = Literal["website", "upload", "setup", "memory_import", "web_search"]
+
+
 class KnowledgeItem(BaseModel):           # untrusted text; never policy
     item_id: str
-    source: Literal["website", "upload", "setup", "memory_import"]
+    source: KnowledgeSource
     title: str
     text: str
     label: Label                          # owner-only until the owner marks it public
@@ -401,6 +407,8 @@ class ApprovalResult(BaseModel):
     decision: Decision
     execution: ExecResult | None          # allow_once / allow_person execute inside the answer call
     card_diff: list[RuleCard] | None      # allow_person / deny_always: cards the owner proves (/policy/draft) and confirms
+    approved: Decision | None = None     # signed approved state: "{owner} approved this" for an answer that runs
+                                         # None for a denial, or an approval the rules recheck refuses (refused_at_execution)
 
 # Replies: typed clauses plus guarded prose
 ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
@@ -422,7 +430,7 @@ class ReplyDraft(BaseModel):              # send_reply input: Claude's schema ha
 
 class Violation(BaseModel):
     kind: Literal["number_in_prose", "promise_word", "soft_promise", "unknown_fact", "unentitled_fact",
-                  "stale_fact", "canary", "unsupported_language", "session_paused"]
+                  "stale_fact", "canary", "unsupported_language", "uncertain_language", "check_unavailable", "session_paused"]
     span: str
     fact_ids: list[str] = []
     rule_id: str
@@ -445,9 +453,10 @@ class RenderedBlock(BaseModel):           # every field is kernel-rendered and c
 class ReplyVerdict(BaseModel):
     ok: bool
     language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
-    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft gives the handoff clause,
-                                          # but none on a first attempt the API rewrites (CheckReplyRequest.final false, every
-                                          # violation rewritable); a blocked owner say none
+    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft keeps its checked cards,
+                                          # then any drafted handoff, when only its prose failed (desk.rewrites.PROSE_ONLY),
+                                          # else gives the handoff clause, but none on a first attempt the API rewrites (CheckReplyRequest.final false,
+                                          # every violation rewritable); a blocked owner say none
     violations: list[Violation]
     message_id: str
     generation: int                       # the session generation it was checked at; deliver() drops it once stale
@@ -517,7 +526,7 @@ class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third
 class LedgerEvent(BaseModel):
     kind: Literal["session", "auth", "verify", "decide", "review", "breaker", "approval", "execute",
                   "payment", "document_link", "reply", "policy", "tool_pin", "takeover", "whisper",
-                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "business_tools"]
+                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search", "business_tools"]
     origin: Literal["kernel", "api"]      # "api" events are recorded as reported, not as verified
     session_id: str | None = None
     ref_id: str | None = None

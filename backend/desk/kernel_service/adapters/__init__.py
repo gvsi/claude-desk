@@ -1,7 +1,7 @@
 """The registry of adapters, one per tool. Each adapter module registers itself at import; the
 native adapters (quote, open times, booking, lead capture, callbacks, verification, document
-release, payment links and mandate charges), the owner's setup tools (website fetch and memory
-reads) and the pinned MCP tools' (`payments_mcp`) are imported at the end of this module.
+release, payment links and mandate charges), the owner's setup tools (website fetch, memory
+reads and web search) and the pinned MCP tools' (`payments_mcp`) are imported at the end of this module.
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
@@ -52,7 +52,10 @@ def profile_sha256(profile: ToolProfile) -> str:
 
 
 async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
-    """Resolve only the copy's own Desk row; malformed or stale block profiles fail closed."""
+    """Resolve only the copy's own Desk row; malformed or stale block profiles fail closed.
+
+    The pin check for native and MCP tools lives in context.resolved_tools.
+    """
     from sqlalchemy import select
     from desk.contracts import is_business_tool
     from desk.db.models import Tool
@@ -64,6 +67,8 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
         Tool.desk_id == desk_id, Tool.tool == tool).execution_options(populate_existing=True)))).one_or_none()
     if row is None or row.source != "business" or row.profile is None or row.profile.business is None:
         return None
+    if row.profile.business.config.block not in blocks.SUPPORTED_BLOCKS:
+        return None                    # configured future blocks are expected, not factory failures
     try:
         expected = blocks.profile(tool, row.profile.business)
         if (row.profile.tool != tool or row.profile.source != "business"
@@ -71,6 +76,7 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
                 or row.profile.definition_sha256 != expected.definition_sha256
                 or row.profile_sha256 != profile_sha256(expected)
                 or row.profile_sha256 != profile_sha256(row.profile)):
+            log.warning("business_adapter_pin_mismatch desk_id=%s tool=%s", desk_id, tool)
             return None
         adapter = blocks.adapter_for(expected.business, tool)
         _check(adapter)
@@ -109,5 +115,5 @@ def _check(adapter: Adapter) -> None:
 from desk.kernel_service.adapters import (book, capture_lead, charge_mandate, find_slots,  # noqa: E402, F401
                                          payment_link, payments_mcp, quote, release_document,
                                          request_callback, start_verification)
-# The owner's setup tools: reading the business's website and the owner's (simulated) memory.
-from desk.kernel_service.adapters import fetch_website, read_memory  # noqa: E402, F401
+# The owner's setup tools: website and memory reads, and research about similar businesses.
+from desk.kernel_service.adapters import fetch_website, read_memory, web_search  # noqa: E402, F401

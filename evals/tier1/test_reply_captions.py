@@ -18,6 +18,22 @@ RIVERA = prompts.DeskIdentity(business_name=RIVERA_NAMES[0], desk_name=RIVERA_NA
 
 @pytest.mark.requires("01a")
 @pytest.mark.white_box
+def test_voice_examples_read_as_english_and_scan_clean():
+    from desk.kernel_service import lang, reply_check
+
+    text = prompts.conversation_system(RIVERA)[0]["text"]
+    for prose_parts, card_note in prompts.VOICE_EXAMPLES:
+        for part in prose_parts:
+            assert lang.detect(part) == "en", part
+            assert reply_check.scan_prose(part, names=RIVERA_NAMES) == [], part
+            assert part in text
+        if card_note:
+            assert f"({card_note})" in text
+    assert prompts.VOICE_EXAMPLES[-1][0][-1].endswith(prompts.STATUS_LINES["offer_callback"]["en"])
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
 @pytest.mark.parametrize(("result", "language", "caption"), [
     (result, language, caption)
     for result, captions in prompts.REPLY_EXAMPLES.items()
@@ -30,6 +46,41 @@ def test_prompt_captions_read_as_their_language_and_scan_clean(result, language,
     assert lang.detect(caption) == language, result
     assert reply_check.scan_prose(caption, names=RIVERA_NAMES) == [], result
     assert caption in prompts.conversation_system(RIVERA)[0]["text"]
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
+@pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])
+@pytest.mark.parametrize(("status", "language", "caption"), [
+    (status, language, caption)
+    for status, captions in prompts.STATUS_LINES.items()
+    for language, caption in captions.items()
+])
+def test_status_lines_read_as_their_language_and_scan_clean(owner, status, language, caption):
+    from desk.kernel_service import lang, reply_check
+
+    names = (*RIVERA_NAMES[:2], owner)
+    assert lang.detect(caption) == language, status
+    assert reply_check.scan_prose(caption, names=names) == [], status
+    identity = RIVERA.model_copy(update={"owner_name": owner})
+    assert caption in prompts.conversation_system(identity)[0]["text"]
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
+@pytest.mark.parametrize(("prose", "names"), [
+    ("I've asked June about this.", ()),
+    ("Maria will call you back tomorrow.", RIVERA_NAMES),
+])
+def test_named_status_and_timing_controls_stay_blocked(prose, names):
+    from desk.kernel_service import reply_check
+
+    # June is also a reserved date word; no name exemption may hide that control.
+    violations = reply_check.scan_prose(prose, names=names)
+    assert "number_in_prose" in {violation.kind for violation in violations}
+    if "June" in prose:
+        named = reply_check.scan_prose(prose, names=(*RIVERA_NAMES[:2], "June Park"))
+        assert "number_in_prose" in {violation.kind for violation in named}
 
 
 @pytest.mark.requires("01a")
@@ -108,7 +159,7 @@ def test_the_terse_payment_caption_still_reads_as_unsupported():
         {"id": "quote-amount", "requires": ["01a"],
          "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["en"] + " $89",
          "clauses": [{"template": "quote", "fact": "own-quote"}],
-         "expect": {"ok": False, "violations": ["number_in_prose"], "blocks": ["handoff"]}},
+         "expect": {"ok": False, "violations": ["number_in_prose"], "blocks": ["quote"]}},
     ]
 ])
 async def test_captions_through_full_reply_check(k, fake, records, row):

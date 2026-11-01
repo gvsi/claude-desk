@@ -375,35 +375,6 @@
   justify-content: flex-end;
 }
 
-/* A callback request: who and why as they typed it, the promised time, and the two next steps. */
-.cd-callback {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-12);
-}
-
-.cd-callback__top {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.cd-callback__reason {
-  margin: 0;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
-
-.cd-callback__when {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.cd-callback__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-}
-
 /* Live now */
 .cd-live {
   display: flex;
@@ -660,4 +631,31 @@
   .cd-briefing-row__words {
     grid-column: 1 / -1;
   }
+}
+
+/* Shapes share the page's layout and line boxes. */
+/* Measurements stop while leaving. Keep scroll anchoring off as a backstop for a measurement
+   queued just before the fade, so it cannot move the owner's restored place. */
+/* The signed summary and rule keep full desktop lines; only their phone tail is shorter. */
+.cd-today--skeleton { overflow-anchor: none; --cd-today-approval-last-width: 100%; }
+@media (max-width: 639.98px) {
+  .cd-today--skeleton { --cd-today-approval-last-width: 75%; }
+}
+.cd-today-skeleton__link { flex: none; margin-top: var(--space-6); }
+.cd-today-skeleton__rule { flex: 1; min-width: 0; }
+.cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
+.cd-today-skeleton__fixed-line { max-width: none; }
+.cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }
+/* Unpainted glyph room is used only in the presence measurement, never as an avatar shape. */
+.cd-today-skeleton__glyph-room { flex: none; width: calc(var(--size-avatar) - var(--space-6) + var(--space-2)); height: calc(var(--size-avatar) - var(--space-6)); }
+.cd-today-skeleton__legend { position: relative; }
+.cd-today-skeleton__legend-room { visibility: hidden; }
+.cd-today-skeleton__word-room { display: block; height: 1lh; }
+.cd-today-skeleton__legend-paint { position: absolute; inset: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.cd-today-skeleton__approval-top { position: relative; }
+.cd-today-skeleton__approval-top-paint { position: absolute; inset: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.cd-today-skeleton__answers { position: relative; }
+.cd-today-skeleton__answers-paint { position: absolute; inset: 0; }
+@container cd-approval-answers (max-width: 437.98px) {
+  .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }

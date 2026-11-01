@@ -18,6 +18,7 @@ import {
   Notice,
   Pill,
   RecordedNote,
+  SkeletonScreen,
   StatusDot,
   TakeOverBar,
   Transcript,
@@ -29,10 +30,13 @@ import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
 import { HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
+import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { TRANSCRIPT_NOTE } from './copy.ts';
+import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
@@ -46,6 +50,8 @@ export interface ConversationDetailProps {
   sessionId: string;
   /** The chat as the list read it, which names who it is with; absent until the list has it. */
   summary: ConversationSummary | undefined;
+  /** The list's first read has settled, data or failure, so `summary` names who the chat is with if it can. */
+  listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
 }
@@ -68,7 +74,10 @@ function levelOf(state: SessionState): string {
  */
 function latestOf(read: OwnerTranscriptRead): string | null {
   const items = [...read.items].sort((a, b) => b.n - a.n);
-  for (const { event } of items) if (event !== null && 'visitor_plain' in event) return event.visitor_plain;
+  for (const { event, owner_plain: ownerPlain } of items) {
+    if (event === null || !('visitor_plain' in event)) continue;
+    return event.type !== 'message' && event.state === 'refused_at_execution' && ownerPlain != null ? ownerPlain : event.visitor_plain;
+  }
   return null;
 }
 
@@ -138,10 +147,11 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
+  const nameRef = useRef<HTMLHeadingElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
@@ -152,10 +162,10 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   });
   // A read taken since the chat opened has come in, not only one kept from an earlier visit.
   const readSinceOpened = chat.isFetchedAfterMount && chat.isSuccess;
-  const failure = useReadFailure(chat);
+  const failure = useReadFailure(chat, { pausedRoute: 'conversation' });
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
-  const heldFailure = useReadFailure(needsYou);
+  const heldFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
   const answers = useAnswer(deskId);
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -163,6 +173,16 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const ownerTyping = useOwnerTyping(sessionId);
   const typing = useTypingBubble(chat.data);
   const endInView = useEndInView();
+  const [handoffCards, setHandoffCards] = useState<HTMLDivElement | null>(null);
+  const shownHandoff = useRef<string | null>(null);
+  const { ready, reveal } = endInView;
+  // The first handoff shown in this open chat leads, if she is still where the chat opened.
+  // Later polls and cards never move her back, even after she marks the first one done.
+  useEffect(() => {
+    if (!ready || !handoffCards || shownHandoff.current === sessionId) return;
+    shownHandoff.current = sessionId;
+    reveal(handoffCards);
+  }, [ready, handoffCards, sessionId, reveal]);
   const mode = chat.data?.state.mode;
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
@@ -185,21 +205,26 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     if (ended && (active === null || active === document.body)) composerRef.current?.querySelector('textarea')?.focus();
   }, [controls.sending]);
 
+  // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
+  // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
+  // way the pane ends up draws inside the one region, so it stays mounted as they change.
+  const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  const pane = (content: ReactNode) => (
+    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
+      {content}
+    </SkeletonScreen>
+  );
+  if (loading) return pane(null);
   if (chat.data === undefined) {
     if (chat.error instanceof ApiError && chat.error.kind === 'not_found') {
-      return (
+      return pane(
         <EmptyState
           title="This conversation isn't in your copy"
           body="It may belong to another demo copy, or the link is wrong. Pick a conversation from the list."
-        />
+        />,
       );
     }
-    if (failure !== null) return <FailedRead failure={failure} />;
-    return (
-      <p className="cd-conversation__loading cd-type-meta" role="status">
-        Opening the conversation
-      </p>
-    );
+    return pane(failure === null ? null : <FailedRead failure={failure} />);
   }
 
   const read = chat.data;
@@ -211,6 +236,9 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
   const held = heldOldestFirst(needsYou.data ?? []).filter((item) => item.decision.session_id === sessionId);
+  const callbacks = read.replayed === true
+    ? []
+    : (needsYou.data ?? []).filter((item): item is CallbackItem => item.handoff !== null && item.handoff.session_id === sessionId);
   const mine = (item: HeldItem) => item.decision.session_id === sessionId;
   const kept = [...answers.kept.values()].filter(mine);
   const answered = [...answers.answered.values()].filter((entry) => mine(entry.item));
@@ -278,10 +306,10 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     );
   }
 
-  return (
+  return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
       <header className="cd-conversation__head">
-        <h2 id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
+        <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
           {who}
         </h2>
         <Pill>{levelOf(state)}</Pill>
@@ -302,10 +330,17 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      {/* The transcript, its end in view as a chat's: it scrolls on its own between the head and the owner's controls, or in a short window with them, as one. */}
+      {/* The transcript and its handoff cards scroll between the head and the owner's controls, or in a short window with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
+        {callbacks.length > 0 ? (
+          <div ref={setHandoffCards} className="cd-conversation__handoffs">
+            {callbacks.map((item) => (
+              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
+            ))}
+          </div>
+        ) : null}
         <Transcript label={`Conversation with ${who}`}>
-          <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
+          <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}
             agentName={who}
@@ -342,6 +377,6 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           {controls.messageError !== null ? <Notice tone="error">{controls.messageError}</Notice> : null}
         </div>
       )}
-    </section>
+    </section>,
   );
 }

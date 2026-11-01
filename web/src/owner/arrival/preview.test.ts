@@ -44,7 +44,7 @@ function previewAt(ms: number): { today: Today; needsYou: NeedsYouItem[]; inbox:
  */
 function drawn({ today: t, needsYou: held, inbox }: { today: Today; needsYou: NeedsYouItem[]; inbox: DemoInboxEntry[] }) {
   const when = (iso: string | null) => (iso === null ? null : new Date(Date.parse(iso)).toISOString());
-  const event = (item: BriefingItem | null) => item && { kind: item.kind, at: when(item.at), display_name: item.display_name, line: item.line };
+  const event = (item: BriefingItem | null) => item && { kind: item.kind, at: when(item.at), display_name: item.display_name, line: item.line, cause: item.cause };
   return {
     greeting_name: t.greeting_name,
     needs_you_count: t.needs_you_count,
@@ -53,9 +53,13 @@ function drawn({ today: t, needsYou: held, inbox }: { today: Today; needsYou: Ne
       conversations: t.briefing.conversations,
       bookings: t.briefing.bookings,
       leads: t.briefing.leads,
-      blocked: t.briefing.blocked,
+      turned_down: t.briefing.turned_down,
       total: t.briefing.total,
-      newest: { blocked: event(t.briefing.newest.blocked), booking: event(t.briefing.newest.booking), lead_or_answer: event(t.briefing.newest.lead_or_answer) },
+      newest: {
+        turned_down: event(t.briefing.newest.turned_down),
+        booking: event(t.briefing.newest.booking),
+        lead_or_answer: event(t.briefing.newest.lead_or_answer),
+      },
     },
     this_week: t.this_week,
     needs_you: held.map((item) => ({ held_at: when(item.held_at), held_by: item.held_by, from_the_visitor: item.from_the_visitor, reason: item.decision?.reason_plain })),

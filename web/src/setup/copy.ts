@@ -3,7 +3,7 @@
  * owner UI is English and plain. Words that come from the shared rules helpers (`ruleWords`,
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
-import type { QuestionKey, SetupStep } from '../api/views.ts';
+import type { SetupStep } from '../api/views.ts';
 import { SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, type CopyLanguage } from '../ds/index.ts';
 
 /**
@@ -54,16 +54,14 @@ export interface StartExample {
   /** What kind of business it is, as the chip says it. */
   chip: string;
   /**
-   * A description the way an owner writes one: the business's name, the owner's first name as the
-   * box's hint asks, and the work, in the first person. Words for the owner to change, not facts, so
-   * no prices, dates, discounts or promises.
+   * A description the way an owner writes one: the business's name, the owner's name as the
+   * box's hint asks, and the work, in the first person. The owner can change every word.
    */
   description: string;
 }
 
 /**
- * The start step's examples: the line and the chips in the signed board's words (UXC-P602-After),
- * and the descriptions they put in the box, written for the build rather than taken from the board.
+ * The start step's examples: the line, the chips and the descriptions they put in the box.
  */
 export interface StartExamples {
   /** The line over the chips. */
@@ -73,26 +71,31 @@ export interface StartExamples {
   examples: readonly StartExample[];
 }
 
-/** The examples by language, as the public page keeps its words (`PUBLIC_COPY`). */
+/** The four starter businesses by language, in their signed order and words. */
 export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
   en: {
     line: 'Or start from an example. You can change every word.',
     label: 'Examples',
     examples: [
       {
+        chip: 'A hair salon in Oakland',
+        description:
+          'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage. Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.',
+      },
+      {
         chip: 'A plumber in Oakland',
         description:
-          "Okafor Plumbing. I'm Daniel, and I fix leaks, clear drains and replace water heaters for homes around Oakland. People often send me a photo of the problem before I come out.",
+          'I’m Maria Rivera. Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
       },
       {
-        chip: 'A bakery that takes custom orders',
+        chip: 'Apartments in Sacramento',
         description:
-          "Rosa's Bakery. I'm Rosa, and I bake custom cakes and pastries in Berkeley. Most orders are for birthdays and weddings, and people tell me the size, the flavors and the design they have in mind.",
+          'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.',
       },
       {
-        chip: 'A tax preparer',
+        chip: 'A CPA firm in San Jose',
         description:
-          "Nguyen Tax Services. I'm Linh, and I prepare tax returns for families, freelancers and small shops in San Jose. People send me their documents online or bring them to my office.",
+          'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.',
       },
     ],
   },
@@ -101,19 +104,24 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
     label: 'Ejemplos',
     examples: [
       {
-        chip: 'Un plomero en Oakland',
+        chip: 'Una peluquería en Oakland',
         description:
-          'Plomería Okafor. Soy Daniel y arreglo fugas, destapo drenajes y cambio calentadores de agua en casas de Oakland. La gente suele mandarme una foto del problema antes de que vaya.',
+          'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
       },
       {
-        chip: 'Una panadería que acepta pedidos personalizados',
+        chip: 'Una plomera en Oakland',
         description:
-          'Panadería Rosa. Soy Rosa y hago pasteles personalizados y pan dulce en Berkeley. Casi todos los pedidos son para cumpleaños y bodas, y la gente me dice el tamaño, los sabores y el diseño que tiene en mente.',
+          'Soy Maria Rivera. Rivera Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
       },
       {
-        chip: 'Una preparadora de impuestos',
+        chip: 'Departamentos en Sacramento',
         description:
-          'Impuestos Nguyen. Soy Linh y preparo declaraciones de impuestos para familias, trabajadores independientes y pequeños negocios en San José. La gente me manda sus documentos por internet o los trae a mi oficina.',
+          'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.',
+      },
+      {
+        chip: 'Un despacho contable en San José',
+        description:
+          'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva la contabilidad de personas y pequeños negocios. Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.',
       },
     ],
   },
@@ -121,6 +129,9 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
 
 /** The steps, as the bar lists them. */
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;
+
+/** The public About panel's charter claims, in setup's signed order. Labels come from cardChrome. */
+export { SETUP_PUBLIC_LINE_KEYS as PUBLIC_LINE_KEYS } from '../api/views.ts';
 
 /** Where each interview step sits in the bar. */
 export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
@@ -132,17 +143,6 @@ export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
   preview: 4,
   live: 4,
 };
-
-/** The interview's questions in the order the API asks them (plan 02b Task 6, `QUESTION_KEYS`). */
-export const QUESTION_ORDER: readonly QuestionKey[] = [
-  'what_you_do',
-  'hours_and_area',
-  'quote_limit',
-  'discounts',
-  'documents_and_payments',
-  'money_limit',
-  'contact_and_after_hours',
-];
 
 export const SETUP_COPY = {
   stepsLabel: 'Set up your Desk',
@@ -161,8 +161,11 @@ export const SETUP_COPY = {
 
   questions: {
     title: 'A few questions',
-    beforeConsent: "About seven. Answer in your own words; I'll turn them into rules you can check.",
-    counter: (n: number, of: number) => `Question ${n} of ${of}`,
+    suggestions: 'Use your suggestions',
+    suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
+    dismiss: 'Dismiss', other: 'Something else…',
+    upArrow: 'Up arrow', downArrow: 'Down arrow',
+    move: 'to move', pick: 'to pick', send: 'to send', typeInstead: 'to type instead',
     allow: 'Yes, use it',
     decline: "No, I'll type it",
     composerLabel: 'Your answer',
@@ -170,7 +173,23 @@ export const SETUP_COPY = {
     failed: "I couldn't answer just now. Your answer is still here; try again.",
     tryAgain: 'Try again',
     conversation: 'Setup questions',
+    putting: 'Putting together what I’d have your Desk do. This can take a minute or so.',
     loading: 'Opening your setup',
+  },
+
+  proposal: {
+    changed: 'Changed below',
+    connect: 'Connect', connected: 'Connected',
+    setItUp: 'Set it up', setUp: 'Set up',
+    amount: 'Amount', amountHint: 'In dollars. The payment link asks for this amount.', amountError: 'Enter an amount to accept this.',
+    failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
+    decline: 'Not now', later: 'Coming later',
+    who: 'Who', usesLabel: 'Uses', nextLabel: 'Next for you', asks: 'Asks',
+    uses: { schedule: 'Your opening hours', payment: 'Stripe', price: 'Your prices', urgent: 'Alerts you right away' },
+    next: {
+      schedule: { auto: 'The booking shows in Today, with their answers', ask: 'You approve each request in Needs you' },
+      intake: 'Their answers show on the booking', payment: 'Each payment shows in Today',
+    },
   },
 
   tools: {
@@ -215,7 +234,7 @@ export const SETUP_COPY = {
     who: {
       public: 'A visitor, not verified',
       verified: 'A customer, verified',
-      agent: 'Someone’s agent, signed limit',
+      agent: "Someone's agent, signed limit",
       after_hours: 'A visitor, after hours',
     },
   },
@@ -223,7 +242,7 @@ export const SETUP_COPY = {
   safety: {
     title: 'Safety check',
     loading: 'Trying tricks people use on your draft rules',
-    blocked: (blocked: number, total: number) => `${blocked} of ${total} blocked`,
+    stopped: (stopped: number, total: number) => `${stopped} of ${total} stopped`,
     lead: (total: number) => `I tried ${total} tricks people really use, on your draft rules. Nothing was real, and no one was contacted.`,
     label: 'Tricks tried',
     empty: 'No tricks to show',
@@ -235,9 +254,25 @@ export const SETUP_COPY = {
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
   },
 
+  publicLines: {
+    suggestedTitle: 'Suggested by Claude, please check',
+    suggestedIntro: 'Claude found these in your memory and online. Customers see them only once you choose “Looks right”.',
+    remove: 'Remove',
+    hours: 'Hours',
+    prices: 'Price list',
+    title: 'What customers will read',
+    subtitle: 'Your Desk answers customers from these. Check them before the safety check.',
+    edit: 'Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    refused: "This line can't state a price, a time or a promise. Prices come from your price list, and times from your opening hours.",
+  },
+
   live: {
     previewTitle: 'Try it as a customer before anyone else can',
-    previewSubtitle: 'Answering stays off until you go live. Only you can see this preview.',
+    /** The launch bar's two lines under the preview, the first after an info dot. */
+    previewAnsweringOff: 'Answering stays off until you go live.',
+    previewOnlyYou: 'Only you can see this preview.',
     goLive: 'Go live',
     /** After the business's name. */
     isLive: ' is live',

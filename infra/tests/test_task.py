@@ -158,6 +158,7 @@ SEAM_SECRETS = {
         "MOCKPAY_DB_PASSWORD": ("desk/db/mockpay", "password"),
         "DESK_SIGNING_SEED": ("desk/signing-seed", None),
         "ANTHROPIC_API_KEY": ("desk/anthropic-api-key", None),
+        "TYPESAFE_API_KEY": ("desk/typesafe-api-key", None),
         "MOCKPAY_KEY": ("desk/mockpay-key", None),
     },
     "Main": {
@@ -260,7 +261,7 @@ def test_task_role_has_no_policies(desk_stacks):
 
 APP_SECRETS = {
     "desk/db/kernel", "desk/db/api", "desk/db/mockpay", "desk/signing-seed", "desk/mockpay-key",
-    "desk/anthropic-api-key", "desk/passcode-hash",
+    "desk/anthropic-api-key", "desk/typesafe-api-key", "desk/passcode-hash",
 }
 
 
@@ -279,7 +280,7 @@ def test_execution_role_reads_only_the_app_secrets(desk_stacks):
         for stacks_source in (desk_stacks.source(resource) for resource in resource_list(statement))
     ]
     names = [_secret_name(desk_stacks, secret_id) for secret_id in read]
-    assert sorted(names) == sorted(APP_SECRETS)  # exactly the seven, each once; never desk/db/admin
+    assert sorted(names) == sorted(APP_SECRETS)  # each once; never desk/db/admin
     for statement in statements:
         if any(action.startswith("secretsmanager:") for action in actions(statement)):
             assert sorted(actions(statement)) == ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]

@@ -90,11 +90,24 @@ def test_cost_matches_the_master_plan_examples():
                     "output_tokens": 40}
     assert cost_usd(opus_first_call, "claude-opus-5-5", "anthropic") == pytest.approx(0.0139)
     assert cost_usd(reviewer, "claude-sonnet-5-5", "anthropic") == pytest.approx(0.00252)
-    assert cost_usd(soft_promise, "claude-haiku-5-5", "anthropic") == pytest.approx(0.00011)
+    assert cost_usd(soft_promise, SONNET, "anthropic") == pytest.approx(0.0022)
     # A cold cache: the same call writing the 4,500 tokens it would have read adds 4,500 × ($5 − $0.20) per MTok.
     cold = {**opus_first_call, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 4_500}
     assert cost_usd(cold, "claude-opus-5-5", "anthropic") - cost_usd(opus_first_call, "claude-opus-5-5",
                                                                       "anthropic") == pytest.approx(0.0216)
+
+
+def test_soft_check_usage_prices_production_sonnet_and_historical_haiku():
+    from desk.kernel_service.decisions import SOFT_PROMISE_MODEL
+    from evals.tier2.runner import KERNEL_CHECK_MODELS
+    from evals.usage import kernel_check_call
+
+    assert KERNEL_CHECK_MODELS["reply"] == SOFT_PROMISE_MODEL == SONNET
+    for model, expected in [(SONNET, 0.0022), (HAIKU, 0.00011)]:
+        usage = kernel_check_call({"kind": "reply", "session_id": SESSION, "summary": {
+            "soft_promise": call_usage(model, input_tokens=900, cached=0, output=40, ms=6_000)}})
+        assert usage.model == model and usage.ms == 6_000
+        assert usage.cost_usd("anthropic") == pytest.approx(expected)
 
 
 def test_claude_api_prices_are_the_apis():
@@ -147,7 +160,7 @@ def test_cost_per_conversation_counts_desk_calls_only():
     triage, translation = model_call("triage", HAIKU, cached=0), model_call("translation", HAIKU, cached=0)
     setup = [model_call("setup", OPUS, session_id=None), model_call("card_draft", OPUS, session_id=None)]
     left_out = [model_call("visiting_agent", OPUS), model_call("conversation", OPUS, session_id="s-elsewhere")]
-    reviewer, soft = call_usage(SONNET), call_usage(HAIKU, input_tokens=900, cached=0, output=40, ms=420)
+    reviewer, soft = call_usage(SONNET), call_usage(SONNET, input_tokens=900, cached=0, output=40, ms=420)
     first.event("review", ref_id=first.decide("native.book"), **reviewer)
     first.event("review", session_id="s-elsewhere", ref_id="d-elsewhere", **call_usage(SONNET))   # not the run's
     reply_entry(first, soft)
@@ -199,8 +212,8 @@ def test_tokens_per_call_by_route():
     first, second = Run(legit()), Run(legit())
     first.event("review", ref_id=first.decide("native.book"),
                 **call_usage(SONNET, input_tokens=610, cached=1_190, output=118))
-    reply_entry(first, call_usage(HAIKU, input_tokens=900, cached=0, output=40))
-    reply_entry(second, call_usage(HAIKU, input_tokens=910, cached=0, output=43))
+    reply_entry(first, call_usage(SONNET, input_tokens=900, cached=0, output=40))
+    reply_entry(second, call_usage(SONNET, input_tokens=910, cached=0, output=43))
     simulator = [{"model": OPUS, "input_tokens": 2_000, "output_tokens": 300, "cache_read_input_tokens": 0,
                   "cache_creation_input_tokens": 0, "latency_ms": 4_000}]
     runs = [
@@ -888,3 +901,20 @@ async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, ca
         assert await run.latency_command(["--max-usd", "3", "--base-url", "https://desk.example.com"], deps) == 1
         out = capsys.readouterr().out
         assert out == said
+
+
+@pytest.mark.parametrize("status", ["ok", "invalid", "timeout"])
+def test_soft_check_try_is_one_cost_record_including_unavailable(status):
+    """The reply ledger's soft-check summary is its one try's usage, priced once whether or not it
+    gave a verdict."""
+    from evals.latency import spend_usd
+    from evals.usage import collect_usage
+
+    call = call_usage(SONNET, input_tokens=900, cached=100, write=50, output=40, ms=420, status=status)
+    event = {"kind": "reply", "session_id": SESSION,
+             "summary": {"soft_promise": call, "violations": [] if status == "ok" else ["check_unavailable"]}}
+    records = collect_usage({"ledger_entries": [{"event": event}]}, [SESSION])
+    [record] = records
+    assert (record.route, record.model, record.ms) == ("soft_promise", SONNET, 420)
+    assert record.cost_usd("anthropic") == pytest.approx(priced(call))
+    assert spend_usd(records, "anthropic").kernel_usd == pytest.approx(priced(call))

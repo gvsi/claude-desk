@@ -9,7 +9,7 @@
 import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
 import { placeholderHex, proseBlock, rivera } from '../ds/fixtures/index.ts';
-import { DECISIONS, TOOLS_WHILE_NOT_ANSWERING, type DecisionSpec, type Language } from './script.ts';
+import { DECISIONS, TOOLS_WHILE_NOT_ANSWERING, handoffBlock, type DecisionSpec, type Language } from './script.ts';
 import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './world.ts';
 
 /** The mock's `PUBLIC_ORIGIN`: the API builds the address agents use from it, never from a request's host. */
@@ -128,6 +128,7 @@ const AGENT_DECISIONS = {
     executed: false,
     visitorStatus: 'refused_over_mandate',
     cardIds: [],
+    policyIds: ['B.agent_charge_within_mandate'],
     reasonPlain: `${AGENT} tried to charge $250.00 in one go, over its signed limit of $20 a charge.`,
     amountCents: 25000,
   },
@@ -195,8 +196,8 @@ type TurnStep = (n: number) => { turn: AgentTurn; last?: true };
  *
  * Each answer goes by the Desk as it is at that request, as the API gives each request its tools.
  * While the Desk's Answering switch is off, the agent's session keeps only callbacks and leads
- * (master plan, "Model-visible tools"): a request that needs another tool gets the handoff, which
- * decides nothing, and the run ends there.
+ * (master plan, "Model-visible tools"): a request that needs another tool gets the Desk's own
+ * handoff card, which decides nothing, and the run ends there.
  */
 function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
   return exchangesFor(task).flatMap((exchange): TurnStep[] => [
@@ -209,7 +210,7 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
       const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
       const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
-      const reply = ctx.reply((allowed ? exchange.reply : [rivera.blocks.handoff.en]).map(copyBlock));
+      const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.handoffName)]).map(copyBlock));
       world.emit(agent, reply);
       const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts };
       return allowed ? { turn } : { turn, last: true };

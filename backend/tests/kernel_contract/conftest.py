@@ -23,12 +23,13 @@ import httpx
 import psycopg
 import pytest
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from desk.api.kernel_client import CredentialView, KernelHttp
 from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
-from desk.contracts import CopyCreated, Decision, RuleCard
+from desk.contracts import Claim, CopyCreated, Decision, RuleCard
 from desk.kernel_api import ExecuteRequest, ModeRequest, PolicyConfirmRequest, PolicyDraftRequest
 from tests.kernel_contract.fake_kernel import IDLE_LIMIT, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
@@ -136,6 +137,35 @@ class Arrange:
             self._admin.execute("UPDATE kernel.sessions SET mode = 'paused', strikes = 3 WHERE session_id = %s",
                                 (session_id,))
 
+    def stored_policy(self, copy: CopyCreated, key: str, text: str, *,
+                      readers: tuple[str, ...] = ("public",), expired: bool = False) -> None:
+        """Historical policy rows that current write guards would refuse, with optional read filtering."""
+        desk_id, fact_id = copy.desk_ids[0], f"charter:policy:{key}"
+        claims = [Claim(key=f"policy:{key}", kind="text", value=text)]
+        expires_at = datetime(2000, 1, 1, tzinfo=UTC) if expired else None
+        if self._state is not None:
+            desk = self._state.desks[desk_id]
+            fact = desk.facts[fact_id]
+            self._state._put_fact(desk, fact.model_copy(update={
+                "claims": claims, "label": fact.label.model_copy(update={"readers": list(readers)}),
+                "expires_at": expires_at}))
+            self._state.flush()
+        else:
+            self._admin.execute("UPDATE kernel.facts SET claims = %s, readers = %s, expires_at = %s"
+                                " WHERE copy_id = %s AND desk_id = %s AND fact_id = %s",
+                                (Jsonb([claim.model_dump(mode="json") for claim in claims]), Jsonb(list(readers)),
+                                 expires_at, copy.copy_id, desk_id, fact_id))
+
+    def expire_mandate(self, mandate_id: str) -> None:
+        """Simulate reaching the stored mandate's expiry without expiring the decision or agent turn."""
+        if self._state is not None:
+            record = self._state.mandates[mandate_id]
+            record.mandate = record.mandate.model_copy(update={
+                "expires_at": (self._state.now - timedelta(seconds=1)).isoformat()})
+        else:
+            self._admin.execute("UPDATE kernel.mandates SET expires_at = %s WHERE mandate_id = %s",
+                                (datetime.now(UTC) - timedelta(seconds=1), mandate_id))
+
     async def never(self, owner: CredentialView, ro_read: Callable[..., list[dict]], ro_schema: str, copy: CopyCreated,
                     tool: str) -> None:
         """The owner's rules change: a `never` card for `tool` is confirmed on the copy's first Desk. The real kernel
@@ -210,6 +240,13 @@ class Arrange:
         (found,) = self._admin.execute("SELECT policy_ids FROM kernel.decisions WHERE decision_id = %s",
                                        (decision_id,)).fetchall()
         return found[0]
+
+    def recorded_knowledge_created_at(self, desk_id: str) -> dict[str, datetime | None]:
+        """First-added timestamps from the fake's stored state or the real kernel's table, never an API write."""
+        if self._state is not None:
+            return dict(self._state.desks[desk_id].knowledge_created_at)
+        return dict(self._admin.execute(
+            "SELECT item_id, created_at FROM kernel.knowledge_items WHERE desk_id = %s", (desk_id,)).fetchall())
 
     def close_idle_sessions(self, session_id: str) -> None:
         """Closes the session: the fake's clock moves past the 24-hour idle limit (closing every idle visitor

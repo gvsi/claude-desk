@@ -117,6 +117,9 @@ class Desk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Private setup notes; never included in kernel_ro.desks.
+    simulated_memory: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
 
 class Person(Base):
     __tablename__ = "people"
@@ -356,6 +359,8 @@ class Decision(Base):
     card_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     review: Mapped[c.Review | None] = mapped_column(ContractJSON(c.Review))
     reason_plain: Mapped[str] = mapped_column(Text)
+    # why it was refused at execution, for the owner alone (`decide.set_state`); None in every other state
+    owner_plain: Mapped[str | None] = mapped_column(Text)
     visitor_plain: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ledger_seq: Mapped[int] = mapped_column(BigInteger)
@@ -553,7 +558,9 @@ class Handoff(Base):
     card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
     which first closes the session's open ones. A row's kind never changes. The kernel keeps one
     open handoff per session, of either kind, under the session row, not by a constraint, so rows
-    from before may hold several (01b_2b_handoff_kind)."""
+    from before may hold several (01b_2b_handoff_kind). A call-back in the owner's own preview
+    inserts its row already `done`, with no closing entry or alert, so it leaves no Needs-you item;
+    its fact still backs the preview's card and its row stays for reconciliation."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
@@ -624,6 +631,14 @@ class LedgerEntry(Base):
 
 # app.*: the API process (role desk_api)
 
+class ActionUpdateMetadata(BaseModel):
+    """An action update's association for summaries, separate from its frozen model text."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    state: str
+    result_fact_ids: list[str]
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = {"schema": "app"}
@@ -635,7 +650,8 @@ class Message(Base):
     kind: Mapped[str] = mapped_column(Text)
     author: Mapped[str] = mapped_column(Text)
     text: Mapped[str | None] = mapped_column(Text)                 # untrusted
-    blocks: Mapped[list[c.RenderedBlock] | None] = mapped_column(ContractJSON(list[c.RenderedBlock]))
+    blocks: Mapped[list[c.RenderedBlock] | ActionUpdateMetadata | None] = mapped_column(
+        ContractJSON(list[c.RenderedBlock] | ActionUpdateMetadata))
     language: Mapped[str | None] = mapped_column(Text)
     owner_translation: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(Text)
@@ -643,7 +659,8 @@ class Message(Base):
     model_context: Mapped[int | None] = mapped_column(Integer)
     model_seq: Mapped[int | None] = mapped_column(Integer)         # unique per session
     model_content: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))   # frozen
-    ref_id: Mapped[str | None] = mapped_column(Text)               # the kernel's message_id or decision_id
+    # The kernel's message_id or decision_id; a note may use business_local_time:{timezone}|{local_now}.
+    ref_id: Mapped[str | None] = mapped_column(Text)
     call_id: Mapped[str | None] = mapped_column(Text)              # the tool_use id of Claude's delivered reply
     event_seq: Mapped[int | None] = mapped_column(BigInteger)      # the run_events.seq a delivered or status row published
     generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
@@ -683,9 +700,10 @@ class SetupInterview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     # A start's client key (migration api_idempotency): unique per copy, with its body's hash, the answer it failed
-    # with, if it did, and when it asked the kernel for the Desk. The failure is kept for diagnosis: a repeat answers
-    # 409 `key_spent` from its presence, never from its content. Every start sends a key now; a row written without a
-    # key, before the key was required, leaves all four null.
+    # with, if it did, and the copy's newest kernel created_at when it asked for the Desk (1970-01-01 UTC if none
+    # existed). A repeat answers 409 `key_spent` from the failure's presence. The Desk-list guard also reads
+    # `"kernel": "failed"` from start_error: a definite refusal with no kept Desk ID claims no Desk.
+    # Every start sends a key now; a row written without a key, before it was required, leaves all four null.
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     request_sha256: Mapped[str | None] = mapped_column(Text)
     start_error: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))

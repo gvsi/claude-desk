@@ -1,36 +1,23 @@
 """Owner-only whole replacement of a Desk's trusted block configurations."""
 
 import re
-import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from functools import partial
 
 from fastapi import APIRouter, Request
-from pydantic import ValidationError
 from sqlalchemy import select
 
 from desk.contracts import BusinessTool, BusinessToolDef, LedgerEvent
 from desk.db.models import Tool
 from desk.kernel_api import BusinessToolsRequest, DeskUpdated
-from desk.kernel_service import adapters, desks, labels, ledger
+from desk.kernel_service import adapters, desks, labels, ledger, reply_check
 from desk.kernel_service.adapters import blocks
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, storable
 
 router = APIRouter()
-FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
-
-# Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
-CURRENCY_CODE = re.compile(r"\b(?:" + "|".join("""
-    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD
-    BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD
-    EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD
-    IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL
-    MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN
-    PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD SSP
-    STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED
-    VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA
-    XXX YER ZAR ZMW ZWG ZWL
-""".split()) + r")\b", re.IGNORECASE)
+# Owner decision (2026-10-31): payment titles may say neither free nor complimentary.
+PAYMENT_TITLE_REFUSED_WORDS = frozenset({"free", "complimentary"})
+INDEXED_KEY = re.compile(r"\.\d+-([^.]+)$")     # `<tool>.<index>-<field>`, the index only orders the scan
 
 
 def config_texts(value):
@@ -46,63 +33,79 @@ def config_texts(value):
 
 
 def public_fields(tool: BusinessTool) -> dict[str, str]:
-    """One tool's visitor-facing fields in render order; never its structured amount."""
-    return {f"{tool.tool}.{field}": getattr(tool if field == "title" else tool.config, field)
-            for field in blocks.CARD_FIELDS[tool.config.block]}
+    """One tool's visitor-facing fields, keyed `<tool>.<index>-<field>` by render position; never its
+    structured amount. The shared scan reads keys sorted, so with one digit per index (no block has
+    more than 10 card fields) sorted order is render order."""
+    return {f"{tool.tool}.{index}-{field}": getattr(tool if field == "title" else tool.config, field)
+            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])}
 
 
 def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
-    return {f"{tool.tool}.{field}": FREE_WORDS for field in blocks.CARD_FIELDS[tool.config.block]
+    """The shared free words, allowed in a title or appointment type only, and never on a payment's card."""
+    if tool.config.block == "purpose_payment":
+        return {}
+    return {f"{tool.tool}.{index}-{field}": reply_check.FREE_WORDS
+            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])
             if field in {"title", "appointment_type"}}
 
 
-def public_promise_fields(values: Mapping[str, str], *,
-                          allow_words: Mapping[str, frozenset[str]] = {}) -> list[str]:
-    """Shared real/fake check: one prose scan, preserving field boundaries for narrow exceptions."""
-    from desk.kernel_service import reply_check
-
-    pieces, bounds, offset = [], [], 0
-    for key, value in values.items():
-        text = reply_check.shown(value)
-        pieces.append(text)
-        bounds.append((key, offset, offset + len(text)))
-        offset += len(text) + 1
-    combined = "\n".join(pieces)
-    hits = reply_check.scan_prose(combined)
-    if CURRENCY_CODE.search(combined) or any(unicodedata.category(ch) == "Sc" for ch in combined):
-        return list(values)
-    if not hits:
-        return []
-    if any(hit.rule_id not in {"lex.en.promise", "lex.es.promise"} for hit in hits):
-        return list(values)
-
-    # scan_prose returns text spans but not offsets. Recover only promise-hit locations from
-    # its own read-only folding/lexicon machinery, until B7 exposes scan_public_text. Never
-    # rescan fields separately: a promise can straddle their boundary ("no" + "charge").
-    spans = {(f"lex.{language}.promise", origin[match.start()], origin[match.end() - 1] + 1)
-             for reading, origin in reply_check._readings(combined).items()
-             for language, entries in reply_check.LEXICONS.items() for category, pattern in entries
-             if category == "promise" for match in pattern.finditer(reading) if match.end() > match.start()}
-
-    def permitted(hit) -> bool:
-        occurrences = [(start, end) for rule, start, end in spans
-                       if rule == hit.rule_id and combined[start:end][:reply_check.SPAN_CHARS] == hit.span]
-        # When identical hits occur more than once, every occurrence must be within an allowed
-        # field; one allowed title must never exempt the same word in an unallowed purpose.
-        return bool(occurrences) and all(
-            any(left <= start and end <= right
-                and any(reading.casefold() in allow_words.get(key, frozenset())
-                        for reading in reply_check._readings(combined[start:end]))
-                for key, left, right in bounds) for start, end in occurrences)
-
-    return [] if all(permitted(hit) for hit in hits) else list(values)
+def payment_title_refused_fields(tool: BusinessTool) -> list[str]:
+    if tool.config.block == "purpose_payment" and any(
+            set(re.findall(r"\w+", reading.casefold())) & PAYMENT_TITLE_REFUSED_WORDS
+            for reading in reply_check._readings(reply_check.shown(tool.title))):
+        return [key for key in public_fields(tool) if key.endswith("-title")]
+    return []
 
 
-async def refuse_public_promises(ctx, part, values, desk_id=None, *,
-                                allow_words: Mapping[str, frozenset[str]] = {}) -> None:
-    # TODO B7: replace this shim with desks.refuse_public_promises and its shared scanner.
-    if public_promise_fields(values, allow_words=allow_words):
-        raise _invalid(ctx, desk_id, "public_promise")
+def unindexed_detail(fields: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    """A refusal's detail under setup's stable `<tool>.<field>` keys, in the closed rule set:
+    `format_control` stays, and every other rule the scan names is `public_promise`."""
+    detail: dict[str, set[str]] = {}
+    for key, rules in fields.items():
+        detail.setdefault(INDEXED_KEY.sub(r".\1", key), set()).update(
+            "format_control" if rule == "format_control" else "public_promise" for rule in rules)
+    return {key: sorted(rules) for key, rules in sorted(detail.items()) if rules}
+
+
+def hidden_fields(values: Mapping[str, str]) -> dict[str, list[str]]:
+    """Every card field of a tool holding a character no font draws (a format control, such as a bidi
+    override or isolate, or another ignorable), refused as `format_control` on the text as written,
+    before any normalizing: a receipt renders the original text, while the scan reads it normalized."""
+    if any(reply_check._unseen(ch) for value in values.values() for ch in value):
+        return unindexed_detail({key: ["format_control"] for key in values})
+    return {}
+
+
+def card_refusal(tool: BusinessTool, scanned: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    """One tool's refusal detail from the shared scan of its card fields (`scanned`, by indexed key),
+    with the payment-title rule's own refusal; empty when nothing is refused. A key the scan wasn't
+    given (a size limit's) refuses every card field, so the detail stays in the closed key set."""
+    values = public_fields(tool)
+    fields: dict[str, set[str]] = {}
+    for key, rules in scanned.items():
+        for each in [key] if key in values else values:
+            fields.setdefault(each, set()).update(rules)
+    for key in payment_title_refused_fields(tool):
+        fields.setdefault(key, set()).add("public_promise")
+    return unindexed_detail(fields)
+
+
+async def _card_text_refusal(ctx: KernelCtx, desk_id: str, tool: BusinessTool) -> dict[str, list[str]]:
+    """One combined public-promise scan of a tool's card fields in render order, after the hidden
+    character check; the shared check's own refusal is folded into the batch's. Card fields get no
+    amenity exception (`amenities=False`): the master plan allows the free words in a title or an
+    appointment type only, and exempts no other hit, while charter policy text keeps that exception."""
+    values = public_fields(tool)
+    if hidden := hidden_fields(values):
+        return hidden
+    try:
+        await desks.refuse_public_promises(ctx, "business_tools", values, desk_id,
+                                           allow_words=free_allow_words(tool), amenities=False)
+    except KernelFailure as failure:
+        if failure.status != 422 or failure.detail is None:
+            raise
+        return card_refusal(tool, failure.detail)
+    return card_refusal(tool, {})
 
 
 async def _refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, reason: str) -> None:
@@ -112,34 +115,40 @@ async def _refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, reason: str) -
                                           summary={"tools": [], "refused": reason}))
 
 
-def _invalid(ctx: KernelCtx, desk_id: str, reason: str) -> KernelFailure:
-    return KernelFailure(422, "invalid", reason,
+def _invalid(ctx: KernelCtx, desk_id: str, reason: str, *,
+             detail: dict[str, list[str]] | None = None) -> KernelFailure:
+    return KernelFailure(422, "invalid", reason, detail=detail,
                          persist=partial(_refusal, copy_id=ctx.copy_id, desk_id=desk_id, reason=reason))
 
 
-@router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
-async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) -> DeskUpdated:
-    # Parse after authentication so invalid batches also have a copy-scoped refusal ledger entry.
-    owner = await desks.owner_alone(ctx, request)
-    desk = await desks.held_desk(ctx, request, owner, id)
-    try:
-        parsed = BusinessToolsRequest.model_validate(body)
-    except ValidationError:
-        raise _invalid(ctx, id, "business_tools_invalid") from None
-    if len({tool.tool for tool in parsed.tools}) != len(parsed.tools):
+async def replace_business_tools(ctx: KernelCtx, id: str, body: BusinessToolsRequest) -> list[Tool]:
+    """Replace Desk `id`'s business tools with `body`, in the caller's transaction, once the caller
+    holds the Desk (the owner's PUT, or a seed on a new copy).
+
+    The whole batch is refused, with 422 `invalid` and a `business_tools` ledger entry naming a fixed
+    reason, for a repeated tool, more than 8 tools (BusinessToolsRequest allows at most 8, and the PUT
+    route refuses a longer batch the same way), unstorable text, a document canary, a format control,
+    or card text the public-promise check refuses (`desks.refuse_public_promises`, one combined scan
+    per tool in render order). A card-text refusal's `detail` names every refused `<tool>.<field>` in
+    the batch with `public_promise` or `format_control`; the others carry no detail. Otherwise each new
+    or changed tool waits for review, each one left out is disabled, and the batch is ledgered
+    `business_tools`. Returns the batch's rows in batch order, without the disabled leftovers."""
+    if len({tool.tool for tool in body.tools}) != len(body.tools):
         raise _invalid(ctx, id, "business_tools_duplicate")
-    shown = parsed.model_dump(mode="json")
+    shown = body.model_dump(mode="json")
     if not all(storable(text) for text in config_texts(shown)):
         raise _invalid(ctx, id, "business_tools_text")
     if labels.canary_fields(shown, await labels.copy_canaries(ctx)):
         raise _invalid(ctx, id, "business_tools_canary")
-    for tool in parsed.tools:
-        await refuse_public_promises(ctx, part="business_tools", values=public_fields(tool), desk_id=id,
-                                     allow_words=free_allow_words(tool))
+    detail = {}
+    for tool in body.tools:
+        detail.update(await _card_text_refusal(ctx, id, tool))
+    if detail:
+        raise _invalid(ctx, id, "public_promise", detail=detail)
     rows = {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
         Tool.desk_id == id, Tool.source == "business").order_by(Tool.tool).with_for_update()))}
-    changes = []
-    for tool in parsed.tools:
+    written, changes = [], []
+    for tool in body.tools:
         definition = BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"}))
         profile = blocks.profile(tool.tool, definition)
         row = rows.pop(tool.tool, None)
@@ -157,6 +166,7 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
             row.profile_sha256, row.definition_sha256 = profile_hash, profile.definition_sha256
             row.status, row.review_reason = "needs_review", change
             row.pending_definition_text = row.pending_sha256 = None
+        written.append(row)
         changes.append({"tool": tool.tool, "block": definition.config.block,
                         "definition_sha256": row.definition_sha256, "change": change})
     for row in rows.values():
@@ -166,4 +176,20 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=id,
                         event=LedgerEvent(kind="business_tools", origin="kernel", summary={"tools": changes}))
+    return written
+
+
+@router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
+async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, request: Request) -> DeskUpdated:
+    owner = await desks.owner_alone(ctx, request)
+    desk = await desks.held_desk(ctx, request, owner, id)
+    await replace_business_tools(ctx, id, body)
     return DeskUpdated(desk_id=desk.desk_id, updated_at=ctx.clock.now())
+
+
+async def refuse_invalid_request(ctx: KernelCtx, request: Request) -> None:
+    """Authenticate malformed typed batches before recording their code-only refusal."""
+    owner = await desks.owner_alone(ctx, request)
+    desk_id = request.path_params["id"]
+    await desks.held_desk(ctx, request, owner, desk_id)
+    raise _invalid(ctx, desk_id, "business_tools_invalid")

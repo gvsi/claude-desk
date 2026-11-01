@@ -27,6 +27,7 @@ A built-in connector's tile fills the box at the 8 px `radius-control`; at `page
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `icon` | `ConnectorIconName` | One of the eight above. |
+| `glyph` | `IconName` (optional) | Draws a built-in tile with this glyph, overriding `icon`. |
 | `size` | `'page' \| 'section' \| 'inline'` | Required. |
 
 Brand marks: Simple Icons (https://simpleicons.org), CC0.

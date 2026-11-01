@@ -2,8 +2,11 @@
 
 `session_context` answers with:
 
+- `clock`: the kernel's current UTC instant and the business's local date and time, public
+  information for every session kind, separate from labelled facts;
 - `tools`: the profiles of the tools the session may call now (`decide.tools_given` over the
-  Desk's enabled tools), the same set `/decide` checks a call against;
+  Desk's enabled tools, followed by `adapters.resolve`), so stale or unresolved profiles
+  cannot grant a next-step exemption;
 - `tools_declared`: every profile on the Desk that a session of its kind could ever be given
   (`decide.declared_tools`), in any standing and status, so the API can declare them all when a
   conversation starts and load each one only once it is given;
@@ -14,8 +17,10 @@
   `labels.can_read` decides each row in Python, so there is one rule for who reads what; a
   Desk's rows stay few in a demo copy, where a real Desk would filter in SQL first. The facts
   start with the Desk's catalog (`catalog_fact`), so Claude knows the `item_id`s `native.quote`
-  takes. A visitor's or agent's session is never given a row holding one of the copy's document
-  canaries (`labels.find_canaries_in`) anywhere Claude would read it, whatever its label: in a
+  takes. The seed-only public starter questions (`charter:starter:*`) are left out for every
+  session: they are chips on the public page, never business facts for Claude. A visitor's or
+  agent's session is never given a row holding one of the copy's document canaries
+  (`labels.find_canaries_in`) anywhere Claude would read it, whatever its label: in a
   fact's ID or a claim's key or value, or in a knowledge item's ID, title or text
   (`labels.knowledge_canaries`, which doesn't read again an item it found clean against the same
   canaries, at ingest or here). Knowledge holding one in its title or text is stored owner-only
@@ -42,8 +47,9 @@ from desk.contracts import Claim, Fact, KnowledgeItem, Label, Principal, ToolPro
 from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_api import SessionContext
-from desk.kernel_service import adapters, auth, decide, labels
+from desk.kernel_api import ContextClock, SessionContext
+from desk.kernel_service import adapters, auth, clock, decide, desks, labels
+from desk.kernel_service.adapters.base import business_timezone
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
 from desk.kernel_service.sessions import principal_for
@@ -79,20 +85,18 @@ def _profile(row: Tool) -> ToolProfile:
 
 async def session_context(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
                           desk_row: Desk) -> SessionContext:
-    """The tools, facts and knowledge of `desk_row` given to the authenticated session."""
+    """The kernel's local time, tools, facts and knowledge given to the authenticated session."""
     from desk.kernel_service.adapters import blocks
 
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
-    given = decide.tools_given(principal, session_row, desk_row, await decide.enabled_tools(ctx, desk_id))
+    given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
     valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
                       and profile.status == "enabled"
                       and profile.business is not None and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                       and await adapters.resolve(ctx, desk_id, tool) is not None}
-    given = {tool for tool, profile in profiles.items() if tool in given
-             and (profile.source != "business" or tool in valid_business)}
     if principal.kind in ("visitor", "agent"):
         declared = declared | valid_business
 
@@ -100,8 +104,11 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     # the owner reads the business's own text; a conversation is never given a document's canary
     canaries = labels.NO_CANARIES if session_row.kind == "owner" else await labels.copy_canaries(ctx)
     now = ctx.clock.now()
+    tz = await business_timezone(ctx, desk_row)
+    local = now.astimezone(tz)
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.status != "expired",
+        desks.not_starter(),
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
     knowledge = await ctx.db.scalars(ctx.repo.scoped(
         select(KnowledgeRow).where(KnowledgeRow.desk_id == desk_id).order_by(KnowledgeRow.created_at,
@@ -110,7 +117,11 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     readable = [*([catalog] if catalog is not None and labels.can_read(catalog.label, readers) else []),
                 *(labels.fact_of(row) for row in facts if labels.can_read(row.readers, readers))]
     return SessionContext(
-        tools=[profile for tool, profile in profiles.items() if tool in given],
+        clock=ContextClock(as_of_utc=clock.signed_time(now), local_now=local.isoformat(timespec="minutes"),
+                           local_date=local.date().isoformat(),
+                           weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                           timezone=tz.key),
+        tools=given,
         tools_declared=[profile for tool, profile in profiles.items() if tool in declared],
         facts=[fact for fact in readable
                if not labels.find_canaries_in([fact.fact_id, *((claim.key, claim.value) for claim in fact.claims)],
@@ -120,6 +131,16 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
                    for row in knowledge if labels.can_read(row.readers, readers)
                    and not labels.knowledge_canaries(row.item_id, row.title, row.text, canaries)],
     )
+
+
+async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
+                         desk_row: Desk) -> list[ToolProfile]:
+    """The callable session tools, after adapter resolution; shared with the reply check."""
+    enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
+    given = decide.tools_given(principal, session_row, desk_row, enabled)
+    return [_profile(enabled[tool]) for tool in sorted(given)
+            if adapters.profile_sha256(enabled[tool].profile) == enabled[tool].profile_sha256
+            and await adapters.resolve(ctx, desk_row.desk_id, tool) is not None]
 
 
 router = APIRouter()

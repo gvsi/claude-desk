@@ -96,7 +96,7 @@ def test_subjects():
         "native.charge_mandate": "be charged", "native.capture_lead": "leave their details",
         "native.request_callback": "ask for a callback", "native.start_verification": "get a verification code sent",
         "payments.list_charges": "see payment history", "payments.create_refund": "get a refund",
-        "native.fetch_website": "read a website", "native.read_memory": "read your memory",
+        "native.fetch_website": "read a website", "native.read_memory": "read your memory", "native.web_search": "search the web",
     }
     for tool, phrase in phrases.items():
         counterexample = raw("native.quote")

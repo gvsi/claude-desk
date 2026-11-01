@@ -6,14 +6,16 @@ A job's arguments are IDs and signed kernel records only, never a credential: no
 for the session's next request, which holds the visitor's own (`runner.TurnRunner`): the open event stream or the
 next message.
 
-- `resume_after_answer(copy_id, desk_id, session_id, decision)`, deferred once the owner answered a held request:
-  in one transaction, the decision as the kernel signed it, shown to the visitor as `resolved`; an `action_update`
-  row that wakes Claude; and a `run_resumable` control row, which the visitor's next request handles by running
-  Claude's follow-up with the visitor's credential. A decision whose outcome may still change (an `unknown`
-  execution) also leaves a `decision_pending` row, so its final state is shown once it has one. Idempotent: a
-  state already shown writes nothing, so a repeated or retried job, or a status another path showed first, adds
-  nothing. Nor does a job that runs late, once a later state of its decision is shown (the visitor's next request
-  found the approval executed, or an `unknown` outcome reconciled): the visitor never sees a decision go back.
+- `resume_after_answer(copy_id, desk_id, session_id, decision, approved=None, result_fact_ids=None)`, deferred once
+  the owner answered a held request: in one transaction, the optional signed `approved` snapshot as a `receipt`,
+  then the signed outcome as `resolved`, each with its owner-only reason stripped and its signed fields unchanged.
+  Only the outcome adds an `action_update` row that wakes Claude and names the executed answer's result facts,
+  and a `run_resumable` control row, which the visitor's next request handles by running Claude's follow-up with
+  the visitor's credential. A decision whose outcome may still change (an `unknown` execution) also leaves a
+  `decision_pending` row, so its final state is shown once it has one. Idempotent: a state already shown writes
+  nothing, so a repeated or retried job, or a status another path showed first, adds nothing. Nor does a job that
+  runs late, once a later state of its decision is shown (the visitor's next request found the approval executed,
+  or an `unknown` outcome reconciled): the visitor never sees a decision go back.
 - `surface_due_decisions`, each minute: every decision the visitor was shown as held, or that an unhandled
   `decision_pending` row names, whose final state isn't shown yet, and whose kernel_ro state is final or whose
   `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one `decision_due` control
@@ -58,7 +60,7 @@ from procrastinate.manager import JobManager
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock
+from desk.api.deliver import NOT_FINAL, Status, deliver, run_lock, visitor_safe
 from desk.api.model import ModelClient
 from desk.api.ratelimit import RateLimited, RateLimiter, RateLimitLedger
 from desk.api.ro import KERNEL_RO, due_decisions
@@ -112,11 +114,14 @@ def jobs_app(connector: BaseConnector, *, schedule: bool = True) -> procrastinat
 
     @app.task(name=RESUME_AFTER_ANSWER, queue=QUEUE, pass_context=True)
     async def resume_after_answer_job(context: JobContext, copy_id: str, desk_id: str, session_id: str,
-                                      decision: dict) -> None:
+                                      decision: dict, approved: dict | None = None, *,
+                                      result_fact_ids: list[str] | None = None) -> None:
         env = _env(context)
         async with env.engine.connect() as conn:
             await resume_after_answer(conn, Ids(copy_id=copy_id, desk_id=desk_id, session_id=session_id),
-                                      Decision.model_validate(decision))
+                                      Decision.model_validate(decision),
+                                      Decision.model_validate(approved) if approved is not None else None,
+                                      result_fact_ids=result_fact_ids)
 
     @app.task(name=SURFACE_DUE_DECISIONS, queue=QUEUE, pass_context=True)
     async def surface_due_decisions_job(context: JobContext, timestamp: int) -> None:
@@ -182,13 +187,23 @@ async def _keep_running(app: procrastinate.App, env: JobEnv, name: str, options:
         await asyncio.sleep(RESTART_S)
 
 
-async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: Decision) -> None:
-    """Leave the owner's answer for the resume job: the session's IDs and the decision the kernel signed, nothing
-    else."""
+async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: Decision,
+                                    approved: Decision | None = None, *,
+                                    result_fact_ids: list[str] | None = None) -> None:
+    """Queue IDs, the signed outcome, its optional approved snapshot and executed result fact IDs only.
+    Exclude the owner-only reason and key; result claims and model_view never enter the queue. The result fact IDs are
+    queued only when an executed outcome has some, so a job queued during a rolling deploy without them still runs on
+    an older worker whose resume job doesn't take them."""
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
+    results = {"result_fact_ids": list(result_fact_ids)} if decision.state == "executed" and result_fact_ids else {}
     await app.configure_task(RESUME_AFTER_ANSWER).defer_async(
-        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, decision=decision.model_dump(mode="json"))
+        copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id,
+        decision=decision.model_dump(mode="json", exclude={"owner_plain"}),
+        approved=approved.model_dump(mode="json", exclude={"owner_plain"}) if approved is not None else None,
+        **results)
 
 
 async def defer_triage(app: procrastinate.App, ids: Ids, stopped: Stopped) -> None:
@@ -261,19 +276,33 @@ async def defer_turn_annotations(app: procrastinate.App | None, conn: AsyncConne
 # The jobs ----------------------------------------------------------------------------------------------------
 
 
-async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decision) -> bool:
-    """Show the answered decision and resume the conversation, in one transaction on `conn` (module docstring); True
-    when this call showed it, False when that state, or a later one, was already shown."""
+async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decision,
+                              approved: Decision | None = None, *,
+                              result_fact_ids: list[str] | None = None) -> bool:
+    """Show the approved snapshot before the outcome and resume once, in one transaction (module docstring).
+    Only the executed outcome's action update names result facts. Without a snapshot (including older jobs),
+    show only the outcome. True when this call showed the outcome, False when that state, or a later one,
+    was already shown."""
+    if approved is not None and (approved.decision_id != decision.decision_id
+                                 or approved.state != "approved"
+                                 or approved.ledger_seq >= decision.ledger_seq):
+        logger.warning("an approved snapshot doesn't match its outcome; showing only the outcome")
+        approved = None
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     await conn.commit()                                    # a READ COMMITTED transaction of its own, for deliver()
     try:
         await run_lock(conn, ids.session_id)               # what the session shows can't change until this commits
+        if approved is not None:
+            await deliver(conn, ids, Status(approved, "receipt"))
         if await deliver(conn, ids, Status(decision, "resolved")) is None:     # that state, or a later one, shown
             await conn.rollback()
             return False
         await append_message(conn, ids, "action_update", text=decision.visitor_plain, ref_id=decision.decision_id,
-                             state=decision.state)
+                             state=decision.state,
+                             result_fact_ids=(result_fact_ids or ()) if decision.state == "executed" else ())
         await append_control(conn, ids, "run_resumable", {"decision_id": decision.decision_id})
         if decision.state in NOT_FINAL:
             await append_control(conn, ids, "decision_pending", {"decision_id": decision.decision_id})

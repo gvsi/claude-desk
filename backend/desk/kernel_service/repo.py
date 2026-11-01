@@ -6,6 +6,11 @@ until a copy is bound (`ctx.bind(copy_id)`), and row-level security then admits 
 rows. A route takes it as `ctx: Ctx`: the transaction commits after the route returns and before
 the answer is sent, so a failed commit answers 500, and it rolls back on any exception.
 
+An agent request first holds its turn's nonce row `FOR UPDATE` (`agents.verify_call`), across
+the soft check's one try and through the reply transaction. No path that holds a row below asks
+for a nonce row. Each reply check also holds one pooled connection across the try. With
+`seen=False` it holds no session-row lock across the model call.
+
 Row locks are taken in one order, so no two kernel transactions wait on each other:
 
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
@@ -20,8 +25,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
    own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
    its ledger entry, so it holds no lock on the row while the soft-promise check runs, and taken
-   there `FOR NO KEY UPDATE` too when its verdict shows the handoff card
-   (`reply_check.open_card_handoff`) or passed on an open handoff's card
+   there `FOR NO KEY UPDATE` too when its verdict rechecks cards (`reply_check.recheck_cards`),
+   shows the handoff card (`reply_check.open_card_handoff`) or passed on an open handoff's card
    (`reply_check.handoff_still_open`), before it looks for the session's open handoffs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
@@ -44,15 +49,22 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
     books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
     4 to 9 the same transaction takes; and the handoffs of a session whose reply shows the
-    handoff card or passed on an open one's card: its open ones `FOR SHARE`, then, for a reply
-    that shows the card, the card's, inserted when none is open;
+    handoff card, passed on an open one's card, or rechecks fact-backed cards: its open ones
+    `FOR SHARE` before facts, including when losing the last checked card could require a handoff;
+    then, for a reply that shows the card, the card's, inserted when none is open (a fresh key
+    waits for nothing, so this insertion may follow the fact recheck);
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
     a handoff expires its own, an hours write rewrites the Desk's, an execution or reconciliation
     that withholds a result narrows the ones it names (`execute._narrow_to_owner`), after the
-    adapter's hook wrote them;
+    adapter's hook wrote them; a reply check's cited fact rows `FOR SHARE` in fact ID order,
+    refreshed after the session and handoff locks and held through signing and commit, so a
+    withdrawal that needs no session lock (including payment-link cancellation) commits before
+    the refresh or waits for the verdict;
 12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
-    reads it `FOR SHARE`).
+    reads it `FOR SHARE`). A reply's card recheck takes this lock after facts, before checking
+    expiry, so currency uses the time after every lock wait. A subsequent handoff fallback
+    reuses the already-held session and open-handoff locks and inserts only fresh keys.
 
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
 any of these, and a write to the business its row after the Desk's. The calendar write then takes
@@ -89,6 +101,17 @@ after it commits, never during it. So a take-over that arrives while the reviewe
 the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`, 4 s), then
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
+
+A reply check's soft call is one try of at most 6 s (`decisions.SOFT_PROMISE_TIMEOUT_S`), with no
+recheck and no fallback (the owner's decision of 2026-10-31 replaced an earlier unchanged-input
+recheck), inside the API's 10 s for `/check_reply`. This is the model budget, not an end-to-end
+deadline. Finalize can then wait on its session write behind T1's re-list and normalize (about
+3 s), a queued decision's normalize and review (about 5 s), and a provider completion (about
+2 s), as below: about 16 s including its own model budget, plus queries, ledger contention and
+commit. Arbitrary lock contention has no finite overall bound. Past the API's 10 s the API shows
+`kernel_unavailable`; the kernel may still commit the verdict and open the owner's handoff. The
+generation fence is unchanged: `open_card_handoff` re-reads the generation under lock and
+`deliver()` drops stale verdicts. This fails closed.
 
 A payment link's completion holds the same row `FOR SHARE` across its provider call (C2,
 `payments._pay`, Plan 01c), so a decision and a completion on one session take turns: each takes
@@ -310,14 +333,16 @@ Persist = Callable[[KernelCtx], Awaitable[object]]
 
 
 class KernelFailure(Exception):
-    """A refusal answered with `status` and `KernelError{code}`.
+    """A refusal answered with `status` and `KernelError{code, detail?}`.
 
     `reason` is internal, for the kernel's log (never a token or contact). `persist`, when given,
     runs in a fresh transaction after the request's transaction has rolled back and before the
     answer; if it fails, the answer is 500 `internal` instead, since the attempt went unrecorded.
+    `detail`, when given, names refused public-policy keys and rule IDs, never their values.
     """
 
-    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None):
+    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None, *,
+                 detail: dict[str, list[str]] | None = None):
         if code not in ERROR_CODES:
             raise ValueError(f"{code!r} is not a KernelError code")
         if not 400 <= status <= 599:
@@ -327,6 +352,7 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+        self.detail = detail
 
 
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:

@@ -89,7 +89,9 @@ it('a_line_attached_after_the_landing_shows_at_once', async () => {
   await motion();
   const { el, root } = host();
   flushSync(() => root.render(row(true, LINES)));
-  await vi.waitFor(() => expect(moving(el)).toEqual([]));
+  // The last animation can finish before animationend, the landing re-check and React's render.
+  // Wait for the row's spent landing state before attaching a line that must not animate.
+  await vi.waitFor(() => expect(el.querySelector('.cd-transcript-row--live')).toBeNull());
 
   // A line that comes later (a held request's outcome, say) shows at once, with no beat to wait for.
   flushSync(() => root.render(row(true, [...LINES, 'Cancelled'])));

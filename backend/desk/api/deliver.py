@@ -3,8 +3,8 @@
 A visitor sees a reply only after the kernel checked it, and a status only as the kernel signed it. Both
 reach the session as one of the four signed events, which only this module builds:
 
-- `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when the check
-  failed: its blocks are then the handoff clause alone) and a `delivered` row carrying the event's `seq`
+- `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when its shown
+  blocks include the handoff clause) and a `delivered` row carrying the event's `seq`
   and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
   left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
   produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for, or a
@@ -52,12 +52,26 @@ NOT_FINAL = frozenset({"allowed", "held", "approved", "unknown"})
 AUTHOR_BY_VIA = {"model": "claude", "api": "claude", "owner": "owner", "kernel": "desk"}
 
 
+def visitor_safe(decision: Decision) -> Decision:
+    """Copy a kernel decision without the owner-only execution refusal reason before a visitor or agent crossing.
+
+    The signed visitor fields stay unchanged; the owner's original record keeps its reason. Serialized job
+    arguments must also exclude the cleared `owner_plain` field, so no visitor-side store carries even its key.
+    """
+    return decision.model_copy(update={"owner_plain": None})
+
+
 @dataclass(frozen=True)
 class Reply:
     verdict: ReplyVerdict
     author: Literal["claude", "owner", "desk"]
     via: Literal["model", "api", "owner", "kernel"]
     call_id: str | None = None             # the send_reply tool_use ID, for a reply Claude's call produced
+
+    @property
+    def handoff(self) -> bool:
+        """The flag stored on the delivered event: its shown blocks include the handoff clause."""
+        return any(block.template == "handoff" for block in self.verdict.blocks)
 
     def __post_init__(self) -> None:
         if self.via not in AUTHOR_BY_VIA or AUTHOR_BY_VIA[self.via] != self.author:
@@ -77,6 +91,7 @@ class Status:
             raise ValueError("a status is a receipt, held or resolved")
         if (self.phase == "held") != (self.decision.state == "held"):
             raise ValueError("a held status shows a held decision, and only a held status does")
+        object.__setattr__(self, "decision", visitor_safe(self.decision))
 
 
 class SessionNotFound(LookupError):
@@ -118,7 +133,9 @@ async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schem
     if shown:
         return None
     event = EvMessage(type="message", message_id=verdict.message_id, generation=verdict.generation,
-                      author=reply.author, language=verdict.language, handoff=not verdict.ok, blocks=verdict.blocks,
+                      author=reply.author, language=verdict.language,
+                      handoff=reply.handoff,
+                      blocks=verdict.blocks,
                       visitor_plain=verdict.visitor_plain, ledger_seq=verdict.ledger_seq, signature=verdict.signature)
     seq = await append_event(conn, ids, event, replayed=replayed)
     await append_message(conn, ids, "delivered", replayed=replayed, author=reply.author, blocks=verdict.blocks,

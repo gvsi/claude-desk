@@ -26,8 +26,10 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
+import { paymentLinkMemory, type PaymentLinkMemory } from './paymentLinks.ts';
 import {
   chatReducer,
+  closesHold,
   initialChatState,
   lowerOnly,
   ownerInChatNow,
@@ -75,6 +77,7 @@ const EVENT_TYPES = Object.keys({
 } satisfies Record<SseEvent['type'], true>) as SseEvent['type'][];
 
 export interface VisitorChatSnapshot {
+  paymentLinks: PaymentLinkMemory;
   /** The public Desk the chat loaded, or null until it has. */
   desk: PublicDesk | null;
   state: ChatState;
@@ -184,6 +187,7 @@ const LOCAL_ID = 'local-';
 
 class VisitorChat {
   private snapshot: VisitorChatSnapshot = {
+    paymentLinks: paymentLinkMemory(),
     desk: null,
     state: initialChatState(),
     session: null,
@@ -613,7 +617,7 @@ class VisitorChat {
     // The old session goes before the chat empties, so no state holds its mode beside an empty chat.
     this.loseTrack();
     this.modeAt = 0;
-    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle' });
+    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle', paymentLinks: paymentLinkMemory() });
     this.dispatch({ type: 'reset' });
     this.loading = true;
     this.open(epoch)
@@ -753,9 +757,9 @@ class VisitorChat {
         this.set({ cancelling: null });
         return;
       }
-      const applied = isUncertain(err) && (await this.wasResolved(decisionId));
+      const closed = isUncertain(err) && (await this.wasClosed(decisionId));
       if (generation !== this.generation) return;
-      this.set({ cancelling: null, cancelFailed: applied ? null : decisionId });
+      this.set({ cancelling: null, cancelFailed: closed ? null : decisionId });
     }
   }
 
@@ -815,13 +819,13 @@ class VisitorChat {
     }
   }
 
-  /** Whether the conversation holds an outcome for `decisionId`: a lost cancel that went through. */
-  private async wasResolved(decisionId: string): Promise<boolean> {
+  /** Whether approval or an outcome closed this hold before a lost cancel answer was checked. */
+  private async wasClosed(decisionId: string): Promise<boolean> {
     const generation = this.generation;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
       if (generation === this.generation) this.observeSession(transcript.state);
-      return transcript.items.some((item) => item.event?.type === 'resolved' && item.event.decision_id === decisionId);
+      return transcript.items.some((item) => closesHold(item.event) && item.event.decision_id === decisionId);
     } catch {
       return false;
     }

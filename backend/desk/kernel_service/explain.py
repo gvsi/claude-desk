@@ -31,6 +31,7 @@ PHRASES: dict[str, tuple[str, str | None]] = {
     "payments.create_refund": ("get a refund", "get a {amount} refund"),
     "native.fetch_website": ("read a website", None),
     "native.read_memory": ("read your memory", None),
+    "native.web_search": ("search the web", None),
 }
 
 BUSINESS_PHRASES: dict[str, tuple[str, str | None]] = {

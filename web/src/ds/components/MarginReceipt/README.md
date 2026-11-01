@@ -12,7 +12,7 @@
 ## What the consumer provides
 
 - `source`, `plain` and `ledgerSeq`, from `receiptFromEvent(event)`. Never write a status mapping or status copy on a screen.
-- `plain` is always the event's `visitor_plain`, unchanged, with no clock time.
+- `plain` is the event's `visitor_plain`, unchanged, with no clock time. The owner-only exception is a `refused_at_execution` status: the owner screen passes the transcript item's `owner_plain` verbatim when present, falling back to the event's `visitor_plain`. The signed event stays unchanged; no owner annotation reaches visitor surfaces.
 - On owner screens only, for the receipt that reports what the kernel decided (a decision's first receipt when its state is in `OWNER_REASON_STATES`: `held`, `refused`, `executed` or `allowed`):
   - `reason`: the decision's `reason_plain`. It is written once, at decide time, so it explains only that receipt.
   - `cardBelow`: the request's `ApprovalCard` is drawn right under this receipt's row.
@@ -43,8 +43,8 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 
 | Source | Dot |
 | --- | --- |
-| A reply that passed its check (`handoff: false`) | handled |
-| A reply whose draft was blocked and handed to the owner (`handoff: true`) | held |
+| A reply showing no handoff clause, including checked cards kept when its prose failed (`handoff: false`) | handled |
+| A reply showing the handoff clause, whether its draft passed or failed (`handoff: true`) | held |
 | `allowed`, `approved`, `executed` | handled |
 | `held`, `unknown` | held |
 | `refused`, `denied`, `failed`, `refused_at_execution` | refused |
@@ -59,15 +59,16 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 | `OWNER_REASON_STATES`, `OwnerReasonState` | `['held', 'refused', 'executed', 'allowed'] as const` and its type: the states of the receipt that reports what the kernel decided, the only ones `reason` applies to. Owner screens use it to pick the receipt that gets the reason. |
 | `OWNER_STATE_WORDS` | The owner's words for those states, which lead that receipt's line (the table above). It `satisfies Record<OwnerReasonState, string>`, so a state left out, or one added, is a compile error. |
 | `ReceiptSource`, `ReceiptView` | The types of `receiptTone`'s argument and `receiptFromEvent`'s result. |
+| `RulesReceipt`, `RulesReceiptProps` | The receipt under Claude's message in Ask Claude once the owner confirmed a rules change, in place of the review: the handled dot and "Confirmed. Version {version} of your rules, checked against the always-on rules.", "Confirmed." leading in primary ink. `version` is the version in force from the API's answer to the confirm, never the draft's. It is plain text, with no trace to open. Drawn outside a conversation's rows, it lands on its own as it is drawn: it rises space-4 as it fades in on `motion-base`, its dot growing from half size; under reduced motion it is there at once. |
 
-`MarginLine.tsx` is the line itself, shared with `MarginNote`; it isn't exported. Neither is `receiptLine` in `receiptTone.ts`, which applies the rules under "The line" for `MarginReceipt`.
+`MarginLine.tsx` is the line itself, shared with `MarginNote` and `RulesReceipt` (whose landing is its `lands` option); it isn't exported. Neither is `receiptLine` in `receiptTone.ts`, which applies the rules under "The line" for `MarginReceipt`.
 
 ## Props
 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `source` | `ReceiptSource` | Required. `{ kind: 'reply'; handoff }` or `{ kind: 'decision'; state }`. |
-| `plain` | `string` | Required. The event's `visitor_plain`, unchanged. |
+| `plain` | `string` | Required. The event's `visitor_plain`, unchanged, except an owner screen's `refused_at_execution` status uses the transcript item's `owner_plain` verbatim when present, with `visitor_plain` as its fallback. |
 | `ledgerSeq` | `number` | Required. The entry the event was signed with. |
 | `reason` | `string` | Owner screens only. The decision's `reason_plain`, for the receipt that reports what the kernel decided: a `decision` receipt in `OWNER_REASON_STATES` reads "{words}. {reason}" (see "The line"). Ignored on a `reply` and on any other state; an empty one keeps `plain`. |
 | `cardBelow` | `boolean` | Owner screens only. The request's `ApprovalCard` is right under this row: a `held` decision reads "Held for you" alone. Ignored on a `reply` and on any other state. |

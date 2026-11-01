@@ -955,11 +955,32 @@
   min-width: 0;
 }
 
-/* The Connectors page's "Add a connector" and the Rules page's preset menu sit 4 px under the top
+/* The Connectors page's "Add a connector" and the Rules page's actions sit 4 px under the top
    of the title's line. */
 .board-connectors__header .cd-page-header__actions,
 .board-rules__header .cd-page-header__actions {
   padding-top: var(--space-4);
+}
+
+.board-rules__header .cd-page-header__actions {
+  gap: var(--space-16);
+}
+
+.board-rules__header .cd-page-header__actions > .cd-type-control {
+  flex: 0 0 auto;
+}
+
+.board-rules__header .cd-text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-control-main);
+  border-radius: var(--radius-control);
+}
+
+@media (min-width: 640px) {
+  .board-rules__header .cd-page-header__text {
+    flex: 1 1 calc(var(--size-reading) / 3);
+  }
 }
 
 /* A phone draws the composer alone, its send button at the right: no helper and no suggestions.
@@ -988,6 +1009,15 @@
   .board-connectors__header .cd-page-header__actions,
   .board-rules__header .cd-page-header__actions {
     padding-top: 0;
+  }
+
+  .board-rules__header .cd-page-header__actions {
+    position: relative;
+  }
+
+  .board-rules__header .cd-preset-menu {
+    position: static;
+    width: auto;
   }
 
   .board-connectors__header .cd-button--main {
@@ -1061,13 +1091,6 @@
   height: 100dvh;
   border-right: 1px solid var(--line-hairline);
   background: var(--bg-panel);
-}
-
-/* Customers while the list loads: a hairline where the first section's head would sit, then the line. */
-.board-people__loading {
-  margin-top: var(--space-28);
-  padding-top: var(--space-16);
-  border-top: 1px solid var(--line-hairline);
 }
 
 /* Customers on a phone (N-Run2-People-Phone): 16 px under the top bar, sections 16 px apart, and the
@@ -1408,6 +1431,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+}
+
+/* The switch adds 8 px at each side; these 8 px align its words with the business details. */
+.board-settings__answering {
+  padding: var(--space-20) var(--space-8);
 }
 
 /* A vision note: the Pill, then its line 12 px after it. */

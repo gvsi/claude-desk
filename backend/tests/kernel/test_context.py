@@ -8,7 +8,7 @@ scripted adapters (`FakeAdapter`) on a Desk to cover tools this plan has no adap
 
 import logging
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import FastAPI
@@ -34,6 +34,27 @@ from .test_execute import executed
 
 ROUTE = "GET /context/{session_id}"
 SEEDED_PUBLIC_KNOWLEDGE = [("kn-price-list", ["public"]), ("kn-website", ["public"])]
+
+
+async def test_context_clock_is_public_and_fresh_for_every_session_kind(app, client, frozen_clock):
+    frozen_clock.travel(datetime(2026, 11, 1, 0, 4, 5, 123456, tzinfo=UTC))
+    copy, visitor = await visitor_of(app, client)
+    agent = await mint(client, copy.owner, copy.desk_id)
+    created = await open_agent(client, copy.slug, agent, frozen_clock, mandate=False)
+    signed = turn(agent, copy.slug, created.state.session_id, frozen_clock)
+    callers = [(visitor.session_id, visitor.headers, None),
+               (signed.session_id, signed.headers, None),
+               (await owner_session_id(client, copy.owner), copy.owner, copy.desk_id)]
+    expected = {"as_of_utc": "2026-11-01T00:04:05.123456Z", "local_now": "2026-10-31T17:04-07:00",
+                "local_date": "2026-10-31", "weekday": "sat", "timezone": "America/Los_Angeles"}
+    for session_id, headers, desk_id in callers:
+        response = await get_context(client, session_id, headers, desk_id=desk_id)
+        assert response.status_code == 200, response.text
+        assert response.json()["clock"] == expected
+    frozen_clock.advance(60)
+    seen = await context_of(client, visitor.session_id, visitor.headers)
+    assert seen.clock.model_dump() == {**expected, "as_of_utc": "2026-11-01T00:05:05.123456Z",
+                                      "local_now": "2026-10-31T17:05-07:00"}
 
 
 async def get_context(client: httpx.AsyncClient, session_id: str, headers: dict[str, str], *,
@@ -117,9 +138,10 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     seen = await context_of(client, kim.session_id, kim.headers)
     assert "native.release_document" in tools(seen.tools)
     assert not {"payments.create_refund", "payments.list_charges"} & set(tools(seen.tools_declared))
-    # the owner is given the setup tools: reading the website and the owner's memory
+    # the owner is given the setup tools: website, memory and web research
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
-    assert tools(owner.tools) == tools(owner.tools_declared) == ["native.fetch_website", "native.read_memory"]
+    assert tools(owner.tools) == tools(owner.tools_declared) == [
+        "native.fetch_website", "native.read_memory", "native.web_search"]
 
     # each kind and standing is given its own tools; a kind's tools are declared in any standing
     # or status, and only that kind's
@@ -450,7 +472,8 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
 
 # The Rivera seed's price list as the catalog names it: each item's ID and title, in ID order.
 RIVERA_CATALOG = [("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
-                  ("leak", "Leak repair")]
+                  ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"),
+                  ("short-notice", "Short-notice fee")]
 
 
 def catalog_of(seen: SessionContext) -> Fact:

@@ -28,12 +28,15 @@ import schema from '../../../backend/desk/contracts.schema.json';
 
 /** Text for every row of the script, in English and Spanish where the row reads Spanish. */
 const SAMPLES: Record<RuleName, string[]> = {
+  'cards-only': ['cards-only', 'solo-tarjetas'],
+  'cards-kept-handoff': ['cards-kept-handoff', 'tarjetas-con-traspaso'],
   discount: ['Can I get 50% off if I pay cash?', '¿Me hacen un descuento?'],
   invoice: ['Can you send my invoice?', 'Necesito mi factura'],
   deposit: ['How do I pay the deposit?', 'Quiero pagar'],
   booked: ['Book the first one', 'Quiero reservar la primera'],
   book: ['Can I book Tuesday?', 'Quiero reservar'],
   price: ['How much is drain clearing?', '¿Cuánto cuesta?'],
+  area: ['Do you work in Alameda?', '¿Trabajan en Alameda?'],
   callback: ['Can you call me back?', 'Please call me tonight', 'Llámame'],
   talk: ["I'd like to talk to Maria Rivera.", 'Quiero hablar con Maria'],
   outage: ['outage'],
@@ -147,6 +150,9 @@ describe('mock payloads', () => {
     for (const { decision } of mockStore.world.decisions.values()) checks.push(['Decision', decision]);
     for (const { entry } of mockStore.world.inbox) checks.push(['DemoInboxEntry', entry]);
     for (const { view } of mockStore.world.links.values()) checks.push(['PaymentLinkView', view]);
+    // What the owner tells a Desk: the stored item the kernel answers with.
+    const item = { item_id: 'note-1', source: 'setup', title: 'A note', text: 'A note for the Desk.', label: { readers: ['owner'] } };
+    checks.push(['KnowledgeItem', await body('addKnowledge', { params: { desk_id: RIVERA.deskId }, body: { item } })]);
 
     for (const desk of mockStore.world.desks) {
       const deskId = desk.summary.desk_id;

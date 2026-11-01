@@ -3,16 +3,54 @@
    and an optional panel at the right, each scrolling on its own. The page is padded 24/40/20 (16
    at the top and sides on a phone) and its content is at most size-content wide, centered.
 
+   Skeleton mode uses these same classes on divs, leaving landmarks to the loading page.
+
    Compact: a top bar on the panel replaces the column, above the page and the panel, and Menu
    opens the sidebar as a modal sheet from the left over a dimmed page. Nothing slides; the sheet
    appears in place. */
 
 .cd-app-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100dvh;
   background: var(--bg-app);
   color: var(--text-primary);
+}
+
+/* The first keyboard stop sits over the banner and sidebar with the shared focus ring. */
+.cd-app-shell__skip {
+  position: absolute;
+  top: var(--space-8);
+  left: var(--space-8);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: var(--size-control);
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* As cd-sr-only, except keyboard focus reveals it. */
+.cd-app-shell__skip:not(:focus-visible) {
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+/* The main region takes programmatic focus; it is not a control. */
+.cd-app-shell__main:focus {
+  outline: none;
 }
 
 /* Positioned, so a panel that is leaving can sit at its right edge, out of the row (below). It is
@@ -151,6 +189,21 @@
 
 .cd-app-shell__menu:hover {
   background: var(--fill-hover);
+}
+
+/* A touch screen gets the same unseen, centred size-touch target as IconButton. The square
+   stays size-control; position: relative only frames the out-of-flow hit area. */
+@media (pointer: coarse) {
+  .cd-app-shell__menu {
+    position: relative;
+  }
+
+  .cd-app-shell__menu::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+  }
 }
 
 /* The sheet: the sidebar's column, full height at the left, over the page. */

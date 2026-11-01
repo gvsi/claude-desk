@@ -7,8 +7,13 @@ API refuses a request whose strict schemas together carry more than 24 optional 
 schema just under those limits can compile for longer than a model call may take. Each schema the API sends keeps to a
 budget well inside them (`SCHEMA_*_MAX`), counted through every `$ref` at each place it is used, and no request's
 strict schemas together pass the API's own limits (`REQUEST_*_MAX`).
+
+The API also refuses a schema whose compiled grammar is too large ("The compiled grammar is too large, which would cause
+performance issues"), which neither count sees. A setup turn has the most fields, so each one's strict schema keeps
+within `SETUP_TURN_SCHEMA_CHARS_MAX` characters and `SETUP_TURN_PROPERTIES_MAX` top-level properties.
 """
 
+import json
 from dataclasses import dataclass
 
 import pytest
@@ -23,16 +28,28 @@ from desk.api.prompts import (
     DraftedSituations,
     RuleChat,
     SetupStart,
+    SetupNextStep,
+    SetupCardAnswer,
+    SetupUnderstanding,
     Translation,
     Triage,
 )
 
 SCHEMA_OPTIONAL_MAX, SCHEMA_UNION_MAX = 8, 6
 REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
+# The longest a setup turn's strict schema may be, as `len(json.dumps(strict_schema(model)))` with json's default
+# separators (how the live probe measured it). This is a margin, not a measured limit: no refusal is known to come
+# from characters alone (the 10,895-character turn that was refused had 23 top-level properties), and a turn of
+# 8,802 characters and 20 properties compiled.
+SETUP_TURN_SCHEMA_CHARS_MAX = 9_000
+# The most top-level properties a setup turn's strict schema may have: the limit found by live probes, which the
+# character cap alone didn't catch. Turns of 21 properties were refused as too large a grammar even with every
+# description stripped (5,951 characters), and removing any one property let them compile; turns of 20 compiled.
+SETUP_TURN_PROPERTIES_MAX = 20
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
-    "setup": (SetupStart, *SETUP_TURNS.values()),       # an answer turn answers in its question's own model
+    "setup": (SetupStart, SetupUnderstanding, SetupNextStep, SetupCardAnswer, *SETUP_TURNS.values()),
     "card_draft": (DraftedRules,),
     "situations": (DraftedSituations,),
     "rules_chat": (RuleChat,),
@@ -122,6 +139,30 @@ def test_every_structured_route_is_counted():
     assert set(OUTPUTS) == ROUTES - {"conversation"}
 
 
+def test_typed_card_revisions_use_one_required_draft():
+    schema = strict_schema(SetupCardAnswer)
+    assert "revised" in schema["required"]
+    assert SetupCardAnswer.model_json_schema()["properties"]["revised"]["maxItems"] == 1
+    assert schema["properties"]["revised"]["items"]["$ref"] == "#/$defs/JobDraft"
+    assert schema["properties"]["decision"]["enum"] == ["accept", "decline", "change", "none"]
+
+
+@pytest.mark.parametrize("output", [SetupNextStep, SetupCardAnswer, *[model for key, model in SETUP_TURNS.items()
+                                                  if key in {"what_you_do", "hours_and_area", "contact_and_after_hours"}]])
+def test_setup_planning_uses_one_required_shape(output):
+    from desk.api.prompts import planning_fields
+
+    schema = strict_schema(output)
+    fields = planning_fields()
+    assert set(fields) <= set(schema["required"])
+    assert "next_topic" not in schema["properties"]
+    assert len(schema["properties"]["next"]["anyOf"]) == 4
+    variants = [schema["$defs"][ref["$ref"].split("/")[-1]] for ref in schema["properties"]["next"]["anyOf"]]
+    assert [variant["properties"]["kind"]["const"] for variant in variants] == ["topic", "job", "connector", "done"]
+    assert all(variant["additionalProperties"] is False for variant in variants)
+    assert "_draft_errors" not in schema["properties"]
+
+
 @pytest.mark.parametrize(("route", "output"), SENT, ids=[f"{route}-{output.__name__}" for route, output in SENT])
 def test_each_structured_output_keeps_to_its_budget(route, output):
     counted = complexity(strict_schema(output))
@@ -135,3 +176,21 @@ def test_no_request_passes_the_apis_limits(route, output):
     assert schemas == [strict_schema(output)]
     total = sum((complexity(schema) for schema in schemas), Complexity())
     assert total.optional <= REQUEST_OPTIONAL_MAX and total.union <= REQUEST_UNION_MAX, total
+
+
+def test_every_setup_turn_schema_is_small_enough_to_compile():
+    sizes = {key: len(json.dumps(strict_schema(model))) for key, model in SETUP_TURNS.items()}
+    for model in SETUP_TURNS.values():
+        assert request("setup", model)["output_config"]["format"]["schema"] == strict_schema(model)
+    over = {key: size for key, size in sizes.items() if size > SETUP_TURN_SCHEMA_CHARS_MAX}
+    assert not over, (f"setup turn strict schemas over {SETUP_TURN_SCHEMA_CHARS_MAX} characters, measured as "
+                      f"len(json.dumps(strict_schema(SETUP_TURNS[key]))) with default separators, as the live grammar "
+                      f"probe measures them: {over}; every turn: {sizes}")
+
+
+def test_every_setup_turn_schema_has_few_enough_properties_to_compile():
+    counts = {key: len(strict_schema(model)["properties"]) for key, model in SETUP_TURNS.items()}
+    over = {key: count for key, count in counts.items() if count > SETUP_TURN_PROPERTIES_MAX}
+    assert not over, (f"setup turn strict schemas over {SETUP_TURN_PROPERTIES_MAX} top-level properties, the limit "
+                      f"live probes found (21 refused, 20 compiled; the character cap didn't catch it): {over}; "
+                      f"every turn: {counts}")

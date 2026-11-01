@@ -33,6 +33,8 @@ export default defineConfig(async (env) =>
             plugins: [storybookTest({ configDir: path.join(dirname, '.storybook') })],
             test: {
               name: 'storybook',
+              // CI runners are slower than a laptop; each story's own waits must stay bounded well under this ceiling.
+              testTimeout: 30_000,
               browser: {
                 enabled: true,
                 headless: true,
@@ -56,6 +58,24 @@ export default defineConfig(async (env) =>
                 provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
                 viewport: { width: 1280, height: 820 },
                 instances: [{ browser: 'chromium' }],
+              },
+            },
+          },
+          {
+            extends: true,
+            // The skeleton's sweep in WebKit, the engine of every browser on an iPhone, with motion
+            // on: the band lines up across shapes by their measured offsets, which iOS Safari needs
+            // since it ignores a fixed background, and its edge draws no step.
+            test: {
+              name: 'ds-webkit',
+              include: ['src/ds/components/Skeleton/*.webkit.test.tsx'],
+              setupFiles: ['src/ds/test/browser-setup.ts'],
+              browser: {
+                enabled: true,
+                headless: true,
+                provider: playwright({ contextOptions: { reducedMotion: 'no-preference' } }),
+                viewport: { width: 1280, height: 820 },
+                instances: [{ browser: 'webkit' }],
               },
             },
           },

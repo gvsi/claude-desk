@@ -19,7 +19,7 @@
 - As a sheet it asks `AppShell` to make everything else inert, through `AppShellPanelContext`, so render it as the shell's `panel`. Focus moves to its composer, and stays inside it: Tab and Shift+Tab wrap, and a focus that lands outside it, by a key or a script, goes back to the last control inside, with or without a shell around it. When the screen removes it with focus inside, focus returns to what opened it.
 - If the window widens to 1024 px or more while it is open, it is a panel beside the page again, the page is live, and focus stays where it is; narrowing again makes it a sheet again. It is the same element at every width, so crossing 1024 px keeps the composer's draft.
 - A header: "Ask Claude" (`h2`, `.cd-type-section`) and an `IconButton` "Close" calling `onClose`.
-- The conversation in a `role="log"` region with `aria-live="polite"`, so replies are announced: the owner's words (a `VisitorMessage` bubble, `text-primary` on `fill-bubble` over `bg-panel`, 11.0:1), Claude's serif replies (`ClaudeMessage`) and their cards, 16 px apart. It scrolls between the header and the composer. While `busy`, `WritingIndicator` says "Claude is writing" at its end; no draft is ever shown.
+- The conversation in a `role="log"` region with `aria-live="polite"`, so replies are announced: the owner's words (a `VisitorMessage` bubble, `text-primary` on `fill-bubble` over `bg-panel`, 11.0:1), Claude's serif replies (`ClaudeMessage`) and their cards, 16 px apart. It scrolls between the header and the composer. While `busy`, Claude's writing dots (`WritingIndicator`) show at its end, with "Claude is writing" for screen readers; no draft is ever shown.
 - An owner `Composer` at the bottom, labelled "Ask Claude", with the placeholder "Ask Claude"; it calls `onSend` with the trimmed words.
 - Escape anywhere inside the panel calls `onClose`, unless something inside (an open menu) handled it first. Beside the page, the screen returns focus to what opened the panel; as a sheet, the panel and the shell do.
 
@@ -35,3 +35,9 @@
 ## What it returns focus to
 
 As a sheet, the panel notes what opened it when it appears: the control that had focus outside it, or else the control the click that opened it landed on, since Safari focuses no button a click presses and leaves focus on the page's body. A capture listener on the document notes each click's control for that click's task only (`clickedControl.ts`), so a panel that opens later never takes an old click for its opener.
+
+## Extra exports
+
+| Export | What it is |
+| --- | --- |
+| `useAskClaudeIsSheet()` | Whether the panel is a modal sheet over the page at this window's width (under 1024 px), rather than beside it, kept up to date as the width crosses that breakpoint. The panel uses it to choose; a page uses it to wait for the sheet to close before showing something the sheet would cover, as Rules does with a confirmed change. |

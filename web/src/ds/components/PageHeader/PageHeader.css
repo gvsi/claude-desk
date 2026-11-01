@@ -68,8 +68,8 @@
     grid-column: 2;
   }
 
-  /* The Rules page's preset menu takes a line of its own, 16 px under the title or the subtitle,
-     at the header's full width, and what it holds fills it. */
+  /* The Rules page's actions (See all rules and the preset menu) share a line, 16 px under
+     the title or subtitle, at the header's full width. The consumer sizes each action. */
   .cd-page-header--actions-below .cd-page-header__actions {
     grid-row: auto;
     grid-column: 1 / -1;
@@ -83,4 +83,10 @@
   .cd-page-header--no-phone-subtitle .cd-page-header__subtitle {
     display: none;
   }
+}
+
+.cd-page-header .cd-page-header__phone-line { display: none; }
+@media (max-width: 639.98px) {
+  .cd-page-header .cd-page-header__phone-line { display: flex; }
+  .cd-page-header .cd-page-header__wide-line { display: none; }
 }

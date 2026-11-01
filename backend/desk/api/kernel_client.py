@@ -34,6 +34,7 @@ from desk.kernel_api import KERNEL_ROUTES, KernelError, WhoAmI
 
 DEFAULT_TIMEOUT_S = 6.0      # above the reviewer's 4 s
 PROVING_TIMEOUT_S = 60.0     # compiling and proving a policy version
+REPLY_CHECK_TIMEOUT_S = 12.0  # one 8 s soft check, plus rendering, database reads and signing
 PROVING_ROUTES = frozenset({"POST /policy/draft", "POST /tools/confirm", "POST /policy/{version}/probe"})
 # Routes whose answer is bytes, not JSON: fetched only with stream(), since a document link is single use.
 STREAM_ROUTES = frozenset({"GET /document_links/{token}"})
@@ -51,9 +52,10 @@ KERNEL_FAULTS = frozenset({"seed_unproved", "internal"})             # treated a
 class KernelFailed(Exception):
     """The kernel refused the call with a 4xx `KernelError`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, *, detail: dict[str, list[str]] | None = None):
         super().__init__(f"kernel answered {status} {code}")
         self.status, self.code = status, code
+        self.detail = detail or {}
 
     @property
     def ends_session(self) -> bool:
@@ -89,7 +91,11 @@ def _failure(route: str, response: httpx.Response) -> KernelFailed | KernelUnava
     except ValidationError:
         code = None
     if response.is_client_error and code is not None and code not in KERNEL_FAULTS:
-        return KernelFailed(response.status_code, code)
+        try:
+            detail = TypeAdapter(dict[str, list[str]]).validate_python(response.json().get("detail", {}))
+        except ValidationError:
+            detail = {}
+        return KernelFailed(response.status_code, code, detail=detail)
     return KernelUnavailable(route, response.status_code, code if code in KERNEL_FAULTS else None)
 
 
@@ -219,6 +225,8 @@ class KernelHttp:
                                           timeout=self._timeout(route))
 
     def _timeout(self, route: str) -> float:
+        if route == "POST /check_reply":
+            return REPLY_CHECK_TIMEOUT_S
         return PROVING_TIMEOUT_S if route in PROVING_ROUTES else self._timeout_s
 
     async def _send(self, route: str, request: httpx.Request, *, stream: bool = False) -> httpx.Response:

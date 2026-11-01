@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from datetime import date as LocalDate
 from functools import cache
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 from zoneinfo import available_timezones
 
 from fastapi.routing import APIRoute
@@ -28,6 +28,10 @@ from desk.api.prompts import (
     CARD_ID_MAX_LENGTH,
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
+    Choice,
+    Autonomy,
+    Cents,
+    ProposalCard,
     PlannedOutcome,
     DemoTask,
     QuestionKey,
@@ -46,6 +50,7 @@ from desk.contracts import (
     DecisionState,
     HoursWindow,
     KnowledgeItem,
+    KnowledgeSource,
     Outcome,
     PaymentLinkState,
     PolicyVersion,
@@ -60,7 +65,7 @@ from desk.contracts import (
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
-from desk.kernel_api import Health
+from desk.kernel_api import Health, ToolPin, ToolsConfirmRequest, each_tool_once
 from desk.presets import PresetName
 
 
@@ -165,6 +170,7 @@ class StoppedDraft(BaseModel):
 class OwnerTranscriptItem(TranscriptItem):
     """The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
     draft of Claude's the reply check stopped.
+    `owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.
 
     `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
     it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
@@ -179,6 +185,9 @@ class OwnerTranscriptItem(TranscriptItem):
     owner_translation: str | None
     triage: Triage | None
     stopped_draft: StoppedDraft | None
+    owner_plain: str | None = Field(description=(
+        "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; "
+        "never part of the stored or signed visitor event."))
 
 
 # The visitor's chat (Task 7) ---------------------------------------------------------------------------------
@@ -332,20 +341,32 @@ class NeedsYouSession(BaseModel):
 
 
 class Handoff(BaseModel):
-    """An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
-    typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one."""
+    """A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:
+
+    - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
+      (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+    - `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite
+      fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
+      no call back was promised.
+
+    A null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens
+    none in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A
+    call-back request closes the session's open card handoff (it reads `done` from then on) and opens its own
+    `callback` row with a new ID."""
 
     handoff_id: str
     session_id: str
     reason: str
     callback_window: str | None
     status: Literal["open", "done"]
+    kind: Literal["callback", "card"]
 
 
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
-    an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted)."""
+    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
+    thing they wrote (untrusted)."""
 
     decision: Decision | None
     held_by: str | None
@@ -413,23 +434,34 @@ class OwnerMessageIn(BaseModel):
     kind: Literal["say", "whisper"]
 
 
-class BriefingItem(BaseModel):
-    """One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
-    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
-    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."""
+RefusalCause = Literal[
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+    "agent_limit", "other_copy", "no_rule",
+]
 
-    kind: Literal["blocked", "booking", "lead", "answer"]
+
+class BriefingItem(BaseModel):
+    """One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
+    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
+    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+    and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+    refusals. Stopped drafts stay on Safety and out of the briefing."""
+
+    kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
     session_id: str | None
     display_name: str | None
     ref_id: str
     line: str | None
+    cause: RefusalCause | None
 
 
 class BriefingNewest(BaseModel):
-    """The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."""
+    """The newest refused request, booking, and lead or answer (the lead when both share a time); None when none."""
 
-    blocked: BriefingItem | None
+    turned_down: BriefingItem | None
     booking: BriefingItem | None
     lead_or_answer: BriefingItem | None
 
@@ -442,7 +474,7 @@ class Briefing(BaseModel):
     conversations: int
     bookings: int
     leads: int
-    blocked: int
+    turned_down: int
     total: int
     newest: BriefingNewest
 
@@ -469,7 +501,7 @@ class ThisWeek(BaseModel):
     `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
     booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
     one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
-    Safety lists Claude's stopped drafts too, without counting them; the briefing's blocked items keep the drafts."""
+    Safety lists Claude's stopped drafts too, without counting them; the briefing omits them."""
 
     timezone: str
     start: LocalDate
@@ -503,14 +535,6 @@ class Today(BaseModel):
     briefing: Briefing
     this_week: ThisWeek
     recorded_history: RecordedHistory
-
-
-RefusalCause = Literal[
-    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
-    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
-    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
-    "agent_limit", "other_copy", "no_rule",
-]
 
 
 class Attempt(BaseModel):
@@ -597,27 +621,125 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
-    (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+    Naming the ask prevents a repeated answer from answering the next one."""
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey
+    question: QuestionKey | None = None
+    card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+    @model_validator(mode="after")
+    def one_ask(self) -> "SetupAnswerIn":
+        if (self.question is None) == (self.card is None):
+            raise ValueError("exactly one of question and card is required")
+        return self
+
+
+class SetupProposalIn(BaseModel):
+    """The owner's decision on a setup proposal, with optional changes when accepting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60,
+                                            pattern=r"^[^\n\r]*$")] | None = None
+    amount_cents: Cents | None = None
+    autonomy: Autonomy | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def one_line_title(cls, value: object) -> object:
+        if isinstance(value, str) and ("\n" in value or "\r" in value):
+            raise ValueError("proposal title must be one line")
+        return value
+
+    @model_validator(mode="after")
+    def accepting_changes(self) -> "SetupProposalIn":
+        changes = self.model_fields_set - {"accept"}
+        if changes and (not self.accept or any(getattr(self, name) is None for name in changes)):
+            raise ValueError("proposal changes require accepting and a value")
+        return self
+
+
+class SetupSuggestionsIn(BaseModel):
+    """Finish setup questions with the current suggestions; no additional answers are supplied."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`)."""
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+    only to a card message, with role `claude` and empty text."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
+    choices: list[Choice] = []
+    card: ProposalCard | None = None
+
+
+class SetupPublicLine(BaseModel):
+    """A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+    public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+    off the charter until the owner rewords it."""
+
+    key: str
+    text: str
+    source: Literal["owner", "suggested"]
+    editable: bool
+    held: bool
+
+
+class SetupPublicHours(BaseModel):
+    source: Literal["owner", "suggested"]
+    windows: list[HoursWindow]
+
+
+class SetupPublicPriceItem(BaseModel):
+    item_id: str
+    title: str
+    unit_cents: int
+
+
+class SetupPublicPrices(BaseModel):
+    source: Literal["owner", "suggested"]
+    items: list[SetupPublicPriceItem]
+
+
+class SetupPublicLines(BaseModel):
+    revision: str
+    lines: list[SetupPublicLine]
+    hours: SetupPublicHours | None
+    prices: SetupPublicPrices | None
+
+
+class SetupPublicLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+
+
+class SetupPublicLineError(BaseModel):
+    error: Literal["line_refused", "not_editable", "not_suggested"]
+    key: str | None = None
+    reason: list[str] | None = None
+
+
+class SetupPublicLinesConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keys: Annotated[list[str], Field(min_length=1)]
+    revision: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
-    before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+    before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
+    conversation so far. Its messages start at Claude's consent
     question: the owner's opening description isn't shown back to them."""
 
     interview_id: str
@@ -626,6 +748,11 @@ class SetupState(BaseModel):
     step: SetupStep
     consent: bool | None
     question: QuestionKey | None
+    pending_card: str | None = None
+    busy: bool = False
+    held_policy_keys: list[str] = Field(description="Charter claim keys, such as a policy line or the public contact, "
+                                       "withheld by the kernel's public-text checks; empty when nothing was held at "
+                                       "the latest charter write.")
     messages: list[SetupMessage]
 
 
@@ -875,6 +1002,20 @@ class DraftAddIn(BaseModel):
     add: list[OwnerCard] = Field(min_length=1, max_length=OWNER_CARDS_MAX)
 
 
+class ToolsConfirmIn(BaseModel):
+    """The shared batch review body; the checked Desk ID comes from the route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: Annotated[list[ToolPin], ToolsConfirmRequest.model_fields["tools"]]
+    enable: bool
+
+    @model_validator(mode="after")
+    def _each_tool_once(self) -> Self:
+        each_tool_once(self.tools)
+        return self
+
+
 class ConfirmRulesIn(BaseModel):
     """`POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms."""
 
@@ -956,6 +1097,19 @@ class SimulateChangeIn(BaseModel):
     tool: ToolName
 
 
+class KnowledgeRow(BaseModel):
+    """An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+    masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+    without a timestamp. Every field is always sent."""
+
+    item_id: str
+    title: str | None
+    text: str | None
+    readers: list[str]
+    source: KnowledgeSource
+    created_at: AwareDatetime | None
+
+
 class KnowledgeIn(BaseModel):
     """`POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
     text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an
@@ -987,6 +1141,8 @@ class ToolDecisionRow(BaseModel):
     outcome: Outcome
     state: DecisionState
     reason_plain: str
+    owner_plain: str | None = Field(description=(
+        "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."))
     created_at: AwareDatetime
     ledger_seq: int
     replayed: bool

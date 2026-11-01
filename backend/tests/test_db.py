@@ -886,6 +886,50 @@ def test_the_decision_policy_ids_revision_goes_down_and_up(scratch):
     assert view() == kept
 
 
+KNOWLEDGE_CREATED_AT_REVISION = "kernel_ro_knowledge_created_at"
+KNOWLEDGE_BEFORE_CREATED_AT = ("item_id", "copy_id", "desk_id", "source", "title", "text", "readers")
+
+
+def test_the_knowledge_created_at_revision_goes_down_and_up(scratch):
+    """Only the last view column and its owner's column grant change; masking, ownership and isolation stay."""
+    admin = scratch.conn
+
+    def view() -> tuple:
+        owner, options, definition = admin.execute(
+            "SELECT pg_get_userbyid(relowner), reloptions, pg_get_viewdef(oid) FROM pg_class"
+            " WHERE oid = 'kernel_ro.knowledge_items'::regclass").fetchone()
+        others = admin.execute(
+            "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
+            " WHERE c.oid = 'kernel_ro.knowledge_items'::regclass AND a.grantee <> c.relowner").fetchall()
+        filtered = "NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in definition
+        return owner, "security_barrier=true" in (options or []), filtered, others, definition
+
+    def owner_reads() -> set[str]:
+        return {column for column in columns(admin, "kernel", "knowledge_items") if admin.execute(
+            "SELECT has_column_privilege('desk_ro_owner', 'kernel.knowledge_items', %s, 'SELECT')",
+            (column,)).fetchone()[0]}
+
+    added = datetime(2026, 10, 31, 12, tzinfo=UTC)
+    admin.execute("INSERT INTO kernel.knowledge_items (desk_id, item_id, copy_id, source, title, text, created_at)"
+                  " VALUES ('desk-added', 'item-added', 'copy-added', 'upload', 'Title', 'Text', %s)", (added,))
+    kept = ("desk_ro_owner", True, True, [("desk_api", "SELECT")])
+    upgraded_definition = view()[-1]
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(KNOWLEDGE_CREATED_AT_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert columns(admin, "kernel_ro", "knowledge_items") == list(KNOWLEDGE_BEFORE_CREATED_AT)
+        assert owner_reads() == set(KNOWLEDGE_BEFORE_CREATED_AT)
+        assert view()[:-1] == kept
+        assert view()[-1] == upgraded_definition.replace(",\n    created_at", "")
+        assert admin.execute("SELECT created_at FROM kernel.knowledge_items WHERE item_id = 'item-added'").fetchone() == (
+            added,)
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert columns(admin, "kernel_ro", "knowledge_items") == [*KNOWLEDGE_BEFORE_CREATED_AT, "created_at"]
+    assert owner_reads() == {*KNOWLEDGE_BEFORE_CREATED_AT, "created_at"}
+    assert view() == (*kept, upgraded_definition)
+
+
 def test_no_downgrade_deletes_from_a_kernel_table():
     """Every kernel table forces row security, on its owner too: on a managed Postgres, whose
     migration role neither is a superuser nor bypasses row security, a DELETE in a downgrade sees no
@@ -917,6 +961,39 @@ class StatementsOn:
 
     def execute(self, statement: str) -> None:
         self.conn.execute(statement)
+
+
+def test_desk_memory_migration_goes_down_and_up_as_non_superuser(scratch, monkeypatch):
+    script = ScriptDirectory.from_config(alembic_config())
+    module = script.get_revision("desk_simulated_memory").module
+    assert module.down_revision == "0013_decision_owner_plain"
+    admin = scratch.conn
+    assert "simulated_memory" in columns(admin, "kernel", "desks")
+    assert "simulated_memory" not in columns(admin, "kernel_ro", "desks")
+    assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.desks',"
+                            " 'simulated_memory', 'SELECT')").fetchone()[0]
+    scratch.migrate(command.downgrade, module.down_revision)
+    try:
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    monkeypatch.setattr(module, "op", StatementsOn(admin))
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
+                      " VALUES ('desk-memory', 'copy-memory', 'biz', 'CPA', 'memory-migrate')")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
+        admin.execute("CREATE ROLE desk_memory_migrator NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE, CREATE ON SCHEMA kernel TO desk_memory_migrator")
+        admin.execute("ALTER TABLE kernel.desks OWNER TO desk_memory_migrator")
+        admin.execute("SET LOCAL ROLE desk_memory_migrator")
+        assert admin.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user").fetchone() == (False, False)
+        module.downgrade()
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+        module.upgrade()
+        module.upgrade()  # safe to run over its own column, like the recent revisions
+        assert "simulated_memory" in columns(admin, "kernel", "desks")
+        admin.execute("RESET ROLE")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
 
 
 def test_agent_tables_go_down_and_up_under_an_owner_bound_by_row_security(scratch, monkeypatch):
@@ -1249,6 +1326,41 @@ def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
     assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
 
 
+OWNER_PLAIN_REVISION = "0013_decision_owner_plain"
+
+
+def test_a_decision_from_before_the_owner_plain_revision_has_no_owner_line(admin, api, monkeypatch):
+    """A decision written before the revision reads with no owner line (NULL), as every state but a
+    refusal at execution does; the column stays nullable, joins no kernel_ro view (the API reads it
+    only through the owner's kernel reads), and the revision runs again over what it added."""
+    revision = ScriptDirectory.from_config(alembic_config()).get_revision(OWNER_PLAIN_REVISION).module
+    # Exercise the revision's SQL in a rolled-back transaction on this suite's database alone.
+    # No scratch database is needed for this column-only migration.
+    monkeypatch.setattr(revision.op, "execute", admin.execute)
+    with admin.transaction(force_rollback=True):
+        admin.execute("SET LOCAL lock_timeout = '5s'")
+        revision.downgrade()
+        assert "owner_plain" not in columns(admin, "kernel", "decisions")
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES ('dec-before-owner-plain', 'copy-owner-plain', 'desk-owner-plain', 'session-owner-plain', 0,"
+            " 'call-1', 'c', 'native.quote', 'hold', 'refused_at_execution', 1, 'r', 'v', now(), 1)")
+        revision.upgrade()
+        assert admin.execute("SELECT owner_plain FROM kernel.decisions"
+                             " WHERE decision_id = 'dec-before-owner-plain'").fetchone() == (None,)
+        assert nullable_columns(admin, "kernel", "decisions")["owner_plain"] is True
+        assert "owner_plain" not in columns(admin, "kernel_ro", "decisions")
+        revision.upgrade()                                # the revision runs again over what it added
+        assert columns(admin, "kernel", "decisions").count("owner_plain") == 1
+    readable = columns(api, "kernel_ro", "decisions")
+    assert "owner_plain" not in readable
+    assert set(readable) == set(KERNEL_RO_COLUMNS["decisions"])
+    api.execute("SELECT " + ", ".join(KERNEL_RO_COLUMNS["decisions"]) + " FROM kernel_ro.decisions LIMIT 0")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="permission denied"):
+        api.execute("SELECT kernel.decisions.owner_plain FROM kernel.decisions LIMIT 0")
+
+
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
     savepoint = session.begin_nested()
     session.add(row)
@@ -1415,7 +1527,7 @@ def test_kernel_ro_views_run_as_a_role_bound_by_row_security(admin):
 
 def test_business_tools_view_migration_goes_down_and_up(scratch):
     admin = scratch.conn
-    scratch.migrate(command.downgrade, HANDOFF_KIND_REVISION)
+    scratch.migrate(command.downgrade, "desk_simulated_memory")
     try:
         assert columns(admin, "kernel_ro", "tools")[-1] == "review_reason"
         assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
@@ -1589,7 +1701,8 @@ def committed_copies(admin):
                           (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
         yield copies
     finally:
-        for table in ("decisions", "document_links", "documents", "sessions", "desks", "copies"):
+        for table in ("knowledge_items", "ledger_entries", "decisions", "document_links", "documents", "sessions",
+                      "desks", "copies"):
             admin.execute(f"DELETE FROM kernel.{table} WHERE copy_id = ANY(%s)", (list(copies),))
 
 
@@ -1633,6 +1746,50 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
             session.rollback()
     finally:
         engine.dispose()
+
+
+def test_api_reads_knowledge_created_at_through_the_view_alone(admin, committed_copies, api):
+    """Only the view exposes when knowledge was added, within its copy and with the latest ledger masking intact."""
+    assert columns(admin, "kernel_ro", "knowledge_items") == [
+        "item_id", "copy_id", "desk_id", "source", "title", "text", "readers", "created_at"]
+    view_acl = admin.execute(
+        "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
+        " WHERE c.oid = 'kernel_ro.knowledge_items'::regclass AND a.grantee <> c.relowner").fetchall()
+    assert view_acl == [("desk_api", "SELECT")]
+    assert admin.execute("SELECT count(*) FROM pg_attribute WHERE attrelid = 'kernel_ro.knowledge_items'::regclass"
+                         " AND attacl IS NOT NULL").fetchone() == (0,)
+    column_acl = admin.execute(
+        "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_attribute t, aclexplode(t.attacl) a"
+        " WHERE t.attrelid = 'kernel.knowledge_items'::regclass AND t.attname = 'created_at'").fetchall()
+    assert column_acl == [("desk_ro_owner", "SELECT")]
+    added = datetime(2026, 10, 31, 12, tzinfo=UTC)
+    for copy_id in committed_copies:
+        for item_id in ("ordinary", "forced", "unledgered"):
+            admin.execute(
+                "INSERT INTO kernel.knowledge_items (item_id, copy_id, desk_id, source, title, text, readers, created_at)"
+                " VALUES (%s, %s, %s, 'upload', 'Title', 'Text', '[\"owner\"]', %s)",
+                (item_id, copy_id, f"desk-{copy_id}", added))
+        # Opposite older flags ensure masking follows the latest entry, not just any matching entry.
+        for seq, (item_id, forced) in enumerate((("ordinary", True), ("forced", False),
+                                                ("ordinary", False), ("forced", True)), start=1):
+            event = {"kind": "desk_data", "summary": {
+                "part": "knowledge", "item_id": item_id, "owner_only_forced": forced}}
+            admin.execute(
+                "INSERT INTO kernel.ledger_entries (desk_id, seq, copy_id, prev_hash, created_at, event, hash,"
+                " signature, key_id, envelope_jcs) VALUES (%s, %s, %s, '', %s, %s, '', '', '', '')",
+                (f"desk-{copy_id}", seq, copy_id, added.isoformat(), Jsonb(event)))
+    assert visible(api, "kernel_ro.knowledge_items", committed_copies) == set()
+    for copy_id in committed_copies:
+        with api.transaction(force_rollback=True):
+            api.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_id,))
+            rows = api.execute(
+                "SELECT copy_id, item_id, title, text, created_at FROM kernel_ro.knowledge_items"
+                " WHERE copy_id = ANY(%s) ORDER BY item_id", (list(committed_copies),)).fetchall()
+            assert rows == [(copy_id, "forced", None, None, added),
+                            (copy_id, "ordinary", "Title", "Text", added),
+                            (copy_id, "unledgered", None, None, added)]
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), api.transaction():
+                api.execute("SELECT created_at FROM kernel.knowledge_items")
 
 
 def test_api_reads_the_deciding_policies_through_the_view_alone(admin, committed_copies, api):

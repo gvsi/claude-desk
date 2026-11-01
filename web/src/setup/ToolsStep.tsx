@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import type { RuleCard, ToolName } from '../api/contracts.ts';
+import type { RuleCard } from '../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
-import type { ConfirmToolBody, SetupState, ToolRow } from '../api/views.ts';
+import type { BusinessToolDef, ConfirmToolBody, SetupState, ToolRow } from '../api/views.ts';
 import {
   Button,
   ConnectorReview,
@@ -12,18 +12,22 @@ import {
   Notice,
   PageHeader,
   SetupToolsList,
+  SkeletonScreen,
   describeEffects,
   rulesForTool,
   type ReviewToolView,
   type RuleMode,
   type SetupToolsRow,
+  type SetupJobRow,
 } from '../ds/index.ts';
-import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOn, isBusinessToolName, isCatalogTool, toolDisplayName, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
+import { businessGlyph, businessLine, businessOwnerLine, businessRows, isBusinessDef } from '../owner/connectors/businessWords.ts';
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY } from './copy.ts';
 import { aroundBusiness } from './shared.ts';
+import { ToolsListSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.tools;
 
@@ -36,10 +40,11 @@ export interface ToolsStepProps {
 }
 
 /** What the step shows: the list, one connector's review, or the change that turns it on. */
+type ReviewKey = ConnectorKey | `desk.${string}`;
 type View =
   | { kind: 'list' }
-  | { kind: 'review'; key: ConnectorKey }
-  | { kind: 'confirm'; key: ConnectorKey; draft: RuleDraft; batch: ConfirmToolBody; rows: ToolRow[]; changed: boolean };
+  | { kind: 'review'; key: ReviewKey }
+  | { kind: 'confirm'; key: ReviewKey; draft: RuleDraft; batch: ConfirmToolBody; rows: ToolRow[]; changed: boolean };
 
 /** The mock payments server, the one connection setup can add. */
 const MOCK_PAYMENTS: ConnectorKey = 'stripe';
@@ -50,7 +55,7 @@ const MOCK_PAYMENTS: ConnectorKey = 'stripe';
  */
 function toolsToTurnOn(connector: CatalogConnector, rows: readonly ToolRow[]): ToolRow[] {
   return rows.filter((row) => {
-    if (!connector.tools.includes(row.tool) || row.definition_sha256 === null) return false;
+    if (!isCatalogTool(row.tool) || !connector.tools.includes(row.tool) || row.definition_sha256 === null) return false;
     const state = toolState(row);
     return state === 'not_on' || state === 'off';
   });
@@ -66,35 +71,53 @@ function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
 }
 
 /** A tool as its review shows it: its name, what it does and touches, its outcome and the rules of yours that cover it. */
-function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
-  const words = TOOL_NAMES[row.tool as ToolName];
+export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
+  const business = businessTools([row]);
+  const name = toolDisplayName(row.tool, business) ?? 'A connected tool';
+  const line = row.source === 'business'
+    ? businessOwnerLine(row.business?.config) : (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
   const covering = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.is_default !== true);
   return {
     key: row.tool,
-    name: words.name,
-    description: `${words.line} ${describeEffects(row.effects, row.reversible)}`,
+    name,
+    description: [line, describeEffects(row.effects, row.reversible)].filter(Boolean).join(' '),
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
 }
 
+/** Setup supports new jobs at their listed hash; changed, delisted and turned-off jobs stay out. */
+function isSetupJob(row: ToolRow): row is ToolRow & { tool: `desk.${string}`; business: BusinessToolDef } {
+  return row !== null && typeof row === 'object' && row.source === 'business' && typeof row.tool === 'string' && isBusinessToolName(row.tool)
+    && isBusinessDef(row.business) && (toolState(row) === 'on' || toolState(row) === 'not_on')
+    && typeof row.description_confirmed === 'string' && row.description_confirmed.trim() !== ''
+    && typeof row.definition_sha256 === 'string' && /^[a-f0-9]{64}$/.test(row.definition_sha256)
+    && typeof row.reversible === 'boolean' && Array.isArray(row.effects)
+    && row.effects.every((effect) => ['read', 'private_data', 'change', 'charge', 'pay_out', 'send_message'].includes(effect));
+}
+
 /**
  * The new Desk's connectors as the design system's setup tools list draws them (N-R2-Setup-05),
  * each row read through `toolState`: Verification "Always on"; a connector with a tool on, or
- * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for Stripe once
- * it can be connected, its tool count and "Connect". A built-in connector with no tools listed, and
- * Google Calendar, which has none, aren't shown.
+ * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for an app
+ * already connected (Stripe once the setup chat or this step has connected it, so it can't be
+ * connected again), its tool count, "Needs review" and "Review" (N-Live-REV-560); Stripe while it
+ * can still be connected, its tool count and "Connect". Both of Stripe's buttons open the same
+ * review. A built-in connector with no tools listed, and Google Calendar, which has none, aren't shown.
  */
 function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (key: ConnectorKey) => void) {
   const builtIn: SetupToolsRow[] = [];
   const external: SetupToolsRow[] = [];
   for (const connector of CONNECTORS) {
     const outside = connector.view.source.kind === 'external';
-    const listed = rows.some((row) => connector.tools.includes(row.tool));
+    const listed = rows.some((row) => isCatalogTool(row.tool) && connector.tools.includes(row.tool));
+    const canConnect = connector.key === MOCK_PAYMENTS && connectable;
     let row: SetupToolsRow | null = null;
     if (connector.key === 'verification' && listed) row = { connector: connector.view, state: 'always_on' };
     else if (connectorOn(connector, rows)) row = { connector: connector.view, state: 'on' };
-    else if (listed || (connector.key === MOCK_PAYMENTS && connectable)) {
+    else if (outside && listed && !canConnect) {
+      row = { connector: connector.view, state: 'needs_review', tools: connector.tools.length, onReview: () => onChoose(connector.key) };
+    } else if (listed || canConnect) {
       row = { connector: connector.view, state: 'off', onChoose: () => onChoose(connector.key), ...(outside ? { tools: connector.tools.length } : {}) };
     }
     if (row !== null) (outside ? external : builtIn).push(row);
@@ -104,10 +127,11 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
 
 /**
  * "What Claude can use": the new Desk's connectors from `setupTools`, grouped by the catalog. A
- * built-in connector that isn't on, or the mock payments server (connected first), opens its review
- * (`ConnectorReview`); "Turn it on" sends one `confirmTool` for its tools, each at the hash it was
- * listed at, and its draft shows inline; "Confirm and turn on" confirms it, and only then, read
- * again, do the tools read "On". "Continue" goes on to the rules.
+ * built-in connector that isn't on, or the mock payments server (connected first while it can
+ * be, or already connected and waiting for review), opens its review (`ConnectorReview`); "Turn it
+ * on" sends one `confirmTool` for its tools, each at the hash it was listed at, and its draft shows
+ * inline; "Confirm and turn on" confirms it, and only then, read again, do the tools read "On".
+ * "Continue" goes on to the rules.
  */
 export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const queryClient = useQueryClient();
@@ -122,7 +146,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const [turningOn, setTurningOn] = useState(false);
   const [reviewError, setReviewError] = useState<string | undefined>(undefined);
 
-  const rows = tools.data?.tools ?? [];
+  const rows = (tools.data?.tools ?? []).filter((row) =>
+    row !== null && typeof row === 'object' && typeof row.tool === 'string' && (row.source !== 'business' || isSetupJob(row)),
+  );
+  const jobs = rows.filter(isSetupJob);
 
   const choose = async (key: ConnectorKey) => {
     setListError(null);
@@ -156,7 +183,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     await queryClient.invalidateQueries({ queryKey: toolsKey });
   };
 
-  const turnOn = async (key: ConnectorKey, turnedOn: ToolRow[]) => {
+  const turnOn = async (key: ReviewKey, turnedOn: ToolRow[]) => {
     const batch: ConfirmToolBody = {
       tools: turnedOn.map((row) => ({ tool: row.tool, definition_sha256: row.definition_sha256 ?? '' })),
       enable: true,
@@ -177,7 +204,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
 
   if (view.kind === 'confirm') {
     const connector = connectorByKey(view.key);
-    const name = connector?.view.name ?? '';
+    const name = toolDisplayName(view.key, businessTools(view.rows)) ?? connector?.view.name ?? 'A connected tool';
     // The change applies with `confirmRules`; when the rules changed since it was drafted, the
     // tools are asked for once more, and the new draft is shown to confirm.
     const confirm = async () => {
@@ -210,7 +237,6 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   if (view.kind === 'review') {
     const connector = connectorByKey(view.key);
     const cards = rules.data?.active.cards;
-    if (connector === null) return null;
     if (cards === undefined || tools.data === undefined) {
       const failed = rules.isError ? rules.error : tools.isError ? tools.error : null;
       return failed === null ? (
@@ -228,6 +254,23 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
         </Notice>
       );
     }
+    const job = jobs.find((row) => row.tool === view.key);
+    if (job) {
+      const tool = reviewTool(job, cards);
+      const glyph = businessGlyph(job.business.config);
+      if (glyph === null) return null;
+      return (
+        <ConnectorReview
+          job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
+          tools={[tool]}
+          onTurnOn={() => void turnOn(view.key, [job])}
+          onCancel={() => setView({ kind: 'list' })}
+          pending={turningOn}
+          {...(reviewError === undefined ? {} : { error: reviewError })}
+        />
+      );
+    }
+    if (connector === null) return null;
     const turnedOn = toolsToTurnOn(connector, rows);
     return (
       <ConnectorReview
@@ -254,19 +297,33 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       >
         {ownerErrorCopy(tools.error)}
       </Notice>
-    ) : (
-      <LoadingLine>{copy.loading}</LoadingLine>
-    );
+    ) : null;
   } else if (rows.length === 0 && tools.data.connectable.length === 0) {
     list = <EmptyState title={copy.empty} body={copy.emptyBody} />;
   } else {
-    list = <SetupToolsList {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void choose(key))} />;
+    const jobRows: SetupJobRow[] = jobs.flatMap((row) => {
+      const line = businessLine(row.business);
+      const glyph = businessGlyph(row.business.config);
+      if (line === null || glyph === null) return [];
+      const title = toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool';
+      const job = { key: row.tool, title, line, glyph };
+      return [toolState(row) === 'on' ? { ...job, state: 'on' } : {
+        ...job, state: 'needs_review', onReview: () => {
+          setReviewError(undefined);
+          setView({ kind: 'review', key: row.tool });
+        },
+      }];
+    });
+    list = <SetupToolsList jobs={jobRows} {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void choose(key))} />;
   }
 
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={aroundBusiness(copy.subtitle, business)} />
-      {list}
+      {/* While the tools are read, the list draws as its shapes; "Continue" stays real under it. */}
+      <SkeletonScreen loading={tools.data === undefined && !tools.isError} status={copy.loading} skeleton={<ToolsListSkeleton />} className="cd-setup-step__region">
+        {list}
+      </SkeletonScreen>
       {connecting ? <LoadingLine>{copy.connecting}</LoadingLine> : null}
       {listError === null ? null : <Notice tone="error">{listError}</Notice>}
       <div className="cd-setup-step__actions">

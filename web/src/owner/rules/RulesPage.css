@@ -1,8 +1,8 @@
-/* RulesPage (N-Conn-17-Presets, N-Conn-22-Phone-Presets): the header with "Start from a preset" at
-   the right of the title's line, 4 px under its top; the owner composer 20 px under it and its
-   suggestions 10 px under the box; the Desk's connectors 20 px under them; then the always-on
-   rules. On a phone the parts are 16 px apart, the composer is drawn alone (no helper, no
-   suggestions), and the preset menu takes a line of its own under the title. */
+/* RulesPage (N-Conn-17-Presets, N-Conn-22-Phone-Presets): the header with "See all rules" before
+   "Start from a preset" at the right of the title's line, 4 px under its top; the owner composer
+   20 px under it and its suggestions 10 px under the box; the Desk's connectors 20 px under them;
+   then the always-on rules. On a phone the parts are 16 px apart, the composer is drawn alone (no helper, no
+   suggestions), and both header actions share a line under the title. */
 
 .cd-rules {
   display: flex;
@@ -12,18 +12,35 @@
 }
 
 .cd-rules__header .cd-page-header__actions {
+  gap: var(--space-16);
   padding-top: var(--space-4);
 }
 
-/* The title and subtitle ask for half a reading measure beside the menu, not their whole line, so
-   with Ask Claude open beside the page the menu stays at the right of the title's line while the
-   column has room for both (N-Conn-12-Chat, and at 1280 px). In a narrower column the menu goes
+.cd-rules__header .cd-page-header__actions > .cd-type-control {
+  flex: 0 0 auto;
+}
+
+.cd-rules__header .cd-text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-control-main);
+  border-radius: var(--radius-control);
+}
+
+/* The title and subtitle ask for a third of a reading measure beside the actions, so
+   with Ask Claude open beside the page the actions stay at the right of the title's line while the
+   column has room for both (N-Conn-12-Chat, and at 1280 px). In a narrower column the actions go
    under them and they keep the column's whole width, so the title never breaks. Under 640 px the
-   menu takes its own line (below). */
+   actions share their own line (below). */
 @media (min-width: 640px) {
   .cd-rules__header .cd-page-header__text {
-    flex: 1 1 calc(var(--size-reading) / 2);
+    flex: 1 1 calc(var(--size-reading) / 3);
   }
+}
+
+/* In that narrower column the subtitle can take a third line; it never leaves a word alone on it. */
+.cd-rules__header .cd-page-header__subtitle {
+  text-wrap: pretty;
 }
 
 .cd-rules__ask {
@@ -57,7 +74,13 @@
   }
 
   .cd-rules__header .cd-page-header__actions {
+    position: relative;
     padding-top: 0;
+  }
+
+  .cd-rules__header .cd-preset-menu {
+    position: static;
+    width: auto;
   }
 
   .cd-rules__ask .cd-suggestion-chips,
@@ -68,4 +91,35 @@
   .cd-rules__ask .cd-composer__tools > :last-child {
     margin-left: auto;
   }
+}
+
+/* The read-dependent parts keep the page's own gaps in every phase. */
+.cd-rules__region > .cd-skeleton-screen__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+.cd-rules-skeleton__control {
+  flex: none;
+  min-width: 0;
+}
+.cd-rules-skeleton__rule {
+  flex: 1;
+  min-width: 0;
+}
+.cd-rules__header .cd-preset-menu > .cd-rules-skeleton__control {
+  flex: 1;
+}
+@media (max-width: 639.98px) {
+  .cd-rules__region > .cd-skeleton-screen__body {
+    gap: var(--space-16);
+  }
+  .cd-rules__header .cd-preset-menu .cd-skeleton {
+    /* Skeleton measures this control's width inline; the phone preset must fill its row instead. */
+    width: 100% !important;
+  }
+}
+
+.cd-rules-skeleton__suffix {
+  display: inline-block;
 }

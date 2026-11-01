@@ -18,16 +18,21 @@ reply check opening a card's handoff, take turns; the table itself holds no such
 expires when its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`), so
 a callback that happened is never promised again.
 The owner is alerted per the Desk's notification defaults; the alert is read only from the Demo
-inbox, so the result's `inbox` stays empty.
+inbox, so the result's `inbox` stays empty. In the owner's own preview (`session_row.preview`),
+the call-back instead inserts its row already `done`, skips `close_open` and sends no alert: no
+Needs-you item and no `desk_data` closing entry (the owner's decision of 2026-10-31). Its fact stays
+committed until its window ends, readable only by the owner and that session even after verification,
+so the preview still shows the card; its row stays for reconciliation.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from desk.contracts import Claim, Fact, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
+from desk.contracts import Claim, Fact, Label, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
 from desk.db.models import Fact as FactRow
 from desk.db.models import Handoff
 from desk.kernel_service import demo_inbox, desks, labels, ledger, render
@@ -92,6 +97,45 @@ async def close_open(ctx: KernelCtx, desk_id: str, session_id: str) -> list[Hand
     return rows
 
 
+async def open_callback(xctx: ExecCtx, action: NormalizedAction, args: RequestCallbackArgs, *,
+                        alert: Callable[[tuple[datetime, datetime] | None], Awaitable[None]]) -> AdapterResult:
+    """Open the native callback once; the caller chooses the owner alert in the same transaction."""
+    ctx = xctx.ctx
+    now = ctx.clock.now()
+    window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
+    session_id = xctx.session_row.session_id
+    start, end = window or (None, None)
+    preview = xctx.session_row.preview
+    closed = [] if preview else await close_open(ctx, action.desk_id, session_id)
+    handoff_id = new_id("handoff")
+    ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=action.copy_id, desk_id=action.desk_id, session_id=session_id,
+                       reason=f"{args.name} · {args.contact} · {args.reason}",
+                       callback_window=f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
+                       status="done" if preview else "open", kind="callback", action_id=action.action_id,
+                       window_start=start, window_end=end, created_at=now))
+    await ctx.db.flush()              # the handoffs, then their facts, as the lock order goes
+    if closed:
+        expired = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == action.desk_id,
+            FactRow.fact_id.in_([f"handoff:{row.handoff_id}" for row in closed])).with_for_update()))
+        for fact_row in expired:
+            fact_row.status = "expired"
+    # a callback whose window has passed can't be promised again
+    label = (Label(readers=["owner", f"session:{session_id}"]) if preview
+             else labels.new_fact_label(xctx.session_row))
+    fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
+                claims=window_claims(window), label=label, expires_at=end)
+    ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
+                               action_id=action.action_id))
+    await ctx.db.flush()
+    for row in closed:
+        await ledger.append(ctx, copy_id=action.copy_id, desk_id=action.desk_id, event=LedgerEvent(
+            kind="desk_data", origin="kernel",
+            summary={"part": "handoffs", "refs": [row.handoff_id], "replaced_by": handoff_id}))
+    if not preview:
+        await alert(window)
+    return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, handoff_id))
+
 class RequestCallbackAdapter:
     profile = PROFILE
     Args = RequestCallbackArgs
@@ -104,38 +148,11 @@ class RequestCallbackAdapter:
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))
 
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: RequestCallbackArgs) -> AdapterResult:
-        ctx = xctx.ctx
-        now = ctx.clock.now()
-        window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
-        session_id = xctx.session_row.session_id
-        start, end = window or (None, None)
-        closed = await close_open(ctx, action.desk_id, session_id)
-        handoff_id = new_id("handoff")
-        ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=action.copy_id, desk_id=action.desk_id, session_id=session_id,
-                           reason=f"{args.name} · {args.contact} · {args.reason}",
-                           callback_window=f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
-                           status="open", kind="callback", action_id=action.action_id, window_start=start,
-                           window_end=end, created_at=now))
-        await ctx.db.flush()              # the handoffs, then their facts, as the lock order goes
-        if closed:
-            expired = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-                FactRow.desk_id == action.desk_id,
-                FactRow.fact_id.in_([f"handoff:{row.handoff_id}" for row in closed])).with_for_update()))
-            for fact_row in expired:
-                fact_row.status = "expired"
-        # a callback whose window has passed can't be promised again
-        fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
-                    claims=window_claims(window), label=labels.new_fact_label(xctx.session_row), expires_at=end)
-        ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
-                                   action_id=action.action_id))
-        await ctx.db.flush()
-        for row in closed:
-            await ledger.append(ctx, copy_id=action.copy_id, desk_id=action.desk_id, event=LedgerEvent(
-                kind="desk_data", origin="kernel",
-                summary={"part": "handoffs", "refs": [row.handoff_id], "replaced_by": handoff_id}))
-        await demo_inbox.alert_owner(ctx, action.desk_id, "callback", render.owner_preview("callback"),
-                                     alert_body(window, args))
-        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, handoff_id))
+        async def alert(window):
+            await demo_inbox.alert_owner(xctx.ctx, action.desk_id, "callback", render.owner_preview("callback"),
+                                         alert_body(window, args))
+
+        return await open_callback(xctx, action, args, alert=alert)
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
         """The handoff the action wrote, if it wrote one."""

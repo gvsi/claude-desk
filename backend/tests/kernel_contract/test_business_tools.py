@@ -6,24 +6,37 @@ import json
 import pytest
 
 from desk.api.schemas import ToolRow
-from desk.contracts import BusinessTool, RuleCard
-from desk.kernel_api import BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, ToolPin, ToolsConfirmRequest
+from desk.contracts import BusinessTool, RuleCard, ToolCall
+from desk.kernel_api import (BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest,
+                             Probe, ToolPin, ToolsConfirmRequest)
 from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision, refused
 
 
 @pytest.mark.kernel_plan("01c")
 @pytest.mark.parametrize('title,config,accepted', [
+    ('AED and CPR training', {'block': 'intake', 'questions': ['What?']}, True),
+    ('CAD drafting consult', {'block': 'intake', 'questions': ['What?']}, True),
+    ('Pay 50 CAD', {'block': 'intake', 'questions': ['What?']}, False),
+    ('CHF 20 deposit', {'block': 'intake', 'questions': ['What?']}, False),
     ('Book a free intro consult', {'block': 'intake', 'questions': ['What?']}, True),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}, True),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Consultas gratuitas', 'minutes': 30}, True),
     ('Book a $0 intro consult', {'block': 'intake', 'questions': ['What?']}, False),
     ('Free consult, 50% off', {'block': 'intake', 'questions': ['What?']}, False),
     ('Retainer', {'block': 'purpose_payment', 'purpose': 'Free retainer', 'amount_cents': 5000}, False),
+    ('Free consultation', {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}, False),
+    ('Complimentary review', {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}, False),
+    ('Free consultation', {'block': 'intake', 'questions': ['What?']}, True),
     ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}, False),
     ('Half-price check', {'block': 'intake', 'questions': ['What?']}, False),
     ('Tuesday 5pm drop-in', {'block': 'intake', 'questions': ['What?']}, False),
     ('Reply within 24 hours', {'block': 'intake', 'questions': ['What?']}, False),
     ('We will call you back today', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Call \u202eyadot\u202c', {'block': 'intake', 'questions': ['What?']}, False),
+    ('guaran\u200bteed', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Consultation gratuite', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Kostenlose Beratung', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, False),
 ])
 async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read, title, config, accepted):
     http, schema, _ = kernel
@@ -38,6 +51,128 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
         assert await refused(call) == (422, 'invalid')
     rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
     assert bool(rows) is accepted
+
+
+AMENITY_WORDING = ('Free parking', 'Complimentary coffee', 'Estacionamiento gratis', 'No cost parking')
+INTAKE = {'block': 'intake', 'questions': ['What?']}
+PAYMENT = {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}
+
+
+async def put_card(kernel, ro_read, title, config):
+    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows."""
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    request = BusinessToolsRequest(tools=[BusinessTool(
+        tool='desk.card', title=title, description='Take details.', config=config)])
+    try:
+        await http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools', request,
+                                                path={'id': copy.desk_ids[0]})
+        detail = None
+    except KernelFailed as error:
+        assert (error.status, error.code) == (422, 'invalid')
+        detail = error.detail
+    return detail, ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config,field', [
+    *[('Retainer', {**PAYMENT, 'purpose': purpose}, 'purpose') for purpose in AMENITY_WORDING],
+    *[(title, PAYMENT, 'title') for title in AMENITY_WORDING if title != 'Free parking'],
+    ('Complimentary coffee', INTAKE, 'title'),
+    ('No cost parking', INTAKE, 'title'),
+])
+async def test_business_card_text_gets_no_amenity_exception(kernel, ro_read, title, config, field):
+    # The amenity exception is for charter policy text; a card field passes a promise word only as
+    # an allowed free word in its title or appointment type.
+    detail, rows = await put_card(kernel, ro_read, title, config)
+    assert detail == {f'desk.card.{field}': ['public_promise']}
+    assert rows == []
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_purpose_payment_title_free_parking_is_refused(kernel, ro_read):
+    detail, rows = await put_card(kernel, ro_read, 'Free parking', PAYMENT)
+    assert detail == {'desk.card.title': ['public_promise']}
+    assert rows == []
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config', [
+    ('Book a free intro call', INTAKE),
+    ('Intro call', {'block': 'typed_booking', 'appointment_type': 'Free intro call', 'minutes': 30}),
+    ('Free parking', INTAKE),
+    ('Free consultation', INTAKE),
+])
+async def test_free_word_in_a_title_or_appointment_type_still_passes(kernel, ro_read, title, config):
+    detail, rows = await put_card(kernel, ro_read, title, config)
+    assert detail is None
+    assert [row['tool'] for row in rows] == ['desk.card']
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config,fields,rule', [
+    ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000},
+     ['title', 'purpose'], 'public_promise'),
+    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, ['title'], 'format_control'),
+    ('guaran\u200bteed', {'block': 'intake', 'questions': ['What?']}, ['title'], 'format_control'),
+])
+async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receipt(
+        kernel, ro_read, title, config, fields, rule):
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    tool = BusinessTool(tool='desk.intake', title=title, description='Take details.', config=config)
+    with pytest.raises(KernelFailed) as refused_call:
+        await http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools',
+            BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
+    assert refused_call.value.detail == {f'{tool.tool}.{field}': [rule] for field in fields}
+    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ()) == []
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    blocked = await decide(http.session(visitor.session_token), visitor.state.session_id, visitor.state.generation,
+                           'refused-intake', tool.tool, {'name': 'Dana', 'answers': ['Consult']})
+    assert blocked.outcome == 'refuse' and blocked.action is None
+    assert title not in blocked.visitor_plain
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize('first_title,second_title,first_rule,second_rule', [
+    ('Tomorrow intake', 'Guaranteed service', 'public_promise', 'public_promise'),
+    ('Intake \u202edeetnaraug\u202c', 'Guaranteed service', 'format_control', 'public_promise'),
+    ('Tomorrow intake', 'guaran\u200bteed', 'public_promise', 'format_control'),
+])
+async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_rows(
+        kernel, ro_read, first_title, second_title, first_rule, second_rule):
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    stored = BusinessTool(tool='desk.existing', title='Customer enquiry', description='Take details.',
+                          config={'block': 'intake', 'questions': ['What do you need?']})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[stored]), path={'id': desk_id})
+
+    def rows():
+        return ro_read(schema, copy.copy_id, "SELECT * FROM {ro}.tools WHERE source = 'business'", ())
+
+    before = rows()
+    tools = [stored.model_copy(update={'tool': 'desk.safe'}),
+             stored.model_copy(update={'tool': 'desk.first', 'title': first_title}),
+             stored.model_copy(update={'tool': 'desk.second', 'title': second_title})]
+    with pytest.raises(KernelFailed) as refused_call:
+        await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=tools), path={'id': desk_id})
+    assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
+    assert refused_call.value.detail == {'desk.first.title': [first_rule], 'desk.second.title': [second_rule]}
+    assert rows() == before
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    events = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools']
+    assert len(events) == 2
+    assert events[-1].summary == {'tools': [], 'refused': 'public_promise'}
 
 
 @pytest.mark.kernel_plan("01c")
@@ -93,7 +228,9 @@ async def test_readded_business_tool_returns_for_review_as_new(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01c")
-async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, ro_read):
+async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, ro_read, arrange):
+    from desk.api.kernel_client import KernelFailed
+
     http, schema, _ = kernel
     copy = await new_copy(http)
     desk_id = copy.desk_ids[0]
@@ -102,11 +239,18 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
                         config={"block": "intake", "questions": ["What do you need?"]})
     valid = BusinessToolsRequest(tools=[tool])
     await owner.call("PUT /desks/{id}/business_tools", valid, path={"id": desk_id})
-    for invalid in (BusinessToolsRequest(tools=[tool, tool]),
-                    BusinessToolsRequest.model_construct(tools=[tool.model_copy(update={"tool": f"desk.enquiry-{i}"})
-                                                                 for i in range(9)]),
-                    BusinessToolsRequest(tools=[tool.model_copy(update={"title": "Guaranteed help"})])):
-        assert await refused(owner.call("PUT /desks/{id}/business_tools", invalid, path={"id": desk_id})) == (422, "invalid")
+    for invalid, detail in (
+            (BusinessToolsRequest(tools=[tool, tool]), {}),
+            (BusinessToolsRequest.model_construct(tools=[tool.model_copy(update={"tool": f"desk.enquiry-{i}"})
+                                                         for i in range(9)]), {}),
+            (BusinessToolsRequest(tools=[tool.model_copy(update={
+                "title": "Guaranteed help", "description": arrange.canary(copy.copy_id)})]), {}),
+            (BusinessToolsRequest(tools=[tool.model_copy(update={"title": "Guaranteed help"})]),
+             {f'{tool.tool}.title': ['public_promise']})):
+        with pytest.raises(KernelFailed) as refused_call:
+            await owner.call("PUT /desks/{id}/business_tools", invalid, path={"id": desk_id})
+        assert (refused_call.value.status, refused_call.value.code) == (422, "invalid")
+        assert refused_call.value.detail == detail
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     assert await refused(http.session(visitor.session_token).call(
         "PUT /desks/{id}/business_tools", valid, path={"id": desk_id})) == (401, "auth")
@@ -159,3 +303,38 @@ async def test_reviewed_intake_decides_executes_and_cannot_select_its_config(ker
         blocked = await decide(session, visitor.state.session_id, visitor.state.generation,
                                f'bad-intake-{index}', tool.tool, {**args, **extra})
         assert blocked.outcome == 'refuse' and blocked.action is None
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_probe_treats_a_tools_confirm_drafts_intake_as_on_without_activating_it(kernel, ro_read):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.intake', title='New client intake', description='Take details.',
+                        config={'block': 'intake', 'questions': ['What?']})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    confirmed = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    version = confirmed.draft.version
+    request = PolicyProbeRequest(desk_id=desk_id, probes=[Probe(
+        actor='visitor', who='anyone', resource_kind='desk',
+        call=ToolCall(call_id='probe-intake', tool=tool.tool, args={'name': 'Dana', 'answers': ['Consult']}))])
+    [result] = await owner.call('POST /policy/{version}/probe', request, path={'version': version})
+    defaults = [card.card_id for card in confirmed.draft.cards if card.is_default and card.applies_to == tool.tool]
+    assert len(defaults) == 1
+    assert result.outcome == 'hold' and result.card_ids == defaults
+    assert not result.depends_on_review
+    [stored] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    assert stored['status'] == 'needs_review'
+    [draft] = ro_read(schema, copy.copy_id, 'SELECT status FROM {ro}.policy_versions WHERE desk_id = %s AND version = %s',
+                      (desk_id, version))
+    assert draft['status'] == 'proved'
+    # A subsequent configuration change removes the draft's stale pin from the probe only.
+    changed = tool.model_copy(update={'title': 'Client enquiry'})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[changed]), path={'id': desk_id})
+    [result] = await owner.call('POST /policy/{version}/probe', request, path={'version': version})
+    assert result.outcome == 'refuse' and result.card_ids == []
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    assert not any(entry.event.summary.get('refused') == 'pin_changed' for entry in ledger.entries)

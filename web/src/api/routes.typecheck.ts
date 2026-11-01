@@ -62,6 +62,7 @@ export const ROUTE_MODELS = {
   suggestions: 'Suggestion[]',
   simulateToolChange: 'ToolProfile',
   addKnowledge: 'KnowledgeItem',
+  knowledge: 'KnowledgeRow[]',
   people: 'PeopleOut',
 
   // Proving
@@ -83,8 +84,15 @@ export const ROUTE_MODELS = {
   setup: 'SetupState',
   setupConsent: 'SetupState',
   setupAnswer: 'SetupState',
+  setupProposal: 'SetupState',
+  setupSuggestions: 'SetupState',
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
+  setupPublicLines: 'SetupPublicLines',
+  setupPublicLine: 'SetupPublicLines',
+  setupPublicLinesConfirm: 'SetupPublicLines',
+  removePublicLine: 'SetupPublicLines',
+  removePublicPrice: 'SetupPublicLines',
 
   // Public
   publicDesk: 'PublicDesk',
@@ -113,10 +121,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [
-  // Proving
-  'confirmTool',
-] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
@@ -215,6 +220,7 @@ export type AnswerNameChecks = [
   Assert<Equal<AnswerProblems<'draftRules', { 200: 'RulesDraft'; 202: 'RulesDraft' }>, NotTheRetry>>,
   Assert<Equal<AnswerProblems<'draftRules', { 202: 'RulesDraft' }>, NotTheRetry | NoFinalAnswer<'draftRules'>>>,
   // but any other route's 202 is, as each of its 2xx answers is.
+  Assert<Equal<AnswerProblems<'setupConsent', { 200: 'SetupState'; 202: 'SetupState' }>, never>>,
   Assert<Equal<AnswerNames<'me', { 200: 'CopyOut'; 202: 'ProvingPending' }>, 'CopyOut' | 'ProvingPending'>>,
   Assert<Equal<AnswerNames<'sendMessage', { 202: 'MessageAccepted' }>, 'MessageAccepted'>>,
   Assert<Equal<AnswerNames<'events', { 200: null }>, null>>,

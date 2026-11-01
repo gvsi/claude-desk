@@ -198,7 +198,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
                                     {"item_id": "drain", "title": "Drain clearing", "unit_cents": 19_000},
                                     {"item_id": "leak", "title": "Leak repair", "unit_cents": 25_000},
                                     {"item_id": "camera", "title": "Camera inspection", "unit_cents": 30_000}]},
-         ["camera", "drain", "heater"]),
+         ["camera", "drain", "heater", "pipe", "short-notice"]),
         ("calendar", {"calendar_slots": [slot_body(slot) for slot in slots[1:]] + [new_slot]},
          sorted([slots[0].slot_id, new_slot["slot_id"]])),
         ("people", {"upsert": [{"ref": "eve", "display_name": "Eve Santos", "contact": "+1 (510) 555-0123"}]},
@@ -217,7 +217,9 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     assert (business.name, business.owner_display_name, business.timezone, business.brand) == (
         "Rivera Plumbing and Drains", "Maria Rivera", "America/Denver", {"primary": "#22524D"})
     charter = await facts_of(app, copy, "charter")
-    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours"}   # the rest replaced
+    # the rest replaced, and the seed's starters kept, as the hours are
+    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours",
+                            *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert charter["charter:contact"].claims == [Claim(key="contact", kind="text", value="(510) 555-0199")]
     assert all(fact.readers == ["public"] and fact.source == "kernel" for fact in charter.values())
     prices = await rows_of(app, copy.copy_id, select(PriceRow).order_by(PriceRow.item_id))
@@ -234,8 +236,11 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     # no entry names a contact, and the chain still verifies
     page = (await client.get(f"/ledger/{copy.desk_id}", headers=copy.owner)).json()
     assert page["chain_ok"] is True
-    summaries = json.dumps([entry["event"]["summary"] for entry in page["entries"]])
-    assert "0123" not in summaries and "555" not in summaries
+    summaries = json.dumps([entry["event"]["summary"] for entry in page["entries"]], ensure_ascii=False)
+    # Eve's contact in no form; IDs and hashes may hold her digits by chance, never set apart as a number
+    for form in ("+1 (510) 555-0123", "(510) 555-0123", "555-0123", "5105550123", "\u2022\u2022\u2022\u2022 0123"):
+        assert form not in summaries, form
+    assert re.search(r"(?<![0-9A-Za-z])(?:555|0123)(?![0-9A-Za-z])", summaries) is None
 
 
 async def people_of(app: FastAPI, copy: Rivera) -> dict[str, Person]:

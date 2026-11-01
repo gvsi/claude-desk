@@ -3,9 +3,9 @@
 Creating a copy is the one call that needs the passcode. Every other owner route takes the copy from the
 kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never from the browser.
 
-A new copy (`copies`, `start_over`) asks the kernel for the recorded night when the settings do (Plan 01d), and
-stores what the kernel replayed into it (`store_replayed_night`) before answering: recorded history for the owner's
-reads, never a turn.
+A new copy (`copies`, `start_over`) stores the seeded hold's visitor question and signed held receipt. It also asks
+the kernel for the recorded night when the settings do (Plan 01d), and stores what the kernel replayed into it
+(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn.
 """
 
 import asyncio
@@ -16,10 +16,11 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
-from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
@@ -54,8 +55,8 @@ from desk.api.schemas import (
     error_responses,
     operation_ids,
 )
-from desk.api.sse import append_control, emit
-from desk.api.store import Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.api.sse import RUN_EVENTS, append_control, emit
+from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
 from desk.contracts import CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
 from desk.kernel_api import (
@@ -90,10 +91,12 @@ class CopyRequest(BaseModel):
 async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
     unfinished setup interviews by Desk ID, from the API's own rows."""
-    desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
+    # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
+    all_desks = await ctx.ro.desks()
+    desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
 
 
 def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
@@ -169,6 +172,44 @@ async def _store_replayed(state: Runtime, created: CopyCreated) -> None:
         logger.error("the replayed night couldn't be stored (%s); the copy has live data only", type(error).__name__)
 
 
+async def store_seeded_chat(conn: AsyncConnection, created: CopyCreated, *, ro_schema: str) -> int:
+    """Store the seeded visitor's question and signed held receipt together, in the caller's transaction.
+
+    An existing visitor row guards retries under the run lock. A dropped receipt raises so the caller rolls back
+    the question too; a seed must never leave half a chat. Only deliver() builds the signed held event.
+    """
+    chat = created.seeded_chat
+    if chat is None:
+        return 0
+    await run_lock(conn, chat.session_id)
+    session = await KernelRO(conn, created.copy_id, ro_schema).session(chat.session_id)
+    if (session is None or session["desk_id"] not in created.desk_ids or session["kind"] != "visitor"
+            or session["closed_at"] is not None):
+        logger.warning("the seeded chat wasn't stored: not an open visitor session on one of the copy's Desks")
+        return 0
+    if (await conn.execute(select(exists().where(
+            MESSAGES.c.copy_id == created.copy_id, MESSAGES.c.session_id == chat.session_id,
+            MESSAGES.c.kind == "visitor_text")))).scalar_one():
+        return 0
+    ids = Ids(copy_id=created.copy_id, desk_id=session["desk_id"], session_id=chat.session_id)
+    await append_message(conn, ids, "visitor_text", text=chat.visitor_line)
+    if await deliver(conn, ids, Status(chat.decision, "held"), ro_schema=ro_schema) is None:
+        raise ValueError("the seeded held receipt wouldn't be shown")
+    return 2
+
+
+async def _store_seeded(state: Runtime, created: CopyCreated) -> None:
+    """Keep the seeded chat independent of the recorded night; neither writer can fail copy creation."""
+    if created.seeded_chat is None:
+        return
+    try:
+        async with state.database().connect() as conn:
+            await store_seeded_chat(conn, created, ro_schema=state.settings.kernel_ro_schema)
+            await conn.commit()
+    except Exception as error:
+        logger.error("the seeded chat couldn't be stored (%s); the copy is still available", type(error).__name__)
+
+
 async def _create_copy(state: Runtime) -> CopyCreated:
     """`POST /copies`, asking for the recorded night when the settings do (`replay_night`). A kernel without the
     seeded night refuses a body that carries `replay_night` at all (422 `invalid`, which creates nothing), so a live
@@ -188,8 +229,10 @@ async def _create_copy(state: Runtime) -> CopyCreated:
 
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
     """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
-    for the recorded night when the settings do (`replay_night`) and stores what was replayed before answering."""
+    for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
+    replayed night in its own transaction, so either can be stored even if the other fails."""
     created = await _create_copy(state)
+    await _store_seeded(state, created)
     await _store_replayed(state, created)
     async with owner_context(state, created.owner_token) as ctx:
         copy = await copy_out(ctx)
@@ -413,7 +456,9 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
-    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored)."""
+    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
+    Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
+    execution refusals; an unreadable reason is null, so the stored transcript still renders."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
@@ -421,7 +466,13 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     state = SessionState(session_id=session_id, kind=session["kind"], verified=session["verified"],
                          assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
     process = runtime(request)
-    return OwnerTranscript(state=state, items=await transcript(ctx.ro.conn, ids, "owner", after),
+    items = await transcript(ctx.ro.conn, ids, "owner", after)
+    statuses = [item for item in items if item.kind == "status" and item.event is not None]
+    reasons = await asyncio.gather(*(owner_reads.refusal_reason(
+        ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq) for item in statuses))
+    for item, reason in zip(statuses, reasons, strict=True):
+        item.owner_plain = reason
+    return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
 
 
@@ -493,15 +544,19 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
                           request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> ApprovalAnswerOut | JSONResponse:
     """The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs
-    there and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude
-    follows up, once the resume job ran and the visitor's own credential is present (the open stream or the next
+    there and then, as the visitor's session (also during a take-over); the visitor sees the signed approved status
+    before the outcome when the answer includes it, and Claude follows up once the resume job ran and the visitor's
+    own credential is present (the open stream or the next
     request). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never
     waits on a proof.
 
     When the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the
-    decision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)
-    resume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the
-    decision. A decision still `held` keeps the kernel's own error, its code included ("Errors"): a 409 is
+    decision is read as it stands: once it left `held` and `approved`, an outcome the visitor wasn't shown yet gets
+    the (idempotent) resume job, so a lost response still resumes the chat. While `approved`, publish its signed
+    receipt without waking Claude and leave a `decision_pending` row under the session's run lock. The visitor's
+    next request can then read its final outcome even if the first answer never queues a job. Either case answers
+    409 `already_resolved` with the decision. A decision still `held` keeps the kernel's own error, its code included
+    ("Errors"): a 409 is
     `{error: "kernel", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`
     kept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer
     the request doesn't offer is the kernel's 422 `invalid`."""
@@ -515,7 +570,10 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
         return await _no_longer_held(state, ctx, decision_id, failure)
     except KernelUnavailable as failure:
         return await _no_longer_held(state, ctx, decision_id, failure)
-    await _resume(state, ctx, result.decision)
+    result_fact_ids = ([fact.fact_id for fact in result.execution.facts]
+                       if result.execution is not None and result.execution.state == "succeeded"
+                       and result.decision.state == "executed" else [])
+    await _resume(state, ctx, result.decision, result.approved, result_fact_ids=result_fact_ids)
     return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
                              execution_state=result.execution.state if result.execution is not None else None)
 
@@ -529,29 +587,60 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
         raise ApiProblem(503, "kernel", code="kernel_unavailable") from None
     if decision.state == "held":                        # the answer didn't take: the kernel's own error stands
         raise failure
-    if not await status_shown(ctx.ro.conn, decision, or_later=True):
+    if decision.state == "approved":
+        await _remember_approval(ctx, decision)
+    elif not await status_shown(ctx.ro.conn, decision, or_later=True):
         await _resume(state, ctx, decision)
     return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
 
 
-async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
+async def _remember_approval(ctx: OwnerCtx, decision: Decision) -> None:
+    """Keep an in-flight approval readable even when its answer's response and resume job were lost."""
+    decision = visitor_safe(decision)
+    session = await ctx.ro.session(decision.session_id)
+    if session is None or session["desk_id"] not in ctx.desk_ids:
+        logger.warning("an answered request's session isn't one of the copy's")
+        return
+    ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
+    conn = ctx.ro.conn
+    await conn.commit()
+    try:
+        await run_lock(conn, ids.session_id)
+        await deliver(conn, ids, Status(decision, "receipt"))
+        pending = (await conn.execute(select(exists().where(
+            RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "control",
+            RUN_EVENTS.c.type == "decision_pending", RUN_EVENTS.c.handled_at.is_(None),
+            RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id)))).scalar_one()
+        if not pending:
+            await append_control(conn, ids, "decision_pending", {"decision_id": decision.decision_id})
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+
+
+async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None,
+                  result_fact_ids: list[str] | None = None) -> None:
     """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
-    queue can't take it, the request does the job's work itself: like the job, it holds only IDs and the signed
-    record and makes no kernel call. If that fails too, the answer still stands, and the due-decisions job surfaces
-    the outcome once it is final."""
+    queue can't take it, the request does the job's work itself: like the job, it holds only IDs and signed
+    records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
+    only the outcome waking Claude and naming the executed answer's result facts. If that fails too, the answer
+    still stands, and the due-decisions job surfaces the outcome once it is final."""
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")
         return
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
     try:
-        await defer_resume_after_answer(state.jobs, ids, decision)
+        await defer_resume_after_answer(state.jobs, ids, decision, approved, result_fact_ids=result_fact_ids)
         return
     except Exception as error:
         logger.error("the resume job couldn't be queued (%s); resuming here", type(error).__name__)
     try:
         async with state.database().connect() as conn:
-            await resume_after_answer(conn, ids, decision)
+            await resume_after_answer(conn, ids, decision, approved, result_fact_ids=result_fact_ids)
     except Exception as error:
         logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)
 

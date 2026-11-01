@@ -419,6 +419,7 @@ const heldConsultation = {
   card_ids: ['cc-consult'],
   review: null,
   reason_plain: 'A visitor not on record asked to book a first consultation on Wednesday, November 4 at 11:00 am.',
+  owner_plain: null,
   visitor_plain: plain.held,
   answers: ['allow_once', 'deny_once', 'deny_always'],
   expires_at: '2026-10-31T18:12:09.774120Z',
@@ -478,6 +479,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.en, cards.contact.en, cards.policy.en],
+    starters: [],
     agent_card: [],
   },
   es: {
@@ -486,6 +488,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.es, cards.contact.es, cards.policy.es],
+    starters: [],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;

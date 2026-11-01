@@ -74,7 +74,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | `executed` | "You allowed this. It's done." | handled |
 | `failed` | "You allowed this, but it didn't go through. Nothing was done." | refused |
 | `unknown` | "You allowed this. Still confirming whether it went through." | held |
-| `refused_at_execution` | "Your rules changed before this ran, so it wasn't done." | refused |
+| `refused_at_execution` | The kernel's `decision.owner_plain`, verbatim. When null or absent: "Your rules changed before this ran, so it wasn't done." | refused |
 | `denied` | "You denied this." | refused |
 | `expired` | "This request expired before you answered. Nothing was done." | info |
 | `cancelled` | "The visitor cancelled before you answered. Nothing was done." | info |

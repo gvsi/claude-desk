@@ -68,7 +68,7 @@ def settings(env: str = "dev", decisions: str = "anthropic") -> KernelSettings:
 def answer() -> httpx2.Response:
     """A passing soft-promise verdict, as the Messages API sends it."""
     return httpx2.Response(200, json={
-        "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+        "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
         "content": [{"type": "text", "text": PASSES}], "stop_reason": "end_turn", "stop_sequence": None,
         "usage": {"input_tokens": 10, "output_tokens": 5}})
 
@@ -210,7 +210,7 @@ async def test_custom_headers_set_after_the_start_never_reach_a_request(environ,
 
 async def test_each_call_is_one_try_with_its_own_timeout(environ, monkeypatch):
     # The client makes no retries, so an overloaded answer is the call's failure, asked once, and
-    # each check's timeout goes with its request (the reviewer's 4 s, the soft-promise check's 2 s).
+    # each check's timeout goes with its request (the reviewer's 4 s, the soft-promise check's 6 s).
     requests: list[httpx2.Request] = []
 
     def overloaded(request: httpx2.Request) -> httpx2.Response:
@@ -225,7 +225,7 @@ async def test_each_call_is_one_try_with_its_own_timeout(environ, monkeypatch):
     reviewed = await backend.review(review_input())
     verdict, usage = await backend.soft_promise(REPLY)
     assert (reviewed.review, reviewed.usage.status, verdict, usage.status) == (None, "error", None, "error")
-    assert [request.extensions["timeout"]["read"] for request in requests] == [4.0, 2.0]
+    assert [request.extensions["timeout"]["read"] for request in requests] == [4.0, 8.0]
 
 
 @pytest.mark.parametrize("named_by", ["settings", "process"])
@@ -323,7 +323,7 @@ async def test_no_key_in_development_reaches_the_hook_on_a_real_socket(environ, 
     assert usage.status == "ok"
     (seen,) = MessagesHandler.seen
     assert seen["path"] == "/v1/messages" and credential(seen["headers"]) == "the placeholder"
-    assert seen["body"]["model"] == "claude-haiku-5-5"
+    assert seen["body"]["model"] == "claude-sonnet-5-5"
 
 
 async def test_spanish_reaches_the_model_as_text(environ, sent):

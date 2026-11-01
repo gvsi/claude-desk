@@ -28,6 +28,7 @@ type Story = StoryObj<typeof meta>;
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expectOwnerFrame(canvasElement, 'Today');
+    await expect(canvas.getByText('Your public page opens in a new tab. Ask about a price or a time.')).toBeVisible();
 
     // The reviewer arrival: the bar across the top, then the greeting in Claude's serif voice.
     const bar = canvas.getByRole('note');

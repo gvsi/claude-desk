@@ -21,7 +21,8 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
     generation: int
     author: Literal["claude", "owner", "desk"]   # "desk" for payment_confirmed and link_cancelled
     language: Literal["en", "es"]
-    handoff: bool                         # not verdict.ok
+    handoff: bool                         # the reply shows the handoff clause
+                                          # a final failure that keeps only cards is a reply, not a handoff
     blocks: list[RenderedBlock]
     visitor_plain: str                    # the reply receipt
     ledger_seq: int
@@ -30,7 +31,7 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
 class EvTurnEnd(BaseModel):               # every turn end, silent ones included
     type: Literal["turn_end"]
 
-class EvReceipt(BaseModel):               # an action's outcome
+class EvReceipt(BaseModel):               # an action's outcome, or a held action's signed approval before its outcome
     type: Literal["receipt"]
     decision_id: str
     state: DecisionState

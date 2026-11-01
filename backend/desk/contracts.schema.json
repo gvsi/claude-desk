@@ -173,6 +173,7 @@
             "native.start_verification",
             "native.fetch_website",
             "native.read_memory",
+            "native.web_search",
             "payments.list_charges",
             "payments.create_refund"
           ],
@@ -275,6 +276,17 @@
             }
           ],
           "title": "Card Diff"
+        },
+        "approved": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -608,6 +620,49 @@
       "title": "Clause",
       "type": "object"
     },
+    "ContextClock": {
+      "properties": {
+        "as_of_utc": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "title": "As Of Utc",
+          "type": "string"
+        },
+        "local_now": {
+          "title": "Local Now",
+          "type": "string"
+        },
+        "local_date": {
+          "title": "Local Date",
+          "type": "string"
+        },
+        "weekday": {
+          "enum": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "title": "Weekday",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of_utc",
+        "local_now",
+        "local_date",
+        "weekday",
+        "timezone"
+      ],
+      "title": "ContextClock",
+      "type": "object"
+    },
     "CopyCreated": {
       "properties": {
         "copy_id": {
@@ -854,6 +909,18 @@
         "reason_plain": {
           "title": "Reason Plain",
           "type": "string"
+        },
+        "owner_plain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Plain"
         },
         "visitor_plain": {
           "title": "Visitor Plain",
@@ -1114,6 +1181,31 @@
         "hours"
       ],
       "title": "DeskHoursRequest",
+      "type": "object"
+    },
+    "DeskMemoryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "about": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "About",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/MemoryItem"
+          },
+          "maxItems": 20,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "about",
+        "items"
+      ],
+      "title": "DeskMemoryRequest",
       "type": "object"
     },
     "DeskNotificationsRequest": {
@@ -1982,6 +2074,30 @@
           ],
           "title": "Code",
           "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "patternProperties": {
+                "^[A-Za-z0-9_.:-]{1,120}$": {
+                  "items": {
+                    "pattern": "^[a-z0-9_.]{1,64}$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_.:-]{1,120}$"
+          },
+          "title": "Detail"
         }
       },
       "required": [
@@ -2001,7 +2117,8 @@
             "website",
             "upload",
             "setup",
-            "memory_import"
+            "memory_import",
+            "web_search"
           ],
           "title": "Source",
           "type": "string"
@@ -2167,6 +2284,7 @@
             "agent_auth",
             "head_checkpoint",
             "desk_data",
+            "web_search",
             "business_tools"
           ],
           "title": "Kind",
@@ -2369,6 +2487,47 @@
       "title": "Mandate",
       "type": "object"
     },
+    "MemoryItem": {
+      "additionalProperties": false,
+      "description": "An untrusted simulated owner note, shared by the write contract and memory reader.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z-]{0,59}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Topics",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "topics",
+        "text"
+      ],
+      "title": "MemoryItem",
+      "type": "object"
+    },
     "ModeRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2430,6 +2589,7 @@
                 "native.start_verification",
                 "native.fetch_website",
                 "native.read_memory",
+                "native.web_search",
                 "payments.list_charges",
                 "payments.create_refund"
               ],
@@ -3327,6 +3487,14 @@
             }
           ],
           "default": null
+        },
+        "starters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Starters",
+          "type": "array"
         }
       },
       "required": [
@@ -3919,6 +4087,9 @@
     },
     "SessionContext": {
       "properties": {
+        "clock": {
+          "$ref": "#/$defs/ContextClock"
+        },
         "tools": {
           "items": {
             "$ref": "#/$defs/ToolProfile"
@@ -3949,6 +4120,7 @@
         }
       },
       "required": [
+        "clock",
         "tools",
         "tools_declared",
         "facts",
@@ -4151,6 +4323,7 @@
         "native.start_verification",
         "native.fetch_website",
         "native.read_memory",
+        "native.web_search",
         "payments.list_charges",
         "payments.create_refund"
       ],
@@ -4174,6 +4347,7 @@
                 "native.start_verification",
                 "native.fetch_website",
                 "native.read_memory",
+                "native.web_search",
                 "payments.list_charges",
                 "payments.create_refund"
               ],
@@ -4216,6 +4390,7 @@
                 "native.start_verification",
                 "native.fetch_website",
                 "native.read_memory",
+                "native.web_search",
                 "payments.list_charges",
                 "payments.create_refund"
               ],
@@ -4380,7 +4555,7 @@
           "items": {
             "$ref": "#/$defs/ToolPin"
           },
-          "maxItems": 21,
+          "maxItems": 22,
           "minItems": 1,
           "title": "Tools",
           "type": "array"
@@ -4438,6 +4613,7 @@
             "native.start_verification",
             "native.fetch_website",
             "native.read_memory",
+            "native.web_search",
             "payments.list_charges",
             "payments.create_refund"
           ],
@@ -4621,6 +4797,8 @@
             "stale_fact",
             "canary",
             "unsupported_language",
+            "uncertain_language",
+            "check_unavailable",
             "session_paused"
           ],
           "title": "Kind",

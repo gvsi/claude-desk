@@ -1,0 +1,41 @@
+/* CrossFade: the old words and the new stacked in one cell, the old fading out as the new fade
+   in, on motion-base. The cell is as wide as the wider of the two, so nothing beside it moves
+   while they fade. Under reduced motion only the new words show, at once. */
+
+.cd-cross-fade {
+  display: inline-grid;
+}
+
+.cd-cross-fade > * {
+  grid-area: 1 / 1;
+}
+
+.cd-cross-fade__was {
+  animation: cd-cross-fade-out var(--motion-base) var(--motion-ease) forwards;
+}
+
+.cd-cross-fade__now {
+  animation: cd-cross-fade-in var(--motion-base) var(--motion-ease) backwards;
+}
+
+@keyframes cd-cross-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes cd-cross-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-cross-fade__was {
+    display: none;
+  }
+
+  .cd-cross-fade__now {
+    animation: none;
+  }
+}

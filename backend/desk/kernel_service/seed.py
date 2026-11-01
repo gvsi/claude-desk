@@ -10,6 +10,9 @@ server (`connections`), with both its tools pinned at the hashes the seed is pro
 `verified` or `record_owner`, never to a person, so they compile to the same Cedar in every copy and
 share one CI-proved report. Once the cards are active, `seed_held_request` puts one held request on
 the owner's Today, decided like any other.
+
+`seed_starters` adds the seed-only public questions after Desk creation, since owner and setup
+charter writes refuse their keys. They are neither business facts for Claude nor reviewer input.
 """
 
 import logging
@@ -43,7 +46,7 @@ from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.presets import PRESETS
 
 __all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_KNOWLEDGE", "RIVERA_MOCKPAY_CHARGES", "RIVERA_MONEY_CAP_CENTS",
-           "rivera_seed", "seed_charges", "seed_held_request", "seed_knowledge"]
+           "rivera_seed", "seed_charges", "seed_held_request", "seed_knowledge", "seed_starters"]
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +54,12 @@ TIMEZONE = "America/Los_Angeles"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
 WEEKDAY_HOURS = HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
 SATURDAY_HOURS = HoursWindow(days=["sat"], start=time(9), end=time(13))
+
+# Claim.value is a scalar, so each seed-only question has a text claim per language.
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
 
 SLOT_MINUTES = 120
 SLOT_DAYS = 14                              # slots for the 14 days after the copy is created
@@ -111,7 +120,8 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 
@@ -146,6 +156,10 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
             PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
             PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
             PriceItem(item_id="leak", title="Leak repair", unit_cents=25000),
+            # a plumbing emergency: "pipe repairs start from $100, and there's a short-notice fee of $50",
+            # each amount on a quote card; a price item has no "from" price, so the title says it starts there
+            PriceItem(item_id="pipe", title="Pipe repair (starting price)", unit_cents=10000),
+            PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000),
         ],
         calendar_slots=calendar_slots(now),
         people=[
@@ -161,8 +175,8 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
         # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
-        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout", "handoff"],
-                                           briefing=["lead", "callback", "booking"]),
+        notifications=NotificationDefaults(now=["approval", "callback", "breaker", "lockout", "handoff"],
+                                           briefing=["lead", "booking"]),
         connections=["mock_payments"],
     )
     return business, desk
@@ -181,6 +195,18 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
             slots.append(CalendarSlot(slot_id=starts_at.strftime("S-%Y%m%d-%H%M"), starts_at=starts_at,
                                       minutes=SLOT_MINUTES))
     return slots
+
+
+async def seed_starters(ctx: KernelCtx, desk_id: str) -> None:
+    """Rivera's public starter questions, written only when seeding a demo copy."""
+    from desk.kernel_service import desks       # desks imports payments, which imports this module
+
+    now = ctx.clock.now()
+    for lang, questions in RIVERA_STARTERS.items():
+        for n, question in enumerate(questions, start=1):
+            fact = desks.charter_fact(Claim(key=f"{desks.STARTER_KEY_PREFIX}{n}:{lang}", kind="text", value=question))
+            ctx.db.add(labels.fact_row(ctx.copy_id, desk_id, fact, now))
+    await ctx.db.flush()
 
 
 async def seed_knowledge(ctx: KernelCtx, desk_id: str, items: list[KnowledgeItem]) -> list[KnowledgeItem]:

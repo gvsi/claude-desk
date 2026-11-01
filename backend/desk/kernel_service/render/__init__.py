@@ -13,8 +13,10 @@ actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`)
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
 in its `last_language`, else English (`language`): the language of the visitor's latest message,
 recorded at turn start (`turn`), or of Claude's last reply (`reply_check.finalize`). Owner alert
-previews (`owner_preview`) are English and owner-only. The owner-only lines (`OWNER_STATUS`) sit
-apart from the status lines, so `status` can't render one into any visitor text.
+previews (`owner_preview`) are English and owner-only. The owner-only lines (`OWNER_STATUS`: why an
+action was refused at execution, a decision's `owner_plain`) sit apart from the status lines, so
+`status` can't render one into any visitor text; `owner_line` renders them in the owner's language
+(`OWNER_LANGUAGE`).
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
@@ -24,7 +26,8 @@ read from that link's own `payment_link` fact, then the kernel's line). Each tem
 once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
-A card's `text` is the headline and then the details, one per line. A template that names no fact
+A card's `text` is the headline and then the details, one per line; the soft checks read it after
+its kind's fixed label (`CHECK_LABELS`, `check_text`). A template that names no fact
 kinds (handoff, verify_prompt) renders without one. `Template.current` says
 whether a fact may still be shown (a status the template renders, not expired), and a fact with
 nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
@@ -60,10 +63,14 @@ DECISION_STATUS_KEYS = STATUS_KEYS - RECEIPT_KEYS
 MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
 MESSAGE_KEYS = frozenset(en.MESSAGES)
 EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
-# Owner-only lines (why an approved private release was refused), which nothing renders until an
-# owner-facing field carries them: outside `STATUS_KEYS`, so no decision's status line can take one.
+# Owner-only lines (why an action was refused at execution: a decision's `owner_plain`, `owner_line`):
+# outside `STATUS_KEYS`, so no decision's status line can take one.
 OWNER_STATUS: dict[str, dict[str, str]] = {"en": en.OWNER_STATUS, "es": es.OWNER_STATUS}
 OWNER_STATUS_KEYS = frozenset(en.OWNER_STATUS)
+# The language the owner reads the owner-only lines in. The kernel keeps no owner language, so this is
+# English for every owner; an owner-language source, once there is one, replaces this line. Never the
+# session's language: these lines are the owner's, not the visitor's.
+OWNER_LANGUAGE: Language = "en"
 OPEN_STATUS: dict[str, Callable[[bool, datetime | None, datetime], str]] = {"en": en.open_status,
                                                                             "es": es.open_status}
 
@@ -117,6 +124,12 @@ def open_status_text(is_open: bool, boundary: datetime | None, as_of: datetime, 
     and `as_of` read in the business's time zone `tz`, with the cards' time formats."""
     local = boundary.astimezone(tz) if boundary is not None else None
     return OPEN_STATUS[lang](is_open, local, as_of.astimezone(tz))
+
+
+def owner_line(key: str) -> str:
+    """The owner-only line `key` ("refused_desk_deleted", ...) in `OWNER_LANGUAGE`. Any other key,
+    a status line's included, raises KeyError: there is no free-text fallback."""
+    return OWNER_STATUS[OWNER_LANGUAGE][key]
 
 
 def agent_card(lang: str, *, business: str, owner: str, slug: str, tools: Collection[str]) -> list[RenderedBlock]:
@@ -225,3 +238,34 @@ register_template("handoff", (), en.handoff, es.handoff)
 register_template("link_cancelled", {"payment_link"}, en.link_cancelled, es.link_cancelled, key="payment_link:",
                   statuses=())
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)
+
+# What kind of card each template renders, as the soft checks read it (the owner's decision of
+# 2026-11-01): a card's text alone ("Service call deposit, $20.00") doesn't say it is a payment link.
+# English whatever the reply's language, since the checks' prompts are English; the web app's card
+# header where it names the kind, else plain words for it. Every registered template has one, the
+# link templates `payment_link` and `document_link` too, which their adapters register.
+CHECK_LABELS: dict[ClauseTemplate, str] = {
+    "quote": "Quote",
+    "booking_options": "Open times",
+    "booking_confirmed": "Booking confirmed",
+    "payment_link": "Payment link",
+    "document_link": "Document link",
+    "hours": "Hours",
+    "policy": "Policy",
+    "contact": "Contact",
+    "handoff": "Handed to a person",
+    "verify_prompt": "Verification",
+    "owner_said": "Message from the owner",
+    "charges": "Charges",
+    "refund_issued": "Refund issued",
+    "charge_confirmed": "Charge confirmed",
+    "callback_confirmed": "Callback set",
+    "payment_confirmed": "Payment confirmed",
+    "link_cancelled": "Payment link cancelled",
+}
+
+
+def check_text(card: RenderedBlock) -> str:
+    """A card as the soft checks (Sonnet's and Jev's) read it: its kind's label, then its text
+    ("Payment link card: Service call deposit, $20.00")."""
+    return f"{CHECK_LABELS[card.template]} card: {card.text}"

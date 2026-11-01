@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
+import type { Effect, RuleCard } from '../../../api/contracts.ts';
+import type { AnyToolName } from '../../../api/views.ts';
 import { reviewChanges } from './reviewChanges.ts';
 
 function card(fields: Partial<RuleCard> & Pick<RuleCard, 'card_id'>): RuleCard {
@@ -21,14 +22,14 @@ function card(fields: Partial<RuleCard> & Pick<RuleCard, 'card_id'>): RuleCard {
 }
 
 /** Each tool's effects, as the master plan's tool table lists them. */
-const EFFECTS: Partial<Record<ToolName, Effect[]>> = {
+const EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
   'native.quote': ['change'],
   'native.book': ['change'],
   'native.payment_link': ['charge'],
   'payments.list_charges': ['private_data'],
   'payments.create_refund': ['pay_out', 'private_data'],
 };
-const effectsOf = (tool: ToolName): readonly Effect[] => EFFECTS[tool] ?? [];
+const effectsOf = (tool: AnyToolName): readonly Effect[] => EFFECTS[tool] ?? [];
 
 type Hours = NonNullable<RuleCard['hours']>;
 

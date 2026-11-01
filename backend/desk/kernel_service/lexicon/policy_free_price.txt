@@ -1,0 +1,9 @@
+# Policy-only implied free prices. Whole phrases, never generic single words.
+folded	costs?\s+nothing
+folded	at\s+no\s+cost
+folded	no\s+cost\s+to\s+you
+folded	nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)
+folded	won['’]t\s+cost\s+you\s+anything
+folded	cuestan?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)
+folded	cobra(?:mos|n)?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)
+folded	nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)

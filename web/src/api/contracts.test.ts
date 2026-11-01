@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, test } from 'vitest';
 
 import { generateContracts } from '../../scripts/gen-contracts.mjs';
@@ -69,6 +70,22 @@ describe('contract types', () => {
 
   test('kernel_error_codes_match_the_schema', () => {
     expectSameMembers(KERNEL_ERROR_CODES, schemaEnum('KernelError', 'code'));
+  });
+
+  test('kernel_error_detail_contains_only_field_and_rule_identifiers', () => {
+    const kernelError = schema.$defs.KernelError;
+    if (!kernelError) throw new Error('contracts.schema.json has no KernelError');
+    const validate = new Ajv2020({ strict: false }).compile(kernelError);
+    expect(validate({ code: 'invalid', detail: {
+      'desk.x.title': ['public_promise', 'format_control'],
+      'charter:policy:service_area': ['lex.en.promise'],
+    } })).toBe(true);
+    for (const detail of [
+      { 'A visitor wrote this': ['public_promise'] },
+      { 'desk.x.title': ['This text is a promise'] },
+      { ['x'.repeat(121)]: ['public_promise'] },
+      { 'desk.x.title': ['x'.repeat(65)] },
+    ]) expect(validate({ code: 'invalid', detail })).toBe(false);
   });
 
   test('ev_error_codes_match_the_schema', () => {

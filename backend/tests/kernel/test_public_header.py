@@ -294,9 +294,16 @@ async def test_a_canary_in_a_public_policy_or_a_price_is_refused(app, client):
             "part": "desk", "refused": "canary", "fields": [field], "fact_ids": [f"document:{dana.document_id}"]}
     assert set(await desks_of(app, copy)) == {copy.desk_id}
     await assert_no_canary_on_record(app, copy, dana.canary, bob.canary)
-    # ordinary policies and prices, digits and all, and one a character away from a canary, pass
+    # Text one character away from a canary still fails the policy's number scan; the canary
+    # refusals above win over that scan and never return detail about the private text.
     near = dana.canary[:-1] + ("1" if dana.canary.endswith("0") else "0")
-    await updated(client, copy, "charter", {"charter": [RIVERA_CONTACT, policy("refunds", f"5-7 days, {near}.")]})
+    response = await put_part(client, copy, "charter", {
+        "charter": [RIVERA_CONTACT, policy("refunds", f"For our records: 5-7 days, {near}.")]})
+    assert (response.status_code, response.json()) == (
+        422, {"code": "invalid", "detail": {"policy:refunds": ["digit"]}})
+    assert await charter_and_prices(app, copy) == stored
+    await updated(client, copy, "charter", {"charter": [RIVERA_CONTACT, policy("about", "Ask about our services.")]})
+    # Prices keep their structured checks, including digits in their IDs and titles.
     await updated(client, copy, "prices", {"price_items": [price("drain-24-7", "Drain clearing, 24/7", 18_000)]})
 
 
@@ -305,6 +312,40 @@ async def withheld_alerts(app: FastAPI, copy: Rivera) -> list[str]:
     return [row.body for row in await rows_of(app, copy.copy_id, select(InboxRow).where(
         InboxRow.desk_id == copy.desk_id, InboxRow.kind == "alert", InboxRow.to == "owner",
         InboxRow.preview == "Hidden from your public page").order_by(InboxRow.created_at))]
+
+
+@pytest.mark.parametrize("unsafe", ["Free consultations for everyone.", "Bonjour nous vous nous vous nous vous."])
+async def test_public_withholds_only_the_failing_policy_without_an_alert(app, client, unsafe):
+    """The owner's decision of 2026-11-01: a stored policy line that fails the public-text scan is
+    left off the page, and the owner isn't alerted."""
+    from .test_decide import open_visitor
+    from .test_reply_check import assert_handed_off, checked, clause, public_key, verify_verdict
+
+    copy = await rivera(app, client)
+    honest = "Ask about our services."
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:about", "kind": "text", "value": honest},
+        {"key": "policy:pricing", "kind": "text", "value": "Ask about pricing."}]})
+    assert response.status_code == 200, response.text
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:pricing")))).one()
+        row.claims = [Claim(key="policy:pricing", kind="text", value=unsafe)]
+    for language in ("en", "es"):
+        page = await public_page(client, copy, language)
+        assert [(block.fact_id, block.text) for block in page.charter if block.template == "policy"] == [
+            ("charter:policy:about", honest)]
+    assert await withheld_alerts(app, copy) == []
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:about")])
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == [honest]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:pricing")])
+    assert_handed_off(verdict)
+    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("policy_combined", ["charter:policy:pricing"])]
 
 
 async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, frozen_clock):
