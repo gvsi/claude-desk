@@ -10,6 +10,7 @@ import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, ty
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
+  AgentTasks,
   ApprovalAnswerOut,
   CancelAccepted,
   CancelReason,
@@ -58,7 +59,16 @@ import {
   type Step,
 } from './script.ts';
 import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, stopSetupRuns, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import {
+  SETUP_ROUTES,
+  setupPublicDesk,
+  setupTaskSet,
+  stopSetupRuns,
+  withSetupBusinesses,
+  withSetupBusinessName,
+  withSetupDesks,
+  withSetupGreeting,
+} from './setup.ts';
 import { TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
 import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
@@ -806,8 +816,8 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    // The turn's tools are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session)), session.language, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
@@ -857,6 +867,15 @@ const SERVED: ServedRoutes = {
     // A demo key for this browser's chat with the Desk, shown once and kept nowhere.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
+  },
+  agentTasks(sv, req) {
+    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
+    // Rivera's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const deskId = visitor.desk.summary.desk_id;
+    const own = sv.world.desks[0]?.summary.desk_id === deskId;
+    return ok({ task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other') } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
     const visitor = sv.visitor(req.params.slug, req.cookies);

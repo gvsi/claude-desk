@@ -1,12 +1,13 @@
 /**
- * The visitor's session for the agents page's two actions, a demo key and sending the built-in
- * agent, which the API ties to the visitor's chat with the Desk (its HttpOnly cookie). The page
- * makes one for both actions, so they share it: it opens (`ensureSession`, which resumes the chat
- * the cookie names) before the first call, however many calls are waiting for it, and a call the API
- * answers 401 found it gone. Then one new session opens, shared by every call that found the same
- * one gone, and the call is sent once more; a second 401 is the caller's to show as the chat having
- * ended. Two sessions opened at once would each set the cookie, and a run read with the later one
- * would answer 404 while its agent goes on.
+ * The visitor's session for the agents page's calls, which the API ties to the visitor's chat with
+ * the Desk (its HttpOnly cookie): the read of the Desk's tasks when the page opens, and the two
+ * actions, a demo key and sending the built-in agent. The page makes one for all three, so they
+ * share it: it opens (`ensureSession`, which resumes the chat the cookie names) before the first
+ * call, however many calls are waiting for it, and a call the API answers 401 found it gone. Then
+ * one new session opens, shared by every call that found the same one gone, and the call is sent
+ * once more; a second 401 is the caller's to show as the chat having ended. A session that fails to
+ * open is opened again by the next call. Two sessions opened at once would each set the cookie, and
+ * a run read with the later one would answer 404 while its agent goes on.
  */
 import { useCallback, useMemo, useRef } from 'react';
 

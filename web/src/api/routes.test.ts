@@ -88,6 +88,7 @@ const PLAN_02: Record<RouteKey, string> = {
   visitorInbox: 'GET /api/public/desks/{slug}/demo_inbox',
   agentCard: 'GET /api/public/desks/{slug}/agent_card',
   agentKey: 'POST /api/public/desks/{slug}/agents/key',
+  agentTasks: 'GET /api/public/desks/{slug}/agent_tasks',
   sendAgent: 'POST /api/public/desks/{slug}/send_agent',
   agentRun: 'GET /api/public/desks/{slug}/send_agent/{run_id}',
   // Tokens

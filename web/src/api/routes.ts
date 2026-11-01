@@ -25,6 +25,7 @@ import type {
   AgentCardOut,
   AgentRunStarted,
   AgentTaskBody,
+  AgentTasks,
   AnswerBody,
   AnsweringBody,
   ApprovalAnswerOut,
@@ -177,6 +178,7 @@ export const ROUTES = {
   visitorInbox: { method: 'GET', path: '/api/public/desks/{slug}/demo_inbox', owner: false },
   agentCard: { method: 'GET', path: '/api/public/desks/{slug}/agent_card', owner: false },
   agentKey: { method: 'POST', path: '/api/public/desks/{slug}/agents/key', owner: false },
+  agentTasks: { method: 'GET', path: '/api/public/desks/{slug}/agent_tasks', owner: false },
   sendAgent: { method: 'POST', path: '/api/public/desks/{slug}/send_agent', owner: false },
   agentRun: { method: 'GET', path: '/api/public/desks/{slug}/send_agent/{run_id}', owner: false },
 
@@ -268,6 +270,7 @@ interface RouteShapes {
   visitorInbox: { body: undefined; response: DemoInboxEntry[] };
   agentCard: { body: undefined; response: AgentCardOut };
   agentKey: { body: undefined; response: DemoAgentIssued };
+  agentTasks: { body: undefined; response: AgentTasks };
   sendAgent: { body: AgentTaskBody; response: AgentRunStarted };
   agentRun: { body: undefined; response: DemoAgentRun };
 

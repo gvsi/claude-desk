@@ -107,6 +107,7 @@ export const ROUTE_MODELS = {
   visitorInbox: 'DemoInboxEntry[]',
   agentCard: 'AgentCardOut',
   agentKey: 'DemoAgentIssued',
+  agentTasks: 'AgentTasks',
   sendAgent: 'AgentRunStarted',
   agentRun: 'DemoAgentRun',
 
