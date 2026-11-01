@@ -380,9 +380,19 @@ RIVERA_CARDS = [
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
           "Agents can pay up to $20 from their spending limit.", max_amount_cents=2_000),
+    _card("rv-urgent", "desk.emergency-callback", "auto", "anyone",
+          "Anyone can ask for an urgent callback, which alerts you at once."),
     *(RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                reason="Anything your rules don't cover waits for you.")
       for tool in ("native.release_document", "payments.list_charges", "payments.create_refund")),
+]
+
+# The seed's urgent business tool (the kernel's `seed.RIVERA_BUSINESS_TOOLS`): every copy has it enabled, turned on
+# by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
+RIVERA_BUSINESS_TOOLS = [
+    {"tool": "desk.emergency-callback", "title": "Emergency callback",
+     "description": "Asks Maria to call back urgently about an emergency.",
+     "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
 
@@ -1342,6 +1352,7 @@ class Desk:
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
+    seed_enables: tuple[ToolPin, ...] = ()   # the tools the seed's version 1 turned on as it activated (its enables)
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
     notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
@@ -1868,7 +1879,29 @@ class FakeKernelState:
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
                                   created_at=self.now + timedelta(microseconds=index))
+        self._seed_business_tools(desk, RIVERA_BUSINESS_TOOLS)
         return desk
+
+    def _seed_business_tools(self, desk: Desk, business_tools: list[dict]) -> None:
+        """The seed's business tools as the kernel writes them: through the owner's replacement (ledgered
+        `business_tools`, each "new"), then turned on by version 1 as it activates (its `enables`, the version's row
+        written again over them, and a `tool_pin` "enabled" entry for each, naming version 1 and the pin)."""
+        from desk.contracts import BusinessTool, BusinessToolDef
+        from desk.kernel_service.adapters.blocks import profile as block_profile
+
+        profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+                    for tool in map(BusinessTool.model_validate, business_tools)]
+        self.append(desk, "business_tools", {"tools": [
+            {"tool": profile.tool, "block": profile.business.config.block,
+             "definition_sha256": profile.definition_sha256, "change": "new"} for profile in profiles]})
+        for profile in profiles:
+            self._put_tool(desk, profile.model_copy(update={"status": "enabled", "review_reason": None}))
+        desk.seed_enables = tuple(ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256)
+                                  for profile in profiles)
+        self._put_policy(desk)
+        for pin in desk.seed_enables:
+            self.append(desk, "tool_pin", {"tool": pin.tool, "event": "enabled", "version": desk.policy_version,
+                                           "definition_sha256": pin.definition_sha256})
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
                      cards: list[RuleCard]) -> Desk:

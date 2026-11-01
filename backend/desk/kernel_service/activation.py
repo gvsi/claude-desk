@@ -82,6 +82,8 @@ from sqlalchemy import func, select
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    BusinessTool,
+    BusinessToolDef,
     LedgerEvent,
     NormalizedAction,
     PolicyVersion,
@@ -101,6 +103,7 @@ from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import ToolPin
 from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, mcp_client, mcp_pins, payments,
                                  reference, render, review_thresholds, seed)
+from desk.kernel_service.adapters import blocks
 from desk.kernel_service.adapters.base import Normalized
 from desk.kernel_service.auth import OwnerCtx, SessionRow
 from desk.kernel_service.baseline_reasons import BASELINE_RULE_PLAIN as BASELINE_REASONS
@@ -398,7 +401,9 @@ def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], p
 # is every new Desk's first cap. A preset drafted at another cap misses the shipped report and
 # proves live like any draft. Each is compiled over the profiles a Desk made from it enables
 # (`shipped_profiles`): the native adapters', and the seed's also its connected MCP tools', pinned at
-# the hashes of the server's default definitions (`mcp_client.seed_pins()`), so proving needs no server.
+# the hashes of the server's default definitions (`mcp_client.seed_pins()`), so proving needs no server,
+# and its business tools' (`SHIPPED_BUSINESS_TOOLS`), each pinned at its definition's hash, as the
+# seed's version turns them on (`activate_shipped` with `enables`).
 
 PROOFS_DIR = compiler.CEDAR_DIR / "proofs"
 SHIPPED_PRESETS: dict[str, list[RuleCard]] = {
@@ -416,16 +421,30 @@ SHIPPED_CONNECTIONS: dict[str, tuple[str, ...]] = {   # the MCP servers a Desk f
     "ask_first": (),
     "auto": (),
 }
+SHIPPED_BUSINESS_TOOLS: dict[str, list[BusinessTool]] = {   # the business tools a Desk from each set enables
+    "rivera": seed.RIVERA_BUSINESS_TOOLS,
+    "ask_first": [],
+    "auto": [],
+}
+
+
+def shipped_business_profiles(preset: str | None = None) -> dict[str, ToolProfile]:
+    """The profiles of the business tools a Desk made from `preset` is given (`SHIPPED_BUSINESS_TOOLS`),
+    by tool name, as the owner's replacement builds them (`blocks.profile`)."""
+    return {tool.tool: blocks.profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+            for tool in SHIPPED_BUSINESS_TOOLS.get(preset or "", ())}
 
 
 def shipped_profiles(preset: str | None = None) -> list[ToolProfile]:
     """The profiles a Desk made from `preset` enables, by tool name: the registered native adapters'
     (all a new Desk from `desks.create_desk` has), and for the seed also its connected MCP tools',
-    each pinned at its seed hash."""
+    each pinned at its seed hash, and its business tools', each pinned at its definition's hash."""
     pins = mcp_client.seed_pins()
     connected = [ToolPin(tool=tool, definition_sha256=pins[mcp_pins.MCP_OPERATIONS[tool]])
                  for server in SHIPPED_CONNECTIONS.get(preset or "", ()) for tool in mcp_pins.SERVERS[server]]
-    return mcp_pins.enabled_with(adapters.registered_profiles(source="native"), connected)
+    business = shipped_business_profiles(preset)
+    configured = [ToolPin(tool=tool, definition_sha256=profile.definition_sha256) for tool, profile in business.items()]
+    return mcp_pins.enabled_with(adapters.registered_profiles(source="native"), [*connected, *configured], business)
 
 
 class ShippedReport(BaseModel):
@@ -683,7 +702,8 @@ def version_cap(row: PolicyVersionRow | None) -> int:
         return 0
 
 
-async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money_cap_cents: int) -> PolicyVersion:
+async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money_cap_cents: int, *,
+                           enables: Sequence[ToolPin] = ()) -> PolicyVersion:
     """Makes a shipped rule set (`SHIPPED_PRESETS`) version 1 of a new Desk at the money cap
     `auto_money_cap_cents` (its `DeskSeed`'s), `active`, in the caller's transaction, ledgered
     `policy` `{version, status: "active", preset, activated: true, from: null,
@@ -692,10 +712,22 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
     either proof mode; nothing is proved here, so only the cap the set was proved at in CI
     (`SHIPPED_CAPS`) hits. A miss raises `SeedUnproved` (503, so the caller's transaction and
     everything in it roll back), lists the preset in `Health.unproved_seeds` and logs
-    `seed_unproved` with the hashes, since there may be no Desk left to ledger on."""
+    `seed_unproved` with the hashes, since there may be no Desk left to ledger on.
+
+    With `enables` (the seed's business tools, waiting for review), the version turns those tools
+    on as a confirmed `/tools/confirm` draft does: it is compiled over the enabled profiles plus
+    each of them pinned at its hash (`draft_profiles`), so the shipped report covers them; each pin
+    is checked again as `confirm` checks it (`mcp_pins.check_enables`); the version stores them, and
+    they are turned on in this transaction (`mcp_pins.enable_tools`), their `tool_pin` `enabled`
+    events ledgered after the `policy` entry. A stored profile that no longer matches its pin, or a
+    pin that isn't current, is the set left unproved, as a miss is (`SeedUnproved`, logged
+    `seed_unproved` with the reason)."""
     cards = SHIPPED_PRESETS[preset]
     cap = auto_money_cap_cents
-    profiles = await desks.enabled_profiles(ctx, desk_id)
+    try:
+        profiles = await draft_profiles(ctx, desk_id, enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise _unproved_seed(ctx, preset, "profile_changed") from None
     schema = compiler.desk_schema(profiles)
     compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap)
     hashes = version_hashes(compiled, schema, profiles, cards=cards, auto_money_cap_cents=cap)
@@ -705,16 +737,29 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
         log.error("seed_unproved preset=%s %s", preset,
                   " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
         raise SeedUnproved(preset)
+    if enables and (await mcp_pins.check_enables(ctx, desk_id, enables)).state != "ok":
+        raise _unproved_seed(ctx, preset, "pin_changed")
     row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, compiled=compiled,
                       a0=compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap, review=False).A,
                       schema=schema, hashes=hashes, auto_money_cap_cents=cap, status="active", proof=report,
-                      created_at=ctx.clock.now(), preset=preset)
+                      created_at=ctx.clock.now(), preset=preset, enables=enables)
     ctx.db.add(row)
     await ctx.db.flush()
+    events = await mcp_pins.enable_tools(ctx, desk_id, 1, enables) if enables else []
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel", summary={"version": 1, "status": "active", "preset": preset,
                                                  "activated": True, "from": None, "auto_money_cap_cents": cap}))
+    for event in events:
+        await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=event)
     return version_contract(row)
+
+
+def _unproved_seed(ctx: KernelCtx, preset: str, reason: str) -> SeedUnproved:
+    """A shipped set whose tools can't be turned on at the pins it was proved with: listed in
+    `Health.unproved_seeds` and logged `seed_unproved` with the reason, as a missing report is."""
+    ctx.policies.unproved_seeds.add(preset)
+    log.error("seed_unproved preset=%s reason=%s", preset, reason)
+    return SeedUnproved(preset)
 
 
 async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | None:

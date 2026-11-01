@@ -43,14 +43,18 @@ async def test_urgent_title_refuses_bidi_controls_without_writing_business_data(
     before_facts = {row.fact_id: (row.claims, row.readers, row.status)
                     for row in await rows_of(app, copy.copy_id, select(Fact))}
     before_inbox = {row.entry_id for row in await rows_of(app, copy.copy_id, select(DemoInboxRow))}
+    before_tools = {row.tool: (row.status, row.definition_sha256) for row in await rows_of(
+        app, copy.copy_id, select(Tool).where(Tool.source == 'business'))}
+    assert before_tools == {'desk.emergency-callback': ('enabled', before_tools['desk.emergency-callback'][1])}
     response = await put(client, copy, [urgent(title='Urgent \u202edeetnaraug\u202c')])
     assert response.status_code == 422, response.text
-    assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.source == 'business'))
+    assert {row.tool: (row.status, row.definition_sha256) for row in await rows_of(
+        app, copy.copy_id, select(Tool).where(Tool.source == 'business'))} == before_tools   # the seed's, as it was
     assert not await rows_of(app, copy.copy_id, select(Handoff))
     assert {row.fact_id: (row.claims, row.readers, row.status)
             for row in await rows_of(app, copy.copy_id, select(Fact))} == before_facts
     assert {row.entry_id for row in await rows_of(app, copy.copy_id, select(DemoInboxRow))} == before_inbox
-    [entry] = [row for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+    *_, entry = [row for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
     assert entry.event.summary == {'tools': [], 'refused': 'public_promise'}
 
 

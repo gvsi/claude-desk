@@ -49,17 +49,19 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
         assert (await call).desk_id == desk_id
     else:
         assert await refused(call) == (422, 'invalid')
-    rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+    rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE tool = 'desk.consult'", ())
     assert bool(rows) is accepted
 
 
 AMENITY_WORDING = ('Free parking', 'Complimentary coffee', 'Estacionamiento gratis', 'No cost parking')
 INTAKE = {'block': 'intake', 'questions': ['What?']}
 PAYMENT = {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}
+SEEDED_URGENT = 'desk.emergency-callback'   # the Rivera seed's urgent business tool, on every copy
 
 
 async def put_card(kernel, ro_read, title, config):
-    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows."""
+    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows,
+    leaving out the Rivera seed's own urgent tool (`SEEDED_URGENT`), which every copy has."""
     from desk.api.kernel_client import KernelFailed
 
     http, schema, _ = kernel
@@ -73,7 +75,8 @@ async def put_card(kernel, ro_read, title, config):
     except KernelFailed as error:
         assert (error.status, error.code) == (422, 'invalid')
         detail = error.detail
-    return detail, ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+    return detail, ro_read(schema, copy.copy_id,
+                           "SELECT tool FROM {ro}.tools WHERE source = 'business' AND tool <> %s", (SEEDED_URGENT,))
 
 
 @pytest.mark.kernel_plan('01c')
@@ -131,7 +134,7 @@ async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receip
             BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
     assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
     assert refused_call.value.detail == {f'{tool.tool}.{field}': [rule] for field in fields}
-    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ()) == []
+    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE tool = %s", (tool.tool,)) == []
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     blocked = await decide(http.session(visitor.session_token), visitor.state.session_id, visitor.state.generation,
                            'refused-intake', tool.tool, {'name': 'Dana', 'answers': ['Consult']})
@@ -171,7 +174,7 @@ async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_row
     assert rows() == before
     ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
     events = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools']
-    assert len(events) == 2
+    assert [event.summary.get('refused') for event in events[-2:]] == [None, 'public_promise']
     assert events[-1].summary == {'tools': [], 'refused': 'public_promise'}
 
 
@@ -255,7 +258,7 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
     assert await refused(http.session(visitor.session_token).call(
         "PUT /desks/{id}/business_tools", valid, path={"id": desk_id})) == (401, "auth")
     rows = ro_read(schema, copy.copy_id, "SELECT tool, status, business FROM {ro}.tools"
-                                       " WHERE desk_id = %s AND source = 'business'", (desk_id,))
+                                       " WHERE desk_id = %s AND source = 'business' AND status <> 'disabled'", (desk_id,))
     assert len(rows) == 1 and rows[0]["status"] == "needs_review"
     assert rows[0]["business"]["title"] == tool.title
 

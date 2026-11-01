@@ -545,16 +545,18 @@ async def test_start_verification_is_for_unverified_sessions(app, client):
 async def test_answering_off_leaves_lead_capture_and_callback(app, client):
     copy, visitor = await visitor_of(app, client)
     live = await context_of(client, visitor.session_id, visitor.headers)
-    assert tools(live.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-                                 "native.quote", "native.request_callback", "native.start_verification"]
+    assert tools(live.tools) == ["desk.emergency-callback", "native.book", "native.capture_lead", "native.find_slots",
+                                 "native.payment_link", "native.quote", "native.request_callback",
+                                 "native.start_verification"]
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         desk = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == copy.desk_id)))).one()
         desk.answering = False
 
-    # with Answering off, a visitor can still leave their details or ask for a callback, and nothing else
+    # with Answering off, a visitor can still leave their details or ask for a callback, urgent or not,
+    # and nothing else
     quiet = await context_of(client, visitor.session_id, visitor.headers)
-    assert tools(quiet.tools) == ["native.capture_lead", "native.request_callback"]
+    assert tools(quiet.tools) == ["desk.emergency-callback", "native.capture_lead", "native.request_callback"]
     assert quiet.tools_declared == live.tools_declared
     refused = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
     assert (refused.outcome, refused.action) == ("refuse", None)

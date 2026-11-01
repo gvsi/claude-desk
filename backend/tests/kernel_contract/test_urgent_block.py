@@ -1,5 +1,6 @@
 """The same urgent callback and immediate owner delivery against fake and real kernels."""
 
+import json
 
 import pytest
 
@@ -74,3 +75,45 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[changed]), path={'id': desk_id})
     [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
     assert (row['status'], row['review_reason']) == ('needs_review', 'changed')
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_a_fresh_copy_handles_an_emergency_through_the_seeded_urgent_tool(kernel, ro_read):
+    """An emergency on a new copy is urgent: the Rivera seed's `desk.emergency-callback` is enabled,
+    given to a stranger beside the native callback, allowed by the seed's `rv-urgent` card, and
+    alerts Maria at once with the seed's notification settings as they are."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    [row] = ro_read(schema, copy.copy_id, "SELECT * FROM {ro}.tools WHERE source = 'business'", ())
+    assert (row['desk_id'], row['tool'], row['status'], row['review_reason']) == (
+        desk_id, 'desk.emergency-callback', 'enabled', None)
+    assert row['business'] == {'title': 'Emergency callback',
+                               'description': 'Asks Maria to call back urgently about an emergency.',
+                               'config': {'block': 'urgent', 'urgent_when':
+                                          'A burst or leaking pipe, flooding, a sewage backup, or no water'}}
+    # written as the owner's replacement writes it, then turned on by the seed's version 1
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    seeded = [(entry.event.kind, entry.event.summary) for entry in ledger.entries
+              if entry.event.kind in ('business_tools', 'tool_pin') and 'emergency' in json.dumps(entry.event.summary)]
+    assert seeded == [
+        ('business_tools', {'tools': [{'tool': 'desk.emergency-callback', 'block': 'urgent',
+                                       'definition_sha256': row['definition_sha256'], 'change': 'new'}]}),
+        ('tool_pin', {'tool': 'desk.emergency-callback', 'event': 'enabled', 'version': 1,
+                      'definition_sha256': row['definition_sha256']})]
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    session = http.session(visitor.session_token)
+    seen = await session.call('GET /context/{session_id}?desk_id=', path={'session_id': visitor.state.session_id})
+    assert {'desk.emergency-callback', 'native.request_callback'} <= {profile.tool for profile in seen.tools}
+    args = {'name': 'Sam Lee', 'contact': '(510) 555-0100', 'reason': 'My pipes have burst'}
+    allowed = await decide(session, visitor.state.session_id, visitor.state.generation, 'burst',
+                           'desk.emergency-callback', args)
+    assert (allowed.outcome, allowed.card_ids) == ('allow', ['rv-urgent'])
+    result = await execute(session, allowed, visitor.state.generation)
+    assert result.state == 'succeeded' and result.inbox == []
+    receipt = await read_decision(session, allowed.decision_id)
+    assert receipt.visitor_plain == '“Emergency callback”: urgent request sent to Maria Rivera'
+    alerts = [entry for entry in await owner.call('GET /demo_inbox') if entry.to == 'owner' and entry.kind == 'alert'
+              and entry.body.startswith('Reported as urgent through “Emergency callback”. ')]
+    assert len(alerts) == 1
