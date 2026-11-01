@@ -26,6 +26,7 @@ from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
 from desk.api.agents import MAX_KEYS, MAX_RUNS, DemoAgents, HeldKey, a2a_client, demo_task_set
+from desk.api.cookies import VISITOR_COOKIE
 from desk.api.main import create_app
 from desk.api.metrics import record_model_call
 from desk.api.model import ModelRequest, ModelResponse, build_kwargs
@@ -614,13 +615,18 @@ async def test_the_agents_page_reads_its_desks_task_set(app, browser, fake, kern
     seed_slug = fake.desks[copy.desk_ids[0]].slug
     desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, "Maple Street Rentals")
     await setup_row(engine, copy.copy_id, desk_id, "landlord")
+    tokens = {}
     for sent_to, expected in ((seed_slug, "rivera"), (slug, "landlord")):
-        client, _, _ = await open_session(app, browser, sent_to)
+        client, tokens[sent_to], _ = await open_session(app, browser, sent_to)
         read = await client.get(f"/api/public/desks/{sent_to}/agent_tasks")
         assert (read.status_code, read.json()) == (200, {"task_set": expected}), sent_to
         assert read.headers["cache-control"] == "no-store"
-    unknown = await browser(app, ip="198.51.100.45").get(f"/api/public/desks/{slug}/agent_tasks")
-    assert (unknown.status_code, unknown.json()) == (401, {"error": "no_session"})
+    # No session, or another Desk's session sent on this Desk's path, reads nothing.
+    elsewhere = browser(app, ip="198.51.100.46")
+    elsewhere.cookies.set(VISITOR_COOKIE, tokens[seed_slug], domain="desk.test", path=f"/api/public/desks/{slug}")
+    for client in (browser(app, ip="198.51.100.45"), elsewhere):
+        refused = await client.get(f"/api/public/desks/{slug}/agent_tasks")
+        assert (refused.status_code, refused.json()) == (401, {"error": "no_session"})
 
 
 async def test_desk_replies_are_untrusted_in_the_agent_prompt(app, browser, fake, kernel_http, agent_model, desk_model):
