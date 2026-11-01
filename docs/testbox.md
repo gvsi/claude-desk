@@ -10,6 +10,9 @@ tools/testbox/run make web-e2e
 tools/testbox/run make evals-tier1
 ```
 
+A lane's first call takes about 4.5 minutes, to sync the worktree and build the lane's environment
+and kernel; later calls add seconds of overhead.
+
 The remote machine is available for tests and kernel builds; it is not the default runner yet. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
 QA also stay on the laptop. CI continues using its own runners.
 
@@ -109,8 +112,11 @@ Remote test reports remain in the lane; source files are never copied back autom
 Changed kernel sources or build inputs trigger `make kernel` before the requested command.
 Each database is cloned from a template keyed by migration inputs and migrated with the
 same development role passwords as `make db-roles`. A schema change recreates that lane's
-throwaway database. The dedicated Postgres 16 server disables fsync, synchronous_commit
-and full_page_writes: its data is disposable. It never connects to a laptop database.
+throwaway database. Lanes reach Postgres directly at the test bridge's address,
+`10.200.0.1:5432`, from their network namespace; the loopback forwarder on `127.0.0.1:5432`
+remains for clients from older branches. The dedicated Postgres 16 server disables fsync,
+synchronous_commit and full_page_writes: its data is disposable. It never connects to a
+laptop database.
 
 The account's deny-only inline policies may also be on the role. Provisioning accepts any other inline
 policy, whatever its name, when all its statements deny, since such a policy can't grant anything, and
