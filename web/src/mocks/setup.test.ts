@@ -10,7 +10,7 @@ import type { RouteKey } from '../api/routes.ts';
 import type { BusinessOut, CopyOut, RulesDraft, SetupState, SetupTools, SituationResult, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
-import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
+import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo } from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -712,6 +712,13 @@ describe('the owner and the line about the business, from the description', () =
     for (const [description, greeting] of cases) {
       expect((await started(description)).first?.slice(0, greeting.length + ' Before'.length), description).toBe(`${greeting} Before`);
     }
+  });
+
+  it('a_name_that_ends_in_a_stop_is_thanked_with_one', () => {
+    // The description's reading never gives such a name, but the thanks mustn't add a second stop.
+    expect(thanksTo('Bob Smith Jr.')).toBe('Thanks, Bob Smith Jr.');
+    expect(thanksTo('Maria')).toBe('Thanks, Maria.');
+    expect(thanksTo(null)).toBe('Thanks.');
   });
 
   it('the_about_line_leaves_out_the_introduction_and_the_name', async () => {
