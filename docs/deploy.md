@@ -11,7 +11,7 @@ Every command here that creates or changes anything in AWS runs only with the ow
 **Sign-off:** the owner's go for the deploy, CI green on the commit, and a clean preflight. `deploy.sh` runs `infra/scripts/preflight.py` first, which stops the deploy before any change unless:
 
 - the working tree is clean and `HEAD` is on `origin/main` (`--allow-branch` skips only the second check);
-- `make evals-results-check` passes against the repository's first commit, so `HEAD`'s own tier 2 results file must exist and pass. Until the API's tier 2 scenarios are marked landed (`evals/tier1/landed.toml`), that file holds no runs: a deploy is then gated by tier 1 in CI and the run-free file;
+- `make evals-results-check` passes against the first commit: while every tier 2 scenario is pending, no results file is needed; once any can run, `HEAD`'s own results file must exist and pass;
 - both owner secrets are set (below);
 - the web app builds and checks at `HEAD` (`npm ci`, `npm run build`, `npm run check:build` in `web/`).
 
