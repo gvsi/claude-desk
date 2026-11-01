@@ -240,8 +240,12 @@ describe('Conversations', () => {
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollTop).toBe(0);
-    // Reading to the end resumes following even though the handoff is still open.
-    region.scrollTop = region.scrollHeight;
+    // Following resumes on the scroll event, not on assigning scrollTop. Wait for that event
+    // before a poll can append the next message, even though the handoff is still open.
+    await new Promise<void>((resolve) => {
+      region.addEventListener('scroll', () => resolve(), { once: true });
+      region.scrollTop = region.scrollHeight;
+    });
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     mockStore.world.visitorText(chat, 'Please use the side gate.');
     await expect.element(log(screen).getByText('Please use the side gate.', { exact: true })).toBeInTheDocument();
