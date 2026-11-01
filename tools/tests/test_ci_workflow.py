@@ -232,7 +232,8 @@ def test_job_names_are_the_required_checks():
     assert [job["name"] for job in workflow_jobs] == REQUIRED_CHECKS
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
-        assert job["timeout-minutes"] == 25, job["name"]
+        # The backend suite runs past 25 minutes on a pull request's runner; every other job keeps 25.
+        assert job["timeout-minutes"] == (40 if job["name"] == "backend tests" else 25), job["name"]
 
 
 # The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
