@@ -46,6 +46,7 @@ EVENT = TypeAdapter(SseEvent)
 @pytest.mark.parametrize("state, expected, error", [
     ("executed", "done", False), ("denied", "refused", True), ("expired", "refused", True),
     ("cancelled", "refused", True), ("refused_at_execution", "refused", True),
+    ("failed", "failed", True),
     ("approved", "held_for_owner", False), ("unknown", "held_for_owner", False),
 ])
 async def test_recovering_an_answered_hold_uses_current_state(api_conn, caller, visitor, fake,

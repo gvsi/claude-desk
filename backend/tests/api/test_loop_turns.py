@@ -556,6 +556,44 @@ def quote_fact(request) -> str:
     return done["content"]["result"]["fact_id"]
 
 
+async def test_quote_finishes_with_a_payment_link_card_once(api_conn, caller, fake):
+    await said(api_conn, caller, "Please quote a drain clearing and give me the link to pay.")
+    result_ids = []
+
+    def create_payment_link(request):
+        (result,) = tool_results(request)
+        assert result["tool_use_id"] == "toolu_quote" and result["content"]["outcome"] == "done"
+        quote = result["content"]["result"]
+        assert quote["fact_id"] in result["content"]["fact_ids"]
+        return response(tool_use("native__payment_link", {"quote_id": quote["quote_id"]}, id="toolu_payment"))
+
+    def show_payment_link(request):
+        (result,) = tool_results(request)
+        assert result["tool_use_id"] == "toolu_payment" and result["content"]["outcome"] == "done"
+        (fact_id,) = result["content"]["fact_ids"]
+        result_ids.append(fact_id)
+        return response(reply("Here is the link to pay.", {"template": "payment_link", "fact_id": fact_id}))
+
+    model = ScriptedModel([
+        response(tool_use("native__quote", DRAIN, id="toolu_quote")),
+        create_payment_link,
+        show_payment_link,
+    ])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert len(model.requests) == 3
+    (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    (card,) = [block for block in message.blocks if block.kind == "card"]
+    assert not message.handoff and card.template == "payment_link" and card.href
+    assert [card.fact_id] == result_ids
+    decisions = [record.decision for record in fake.decisions.values()
+                 if record.decision.session_id == caller.session_id]
+    assert [decision.action.tool for decision in decisions] == ["native.quote", "native.payment_link"]
+    executions = [entry.event.ref_id for entry in fake.desks[caller.desk_id].ledger
+                  if entry.event.kind == "execute" and entry.event.session_id == caller.session_id]
+    assert executions == [decision.decision_id for decision in decisions]
+    assert len(fake.called("POST /execute")) == 2
+
+
 async def test_parallel_calls_with_mixed_outcomes_share_one_tool_result_message(api_conn, caller, visitor, fake):
     all_in = asyncio.Event()
     arrived = []

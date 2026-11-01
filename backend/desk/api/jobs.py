@@ -114,7 +114,7 @@ def jobs_app(connector: BaseConnector, *, schedule: bool = True) -> procrastinat
 
     @app.task(name=RESUME_AFTER_ANSWER, queue=QUEUE, pass_context=True)
     async def resume_after_answer_job(context: JobContext, copy_id: str, desk_id: str, session_id: str,
-                                      decision: dict, approved: dict | None = None,
+                                      decision: dict, approved: dict | None = None, *,
                                       result_fact_ids: list[str] | None = None) -> None:
         env = _env(context)
         async with env.engine.connect() as conn:
@@ -188,7 +188,7 @@ async def _keep_running(app: procrastinate.App, env: JobEnv, name: str, options:
 
 
 async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: Decision,
-                                    approved: Decision | None = None,
+                                    approved: Decision | None = None, *,
                                     result_fact_ids: list[str] | None = None) -> None:
     """Queue IDs, the signed outcome, its optional approved snapshot and executed result fact IDs only.
     Exclude the owner-only reason and key; result claims and model_view never enter the queue."""
@@ -274,7 +274,7 @@ async def defer_turn_annotations(app: procrastinate.App | None, conn: AsyncConne
 
 
 async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decision,
-                              approved: Decision | None = None,
+                              approved: Decision | None = None, *,
                               result_fact_ids: list[str] | None = None) -> bool:
     """Show the approved snapshot before the outcome and resume once, in one transaction (module docstring).
     Only the executed outcome's action update names result facts. Without a snapshot (including older jobs),

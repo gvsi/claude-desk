@@ -62,7 +62,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
-from xml.etree import ElementTree
 
 from pydantic import ConfigDict, ValidationError
 from pydantic_core import from_json
@@ -88,7 +87,7 @@ from desk.api.prompts import (
 )
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
-from desk.db.models import Message, RunEvent
+from desk.db.models import ActionUpdateMetadata, Message, RunEvent
 from desk.kernel_api import ContextClock
 
 MESSAGES = Message.__table__
@@ -257,7 +256,8 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
     """Append a transcript row and return its `n`, under the session's events lock (module docstring). A row the
     model will see is written with its frozen block and waits for the next model call. `state` (the decision's) is
     required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. Its optional
-    `result_fact_ids` live only in the frozen block and the code-built summary. A `replayed` row
+    `result_fact_ids` and state are stored in `blocks` for the code-built summary, independently of the frozen
+    block. A `replayed` row
     (a visitor's, an agent's, a delivered one or a status) is recorded history: written at its moment with its
     `replay_id`, with no frozen block and no `wake`. Context, tool-change and model rows, which no reader polls,
     have their own functions."""
@@ -276,6 +276,8 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         raise ValueError(f"a {kind} row has text")
     if kind == "action_update" and not (values["ref_id"] and state):
         raise ValueError("an action_update names its decision (ref_id) and state")
+    if kind == "action_update":
+        values["blocks"] = ActionUpdateMetadata(state=state, result_fact_ids=list(result_fact_ids))
     if kind == "annotation" and not values["ref_id"]:
         raise ValueError("an annotation names the row it annotates (ref_id, its message_id)")
     if kind in PRESENCE_KINDS and not values.get("event_seq"):
@@ -535,11 +537,11 @@ def _summary_line(row: Any) -> str:
     if row.kind == "delivered":
         return summary_line(SHOWN_LABELS[row.author], blocks_text(row.blocks or []))
     if row.kind == "action_update":
-        # Read the frozen association, including blocks written before result IDs were carried.
-        attributes = ElementTree.fromstring(row.model_content["text"]).attrib
-        metadata = (f'decision_id={json.dumps(row.ref_id, ensure_ascii=False)} '
-                    f'state={json.dumps(attributes["state"])} '
-                    f'result_fact_ids={attributes.get("result_fact_ids", "[]")} ')
+        # Older rows have no structured metadata; retain their decision and text without parsing frozen text.
+        metadata = f'decision_id={json.dumps(row.ref_id, ensure_ascii=False)} '
+        if row.blocks is not None:
+            metadata += (f'state={json.dumps(row.blocks.state)} '
+                         f'result_fact_ids={json.dumps(" ".join(row.blocks.result_fact_ids), ensure_ascii=False)} ')
         return summary_line(SUMMARY_LABELS[row.kind], metadata + (row.text or ""))
     return summary_line(SUMMARY_LABELS[row.kind], row.text or "")
 

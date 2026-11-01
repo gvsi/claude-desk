@@ -203,6 +203,14 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     )
 
 
+def test_system_prompt_has_one_result_card_mapping():
+    text = conversation_system(RIVERA)[0]["text"]
+    bullet = next(line for line in text.splitlines() if line.startswith("- Clauses and the facts they cite:"))
+    for kind, template in prompts.RESULT_CARD_TEMPLATES.items():
+        assert f"{template} (a {kind} fact)" in bullet
+    assert "Result cards by fact kind:" not in text
+
+
 def test_system_prompt_covers_the_rules():
     assert PROMPT_VERSION == "2026-10-31.12"                    # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
@@ -252,8 +260,11 @@ def test_system_prompt_covers_the_rules():
         "Availability is capability, not permission",
         "Use the loaded tool descriptions for prerequisites, arguments and returned identities",
         "If a needed result fact is absent and an available tool can get it, use that tool",
-        "Ask only for missing information the task needs",
+        "Ask only for the missing details the task needs, alongside the questions above that help you "
+        "understand their situation",
         "The catalog gives item IDs, not a quote or a price card",
+        "If no available capability can get the missing information, answer the supported parts and offer to "
+        "take a message for Maria Rivera or arrange a callback for what remains",
         "English or Spanish", "reply with the handoff clause alone",
         "\"held_for_owner\": the request hasn't happened; it waits for Maria Rivera.",
         "A call you made, or only planned, doesn't show that anything was saved, sent or arranged.",
@@ -293,6 +304,7 @@ def test_system_prompt_covers_the_rules():
         "verification is a prerequisite, not completion",
         "If already verified, use the relevant record tool rather than restarting verification",
         "Never invent or enumerate record IDs",
+        "If no entitled identifier is available, offer to take a message for Maria Rivera or arrange a callback",
         "An <action_update> reports the current state of an earlier request",
         "Approval isn't completion",
         "from the result fact IDs the update names",

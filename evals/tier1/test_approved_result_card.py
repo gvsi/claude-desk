@@ -1,6 +1,5 @@
 """An owner's approved refund completes once and reaches the visitor as its genuine card."""
 
-import json
 from xml.etree import ElementTree
 
 import pytest
@@ -46,7 +45,7 @@ async def test_approved_refund_shows_its_result_card_once(k, api, fake, records)
                     if block.get("type") == "text" and block["text"].startswith("<action_update "):
                         update = ElementTree.fromstring(block["text"])
                         assert update.attrib["decision_id"] == decision_id
-                        associated.extend(json.loads(update.attrib["result_fact_ids"]))
+                        associated.extend(update.attrib["result_fact_ids"].split())
                         assert len(associated) == 1
                         fake.script(OPUS, ToolUse("send_reply", {
                             "prose": "Here are the details of your request.",

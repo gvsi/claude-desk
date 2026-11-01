@@ -7,6 +7,7 @@ what they leave is read with the visitor's own credential on the session's next 
 """
 
 import asyncio
+import inspect
 import json
 from xml.etree import ElementTree
 from datetime import timedelta
@@ -48,6 +49,14 @@ from desk.kernel_api import AnswerRequest, CreateCopyRequest, CreateSessionReque
 from tests.api.fakes import ScriptedModel, response, tool_use
 
 DRAIN = {"items": [{"item_id": "drain", "qty": 1}]}
+
+
+def test_resume_result_ids_cannot_bind_to_a_positional_argument():
+    for function in (jobs.resume_after_answer, jobs.defer_resume_after_answer):
+        signature = inspect.signature(function)
+        with pytest.raises(TypeError):
+            signature.bind(None, None, None, None, ["refund:R-1"])
+        signature.bind(None, None, None, None, result_fact_ids=["refund:R-1"])
 
 
 class Copy:
@@ -111,7 +120,7 @@ async def test_an_approved_booking_is_shown_with_its_result_card(copy, engine):
         updates = [ElementTree.fromstring(block["text"]) for message in request.messages
                    for block in message["content"] if block.get("type") == "text"
                    and block["text"].startswith("<action_update ")]
-        assert json.loads(updates[0].attrib["result_fact_ids"]) == [fact.fact_id]
+        assert updates[0].attrib["result_fact_ids"].split() == [fact.fact_id]
         return response(tool_use("send_reply", {"prose": "Here are the details of your request.",
                                                 "clauses": [{"template": "booking_confirmed",
                                                              "fact_id": fact.fact_id}]}))
@@ -137,7 +146,7 @@ async def test_resume_carries_only_result_ids_on_executed_updates(copy, engine):
         block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
                                          " AND kind = 'action_update'"), {"s": caller.session_id})).scalar_one()
     update = ElementTree.fromstring(block["text"])
-    assert json.loads(update.attrib["result_fact_ids"]) == fact_ids
+    assert update.attrib["result_fact_ids"].split() == fact_ids
     assert update.attrib["decision_id"] == held.decision_id
     for state in ("denied", "expired"):
         other = await copy.visitor()

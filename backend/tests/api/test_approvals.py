@@ -200,7 +200,7 @@ async def test_approved_result_ids_reach_the_follow_up(app, browser, fake, kerne
     async with engine.connect() as conn:
         block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
                                          " AND kind = 'action_update'"), {"s": held.session_id})).scalar_one()
-    assert json.loads(ElementTree.fromstring(block["text"]).attrib["result_fact_ids"]) == fact_ids
+    assert ElementTree.fromstring(block["text"]).attrib["result_fact_ids"].split() == fact_ids
     if not inline:
         (job,) = await resume_jobs(jobs_connector)
         assert job["args"]["result_fact_ids"] == fact_ids
@@ -239,7 +239,7 @@ async def test_resumed_result_card_uses_the_answer_association(app, browser, fak
                    and block["text"].startswith("<action_update ")]
         (update,) = updates
         assert update.attrib["decision_id"] == held.decision_id
-        (fact_id,) = json.loads(update.attrib["result_fact_ids"])
+        (fact_id,) = update.attrib["result_fact_ids"].split()
         return response(tool_use("send_reply", {"prose": "Here are the details of your request.",
                                                 "clauses": [{"template": template, "fact_id": fact_id}]}))
 
