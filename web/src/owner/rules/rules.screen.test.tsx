@@ -17,6 +17,7 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
 import { worker } from '../../mocks/browser.ts';
+import { businessOut } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
@@ -34,6 +35,12 @@ function desk(): DeskRecord {
   const found = mockStore.world.desk(RIVERA.deskId);
   if (!found) throw new Error('the mock has the main Desk');
   return found;
+}
+
+/** Renames both the business read and its Desk summary, as the API keeps them together. */
+function renameBusiness(name: string): void {
+  desk().summary.business_name = name;
+  worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([{ ...businessOut(mockStore.world), name }])));
 }
 
 /** The change review's rows as the owner reads them, in order: each one's title and the words of its Before and After. */
@@ -958,7 +965,7 @@ describe("Ask Claude's question about a hold", () => {
 
   it('another_business_without_a_hold_has_no_chips_row', async () => {
     mockStore.reset('rivera_quiet');
-    desk().summary.business_name = 'Acme Accounting';
+    renameBusiness('Acme Accounting');
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.poll(() => requests('needsYou').length).toBeGreaterThanOrEqual(2);
@@ -967,7 +974,7 @@ describe("Ask Claude's question about a hold", () => {
   });
 
   it('another_business_has_only_the_hold_question', async () => {
-    desk().summary.business_name = 'Acme Accounting';
+    renameBusiness('Acme Accounting');
     const { screen } = await renderRoute(`${DESK}/rules`);
     const group = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
