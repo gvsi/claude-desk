@@ -1,5 +1,5 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
-import type { PublicLine, SetupState } from '../api/views.ts';
+import type { SetupPublicLine, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
 import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
@@ -24,10 +24,10 @@ function afterHoursOf(answer: string | undefined): string | undefined {
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 
-function seed(sv: Server, state: SetupState): PublicLine[] {
+function seed(sv: Server, state: SetupState): SetupPublicLine[] {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
-    return CPA_LINES.map(([key, text]): PublicLine => ({
+    return CPA_LINES.map(([key, text]): SetupPublicLine => ({
       key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help',
     }));
   }
@@ -46,11 +46,11 @@ function seed(sv: Server, state: SetupState): PublicLine[] {
     ['about', about],
     ['after_hours', afterHoursOf(answers.get('contact_and_after_hours'))],
   ];
-  return values.flatMap(([key, text]): PublicLine[] => text?.trim()
+  return values.flatMap(([key, text]): SetupPublicLine[] => text?.trim()
     ? [{ key: `policy:${key}`, text, source: 'owner', editable: true }] : []);
 }
 
-function read(sv: Server, req: Req): { lines: PublicLine[] } | Failure {
+function read(sv: Server, req: Req): { lines: SetupPublicLine[] } | Failure {
   const found = SETUP_ROUTES.setup!(sv, req);
   if (found.status !== 200) return found as Failure;
   const state = found.body as SetupState;
@@ -78,7 +78,7 @@ export const PUBLIC_LINES_ROUTES = {
       return { status: 422, body: { error: 'invalid' } };
     }
     if (!line.editable) return { status: 422, body: { error: 'not_editable', key: line.key } };
-    if (publicLineRefused(text)) return { status: 422, body: { error: 'line_refused', key: line.key, reason: 'mock_scan' } };
+    if (publicLineRefused(text)) return { status: 422, body: { error: 'line_refused', key: line.key, reason: ['mock_scan'] } };
     line.text = text.trim();
     line.source = 'owner';
     return { status: 200, body: structuredClone(found) };
@@ -90,7 +90,7 @@ export const PUBLIC_LINES_ROUTES = {
       return { status: 422, body: { error: 'invalid' } };
     }
     const refused = found.lines.find((line) => publicLineRefused(line.text));
-    if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: 'mock_scan' } };
+    if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     return { status: 200, body: structuredClone(found) };
   },
 } satisfies ServedRoutes;

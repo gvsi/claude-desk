@@ -577,18 +577,18 @@ export interface SetupTools {
 }
 
 /** The public charter lines the owner reviews before the safety check. */
-export interface PublicLine {
+export interface SetupPublicLine {
   key: string;
   text: string;
   source: 'owner' | 'suggested';
   editable: boolean;
 }
 
-export interface PublicLines {
-  lines: PublicLine[];
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
 }
 
-export interface PublicLineBody {
+export interface SetupPublicLineIn {
   key: string;
   text: string;
 }

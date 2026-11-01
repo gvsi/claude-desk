@@ -52,8 +52,8 @@ import type {
   PasscodeBody,
   PaymentLinkOut,
   PeopleOut,
-  PublicLines,
-  PublicLineBody,
+  SetupPublicLines,
+  SetupPublicLineIn,
   PolicyVersionOut,
   PresetBody,
   Reports,
@@ -244,9 +244,9 @@ interface RouteShapes {
   setupSuggestions: { body: SetupSuggestionsBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
-  setupPublicLines: { body: undefined; response: PublicLines };
-  setupPublicLine: { body: PublicLineBody; response: PublicLines };
-  setupPublicLinesConfirm: { body: Record<string, never>; response: PublicLines };
+  setupPublicLines: { body: undefined; response: SetupPublicLines };
+  setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
+  setupPublicLinesConfirm: { body: Record<string, never>; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };

@@ -1,7 +1,7 @@
 import { http } from 'msw';
 import { expect, it, onTestFinished } from 'vitest';
 
-import type { PublicLines, SetupState } from '../api/views.ts';
+import type { SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -196,7 +196,7 @@ it('hides unknown keys and gives read-only How we help the full text width', asy
   const state = await atSituations();
   const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
   if ('network' in read) throw new Error('read failed');
-  const body = read.body as PublicLines;
+  const body = read.body as SetupPublicLines;
   body.lines.find((line) => line.key === 'policy:how_we_help')!.editable = true;
   body.lines.unshift({ key: 'policy:unknown', text: 'Unknown text stays hidden.', editable: true, source: 'suggested' });
   mockStore.inject({ route: 'setupPublicLines', status: 200, body });

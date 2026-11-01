@@ -131,7 +131,7 @@ export interface ErrorBody {
   error: string;
   /** A public-line refusal's row; the internal reason is never rendered. */
   key?: string;
-  reason?: string;
+  reason?: string[] | null;
   code?: string;
   decision?: Decision;
   /** An `above_money_cap` refusal's limit for taking money without asking. */

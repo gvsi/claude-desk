@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from 'vitest';
 
-import type { PublicLines, QuestionKey, SetupState } from '../api/views.ts';
+import type { SetupPublicLines, QuestionKey, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS } from './setup.ts';
 import { mockStore } from './store.ts';
@@ -30,7 +30,7 @@ it('reads the seven public lines in order without moving the interview', async (
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   expect(read.status).toBe(200);
-  const lines = (read.body as PublicLines).lines;
+  const lines = (read.body as SetupPublicLines).lines;
   expect(lines.map((line) => line.key)).toEqual([
     'policy:about', 'policy:pricing', 'policy:intake', 'policy:after_hours',
     'policy:urgent', 'policy:service_area', 'policy:how_we_help',
@@ -67,7 +67,7 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
   expect(read).toMatchObject({ status: 200, body: expected });
   if ('network' in read) throw new Error('read failed');
   for (const answer of Object.values(limits)) {
-    for (const line of (read.body as PublicLines).lines) expect(line.text).not.toContain(answer);
+    for (const line of (read.body as SetupPublicLines).lines) expect(line.text).not.toContain(answer);
   }
   expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200, body: expected });
 });
@@ -98,7 +98,7 @@ it('seeds other businesses only from their About and explicit after-hours clause
     ] : [])] } });
     if ('network' in read) throw new Error('read failed');
     for (const answer of Object.values(limits)) {
-      for (const line of (read.body as PublicLines).lines) expect(line.text).not.toContain(answer);
+      for (const line of (read.body as SetupPublicLines).lines) expect(line.text).not.toContain(answer);
     }
     expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200 });
   }
@@ -113,7 +113,7 @@ it('updates one editable line and refuses unsafe, read-only or invalid edits wit
   });
   for (const refused of ['$20', '10%', '9am', '9:30', '9 to 6', 'guarantee', 'promise', 'always', 'never']) {
     expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text: refused } })).toMatchObject({
-      status: 422, body: { error: 'line_refused', key, reason: expect.any(String) },
+      status: 422, body: { error: 'line_refused', key, reason: ['mock_scan'] },
     });
   }
   expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:how_we_help', text } })).toMatchObject({
@@ -149,7 +149,7 @@ it('confirms all lines, rescans seeded answers and leaves the interview at rules
     status: 200, body: { charter: [] },
   });
   expect(await mockStore.dispatch('setupPublicLinesConfirm', { params: unsafe, body: {} })).toMatchObject({
-    status: 422, body: { error: 'line_refused', key: 'policy:about', reason: expect.any(String) },
+    status: 422, body: { error: 'line_refused', key: 'policy:about', reason: ['mock_scan'] },
   });
   expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject({
     status: 200, body: { charter: expect.not.arrayContaining([expect.objectContaining({ fact_id: 'charter:policy:about' })]) },
@@ -176,7 +176,7 @@ it('shows saved and confirmed lines in the public charter for their claims', asy
   expect(await mockStore.dispatch('publicDesk', { params: { slug } })).toMatchObject({
     status: 200,
     body: {
-      charter: (confirmed.body as PublicLines).lines.map(({ key, text }) => expect.objectContaining({
+      charter: (confirmed.body as SetupPublicLines).lines.map(({ key, text }) => expect.objectContaining({
         fact_id: `charter:${key}`, title: text,
       })),
     },
@@ -279,7 +279,7 @@ it('seeds How we help as customer-readable lines that pass the scan', async () =
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   expect(read.status).toBe(200);
-  const line = (read.body as PublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
+  const line = (read.body as SetupPublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
   expect(line).toMatchObject({ editable: false });
   const jobs = line!.text.split('\n');
   expect(jobs).toEqual([
@@ -301,7 +301,7 @@ it('scans read-only How we help before confirmation and public publication', asy
   const key = 'policy:how_we_help';
   const text = 'Book a free 20-minute call.';
   // Reproduce an unsafe code-built draft without allowing an owner to edit the read-only claim.
-  storePublicLines(mockStore.world, params.id, (read.body as PublicLines).lines.map((line) =>
+  storePublicLines(mockStore.world, params.id, (read.body as SetupPublicLines).lines.map((line) =>
     line.key === key ? { ...line, text } : line,
   ));
   expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({

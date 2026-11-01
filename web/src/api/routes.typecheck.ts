@@ -88,9 +88,9 @@ export const ROUTE_MODELS = {
   setupSuggestions: 'SetupState',
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
-  setupPublicLines: 'PublicLines',
-  setupPublicLine: 'PublicLines',
-  setupPublicLinesConfirm: 'PublicLines',
+  setupPublicLines: 'SetupPublicLines',
+  setupPublicLine: 'SetupPublicLines',
+  setupPublicLinesConfirm: 'SetupPublicLines',
 
   // Public
   publicDesk: 'PublicDesk',

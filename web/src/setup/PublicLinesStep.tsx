@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
-import type { PublicLine, PublicLines, SetupState, SetupStep } from '../api/views.ts';
+import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '../api/views.ts';
 import { Button, Card, cardChrome, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 
@@ -11,7 +11,7 @@ import './PublicLinesStep.css';
 const copy = SETUP_COPY.publicLines;
 
 /** A malformed answer holds this step, including a 200 that cannot confirm what was checked. */
-function checkedLines(value: PublicLines): PublicLines {
+function checkedLines(value: SetupPublicLines): SetupPublicLines {
   if (
     !value || !Array.isArray(value.lines) || value.lines.some((line) =>
       !line || typeof line.key !== 'string' || typeof line.text !== 'string' || !line.text.trim()
@@ -21,7 +21,7 @@ function checkedLines(value: PublicLines): PublicLines {
   return value;
 }
 
-const canEdit = (line: PublicLine) => line.editable && line.key !== 'policy:how_we_help';
+const canEdit = (line: SetupPublicLine) => line.editable && line.key !== 'policy:how_we_help';
 
 export interface PublicLinesStepProps {
   state: SetupState;
@@ -74,7 +74,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     setError(null);
     setRefused(false);
   };
-  const edit = (line: PublicLine) => {
+  const edit = (line: SetupPublicLine) => {
     setText(line.text);
     setEditingKey(line.key);
     setError(null);

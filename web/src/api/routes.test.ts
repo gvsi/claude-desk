@@ -6,7 +6,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { MoneyCapIn } from './openapi.gen.ts';
 import { ROUTES, apiPath, type RouteBody, type RouteKey } from './routes.ts';
-import type { AnyToolName, QuestionKey } from './views.ts';
+import type { AnyToolName, QuestionKey, SetupPublicLine, SetupPublicLineIn, SetupPublicLines } from './views.ts';
+import { ROUTE_MODELS } from './routes.typecheck.ts';
 
 const PLAN_02: Record<RouteKey, string> = {
   // Copy and Desks
@@ -137,4 +138,13 @@ describe('ROUTES', () => {
     expect(apiPath('conversation', { session_id: 's1' }, { after: undefined })).toBe('/api/owner/conversations/s1');
     expect(() => apiPath('publicDesk', {} as { slug: string })).toThrow();
   });
+});
+
+
+it('names the setup public-line responses as the API document does', () => {
+  for (const key of ['setupPublicLines', 'setupPublicLine', 'setupPublicLinesConfirm'] as const) {
+    expect(ROUTE_MODELS[key]).toBe('SetupPublicLines');
+  }
+  expectTypeOf<RouteBody<'setupPublicLine'>>().toEqualTypeOf<SetupPublicLineIn>();
+  expectTypeOf<SetupPublicLines['lines'][number]>().toEqualTypeOf<SetupPublicLine>();
 });
