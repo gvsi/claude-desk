@@ -88,7 +88,9 @@ it('saves the edited line and keeps every other control disabled while Save is b
   await field.fill('We help local businesses.');
   await screen.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).toHaveAttribute('aria-busy', 'true');
-  await expect.element(screen.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+  const cancel = screen.getByRole('button', { name: 'Cancel', exact: true });
+  await expect.element(cancel).toHaveAttribute('aria-disabled', 'true');
+  expect((cancel.element() as HTMLButtonElement).disabled).toBe(false);
   await expect.element(field).toHaveAttribute('readonly');
   release();
   await expect.element(field).not.toBeInTheDocument();
@@ -127,7 +129,10 @@ it('confirms with an empty object and advances to Safety check only after succes
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toHaveAttribute('aria-busy', 'true');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
-  for (const edit of screen.getByRole('button', { name: 'Edit', exact: true }).elements()) expect((edit as HTMLButtonElement).disabled).toBe(true);
+  for (const edit of screen.getByRole('button', { name: 'Edit', exact: true }).elements()) {
+    expect(edit.getAttribute('aria-disabled')).toBe('true');
+    expect((edit as HTMLButtonElement).disabled).toBe(false);
+  }
   release();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({});

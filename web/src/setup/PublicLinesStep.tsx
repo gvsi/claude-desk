@@ -3,8 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { PublicLine, PublicLines, SetupState, SetupStep } from '../api/views.ts';
-import { Button, Card, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
-import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
+import { Button, Card, cardChrome, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 
 import './PublicLinesStep.css';
@@ -166,7 +165,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                       </div>
                       <div className="cd-setup-step__actions">
                         <Button variant="primary" busy={busy === 'save'} onClick={() => void save()}>{copy.save}</Button>
-                        <Button variant="ghost" disabled={busy !== null} onClick={cancel}>{copy.cancel}</Button>
+                        <Button variant="ghost" waiting={busy !== null} onClick={cancel}>{copy.cancel}</Button>
                       </div>
                     </div>
                   ) : (
@@ -177,7 +176,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                       {canEdit(line) ? (
                         <Button
                           variant="ghost"
-                          disabled={editingKey !== null || busy !== null}
+                          disabled={editingKey !== null}
+                          waiting={busy !== null}
                           describedBy={`${fieldId}-${line.key}`}
                           buttonRef={(button) => {
                             if (button) editButtons.current.set(line.key, button);
@@ -195,9 +195,13 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
             </div>
           </Card>
           <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" disabled={editingKey !== null} busy={busy === 'confirm'} onClick={() => void confirm()}>
-              {SETUP_COPY.situations.looksRight}
-            </Button>
+            {editingKey !== null ? (
+              <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
+            ) : (
+              <Button variant="primary" size="main" busy={busy === 'confirm'} onClick={() => void confirm()}>
+                {SETUP_COPY.situations.looksRight}
+              </Button>
+            )}
           </div>
         </>
       )}
