@@ -9,7 +9,7 @@
 import { apiPath } from './routes.ts';
 
 /** What a read looks at: the owner's Claude memory, their website, or a web search. */
-export type SetupRead = 'memory' | 'website' | 'search';
+export type SetupRead = 'memory' | 'website' | 'web_search';
 
 export type SetupStreamEvent =
   | { type: 'delta'; run: string; text: string }
@@ -21,7 +21,7 @@ export type SetupStreamEvent =
   | { type: 'error'; run: string | null; error: string };
 
 const NAMES = ['delta', 'reset', 'reading', 'label', 'done', 'error'] as const;
-const READS: ReadonlySet<unknown> = new Set<SetupRead>(['memory', 'website', 'search']);
+const READS: ReadonlySet<unknown> = new Set<SetupRead>(['memory', 'website', 'web_search']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

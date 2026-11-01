@@ -89,14 +89,40 @@ describe('streamed setup turns', () => {
     expect(consented.state.messages.at(-1)).toMatchObject({ role: 'owner', text: 'Yes, use it' });
     const stream = follow(id);
     await vi.waitFor(() => expect(stream.closed()).toBe(true));
-    expect(stream.heard.slice(0, 2).map(([name, data]) => [name, data.read])).toEqual([
-      ['reading', 'memory'],
-      ['label', 'memory'],
-    ]);
-    expect(named(stream.heard, 'label').map(({ text }) => text)).toEqual([MEMORY_LABEL]);
+    // The reads run at once: one reading per read in the order the interview saves their labels
+    // (the memory first), then each label in that same order with the saved words, then the reply.
+    const saved = (await read(id)).messages.filter((m) => m.role === 'tool_label').map((m) => m.text);
+    expect(saved[0]).toBe(MEMORY_LABEL);
+    const names = stream.heard.map(([name]) => name);
+    expect(names.slice(0, saved.length * 2)).toEqual([...saved.map(() => 'reading'), ...saved.map(() => 'label')]);
+    const reads = named(stream.heard, 'reading').map(({ read: what }) => what);
+    expect(reads[0]).toBe('memory');
+    expect(named(stream.heard, 'label').map(({ read: what }) => what)).toEqual(reads);
+    expect(named(stream.heard, 'label').map(({ text }) => text)).toEqual(saved);
+    expect(new Set(names.slice(saved.length * 2, -1))).toEqual(new Set(['delta']));
+    expect(names.at(-1)).toBe('done');
     // The first question, with its choices, docks once the turn lands: it isn't part of the reply.
     expect(named(stream.heard, 'delta').at(-1)?.text).toBe(CPA_COPY.opening.join('\n\n'));
-    expect((await read(id)).messages.some((m) => m.role === 'tool_label' && m.text === MEMORY_LABEL)).toBe(true);
+  });
+
+  it('gives_a_late_stream_every_read_started_and_ended_in_order', async () => {
+    const id = (await startState()).interview_id;
+    mockStore.streamSetupTurns();
+    let release: () => void = () => {};
+    mockStore.planStream('setup', {
+      pauseAfter: 1,
+      until: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    });
+    await send('setupConsent', id, { allow: true });
+    const first = follow(id);
+    await vi.waitFor(() => expect(named(first.heard, 'delta')).toHaveLength(1));
+    // Comes in after the reads ended: it hears them in the same order, then the reply so far.
+    const late = follow(id);
+    expect(late.heard).toEqual(first.heard);
+    release();
+    await vi.waitFor(() => expect(late.closed()).toBe(true));
   });
 
   it('writes_with_no_reads_after_no_i_will_type_it', async () => {

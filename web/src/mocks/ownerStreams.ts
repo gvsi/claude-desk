@@ -45,7 +45,7 @@ export interface OwnerStreamPlan {
 
 /** A read the turn makes before it writes, and the label it ends with. */
 export interface PlayedRead {
-  read: 'memory' | 'website' | 'search';
+  read: 'memory' | 'website' | 'web_search';
   host: string | null;
   text: string;
 }

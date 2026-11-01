@@ -128,9 +128,10 @@ export interface SetupFollower {
   close(): void;
 }
 
-/** A running turn as its stream shows it: the reads ended so far and the reply so far. */
+/** A running turn as its stream shows it: the reads started and ended so far, and the reply so far. */
 interface SetupRun {
   id: string;
+  reading: { read: PlayedRead['read']; host: string | null }[];
   labels: { read: PlayedRead['read']; text: string }[];
   text: string;
   followers: Set<SetupFollower>;
@@ -1018,6 +1019,14 @@ export function holdNextAnswer(world: MockWorld, interviewId: string): () => voi
 
 const runId = () => `r_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
 
+/** What a saved read label read, as its stream names it: the owner's Claude memory, a web search, or their site. */
+function readOf(label: string): Pick<PlayedRead, 'read' | 'host'> {
+  if (label === MEMORY_LABEL || label.includes('Claude memory')) return { read: 'memory', host: null };
+  if (/^(?:Searched the web|Couldn't search the web)/.test(label)) return { read: 'web_search', host: null };
+  const host = label.replace(/^(?:Read|Couldn't read) /, '').split(',')[0] ?? null;
+  return { read: 'website', host };
+}
+
 /** Ends the turn its stream follows: `done` (the turn landed) or `error`, then each stream closes. */
 function endRun(interview: Interview, how: 'done' | 'error' | 'drop'): void {
   const run = interview.run;
@@ -1041,11 +1050,11 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
   const before = interview.state.messages.length;
   commit();
   const added = interview.state.messages.slice(before);
-  const reads = added.flatMap((m): PlayedRead[] => (m.role === 'tool_label' ? [{ read: m.text === MEMORY_LABEL ? 'memory' : 'website', host: null, text: m.text }] : []));
+  const reads = added.flatMap((m): PlayedRead[] => (m.role === 'tool_label' ? [{ ...readOf(m.text), text: m.text }] : []));
   // The reply streams; a question with choices is the next message, which docks once the turn lands.
   const text = added.filter((m) => m.role === 'claude' && m.card == null && m.text.trim() !== '' && m.choices.length === 0).map((m) => m.text).join('\n\n');
   interview.view = view;
-  const run: SetupRun = { id: runId(), labels: [], text: '', followers: new Set(), stop: () => {} };
+  const run: SetupRun = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {} };
   interview.run = run;
   const plan = sv.takePlan('setup');
   // A setup turn that fails is the API's to roll back; the mock's streamed turns only land or break off.
@@ -1060,6 +1069,7 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
         run.text = '';
         for (const follower of run.followers) follower.send('reset', at);
       } else if (ev.name === 'reading') {
+        run.reading.push({ read: ev.read, host: ev.host });
         for (const follower of run.followers) follower.send('reading', { ...at, read: ev.read, host: ev.host });
       } else if (ev.name === 'label') {
         run.labels.push({ read: ev.read, text: ev.text });
@@ -1083,7 +1093,7 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
 export function followSetupTurn(world: MockWorld, id: string, follower: SetupFollower): () => void {
   const interview = interviewsOf(world).get(id);
   if (interview && interview.run === null && busyOf(interview)) {
-    interview.run = { id: runId(), labels: [], text: '', followers: new Set(), stop: () => {} };
+    interview.run = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {} };
   }
   const run = interview?.run ?? null;
   if (run === null) {
@@ -1091,6 +1101,8 @@ export function followSetupTurn(world: MockWorld, id: string, follower: SetupFol
     follower.close();
     return () => {};
   }
+  // A stream that comes late hears the turn so far in its order: each read started, each ended, the reply.
+  for (const started of run.reading) follower.send('reading', { run: run.id, ...started });
   for (const label of run.labels) follower.send('label', { run: run.id, ...label });
   if (run.text !== '') follower.send('delta', { run: run.id, text: run.text });
   run.followers.add(follower);

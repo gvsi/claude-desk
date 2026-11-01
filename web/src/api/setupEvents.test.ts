@@ -20,6 +20,7 @@ describe('readSetupEvent', () => {
       host: 'chenco-cpa.example',
     });
     expect(readSetupEvent('reading', '{"run":"r_2","read":"memory","host":null}')).toEqual({ type: 'reading', run: 'r_2', read: 'memory', host: null });
+    expect(readSetupEvent('reading', '{"run":"r_2","read":"web_search","host":null}')).toEqual({ type: 'reading', run: 'r_2', read: 'web_search', host: null });
     expect(readSetupEvent('label', '{"run":"r_2","read":"memory","text":"Searched your Claude memory"}')).toEqual({
       type: 'label',
       run: 'r_2',
@@ -41,6 +42,7 @@ describe('readSetupEvent', () => {
     expect(readSetupEvent('done', '{}')).toBeNull();
     expect(readSetupEvent('error', '{"run":"r_1"}')).toBeNull();
     expect(readSetupEvent('reading', '{"run":"r_2","read":"files","host":null}')).toBeNull();
+    expect(readSetupEvent('reading', '{"run":"r_2","read":"search","host":null}')).toBeNull();
     expect(readSetupEvent('label', '{"run":"r_2","read":"memory"}')).toBeNull();
   });
 
