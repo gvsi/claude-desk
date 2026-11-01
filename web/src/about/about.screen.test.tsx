@@ -149,7 +149,7 @@ describe('About pages', () => {
     const SUMMARIES: Record<string, string> = {
       'Capability prediction':
         'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
-      'Product proposal': 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
+      'Product proposal': 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       Vision: 'A front desk that never closes: where a Desk could go next, and the rules that wouldn’t change.',
     };
     for (const [lastDesk, to] of [

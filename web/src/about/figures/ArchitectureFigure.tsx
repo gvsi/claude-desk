@@ -201,7 +201,7 @@ export function ArchitectureFigure({ compact = false }: ArchitectureFigureProps)
       <figcaption className={`cd-about-figcaption ${compact ? 'cd-type-caption' : 'cd-type-article-caption'}`}>
         <span className="cd-about-fignum">Figure 1</span>{' '}
         <span>
-          v1 architecture: two processes, two checkpoints.{' '}
+          The first release’s architecture: two processes, two checkpoints.{' '}
           {/* The phone board keeps the caption short; the name is still read there. */}
           <span className={compact ? 'cd-sr-only' : undefined}>
             <span id={nameId} data-figure-label="">
