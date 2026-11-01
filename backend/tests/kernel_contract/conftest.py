@@ -137,16 +137,6 @@ class Arrange:
             self._admin.execute("UPDATE kernel.sessions SET mode = 'paused', strikes = 3 WHERE session_id = %s",
                                 (session_id,))
 
-    def expire_mandate(self, mandate_id: str) -> None:
-        """Simulate reaching the stored mandate's expiry without expiring the decision or agent turn."""
-        if self._state is not None:
-            record = self._state.mandates[mandate_id]
-            record.mandate = record.mandate.model_copy(update={
-                "expires_at": (self._state.now - timedelta(seconds=1)).isoformat()})
-        else:
-            self._admin.execute("UPDATE kernel.mandates SET expires_at = %s WHERE mandate_id = %s",
-                                (datetime.now(UTC) - timedelta(seconds=1), mandate_id))
-
     def stored_policy(self, copy: CopyCreated, key: str, text: str, *,
                       readers: tuple[str, ...] = ("public",), expired: bool = False) -> None:
         """Historical policy rows that current write guards would refuse, with optional read filtering."""
@@ -165,6 +155,16 @@ class Arrange:
                                 " WHERE copy_id = %s AND desk_id = %s AND fact_id = %s",
                                 (Jsonb([claim.model_dump(mode="json") for claim in claims]), Jsonb(list(readers)),
                                  expires_at, copy.copy_id, desk_id, fact_id))
+
+    def expire_mandate(self, mandate_id: str) -> None:
+        """Simulate reaching the stored mandate's expiry without expiring the decision or agent turn."""
+        if self._state is not None:
+            record = self._state.mandates[mandate_id]
+            record.mandate = record.mandate.model_copy(update={
+                "expires_at": (self._state.now - timedelta(seconds=1)).isoformat()})
+        else:
+            self._admin.execute("UPDATE kernel.mandates SET expires_at = %s WHERE mandate_id = %s",
+                                (datetime.now(UTC) - timedelta(seconds=1), mandate_id))
 
     async def never(self, owner: CredentialView, ro_read: Callable[..., list[dict]], ro_schema: str, copy: CopyCreated,
                     tool: str) -> None:
