@@ -70,6 +70,19 @@ def test_feedback_names_a_card_whose_claims_changed_at_signing_and_a_callback_cl
         tools.REPLY_DIAGNOSTICS["not_current"], tools.REPLY_DIAGNOSTICS["lex.en.callback"]]
 
 
+def test_feedback_names_the_policy_card_that_reads_as_a_promise_beside_the_prose():
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="hours", fact_id="charter:hours"),
+               Clause(template="policy", fact_id="charter:policy:pricing")]
+    verdict = SimpleNamespace(violations=[Violation(kind="unknown_fact", rule_id="policy_combined", span="policy",
+                                                    fact_ids=["charter:policy:pricing"])])
+    feedback = tools._feedback(verdict, clauses)
+    assert feedback == [{"kind": "unknown_fact", "rule_id": "policy_combined", "clause_index": 1,
+                         "template": "policy", "fact_id": "charter:policy:pricing"}]
+    assert tools._blocked(feedback).result["diagnostics"] == [tools.REPLY_DIAGNOSTICS["policy_combined"]]
+
+
 def test_an_outage_beside_a_jev_flag_asks_for_the_flag_to_be_fixed():
     # The model check gave no verdict while Jev flagged a promise: both reach Claude, and the outage's line defers
     # to the flag rather than asking for the same prose again.

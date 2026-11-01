@@ -609,10 +609,10 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
     clauses = {"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current", "nothing_to_show",
                "template_unavailable", "kernel_only_template", "claims_changed"}
     literal = {"digit", "currency", "percent_sign", "language_uncertain", "soft.promise", "soft.denies_ai",
-               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, *clauses}
+               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined", *clauses}
     assert {"lex.en.callback", "lex.es.callback"} <= lexicon
     assert lexicon | literal <= REPLY_RULE_IDS
-    assert clauses <= CLAUSE_RULE_IDS
+    assert clauses | {"policy_combined"} <= CLAUSE_RULE_IDS
     assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
         "Remove the call or callback claim unless a callback_confirmed card shows it.")
     assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]

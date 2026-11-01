@@ -448,7 +448,8 @@ REWRITE_INSTRUCTION = (
     "results. For not_a_reader, remove the clause; do not guess another record or reveal the inaccessible one. "
     "For not_current, nothing_to_show or claims_changed, use matching current entitled evidence if available; "
     "otherwise omit the clause and offer a supported next step. For soft.promise or soft.jev, remove the unsupported "
-    "outcome or follow-up claim. "
+    "outcome or follow-up claim. For policy_combined, remove the promise or amount wording beside the cited policy "
+    "card, or remove that policy clause. "
     "For soft.denies_ai, explicitly disclose that you are Claude, an AI. For language_uncertain, write a plain "
     "sentence with everyday words beside the cards, for example 'Here is the link to pay.' For soft.unavailable, "
     "this check returned no verdict: fix any other violations listed; if there are none, send the reply again as it "
@@ -476,6 +477,8 @@ REPLY_DIAGNOSTICS = {
     "kernel_only_template": "Remove the clause: only the kernel may issue this template.",
     "soft.promise": "Remove the unsupported outcome or follow-up claim.",
     "soft.jev": "Remove the unsupported outcome or follow-up claim.",
+    "policy_combined": "Remove the promise or amount wording beside the cited policy card, or remove that policy "
+                       "clause.",
     "soft.denies_ai": "Explicitly disclose that you are Claude, an AI.",
     "soft.handoff_closed": "Remove the unsupported owner follow-up claim; its backing is no longer current.",
     "soft.unavailable": ("This check returned no verdict. Fix any other violations listed; if there are none, send the "
