@@ -796,7 +796,8 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
         [{"template": "callback_confirmed", "fact_id": fact_ids[0]}] if callback else []) for check in checks)
     shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
     assert len(shown) == 1
-    assert [block.template for block in shown[0].blocks] == ["handoff"]
+    # A failure only of the prose keeps the checked callback card alone; with no card, the handoff.
+    assert [block.template for block in shown[0].blocks] == (["callback_confirmed"] if callback else ["handoff"])
     assert prose not in [block.text for block in shown[0].blocks]
     stopped = await rows(api_conn, caller.session_id, "stopped_draft", "text")
     assert len(stopped) == 2
