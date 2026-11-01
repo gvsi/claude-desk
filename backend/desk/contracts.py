@@ -137,6 +137,9 @@ AUTO_MONEY_HARD_CAP_CENTS = 1_000_000     # $10,000: the platform ceiling, the m
                                           # the same as the per-payment limit (`PriceItem.unit_cents`, `NormalizedAction.amount_cents`,
                                           # the baseline's `money_has_amount`); Plan 01b raises it from Plan 01a's 50_000 and moves it
                                           # here ("Money cap")
+# Why `RuleCard` refuses an auto money card: read by the rules chat too, which names it for a business money card the
+# card alone can't recognise.
+AUTO_MONEY_NEEDS_LIMIT = f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}"
 
 class DeskSeed(BaseModel):
     name: str                             # "Main line"
@@ -282,7 +285,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         if self.mode == "auto" and moves_money(self) and (
             self.max_amount_cents is None or self.max_amount_cents > AUTO_MONEY_HARD_CAP_CENTS
         ):
-            raise ValueError(f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}")
+            raise ValueError(AUTO_MONEY_NEEDS_LIMIT)
         if (self.who == "person") != (self.person_id is not None):
             raise ValueError('person_id is required iff who == "person"')
         if (self.who == "agent") != (self.agent_key_id is not None):

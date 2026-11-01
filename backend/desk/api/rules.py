@@ -61,7 +61,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
-from desk.contracts import MONEY_TOOLS, Effect, PolicyVersion, RuleCard, money_tools_of
+from desk.contracts import AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, PolicyVersion, RuleCard, money_tools_of
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, auto_money, lower_to_cap
 from desk.presets import PRESETS, PresetName
@@ -149,9 +149,9 @@ def moves_money_alone(card: RuleCard, money_tools: Collection[str] = frozenset()
 def above_cap(card: RuleCard, active: dict[str, RuleCard], cap_cents: int, *,
               money_tools: Collection[str] = frozenset()) -> bool:
     """Whether `card`, new or changed from the `active` card with its ID, moves more money on its own than the cap.
-    An unchanged card stays as the kernel proved it; one with no amount is the kernel's to refuse."""
+    An unchanged card stays as the kernel proved it; one with no amount is above any cap, as the kernel counts it."""
     return (moves_money_alone(card, money_tools) and active.get(card.card_id) != card
-            and card.max_amount_cents is not None and card.max_amount_cents > cap_cents)
+            and (card.max_amount_cents is None or card.max_amount_cents > cap_cents))
 
 
 def check_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap_cents: int, *,
@@ -284,12 +284,27 @@ def rule_card(card: ChatCard) -> RuleCard:
     return RuleCard.model_validate(_fields(card))
 
 
+# The contract's limit line as pydantic reports a validator's ValueError, so a business money card's line matches a
+# native one's word for word.
+_NO_LIMIT_ERROR = f"Value error, {AUTO_MONEY_NEEDS_LIMIT}"
+
+
+def _contract_errors(card: ChatCard) -> list[str]:
+    """Why the contract refuses the card Claude wrote, one line per error; empty when it doesn't."""
+    try:
+        rule_card(card)
+    except ValidationError as invalid:
+        return [error["msg"] for error in invalid.errors(include_url=False, include_input=False)]
+    return []
+
+
 def _chat_problems(chat: RuleChat, owned: list[RuleCard], targets: frozenset[str], cap_cents: int, *,
                    money_tools: Collection[str] = frozenset()) -> str | None:
     """What makes Claude's change unusable, one line per card: an ID used twice or of the compiler's own, a target
     that is neither a tool of the Desk nor an effect, a card for one person or agent that isn't one of the active
     ones kept under its ID for the same person or agent on the same target, or a card the contract refuses. A money card above the cap
-    isn't one: it is the owner's to raise the limit (`AboveMoneyCap`)."""
+    isn't one: it is the owner's to raise the limit (`AboveMoneyCap`). An auto money card with no limit is one, on a
+    business money tool too, which the contract alone can't recognise: Claude gets the contract's own line for it."""
     if chat.change is None:
         return None
     active = {card.card_id: card for card in owned}
@@ -311,12 +326,14 @@ def _chat_problems(chat: RuleChat, owned: list[RuleCard], targets: frozenset[str
                 was is None or (was.applies_to, was.who, was.person_id, was.agent_key_id) != (
                     card.applies_to, card.who, card.person_id, card.agent_key_id)):
             problem(CHAT_ERRORS["scoped"])
-        elif not above_cap(unchecked(card), active, cap_cents, money_tools=money_tools):
-            try:
-                rule_card(card)
-            except ValidationError as invalid:
-                for error in invalid.errors(include_url=False, include_input=False):
-                    problem(error["msg"])
+        else:
+            no_limit = auto_money(unchecked(card), money_tools) and card.max_amount_cents is None
+            if no_limit or not above_cap(unchecked(card), active, cap_cents, money_tools=money_tools):
+                errors = _contract_errors(card)
+                if no_limit and _NO_LIMIT_ERROR not in errors:
+                    errors.insert(0, _NO_LIMIT_ERROR)
+                for error in errors:
+                    problem(error)
     return "\n".join(problems) or None
 
 

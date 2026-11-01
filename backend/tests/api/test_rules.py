@@ -753,6 +753,45 @@ async def test_business_payment_above_cap_is_refused_before_the_kernel(app, brow
     assert fake.called("POST /policy/draft") == []
 
 
+@pytest.mark.parametrize("target", ["native.payment_link", "desk.deposit"])
+async def test_auto_money_card_with_no_maximum_gets_one_retry_in_chat(app, browser, fake, kernel_http, model, target):
+    # "Take deposits on your own", and Claude's auto card leaves out the limit: a business money tool gets the same
+    # retry line a native one does, and the corrected card drafts.
+    from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
+
+    owner = await new_owner(app, browser, fake, kernel_http)
+    await put_deposit(owner, kernel_http)
+    kept = [chat_card(each) for each in owner_cards(fake, owner.desk_id)]
+    unlimited = ChatCard(card_id="chat-deposit", applies_to=target, mode="auto", who="anyone",
+                         reason="Takes deposits on its own.")
+    limited = unlimited.model_copy(update={"max_amount_cents": 5000, "reason": "Takes deposits up to $50 on its own."})
+    model.add(chatted("Done.", *kept, unlimited), chatted("Done.", *kept, limited))
+    reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Take deposits on your own."})
+    assert reply.status_code == 200, reply.text
+    draft = RuleChatOut.model_validate(reply.json()).draft
+    assert draft is not None and draft.diff.added == [rule_card(limited)]
+    retry = model.requests[1].messages[-1]["content"][0]["text"]
+    assert retry.splitlines()[1:-1] == [
+        f"- change.cards.{len(kept)}: Value error, an auto money card needs max_amount_cents of at most "
+        f"{AUTO_MONEY_HARD_CAP_CENTS}"]
+    assert len(fake.called("POST /policy/draft")) == 1
+
+
+async def test_business_money_card_with_no_maximum_is_above_the_cap(app, browser, fake, kernel_http):
+    from desk.api.rules import AboveMoneyCap, check_cap
+
+    unlimited = card("deposit", "desk.deposit")
+    with pytest.raises(AboveMoneyCap):
+        check_cap([unlimited], [], 50_000, money_tools=frozenset({"desk.deposit"}))
+    check_cap([unlimited.model_copy(update={"applies_to": "desk.enquiry"})], [], 50_000,
+              money_tools=frozenset({"desk.deposit"}))
+    owner = await new_owner(app, browser, fake, kernel_http)
+    await put_deposit(owner, kernel_http)
+    response = await owner.browser.post(rules_path(owner, "draft"), json=adding(unlimited))
+    assert (response.status_code, response.json()) == (422, {"error": "above_money_cap", "cap_cents": 50_000})
+    assert fake.called("POST /policy/draft") == []
+
+
 async def test_the_money_limit_drafts_however_many_cards_the_desk_holds(app, browser, fake, kernel_http):
     # The owner-card bound keeps a draft from growing a Desk past what a rules chat can carry. The money limit adds no
     # card, so a Desk already holding more (an active version of 61 owner cards) can still change its cap.
