@@ -156,8 +156,8 @@ def signed_headers(key: Ed25519PrivateKey, agent_key_id: str, desk_slug: str, ra
 async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> DemoTaskSet:
     """Which fixed task lines the agent reads on the Desk (`DEMO_TASKS`): the business type setup stored for it, on the
     newest of the copy's setup interviews that made it (`other` when that one has none); with no such interview, the
-    copy's own Desk, its oldest (the Rivera seed), reads `rivera` and any other `other`. Only that closed type and the
-    Desks' order are read, never a business's, owner's or visitor's words."""
+    copy's own Desk, its oldest (the Rivera seed), reads `rivera` and any other `other`. Only that closed type and which
+    Desk is the copy's oldest decide the set; no business's, owner's or visitor's words reach the agent."""
     found = await conn.execute(select(INTERVIEWS.c.business_type).where(
         INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id == desk_id).order_by(
         INTERVIEWS.c.created_at.desc(), INTERVIEWS.c.interview_id.desc()).limit(1))
