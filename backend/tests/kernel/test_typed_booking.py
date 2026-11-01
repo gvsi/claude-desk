@@ -22,6 +22,34 @@ SLOT = 'S-20261102-1000'
 DESK = DeskInfo(owner_display_name='Maria Rivera', timezone='America/Los_Angeles')
 
 
+def test_typed_booking_factory_consumes_one_code_built_profile(monkeypatch):
+    from desk.contracts import BusinessToolDef
+    from desk.kernel_service.adapters import blocks
+    from desk.kernel_service.adapters.book import BookArgs
+
+    definition = BusinessToolDef(title='Free consult', description='Book an introduction.',
+                                 config={'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 20})
+    built = blocks.profile(TOOL, definition)
+    calls = []
+
+    def build(tool, config):
+        calls.append((tool, config))
+        return built
+
+    monkeypatch.setattr(blocks, 'profile', build)
+    adapter = blocks.adapter_for(definition, TOOL)
+    assert calls == [(TOOL, definition)]
+    assert blocks.BLOCK_ADAPTERS['typed_booking'] is blocks.TypedBookingAdapter
+    assert 'typed_booking' in blocks.SUPPORTED_BLOCKS
+    assert blocks.BLOCK_BASE['typed_booking'] == 'native.book'
+    assert blocks.CARD_FIELDS['typed_booking'] == ('title', 'appointment_type')
+    assert adapter.profile == built.model_copy(update={'status': 'enabled', 'review_reason': None})
+    assert adapter.Args is BookArgs
+    assert adapter.appointment() == ('Free consult', 20)
+    assert adapter.profile.description_confirmed.startswith(
+        'Books one open time on your calendar for this kind of appointment.')
+
+
 def typed_booking(**config):
     return {'tool': TOOL, 'title': 'Book a consult', 'description': 'Book an introduction.',
             'config': {'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20, **config}}
@@ -78,6 +106,67 @@ async def test_typed_booking_executes_from_config_and_renders_both_languages(app
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))
     assert alert.body == 'A stranger booked “Consult” Monday, November 2, from 10:00 am to 11:00 am.'
     assert result.inbox == []
+
+
+async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(app, client, monkeypatch):
+    from desk.kernel_service import business_tools
+
+    scans = []
+    original = business_tools.refuse_public_promises
+
+    async def checked(ctx, **kwargs):
+        scans.append(kwargs)
+        await original(ctx, **kwargs)
+
+    monkeypatch.setattr(business_tools, 'refuse_public_promises', checked)
+    copy, visitor = await configured(app, client, config={'appointment_type': 'Free consult'})
+    assert len(scans) == 1
+    assert scans[0]['values'] == {f'{TOOL}.title': 'Book a consult', f'{TOOL}.appointment_type': 'Free consult'}
+    assert 'free' in scans[0]['allow_words'][f'{TOOL}.title']
+    assert 'free' in scans[0]['allow_words'][f'{TOOL}.appointment_type']
+    decision = await decided(client, visitor, TOOL, {'slot_id': SLOT})
+    assert decision.outcome == 'allow'
+    [fact] = (await executed(client, visitor, decision)).facts
+    assert {claim.key: claim.value for claim in fact.claims}['appointment_type'] == 'Free consult'
+    for language, first_line in [('en', '“Free consult” at 10:00 am'), ('es', '“Free consult” a las 10:00')]:
+        card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, language, DESK)
+        assert card.lines[0] == first_line
+    assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Maria Rivera\'s calendar'
+
+
+@pytest.mark.solver
+async def test_identical_put_refreshes_and_reproves_an_old_typed_booking_profile(app, client, desk_prove):
+    from desk.kernel_service import adapters
+    from .test_business_tools import business_rows
+
+    copy, visitor = await configured(app, client)
+    original = (await business_rows(app, copy))[TOOL]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.tool == TOOL)))).one()
+        # A previously stored typed tool predates the optional booking note's input schema.
+        schema = {**row.profile.input_schema, 'properties': {
+            key: value for key, value in row.profile.input_schema['properties'].items() if key != 'note'}}
+        row.profile = row.profile.model_copy(update={'input_schema': schema})
+        row.profile_sha256 = adapters.profile_sha256(row.profile)
+        assert await adapters.resolve(ctx, copy.desk_id, TOOL) is None
+    assert (await put(client, copy, [typed_booking()])).status_code == 200
+    refreshed = (await business_rows(app, copy))[TOOL]
+    assert (refreshed.status, refreshed.review_reason) == ('needs_review', 'changed')
+    assert refreshed.definition_sha256 == original.definition_sha256
+    assert refreshed.profile_sha256 == original.profile_sha256
+    response = await client.post('/tools/confirm', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'tools': [{'tool': TOOL, 'definition_sha256': refreshed.definition_sha256}],
+        'enable': True})
+    assert response.status_code == 200, response.text
+    draft = response.json()['draft']
+    assert draft['status'] == 'proved' and draft['proof']['method'] == 'symcc', draft
+    response = await client.post('/policy/confirm', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'version': draft['version']})
+    assert response.status_code == 200, response.text
+    decision = await decided(client, visitor, TOOL, {'slot_id': SLOT, 'note': 'Side entrance.'})
+    assert decision.outcome == 'allow'
+    assert (await executed(client, visitor, decision)).state == 'succeeded'
 
 
 async def test_native_booking_keeps_the_existing_card_and_fact(app, client):
