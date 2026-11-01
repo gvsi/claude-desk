@@ -14,7 +14,7 @@ import { worker } from '../mocks/browser.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
+import { renderRoute } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 
@@ -76,7 +76,7 @@ interface StepLoad {
   status: string;
   /** The step's read the test holds, and how. */
   hold: (state: SetupState) => { held: () => number; release: () => void };
-  anchors: (viewport: Viewport) => readonly SkeletonAnchor[];
+  anchors: readonly SkeletonAnchor[];
   stays: readonly string[];
 }
 
@@ -86,54 +86,45 @@ const GROUP_ROW = (child: number, row: number) => `.cd-outcome-groups > :nth-chi
 /** A situation's or a trick's row in its card. */
 const RESULT_ROW = (row: number) => `.cd-setup-step__rows > li:nth-child(${row})`;
 
-const STEPS: Readonly<Partial<Record<Step, StepLoad>>> = {
+/**
+ * Each step's load. The tools' words are the app's own, so their shapes take the lines those words
+ * take in this browser's fonts, and every row is compared whole. The rules, situations and tricks
+ * come with the read: their shapes' lines are estimates, which wrap differently from one platform's
+ * fonts to another's, so only what sits above the first of them is compared, and that row's top,
+ * left and width (decision 15: rows under them may move once as they land).
+ */
+const STEPS: Readonly<Record<Step, StepLoad>> = {
   tools: {
     status: 'Reading your tools',
     hold: (state) => holdReads(path('setupTools', state)),
-    anchors: (viewport) => [
-      { name: 'tools-built-in-row-0', page: TOOL_ROW(1, 1), size: true },
-      // The last row in view: Stripe under "Connect your own" at 1440, Documents at 390.
-      viewport === 'desktop'
-        ? { name: 'tools-external-row-0', page: TOOL_ROW(2, 1), size: true }
-        : { name: 'tools-built-in-row-4', page: TOOL_ROW(1, 5), size: true },
+    anchors: [
+      ...[1, 2, 3, 4, 5, 6].map((row) => ({ name: `tools-built-in-row-${row - 1}`, page: TOOL_ROW(1, row), size: true })),
+      { name: 'tools-external-row-0', page: TOOL_ROW(2, 1), size: true },
     ],
     stays: [TITLE, MAIN_BUTTON],
   },
   rules: {
     status: 'Drafting your rules',
     hold: (state) => holdPosts(path('setupRules', state)),
-    anchors: (viewport) => [
+    anchors: [
       { name: 'rules-money-limit', page: '.cd-outcome-groups > .cd-card:first-child', size: true },
-      { name: 'rules-auto-row-0', page: GROUP_ROW(2, 1), size: true },
-      // The last row in view: the first that asks at 1440, the ninth Claude does on its own at 390.
-      viewport === 'desktop'
-        ? { name: 'rules-ask-row-0', page: GROUP_ROW(3, 1), size: true }
-        : { name: 'rules-auto-row-8', page: GROUP_ROW(2, 9), size: true },
-      { name: 'main-button', page: MAIN_BUTTON, size: true },
+      { name: 'rules-auto-row-0', page: GROUP_ROW(2, 1), dimensions: ['width'] },
     ],
     stays: [TITLE],
   },
   situations: {
     status: 'Trying real situations on your draft rules',
     hold: (state) => holdPosts(path('setupSituations', state)),
-    anchors: (viewport) => [
-      { name: 'situation-row-0', page: RESULT_ROW(1), size: true },
-      // The last row in view: the sixth at 1440, the fourth at 390.
-      viewport === 'desktop' ? { name: 'situation-row-5', page: RESULT_ROW(6), size: true } : { name: 'situation-row-3', page: RESULT_ROW(4), size: true },
-      { name: 'main-button', page: MAIN_BUTTON, size: true },
-    ],
+    anchors: [{ name: 'situation-row-0', page: RESULT_ROW(1), dimensions: ['width'] }],
     stays: [TITLE],
   },
   // Opened at the safety check (a reload), the first results are drawn still, so they land in place.
   safety_check: {
     status: 'Trying tricks people use on your draft rules',
     hold: (state) => holdPosts(path('setupSafetyCheck', state)),
-    anchors: (viewport) => [
-      { name: 'safety-count', page: '.cd-setup-safety__count' },
-      { name: 'trick-row-0', page: RESULT_ROW(1), size: true },
-      // The last row in view: the sixth at 1440, the fourth at 390.
-      viewport === 'desktop' ? { name: 'trick-row-5', page: RESULT_ROW(6), size: true } : { name: 'trick-row-3', page: RESULT_ROW(4), size: true },
-      { name: 'main-button', page: MAIN_BUTTON, size: true },
+    anchors: [
+      { name: 'safety-count', page: '.cd-setup-safety__count', size: true },
+      { name: 'trick-row-0', page: RESULT_ROW(1), dimensions: ['width'] },
     ],
     stays: [TITLE],
   },
@@ -146,7 +137,7 @@ for (const viewport of ['desktop', 'phone'] as const) {
       const read = load.hold(state);
       await expectSkeletonLoad({
         status: load.status,
-        anchors: load.anchors(viewport),
+        anchors: load.anchors,
         stays: load.stays,
         open: async () => {
           await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
@@ -176,8 +167,8 @@ it('setup_reload_hands_off', async () => {
   await expectSkeletonLoad({
     status: 'Reading your tools',
     continues: true,
-    anchors: STEPS.tools!.anchors('desktop'),
-    stays: STEPS.tools!.stays,
+    anchors: STEPS.tools.anchors,
+    stays: STEPS.tools.stays,
     open: async () => {
       await renderRoute(`/app/setup/${state.interview_id}`);
       await vi.waitFor(() => expect(interview.held()).toBe(1));
@@ -226,6 +217,9 @@ it('setup_reload_hands_off', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+/** The safety check's count on the page, not its shape in a fading layer. */
+const landedCount = () => [...document.querySelectorAll('.cd-setup-safety__count')].find((count) => !count.closest('.cd-skeleton-screen__layer'));
+
 it('safety_check_lands_under_the_fading_skeleton', async () => {
   // The owner goes on from Real situations: the check runs as they watch. Its rows start landing
   // one by one while the shapes fade over them, and the count ticks with them to the check's words.
@@ -243,7 +237,7 @@ it('safety_check_lands_under_the_fading_skeleton', async () => {
       document.removeEventListener('animationstart', started, true);
       resolve({
         layer: document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state') ?? null,
-        count: document.querySelector('.cd-setup-safety__count [aria-hidden="true"]')?.textContent ?? null,
+        count: landedCount()?.querySelector('[aria-hidden="true"]')?.textContent ?? null,
       });
     };
     document.addEventListener('animationstart', started, true);
@@ -255,7 +249,7 @@ it('safety_check_lands_under_the_fading_skeleton', async () => {
   expect(at.count, 'the count ticks from the first row').toBe('1 of 6 stopped');
 
   await vi.waitFor(() => expect(document.querySelector('.cd-safety-check-row--live')).toBeNull(), { timeout: 5_000 });
-  const count = document.querySelector('.cd-setup-safety__count')!;
+  const count = landedCount()!;
   expect(count.querySelector('[aria-hidden="true"]')).toBeNull();
   expect(count.textContent).toBe('6 of 6 stopped');
   expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
@@ -312,10 +306,10 @@ it('long_draft_keeps_one_status', async () => {
 it('setup_steps_still_under_reduced_motion', async () => {
   const state = await interviewAt('rules');
   const draft = holdPosts(path('setupRules', state));
-  const rules = STEPS.rules!;
+  const rules = STEPS.rules;
   await expectSkeletonStill({
     status: rules.status,
-    anchors: rules.anchors('desktop'),
+    anchors: rules.anchors,
     stays: rules.stays,
     open: async () => {
       await renderRoute(`/app/setup/${state.interview_id}`);
@@ -333,10 +327,10 @@ it('draft_waits_for_the_people_read', async () => {
   // read out, the draft keeps its shapes, then lands where they were.
   const state = await interviewAt('rules');
   const people = holdReads(peoplePath(state));
-  const rules = STEPS.rules!;
+  const rules = STEPS.rules;
   await expectSkeletonLoad({
     status: rules.status,
-    anchors: rules.anchors('phone'),
+    anchors: rules.anchors,
     stays: rules.stays,
     open: async () => {
       await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });

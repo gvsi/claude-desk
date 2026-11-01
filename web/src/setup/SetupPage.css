@@ -159,6 +159,13 @@
   min-width: 0;
 }
 
+/* Known words' lines (MeasuredLines): a box as wide as the words' own, in their type, which holds a
+   pill per line they take there. */
+.cd-setup-skeleton__measured {
+  display: block;
+  min-width: 0;
+}
+
 /* Lines the words take at one width only: a phone's wrap onto more of them. */
 .cd-skeleton-line.cd-setup-skeleton__phone-line {
   display: none;

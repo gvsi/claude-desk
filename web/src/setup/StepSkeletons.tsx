@@ -1,12 +1,18 @@
 /**
  * Setup's steps as quiet shapes while their reads are out, each built from its own components'
- * classes so the step lands where the shapes were. They draw what a fresh copy's interview shows
- * (the seed's connectors, the draft, situations and tricks from the example answers), with the
- * line counts its words take at a laptop's width and a phone's. A skeleton draws no words.
+ * classes so the step lands where the shapes were. They draw what a fresh copy's interview shows:
+ * the seed's connectors, then the draft, situations and tricks the example answers make. Words the
+ * app knows before the read lands (the connectors' names and lines, the always-on rules, the
+ * payment limit's and the safety check's own lines) are measured in the current fonts at their real
+ * width, so the shapes take the lines the words will, on any platform. Words that come with the read
+ * (the rules, the situations, the tricks) are estimates: when they wrap differently, the rows under
+ * them move once as they land. A skeleton draws no words.
  */
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import { PageHeaderSkeleton, Skeleton, SkeletonCard, SkeletonScreen, type SkeletonText } from '../ds/index.ts';
+import { ALWAYS_ON, PageHeaderSkeleton, Skeleton, SkeletonCard, SkeletonScreen, type SkeletonText } from '../ds/index.ts';
+import { connectorByKey, type ConnectorKey } from '../owner/connectors/catalog.ts';
+import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
 
 /**
@@ -31,13 +37,83 @@ export function SetupOpening({ loading, children }: { loading: boolean; children
 /** A secondary button inline in a row, as "Add" and "Connect" are drawn. */
 const ROW_BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control';
 
+/** The payment limit the draft's line is measured with: the amount is the owner's answer, the words the app's. */
+const MEASURED_LIMIT_CENTS = 50_000;
+
+/** The tricks the safety check's own lines are measured with: the count is the check's, the words the app's. */
+const MEASURED_TRICKS = 6;
+
+/**
+ * The width of each line `words` take in `box`, in px: set in the box's own font, at its width, by
+ * an invisible probe that leaves no words behind. Measured again when the box resizes and when
+ * fonts load, so the lines follow the fonts this browser draws with.
+ */
+function useLineWidths(box: RefObject<HTMLElement | null>, words: string): readonly number[] | null {
+  const [widths, setWidths] = useState<readonly number[] | null>(null);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return undefined;
+    let live = true;
+    const measure = () => {
+      if (!live || !element.isConnected) return;
+      const probe = document.createElement('span');
+      probe.textContent = words;
+      probe.setAttribute('aria-hidden', 'true');
+      Object.assign(probe.style, { position: 'absolute', display: 'block', width: `${element.clientWidth}px`, visibility: 'hidden', pointerEvents: 'none' });
+      element.append(probe);
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(probe);
+        const lines = new Map<number, { left: number; right: number }>();
+        for (const rect of range.getClientRects()) {
+          if (rect.width === 0) continue;
+          const top = Math.round(rect.top);
+          const line = lines.get(top);
+          lines.set(top, line ? { left: Math.min(line.left, rect.left), right: Math.max(line.right, rect.right) } : { left: rect.left, right: rect.right });
+        }
+        const next = [...lines.entries()].sort(([a], [b]) => a - b).map(([, line]) => line.right - line.left);
+        setWidths((now) => (now !== null && now.length === next.length && now.every((width, i) => Math.abs(width - next[i]!) < 0.5) ? now : next));
+      } finally {
+        probe.remove();
+      }
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    void document.fonts.ready.then(measure);
+    document.fonts.addEventListener('loadingdone', measure);
+    return () => {
+      live = false;
+      observer?.disconnect();
+      document.fonts.removeEventListener('loadingdone', measure);
+    };
+  }, [box, words]);
+  return widths;
+}
+
+/**
+ * Known words as lines of shapes: one pill per line the words take here, as long as that line.
+ * Put it where the words go, inside the element that gives them their type and width.
+ */
+function MeasuredLines({ words, text = 'body' }: { words: string; text?: SkeletonText }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const widths = useLineWidths(box, words);
+  return (
+    <span ref={box} className="cd-setup-skeleton__measured">
+      {(widths ?? [Number.NaN]).map((width, i) => (
+        <Skeleton key={i} shape="line" text={text} width={Number.isNaN(width) ? '100%' : width} />
+      ))}
+    </span>
+  );
+}
+
 /** How many lines some words take: the same at every width, or more on a phone, where they wrap. */
 type LineCount = number | { wide: number; phone: number };
 
 /**
- * Lines of one type style, the last one short (`last`, or `phoneLast` for a phone's). Where a phone
- * wraps the words onto more lines, the laptop's lines and the phone's are drawn apart, each shown
- * only at its own width.
+ * Lines of one type style for words that come with the read, an estimate: the last one short
+ * (`last`, or `phoneLast` for a phone's). Where a phone wraps the words onto more lines, the
+ * laptop's lines and the phone's are drawn apart, each shown only at its own width.
  */
 function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count: LineCount; text?: SkeletonText; last?: string; phoneLast?: string }) {
   const wide = typeof count === 'number' ? count : count.wide;
@@ -55,30 +131,19 @@ function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count
   return wide === phone ? <>{set(wide)}</> : <>{set(wide, 'wide')}{set(phone, 'phone')}</>;
 }
 
-/** One connector's row: where it stands ("On", "Always on") or its button ("Add"). */
-interface ToolRowShape {
-  /** The name's width, in px. */
-  name: number;
-  /** The line's width on a laptop, where it takes one line. */
-  line: string;
-  /** How many lines the line takes on a phone, and its last one's width there. */
-  phone: number;
-  phoneLast?: string;
-  end: 'on' | 'always_on' | 'add';
-}
-
-/** A fresh Desk's built-in connectors, in the catalog's order: Quotes, Bookings, Leads and callbacks, Verification, Documents, Payments. */
-const BUILT_IN: readonly ToolRowShape[] = [
-  { name: 46, line: '35%', phone: 1, end: 'on' },
-  { name: 57, line: '38%', phone: 1, end: 'on' },
-  { name: 127, line: '55%', phone: 2, phoneLast: '15%', end: 'on' },
-  { name: 71, line: '40%', phone: 1, end: 'always_on' },
-  { name: 71, line: '75%', phone: 2, phoneLast: '40%', end: 'add' },
-  { name: 61, line: '75%', phone: 2, phoneLast: '60%', end: 'add' },
+/** A fresh Desk's built-in connectors, in the catalog's order, and where each stands or its button. */
+const BUILT_IN: readonly { key: ConnectorKey; end: 'on' | 'always_on' | 'add' }[] = [
+  { key: 'quotes', end: 'on' },
+  { key: 'bookings', end: 'on' },
+  { key: 'leads', end: 'on' },
+  { key: 'verification', end: 'always_on' },
+  { key: 'documents', end: 'add' },
+  { key: 'payments', end: 'add' },
 ];
 
-/** The row's tile and its name over its line, as `ConnectorSummary` draws them. */
-function ToolSummary({ name, line, phone, phoneLast, badge = false }: Omit<ToolRowShape, 'end'> & { badge?: boolean }) {
+/** The row's tile and its name over its line, as `ConnectorSummary` draws them, from the catalog's words. */
+function ToolSummary({ connector, badge = false }: { connector: ConnectorKey; badge?: boolean }) {
+  const view = connectorByKey(connector)?.view;
   return (
     <>
       <Skeleton shape="block" className="cd-connector-icon cd-connector-icon--section" />
@@ -88,15 +153,15 @@ function ToolSummary({ name, line, phone, phoneLast, badge = false }: Omit<ToolR
             // The name and its badge ride the name's line as the real ones do, set on its middle, so
             // the line is as deep as the badge makes it.
             <>
-              <Skeleton shape="block" width={name} height={12} radius="full" className="cd-setup-skeleton__inline" />{' '}
+              <Skeleton shape="block" width={37} height={12} radius="full" className="cd-setup-skeleton__inline" />{' '}
               <Skeleton shape="block" width={48} height="var(--space-20)" radius="full" className="cd-setup-skeleton__inline cd-setup-skeleton__badge" />
             </>
           ) : (
-            <Skeleton shape="line" text="body" width={name} />
+            <MeasuredLines words={view?.name ?? ''} />
           )}
         </span>
         <span className="cd-connector-summary__description cd-type-meta">
-          <Lines count={{ wide: 1, phone }} text="meta" last={line} phoneLast={phoneLast} />
+          <MeasuredLines words={view?.description ?? ''} text="meta" />
         </span>
       </span>
     </>
@@ -104,7 +169,7 @@ function ToolSummary({ name, line, phone, phoneLast, badge = false }: Omit<ToolR
 }
 
 /** Where a built-in connector stands, or its button. */
-function ToolEnd({ end }: { end: ToolRowShape['end'] }) {
+function ToolEnd({ end }: { end: (typeof BUILT_IN)[number]['end'] }) {
   if (end === 'add') {
     return (
       <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
@@ -132,8 +197,8 @@ export function ToolsListSkeleton() {
         <Skeleton shape="line" text="control" width={56} className="cd-setup-tools__heading" />
         <ul className="cd-setup-tools__rows">
           {BUILT_IN.map((row, i) => (
-            <li key={i} className="cd-setup-tools__row" data-skeleton-anchor={`tools-built-in-row-${i}`}>
-              <ToolSummary {...row} />
+            <li key={row.key} className="cd-setup-tools__row" data-skeleton-anchor={`tools-built-in-row-${i}`}>
+              <ToolSummary connector={row.key} />
               <ToolEnd end={row.end} />
             </li>
           ))}
@@ -143,7 +208,7 @@ export function ToolsListSkeleton() {
         <Skeleton shape="line" text="control" width={118} className="cd-setup-tools__heading" />
         <ul className="cd-setup-tools__rows">
           <li className="cd-setup-tools__row" data-skeleton-anchor="tools-external-row-0">
-            <ToolSummary name={37} line="85%" phone={2} phoneLast="40%" badge />
+            <ToolSummary connector="stripe" badge />
             <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
               <Skeleton shape="line" text="meta" width={40} />
               <Skeleton shape="block" measure={{ label: 'Connect', className: ROW_BUTTON }} height="var(--size-control)" />
@@ -193,15 +258,6 @@ const RULE_GROUPS: readonly { title: number; rows: readonly RuleRowShape[] }[] =
 /** The anchor each group's rows are named by, in `OutcomeGroups`' order. */
 const GROUP_NAMES = ['auto', 'ask', 'never'] as const;
 
-/** The always-on rules' lines on a phone, where the fourth wraps; each one line on a laptop. */
-const ALWAYS_ON_LINES: readonly { width: string; phone: number; phoneLast?: string }[] = [
-  { width: '25%', phone: 1 },
-  { width: '42%', phone: 1 },
-  { width: '45%', phone: 1 },
-  { width: '58%', phone: 2, phoneLast: '20%' },
-  { width: '48%', phone: 1 },
-];
-
 /**
  * "Your rules" while the draft is made (`DraftRules`): the payment limit's card, the rules by what
  * Claude does under each group's dot, the always-on rules' card, the check's line and "Check real
@@ -214,8 +270,8 @@ export function DraftRulesSkeleton() {
         <SkeletonCard padding={16} anchor="rules-money-limit">
           <div className="cd-money-limit cd-money-limit--prominent">
             <div className="cd-money-limit__reading">
-              <div className="cd-money-limit__line">
-                <Lines count={{ wide: 1, phone: 2 }} last="80%" phoneLast="45%" />
+              <div className="cd-money-limit__line cd-type-body">
+                <MeasuredLines words={moneyLimitLine(MEASURED_LIMIT_CENTS)} />
               </div>
             </div>
           </div>
@@ -256,13 +312,13 @@ export function DraftRulesSkeleton() {
             </div>
           </div>
           <ul className="cd-always-on__list">
-            {ALWAYS_ON_LINES.map((line, i) => (
-              <li key={i} className="cd-always-on__item cd-type-body">
+            {ALWAYS_ON.map((rule) => (
+              <li key={rule} className="cd-always-on__item cd-type-body">
                 <span className="cd-always-on__lock cd-setup-skeleton__lock">
                   <Skeleton shape="block" width={14} height={14} />
                 </span>
                 <span className="cd-setup-skeleton__fill">
-                  <Lines count={{ wide: 1, phone: line.phone }} last={line.width} phoneLast={line.phoneLast} />
+                  <MeasuredLines words={rule} />
                 </span>
               </li>
             ))}
@@ -394,9 +450,11 @@ export function SafetyCheckSkeleton() {
   return (
     <div className="cd-setup-skeleton">
       <div className="cd-setup-safety__summary">
-        <Skeleton shape="line" text="summary" width={140} anchor="safety-count" />
-        <div>
-          <Lines count={{ wide: 1, phone: 2 }} last="85%" phoneLast="50%" />
+        <div className="cd-setup-safety__count cd-type-summary" data-skeleton-anchor="safety-count">
+          <MeasuredLines words={SETUP_COPY.safety.stopped(MEASURED_TRICKS, MEASURED_TRICKS)} text="summary" />
+        </div>
+        <div className="cd-setup-step__line cd-type-body">
+          <MeasuredLines words={SETUP_COPY.safety.lead(MEASURED_TRICKS)} />
         </div>
       </div>
       <SkeletonCard padding={16}>
