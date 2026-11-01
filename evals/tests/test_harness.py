@@ -605,6 +605,31 @@ def test_pending_plans_skip_on_kernel_only(tier1):
     ])
 
 
+def test_each_case_on_the_real_kernel_starts_on_an_empty_database(tier1):
+    """`k` empties the kernel's and the API's tables before it starts the case's kernel, so a case
+    finds only what it makes: a kernel's startup looks at every copy in the database, and copies
+    that earlier cases left made each start slower than the last."""
+    run = tier1({"test_empty": '''
+        import psycopg
+
+        from desk.db.session import database_url, libpq_url
+
+        def copies():
+            with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
+                return admin.execute("SELECT count(*) FROM kernel.copies").fetchone()[0]
+
+        @pytest.mark.requires("01a")
+        async def test_a_case_leaves_a_copy(k):
+            await k.new_copy()
+            assert copies() >= 1
+
+        @pytest.mark.requires("01a")
+        async def test_the_next_case_finds_none(k):
+            assert copies() == 0
+    '''}, landed=("master", "01a", "01b", "01c"))
+    run("kernel", "--allow-bounded").assert_outcomes(passed=2)
+
+
 # A landed 02a case that takes the `api` fixture, over an unstarted kernel no stand-in API calls.
 API_CASE = '''
     from evals.tier1.targets import KernelTarget
