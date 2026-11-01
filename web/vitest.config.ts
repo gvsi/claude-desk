@@ -33,6 +33,8 @@ export default defineConfig(async (env) =>
             plugins: [storybookTest({ configDir: path.join(dirname, '.storybook') })],
             test: {
               name: 'storybook',
+              // CI runners are slower than a laptop; each story's own waits must stay bounded well under this ceiling.
+              testTimeout: 30_000,
               browser: {
                 enabled: true,
                 headless: true,

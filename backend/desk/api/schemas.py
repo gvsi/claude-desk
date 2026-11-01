@@ -46,6 +46,7 @@ from desk.contracts import (
     DecisionState,
     HoursWindow,
     KnowledgeItem,
+    KnowledgeSource,
     Outcome,
     PaymentLinkState,
     PolicyVersion,
@@ -1011,7 +1012,7 @@ class KnowledgeRow(BaseModel):
     title: str | None
     text: str | None
     readers: list[str]
-    source: Literal["website", "upload", "setup", "memory_import", "web_search"]
+    source: KnowledgeSource
     created_at: AwareDatetime | None
 
 

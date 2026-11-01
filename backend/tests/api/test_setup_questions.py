@@ -1269,8 +1269,19 @@ SETUP_TOOL_ROUTES = ("GET /context/{session_id}?desk_id=", "POST /decide", "POST
 
 
 async def test_start_writes_the_sample_memory_before_the_consent_read(app, browser, fake, kernel_http, model,
-                                                                     engine):
+                                                                     engine, db, monkeypatch):
     owner = await new_owner(app, browser, kernel_http)
+    build_memory = desk_setup.memory_items
+
+    def memory_after_link(drafts):
+        ((desk_id, transcript),) = db.execute(
+            "SELECT desk_id, transcript FROM app.setup_interviews WHERE copy_id = %s",
+            (owner.copy_id,)).fetchall()
+        assert desk_id is not None and transcript == []
+        assert not fake.called("PUT /desks/{id}/answering")
+        return build_memory(drafts)
+
+    monkeypatch.setattr(desk_setup, "memory_items", memory_after_link)
     notes = [{"title": "Customer habits", "topics": [" Customers ", ""],
               "text": "I ask customers to send a photo of the leak before a visit."},
              {"title": "Service hours", "topics": [" HOURS "], "text": "I work weekdays from 8 to 5."}]
@@ -1280,7 +1291,7 @@ async def test_start_writes_the_sample_memory_before_the_consent_read(app, brows
     state = reply.json()
     routes = [call.route for call in fake.calls]
     (written,) = fake.called("PUT /desks/{id}/memory")
-    assert routes.index("POST /desks") < routes.index("PUT /desks/{id}/answering") < routes.index(written.route)
+    assert routes.index("POST /desks") < routes.index(written.route) < routes.index("PUT /desks/{id}/answering")
     assert written.path == f"/desks/{state['desk_id']}/memory"
     assert written.headers["x-owner-session"] == owner.token
     assert written.body == {"about": "Rivera Plumbing fixes leaks and water heaters around Oakland.", "items": [
@@ -1474,8 +1485,8 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     assert not fake.desks[state["desk_id"]].answering
     assert len(fake.called("PUT /desks/{id}/answering")) == 2 and not fake.called("DELETE /desks/{id}")
 
-    # It fails again: the new Desk is deleted, so nothing answers the public at its address, no interview is made (the
-    # start's row keeps its failure, with no Desk, so its key is spent), and the owner gets the kernel's error.
+    # It fails again: the new Desk is deleted, so nothing answers the public at its address. The row keeps the
+    # returned Desk's ID and its failure, but no readable interview; the owner gets the kernel's error.
     fake.fail("PUT /desks/{id}/answering", "timeout")
     before = set(fake.desks)
     model.add(started())
@@ -1494,7 +1505,7 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     async with engine.connect() as conn:
         kept = (await conn.execute(sql("SELECT desk_id, start_error IS NOT NULL FROM app.setup_interviews"
                                        " ORDER BY created_at"))).all()
-    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (None, True)]
+    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (made, True)]
 
     # The delete is best effort: when it fails too, the owner still gets the kernel's error, and it is logged.
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
@@ -2288,6 +2299,21 @@ def idle_in_transaction(db) -> int:
     """The API role's connections holding a transaction open while they wait on something outside Postgres."""
     return db.execute("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
                       " AND usename = 'desk_api' AND state LIKE 'idle in transaction%'").fetchone()[0]
+
+
+async def test_start_holds_no_transaction_while_the_kernel_makes_its_desk(
+        app, browser, kernel_http, model, fake, db):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    release = fake.gate("POST /desks")
+    first = asyncio.create_task(owner.browser.post("/api/owner/setup", json=start_body()))
+    try:
+        await until(lambda: fake.called("POST /desks"))
+        assert idle_in_transaction(db) == 0
+    finally:
+        release.set()
+        reply = await asyncio.wait_for(first, 10)
+        assert reply.status_code == 201, reply.text
 
 
 async def lockable(engine, interview_id: str) -> None:
