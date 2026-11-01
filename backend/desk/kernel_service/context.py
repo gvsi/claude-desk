@@ -97,8 +97,6 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
                       and profile.status == "enabled"
                       and profile.business is not None and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                       and await adapters.resolve(ctx, desk_id, tool) is not None}
-    given = {tool for tool, profile in profiles.items() if tool in given
-             and (profile.source != "business" or tool in valid_business)}
     if principal.kind in ("visitor", "agent"):
         declared = declared | valid_business
 
@@ -141,7 +139,8 @@ async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: Sess
     enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
     given = decide.tools_given(principal, session_row, desk_row, enabled)
     return [_profile(enabled[tool]) for tool in sorted(given)
-            if adapters.resolve(tool, enabled[tool]) is not None]
+            if adapters.profile_sha256(enabled[tool].profile) == enabled[tool].profile_sha256
+            and await adapters.resolve(ctx, desk_row.desk_id, tool) is not None]
 
 
 router = APIRouter()
