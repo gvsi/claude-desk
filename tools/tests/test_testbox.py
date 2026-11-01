@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from desk_tools.testbox import lane_name, selected_files, remote_environment, remote_command
 
 
@@ -21,6 +23,25 @@ def test_environment_is_lane_scoped_and_ci_is_explicit():
         assert env[f"{role}_DATABASE_URL"].endswith(":5432/lane_alpha")
     assert remote_environment("beta", "/repo", ci="1")["CI"] == "1"
     assert env["DESK_PROVE"].endswith("/kernel/target/release/desk-prove")
+
+
+def test_lane_database_urls_reach_postgres_directly_over_the_lane_link():
+    """Not through the loopback forwarder, whose extra hop cost every connection about 40 ms."""
+    from urllib.parse import urlsplit
+    from desk_tools.testbox import DATABASE_HOST, DATABASE_PORT
+
+    env = remote_environment("alpha", "/srv/testbox/lanes/alpha/repo")
+    for role in ("ADMIN", "KERNEL", "API", "MOCKPAY"):
+        url = urlsplit(env[f"{role}_DATABASE_URL"])
+        assert (url.hostname, url.port) == ("10.200.0.1", 5432) == (DATABASE_HOST, DATABASE_PORT)
+    # The address is the test bridge's, where Postgres listens and the launcher lets each lane connect.
+    tools = Path(__file__).parents[1] / "testbox"
+    bootstrap = (tools / "bootstrap.sh").read_text()
+    assert f"ip addr replace {DATABASE_HOST}/16 dev testbox0" in bootstrap
+    assert f"listen_addresses = '127.0.0.1,{DATABASE_HOST}'" in bootstrap
+    assert "host all all 10.200.0.0/16 scram-sha-256" in bootstrap
+    firewall = f'"-d", "{DATABASE_HOST}", "-p", "tcp", "--dport", "{DATABASE_PORT}", "-j", "ACCEPT"'
+    assert firewall in (tools / "lane-exec.py").read_text()
 
 
 def test_command_preserves_argument_boundaries():

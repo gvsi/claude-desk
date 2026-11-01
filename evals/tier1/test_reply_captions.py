@@ -18,6 +18,22 @@ RIVERA = prompts.DeskIdentity(business_name=RIVERA_NAMES[0], desk_name=RIVERA_NA
 
 @pytest.mark.requires("01a")
 @pytest.mark.white_box
+def test_voice_examples_read_as_english_and_scan_clean():
+    from desk.kernel_service import lang, reply_check
+
+    text = prompts.conversation_system(RIVERA)[0]["text"]
+    for prose_parts, card_note in prompts.VOICE_EXAMPLES:
+        for part in prose_parts:
+            assert lang.detect(part) == "en", part
+            assert reply_check.scan_prose(part, names=RIVERA_NAMES) == [], part
+            assert part in text
+        if card_note:
+            assert f"({card_note})" in text
+    assert prompts.VOICE_EXAMPLES[-1][0][-1].endswith(prompts.STATUS_LINES["offer_callback"]["en"])
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
 @pytest.mark.parametrize(("result", "language", "caption"), [
     (result, language, caption)
     for result, captions in prompts.REPLY_EXAMPLES.items()
