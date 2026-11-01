@@ -343,7 +343,7 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
               Booked
             </p>
             <p className="cd-intro__booked-when cd-type-body">Tuesday, November 3</p>
-            <p className="cd-intro__booked-with cd-type-meta">Arriving 2:00 pm to 4:00 pm</p>
+            <p className="cd-intro__booked-with cd-type-meta">2:00 pm to 4:00 pm</p>
             <p className="cd-intro__booked-with cd-type-meta">With Maria Rivera</p>
           </div>
           <div className="cd-intro__receipts cd-type-caption">

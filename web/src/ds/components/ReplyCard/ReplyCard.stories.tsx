@@ -90,7 +90,7 @@ export const BookingConfirmed: Story = {
     await expect(canvas.getByRole('article', { name: 'Booked' })).toBeVisible();
     // The kernel's booking card: the date, the arrival window and who comes, with no booking ID.
     await expect(canvas.getByText('Tuesday, November 3')).toBeVisible();
-    await expect(canvas.getByText('Arriving 2:00 pm to 4:00 pm')).toBeVisible();
+    await expect(canvas.getByText('2:00 pm to 4:00 pm')).toBeVisible();
     await expect(canvas.getByText('With Maria Rivera')).toBeVisible();
     await expect(canvas.queryByText(/B-77/)).toBeNull();
     // The outcome's check is sage, beside the word that says the same, and hidden from screen readers.
@@ -301,7 +301,7 @@ export const BookingConfirmedEs: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('article', { name: 'Reservado' })).toBeVisible();
     await expect(canvas.getByText('martes 3 de noviembre')).toBeVisible();
-    await expect(canvas.getByText('Llegada de 14:00 a 16:00')).toBeVisible();
+    await expect(canvas.getByText('De 14:00 a 16:00')).toBeVisible();
     await expect(canvas.getByText('Con Maria Rivera')).toBeVisible();
   },
 };

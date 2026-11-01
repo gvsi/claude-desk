@@ -555,7 +555,7 @@ describe('public chat page', () => {
     // The kernel's lines, word for word: its title as the headline, then each line in order.
     expect(card.querySelector('.cd-reply-card__headline')?.textContent).toBe('Tuesday, November 3');
     expect([...card.querySelectorAll('.cd-reply-card__detail')].map((p) => p.textContent)).toEqual([
-      'Arriving 2:00 pm to 4:00 pm',
+      '2:00 pm to 4:00 pm',
       'With Maria Rivera',
     ]);
     // The page adds nothing to a card: no date tile, price, link or calendar action.

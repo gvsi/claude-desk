@@ -29,7 +29,7 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30. Dana returns to Rivera Plumbing’s public page signed in with her Claude account.',
       'Owner decision, 2026-10-30: a vision Claude account counts as verified when its verified email matches the contact on record, and her consent is asked on each visit; the receipts say both, word for word as the board writes them.',
-      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?” stated a booking in Claude’s words. Her last visit is now the kernel’s booking card in its rendered shape (“Tuesday, October 20”, “Arriving 10:00 am to 12:00 pm”, “With Maria Rivera”) under “Welcome back, Dana. How did the drain clearing go?”, and the board is to be redrawn to match.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?” stated a booking in Claude’s words. Her last visit is now the kernel’s booking card in its rendered shape (“Tuesday, October 20”, “10:00 am to 12:00 pm”, “With Maria Rivera”) under “Welcome back, Dana. How did the drain clearing go?”, and the board is to be redrawn to match.',
       'The vision bar is PublicShell’s banner, inside the page’s height. With Dana’s last visit, the page is 994 px tall at 1512 px, as the components measure it (the redrawn canvas board is 1013 px); the story runs at that height, so the page fits its window exactly. Once Send is pressed, “This is a vision page, so nothing is sent.” shows under the composer, which grows by its 24 px while the conversation gives them up, so the page stays 994 px; the board draws it before any press.',
       'The about column’s service-area card keeps Rivera’s real service area, as the board draws it: the rule that no vision page names a real city office covers only the city office page (coordinator’s ruling, 2026-10-30).',
     ].join(' '),
@@ -85,7 +85,7 @@ export const Board: Story = {
 
     // Her last visit is the kernel's booking card under the welcome, in her message: the date, the job and who.
     const lastVisit = within(log).getByRole('article', { name: 'Booked' });
-    await expect(lastVisit.textContent).toBe('BookedTuesday, October 20Arriving 10:00 am to 12:00 pmWith Maria Rivera');
+    await expect(lastVisit.textContent).toBe('BookedTuesday, October 2010:00 am to 12:00 pmWith Maria Rivera');
     await expect(lastVisit.closest('.cd-claude-message')?.textContent).toContain(CLAUDE_ACCOUNT_TURNS.matched);
 
     // The invoice is a document card, only for her, with its download.

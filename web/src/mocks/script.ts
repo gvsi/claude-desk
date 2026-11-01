@@ -189,7 +189,7 @@ const bookedCard: Record<Language, CardBlock> = {
   en: cardBlock('booking_confirmed', {
     fact_id: 'booking:B-77',
     title: 'Tuesday, November 3',
-    lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+    lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
   }),
   es: blocks.booking_confirmed.es,
 };

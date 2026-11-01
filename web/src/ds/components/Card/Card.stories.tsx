@@ -122,7 +122,7 @@ export const HoldsCards: Story = {
               Thursday, October 29
             </p>
             <p className="cd-type-meta" style={{ margin: 'var(--space-2) 0 0', color: 'var(--text-secondary)' }}>
-              Arriving 2:00 pm to 4:00 pm
+              2:00 pm to 4:00 pm
             </p>
           </Card>
         </div>
