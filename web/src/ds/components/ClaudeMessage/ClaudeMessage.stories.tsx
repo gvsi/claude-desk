@@ -162,16 +162,22 @@ export const TwoParagraphs: Story = {
   },
 };
 
-export const InertLink: Story = {
+export const Link: Story = {
   args: { blocks: [proseBlock('You can see our hours on [our website](https://riveraplumbing.example/hours).')] },
   parameters: {
     canvasNote:
-      "The board's replies carry no link; this is a reply with one Markdown link to the business's own site. Links in Claude's prose show inert, their text and then their address, until the kernel's reply check reads Markdown links.",
+      "The board's replies carry no link; this is a reply with one Markdown link to the business's own site. Links in Claude's prose show their text only and open in a new tab. The kernel's reply check reads Markdown links and holds every link to the business's contact.",
   },
   play: async ({ canvasElement }) => {
     const prose = canvasElement.querySelector('.cd-claude-message__prose') as HTMLElement;
-    await expect(prose.querySelectorAll('a')).toHaveLength(0);
-    await expect(prose.textContent).toBe('You can see our hours on our website (https://riveraplumbing.example/hours).');
+    await expect(prose.querySelectorAll('a')).toHaveLength(1);
+    const link = prose.querySelector('a');
+    await expect(link?.textContent).toBe('our website');
+    await expect(link?.getAttribute('href')).toBe('https://riveraplumbing.example/hours');
+    await expect(link?.getAttribute('target')).toBe('_blank');
+    await expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+    await expect(prose.textContent).toBe('You can see our hours on our website.');
+    await expect(prose.textContent).not.toContain('https://riveraplumbing.example/hours');
   },
 };
 

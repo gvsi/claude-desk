@@ -9,12 +9,10 @@ import { useMessageReveal } from './useMessageReveal.ts';
 import './ClaudeMessage.css';
 
 /**
- * How links in Claude's prose show. The kernel's reply check doesn't read Markdown link targets
- * yet, so a link that showed only its text could hide a target nothing checked: each shows its
- * text, then its address, and opens nothing. This flips to 'open' once the kernel's Markdown link
- * check is on main.
+ * Links in Claude's prose show their text only and open in a new tab. The kernel's reply check
+ * reads Markdown links and holds every link to the business's contact.
  */
-export const PROSE_LINKS = 'inert' as const;
+export const PROSE_LINKS = 'open' as const;
 
 export interface ClaudeMessageProps {
   /** The delivered message's blocks (`EvMessage.blocks`), in order, exactly as they arrived. */

@@ -30,7 +30,7 @@ Under reduced motion it shows whole at once, its cards with it, and nothing fade
 ## What it shows
 
 - Each `prose` block as Markdown with `ChatMarkdown`, in the reply type (15/23, weight 360): paragraphs, headings, bold, italic, lists, tables, links, inline code, quotes and rules, with Claude's line breaks kept inside a paragraph. A blank prose block takes no space.
-- Links in prose are inert (`links="inert"`): each shows its text, then its address, and opens nothing, because the kernel's reply check doesn't read Markdown link targets yet and a link showing only its text could hide a target nothing checked. One constant, `PROSE_LINKS`, flips this to clickable once that check is on main. Payment and booking links come from cards, as before.
+- Links in prose are clickable (`links="open"`, set by `PROSE_LINKS`): each shows its text only and opens in a new tab with `rel="noopener noreferrer"`. The kernel's reply check reads Markdown links and holds every link to the business's contact. Payment and booking links come from cards, as before. Stopped drafts keep inert links, and `ChatMarkdown` still defaults to inert mode.
 - With `plainProse` (the Vision pages only), each prose block as one plain paragraph exactly as written, never Markdown.
 - Each other block as a `ReplyCard`. A card whose template this build doesn't know shows its text in a plain card, as `ReplyCard` does.
 - Nothing else: no bubble, no avatar, no name, no time. The blocks are the whole message, and nothing is computed or added.
