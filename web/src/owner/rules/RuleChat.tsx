@@ -186,7 +186,13 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
                   draft={turn.draft}
                   inline
                   onConfirmed={(change) => land(deskId, change)}
-                  onDone={(outcome) => onSettled(turn.id, outcome)}
+                  onDone={(outcome) => {
+                    onSettled(turn.id, outcome);
+                    // The receipt has landed where the review's buttons were: focus, left on the
+                    // button pressed, goes to the panel's composer rather than the page.
+                    const box = root.current;
+                    if (outcome === 'confirmed' && box !== null && !box.contains(document.activeElement)) box.querySelector('textarea')?.focus();
+                  }}
                 />
               )}
             </div>

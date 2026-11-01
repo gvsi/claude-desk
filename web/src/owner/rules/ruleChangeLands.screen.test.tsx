@@ -179,6 +179,17 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(sent).toEqual([{ version: desk().lastVersion }]);
   });
 
+  it('focus_goes_to_the_panels_composer_when_the_receipt_lands', async () => {
+    const { log, panel } = await askForTheWeekdayChange();
+    const confirm = log.getByRole('button', { name: 'Confirm change' });
+    confirm.element().focus();
+    const version = desk().lastVersion;
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    // The button it pressed has gone with the review: focus doesn't drop to the page.
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+  });
+
   it('an_answer_without_a_version_settles_by_the_rules_read', async () => {
     const { log } = await askForTheWeekdayChange();
     const version = desk().lastVersion;
