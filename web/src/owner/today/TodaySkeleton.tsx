@@ -132,10 +132,10 @@ export function TodaySkeleton() {
         </div>
         <div className="cd-today__section">
           <SectionTitle anchor="since-title" />
-          <SkeletonCard>
+          <SkeletonCard anchor="since-card">
             <div className="cd-briefing">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="cd-briefing__item">
+              {['booking', 'answer'].map((kind) => (
+                <div key={kind} className="cd-briefing__item">
                   <div className="cd-briefing-row">
                     <Skeleton shape="line" text="caption" width={86} />
                     <span className="cd-briefing-row__kind cd-type-meta">
@@ -145,7 +145,7 @@ export function TodaySkeleton() {
                       </span>
                     </span>
                     <div className="cd-briefing-row__words">
-                      {i === 1 ? (
+                      {kind === 'booking' ? (
                         <>
                           <Skeleton shape="line" text="meta" />
                           <div>

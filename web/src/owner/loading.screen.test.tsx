@@ -173,6 +173,7 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
+  { name: 'since-card', page: '.cd-today__main > .cd-today__section:last-child > .cd-card', size: true },
   { name: 'public-card', page: '.cd-today-aside > .cd-card:first-child', size: true },
   { name: 'public-page-action', page: '.cd-today-aside__action > .cd-button', size: true },
   { name: 'inbox', page: '.cd-owner-inbox > .cd-button', size: true },
@@ -188,7 +189,7 @@ const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner
  * shorter; what Today draws under it in its column, the aside stacked under that on a phone and the
  * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
  */
-const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title'];
+const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
 const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'public-page-action', 'inbox', 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
@@ -262,10 +263,13 @@ function watchTheTickedRow(phone: boolean) {
       expect(last?.textContent).toContain('Done. Your new Desk is live.');
       const change = landedRect('.cd-things > .cd-card').height - before!.card.height;
       expect(change, 'the ticked row is shorter than the fresh one').toBeLessThan(-SKELETON_TOLERANCE_PX);
-      under.forEach(({ name, page }, i) => {
+      under.forEach(({ name, page, size, dimensions }, i) => {
         const real = landedRect(page);
         expect(Math.abs(real.top - before!.under[i]!.top - change), `${name} moves by the card's change`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         expect(Math.abs(real.left - before!.under[i]!.left), `${name} left`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+        for (const dimension of size ? (['width', 'height'] as const) : dimensions ?? []) {
+          expect(Math.abs(real[dimension] - before!.under[i]![dimension]), `${name} ${dimension}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+        }
       });
       const footer = landedRect('.cd-owner-layout__footer');
       expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
