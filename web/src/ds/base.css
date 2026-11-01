@@ -46,6 +46,13 @@ a {
   outline-offset: 0;
 }
 
+/* Its edge one step stronger: a field's own border (TextField, the intro's passcode, the verify code,
+   the checkout's name) takes line-field-focus. A box that draws its edge another way, as the composer
+   does, says so in its own stylesheet. */
+:is(input, textarea):read-write:focus {
+  border-color: var(--line-field-focus);
+}
+
 ::placeholder {
   color: var(--text-tertiary);
   opacity: 1;

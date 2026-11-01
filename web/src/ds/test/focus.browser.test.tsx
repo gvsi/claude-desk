@@ -9,6 +9,8 @@ import { Composer } from '../components/Composer/Composer.tsx';
 import { TextField } from '../components/TextField/TextField.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
 
+import '../components/VerifyCodeForm/VerifyCodeForm.css';
+
 /** A color token as the browser resolves it on the page. */
 function tokenColor(token: string): string {
   const probe = document.createElement('span');
@@ -39,6 +41,8 @@ describe('focus', () => {
   const TEXT_ENTRY: [string, ReactNode, 'field' | 'composer'][] = [
     ['a text field', <TextField label="Business name" value="" onChange={noop} />, 'field'],
     ['a text area', <TextField label="Your business" multiline value="" onChange={noop} />, 'field'],
+    // A field drawn by its own component's stylesheet, as the verify code, the intro's passcode and the checkout's name are.
+    ['a verify code field', <input type="text" className="cd-verify-code__field cd-type-body" aria-label="Code" />, 'field'],
     ['the owner composer', <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} />, 'composer'],
     ['the public chat composer', <Composer variant="visitor" label="Message" placeholder="Message" onSend={noop} />, 'composer'],
     ['the whisper composer', <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude" onSend={noop} />, 'composer'],

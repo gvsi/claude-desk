@@ -278,9 +278,10 @@ export const Default: Story = {
     await expect(field).toHaveAttribute('type', 'password');
     await expect(field).toHaveAttribute('autocomplete', 'off');
     await expect(dialog).toHaveAccessibleDescription(args.intro);
-    // A main-action-tall field whose outline, its boundary, reaches 3:1 (line-field).
+    // A main-action-tall field whose outline, its boundary, reaches 3:1 (line-field); with focus, as
+    // here, one step stronger (line-field-focus), with no ring.
     expectComputed(field, { height: '40px', borderTopLeftRadius: '8px', borderTopWidth: '1px' });
-    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderBottomColor: 'rgba(250, 249, 245, 0.36)' });
+    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.6)', borderBottomColor: 'rgba(250, 249, 245, 0.6)', outlineStyle: 'none' });
     await expect(field).not.toHaveAttribute('aria-invalid');
     await expect(field).not.toHaveAttribute('aria-describedby');
     await expect(canvas.queryByRole('alert')).toBeNull();
