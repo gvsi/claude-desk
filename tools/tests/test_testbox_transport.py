@@ -120,3 +120,21 @@ def test_git_bundle_sends_only_new_objects_and_handles_a_rewind(tmp_path):
     rewind = tmp_path / 'rewind.bundle'
     assert not create_bundle(repo, rewind, second + ':' + first)
     assert not rewind.exists()
+
+
+def test_lane_state_reads_actual_git_refs_when_a_remote_command_changes_head(tmp_path):
+    import json
+    import sys
+    from desk_tools.testbox_client import lane_state_script
+
+    repo = tmp_path / 'repo'
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    (repo / 'source.txt').write_text('source')
+    subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'source'], check=True)
+    head = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
+    subprocess.run(['git', '-C', str(repo), 'update-ref', 'refs/remotes/origin/main', head], check=True)
+    (tmp_path / 'git-signature').write_text('stale marker')
+    (tmp_path / 'manifest.json').write_text('[]')
+    state = json.loads(subprocess.check_output([sys.executable, '-c', lane_state_script(str(tmp_path))], text=True))
+    assert state['git'] == head + ':' + head

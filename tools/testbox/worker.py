@@ -64,7 +64,9 @@ def main():
     if not (repo / ".git").exists():
         run(["git", "init", "-q", str(repo)])
         run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/gvsi/claude-desk.git"])
-    if not (base / "git-signature").exists() or (base / "git-signature").read_text() != request["signature"]:
+    refs = subprocess.run(["git", "rev-parse", "HEAD", "refs/remotes/origin/main"], cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    signature = ":".join(refs.stdout.splitlines()) if refs.returncode == 0 else ""
+    if signature != request["signature"]:
         if request.get("bundle", True):
             run(["git", "bundle", "unbundle", str(transfer / "source.bundle")], cwd=repo, stdout=subprocess.DEVNULL)
         for revision in (request["head"], request["main"]):

@@ -93,7 +93,7 @@ def changed_files(current: dict[str, str], previous: dict[str, str]) -> list[str
 def lane_state_script(base: str) -> str:
     # Inspect actual remote bytes under the lane lock, not a client-side assumption. Commands
     # may edit/delete source files, and a different client may have synchronized this lane.
-    return """import json, sys
+    return """import json, subprocess, sys
 from pathlib import Path
 base = Path(BASE)
 sys.path.insert(0, str(base / 'repo/tools'))
@@ -103,7 +103,8 @@ try:
     sources = source_state(base / 'repo', files)
 except (ImportError, FileNotFoundError):
     sources = {}
-signature = (base / 'git-signature').read_text() if (base / 'git-signature').exists() else ''
+refs = subprocess.run(['git', '-C', str(base / 'repo'), 'rev-parse', 'HEAD', 'refs/remotes/origin/main'], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+signature = ':'.join(refs.stdout.splitlines()) if refs.returncode == 0 else ''
 print(json.dumps({'git': signature, 'sources': sources}), flush=True)
 """.replace('BASE', repr(base))
 
