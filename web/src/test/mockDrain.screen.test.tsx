@@ -95,29 +95,54 @@ it('answers a released read after resetHandlers and the next epoch', async () =>
   expect(await response).toBe('dropped');
   await mockDrain.waitForIdle();
 });
-it.each(['mocked', 'passthrough', 'unhandled', 'network error', 'handler exception'] as const)(
+it.each(['mocked', 'passthrough', 'network error', 'handler exception'] as const)(
   'drains a %s response', async (outcome) => {
-    // A real static path keeps passthrough/unhandled requests on Vite, away from the API proxy.
+    // This non-API path skips trackFetch: only the REQUEST reply port can hold the drain open.
+    // Its real static response keeps passthrough on Vite, away from the API proxy.
     const path = '/mockServiceWorker.js';
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let reached = false;
+    let drained = false;
+    let draining: Promise<void> | undefined;
+    let response: Promise<number | string> | undefined;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      if (outcome !== 'unhandled') worker.use(http.get(path, () => {
+      worker.use(http.get(path, async () => {
+        reached = true;
+        await gate;
         if (outcome === 'passthrough') return passthrough();
         if (outcome === 'network error') return HttpResponse.error();
         if (outcome === 'handler exception') throw new Error('drain test handler exception');
         return HttpResponse.json({ ok: true });
       }));
-      const response = fetch(path).then((reply) => reply.status, () => 'network error');
-      // Start draining before the worker has even delivered REQUEST to this page.
-      await mockDrain.waitForIdle();
+      response = fetch(path).then((reply) => reply.status, () => 'network error');
+      await vi.waitFor(() => expect(reached).toBe(true));
+      draining = mockDrain.waitForIdle().then(() => { drained = true; });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(drained).toBe(false);
+      release();
+      await draining;
+      expect(drained).toBe(true);
       expect(await response).toBe(outcome === 'network error' ? 'network error' : outcome === 'handler exception' ? 500 : 200);
     } finally {
+      release();
+      await response;
+      await draining;
       warn.mockRestore();
       error.mockRestore();
     }
   },
 );
+
+it('passes an unhandled request through to Vite', async () => {
+  // No matching resolver exists to gate. This is a response smoke check; the gated cases
+  // above prove reply-port tracking, including PASSTHROUGH, without the API fetch counter.
+  const response = fetch('/mockServiceWorker.js');
+  await mockDrain.waitForIdle();
+  expect((await response).status).toBe(200);
+});
 
 it('drains an SSE response while its stream is still open', async () => {
   worker.use(sse('/api/drain-events', ({ client }) => {
