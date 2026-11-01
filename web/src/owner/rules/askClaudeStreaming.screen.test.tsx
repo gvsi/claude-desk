@@ -64,6 +64,8 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(writing.element().getBoundingClientRect().width).toBeLessThanOrEqual(1);
     expect(growing(panel)?.getAttribute('aria-hidden')).toBe('true');
     expect(getComputedStyle(growing(panel)!.querySelector('p')!).fontFamily).toContain('Source Serif 4');
+    // Drawn as Markdown, in the same frame as the final answer's prose, so the swap moves nothing.
+    expect(growing(panel)!.querySelector('.cd-claude-message__prose > .cd-md')).not.toBeNull();
     expect(panel.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(requests('ruleChat')).toHaveLength(1);
     expectNoHorizontalScroll();

@@ -193,7 +193,7 @@ export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './com
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
-export { ClaudeMessage, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
+export { ClaudeMessage, PROSE_LINKS, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
 export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';
 export { PersonMessage, type PersonMessageProps } from './components/PersonMessage/PersonMessage.tsx';
 export { AgentMessage, type AgentMessageProps } from './components/AgentMessage/AgentMessage.tsx';

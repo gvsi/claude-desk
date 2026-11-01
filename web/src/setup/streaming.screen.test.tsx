@@ -64,6 +64,8 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     await expect.element(writing).toBeInTheDocument();
     expect(writing.element().getBoundingClientRect().width).toBeLessThanOrEqual(1);
     expect(growing()?.getAttribute('aria-hidden')).toBe('true');
+    // Drawn as Markdown, in the same frame as the saved reply's prose.
+    expect(growing()!.querySelector('.cd-claude-message__prose > .cd-md')).not.toBeNull();
     expect(screen.getByText(MEMORY_LABEL, { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
     expect(screen.getByRole('region', { name: FIRST_QUESTION, exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
