@@ -909,8 +909,11 @@ describe('Conversations', () => {
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
 
-    // The reply check stops her words, a moment after she sends them (a price in prose).
-    mockStore.inject({ route: 'ownerMessage', status: 200, delayMs: 600, body: { message_id: 'msg-stopped', verdict: { ok: false }, ledger_seq: 1 } });
+    // The reply check stops her words (a price in prose), after she tries typing while they send.
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'ownerMessage', status: 200, until, body: { message_id: 'msg-stopped', verdict: { ok: false }, ledger_seq: 1 } });
     const stopped = 'The drain clearing is $89 today.';
     await box.fill(stopped);
     await userEvent.keyboard('{Enter}');
@@ -919,6 +922,8 @@ describe('Conversations', () => {
     // overwritten when they come back.
     await expect.element(box).toBeDisabled();
     await userEvent.keyboard('Newer words');
+    await expect.element(box).toBeDisabled();
+    release();
 
     // They come back to the box, alone, with the line saying why, and the box has focus again.
     await expect

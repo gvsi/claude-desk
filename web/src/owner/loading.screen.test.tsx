@@ -568,7 +568,7 @@ it('reload_opens_on_the_frames_shape at 1440', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('reload_opens_on_the_frames_shape at 390', async () => {
+it.each([390, 620])('reload_opens_on_the_frames_shape at %i', async (width) => {
   const reads = [
     ROUTES.desks.path,
     ROUTES.today.path.replace('{desk_id}', RIVERA.deskId),
@@ -576,9 +576,10 @@ it('reload_opens_on_the_frames_shape at 390', async () => {
   ].map(holdReads);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...PHONE_ANCHORS, ...TODAY_ANCHORS],
+    // The intermediate width guards the frame; Today has its own content geometry.
+    anchors: width === 620 ? PHONE_ANCHORS : [...PHONE_ANCHORS, ...TODAY_ANCHORS],
     open: async () => {
-      await renderRoute(TODAY, { viewport: 'phone', pollScale: 100 });
+      await renderRoute(TODAY, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
     },
     release: () => reads.forEach((read) => read.release()),
   });
