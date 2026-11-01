@@ -10,8 +10,8 @@ their reconciliation (a private action's too, once its session closed: its adapt
 the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
 verification start allowed or approved, a right code checked, a document link opened, a person
 removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
-and a handoff closed, after the Desk row an owner's write holds first; and Plan 01c's payment
-paths, over the real adapters and the mock payments server.
+a booking that closes the card's handoff, and a handoff closed, after the Desk row an owner's write
+holds first; and Plan 01c's payment paths, over the real adapters and the mock payments server.
 """
 
 import asyncio
@@ -605,6 +605,22 @@ async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
     # T2 takes the slot it books (an adapter's own row) after the session, decision and execution
     t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
     assert len(t2) == 1 and t2[0][:3] == ["sessions", "decisions", "executions"], log.transactions
+    assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
+
+
+async def test_a_booking_closing_a_card_handoff_runs_in_the_lock_order(app, client, reviewer):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, "S-20261102-1400")
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2, holding the session row FOR UPDATE: the slot it books FOR SHARE and its booking (an adapter's own
+    # rows), then the session's open card handoff, closed, then the facts (the handoff's, none, and the
+    # booking's), then the closing's entry and the outcome
+    t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
+    assert t2 == [["sessions", "decisions", "executions", "calendar_slots", "handoffs", "facts", "ledger_heads"]], (
+        log.transactions)
     assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
 
 
