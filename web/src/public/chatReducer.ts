@@ -203,10 +203,12 @@ function presenceLine(id: string, ev: EvOwnerJoined | EvOwnerLeft): RowPart<Chat
   return { kind: 'line', row: { kind: 'system', id, ev } };
 }
 
-/** A held request is open until its resolution arrives. */
+/** A held request can be cancelled until approval or its resolution arrives. */
 function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   if (ev.type === 'held') return openHolds.includes(ev.decision_id) ? openHolds : [...openHolds, ev.decision_id];
-  if (ev.type === 'resolved') return openHolds.filter((id) => id !== ev.decision_id);
+  if (ev.type === 'resolved' || (ev.type === 'receipt' && ev.state === 'approved')) {
+    return openHolds.filter((id) => id !== ev.decision_id);
+  }
   return openHolds;
 }
 
@@ -223,7 +225,7 @@ function statusPart(
   const previous = latest.get(ev.decision_id);
   const approved = previous?.source.kind === 'decision' && previous.source.state === 'approved';
   return {
-    part: { kind: 'receipt', receipt, ...(approved ? { beside: previous } : { replaces: previous }) },
+    part: { kind: 'receipt', receipt, ...(approved ? { after: previous } : { replaces: previous }) },
     latest: new Map(latest).set(ev.decision_id, receipt),
   };
 }

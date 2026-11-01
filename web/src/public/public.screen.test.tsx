@@ -373,6 +373,34 @@ describe('public chat page', () => {
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
   });
 
+  it('approved_request_has_no_cancel_while_its_outcome_is_pending', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).toBeVisible();
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!chat || !record) throw new Error('the discount was held');
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    // The approve request can time out: only approval reaches the visitor until a later request.
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+    expect(screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    await expect.element(phone.screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(phone.screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(phone.screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+  });
+
   it('allowed_request_keeps_approval_then_outcome_under_the_message_live_and_reloaded', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);

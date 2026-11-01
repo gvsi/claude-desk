@@ -307,6 +307,7 @@ describe('chatReducer', () => {
     const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21 };
     const waiting = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, handoff, { type: 'turn_end' }])]);
     const allowed = run(events([approved], 4), waiting);
+    expect(allowed.openHolds).toEqual([]);
     expect(allowed.rows[1]?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(approved)]);
     // Even after another message, both receipts stay under the original reply.
     const finished = run(events([quoteMessage, executed], 5), allowed);
@@ -318,6 +319,30 @@ describe('chatReducer', () => {
     expect(run(events([held, approved, executed])).leading).toEqual([receiptFromEvent(approved), receiptFromEvent(executed)]);
     const pending = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, approved, executed])]);
     expect(pending.pending).toEqual([receiptFromEvent(approved), receiptFromEvent(executed)]);
+  });
+
+  it('two_holds_keep_the_outcome_directly_after_its_approval_live_and_reloaded', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const other: StatusEvent = { ...held, decision_id: 'second-held-request', ledger_seq: 11 };
+    const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
+    const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21 };
+    const live = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off both?' },
+      ...events([held, other, handoff, { type: 'turn_end' }, approved, executed])]);
+    const expected = [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed), receiptFromEvent(other)];
+    expect(live.rows[1]?.receipts).toEqual(expected);
+    expect(live.openHolds).toEqual([other.decision_id]);
+
+    const reloaded = run([{ type: 'history', transcript: transcript(6, [
+      visitorText(1, 'Can I get 10% off both?'), { ...item(2, 'status'), event: held },
+      { ...item(3, 'status'), event: other }, { ...item(4, 'delivered'), event: handoff },
+      { ...item(5, 'status'), event: approved }, { ...item(6, 'status'), event: executed },
+    ]) }]);
+    expect(reloaded.rows[1]?.receipts).toEqual(expected);
+    expect(reloaded.openHolds).toEqual([other.decision_id]);
+    // Adjacency also holds before a reply or before the chat has any row.
+    const statuses = events([held, other, approved, executed]);
+    expect(run(statuses).leading).toEqual(expected.slice(1));
+    expect(run([{ type: 'sent', id: 'v1', text: 'Both, please' }, ...statuses]).pending).toEqual(expected.slice(1));
   });
 
   it('approved_then_executed_stay_under_the_same_message_after_reload', () => {
@@ -348,6 +373,7 @@ describe('chatReducer', () => {
       visitorText(1, 'Can I get 10% off?'), { ...item(2, 'status'), event: held }, { ...item(3, 'delivered'), event: handoff },
       { ...item(4, 'status'), event: approved },
     ]) }]);
+    expect(reloaded.openHolds).toEqual([]);
     const finished = run(events([executed], 5), reloaded);
     const expected = [[], [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed)]];
     expect(finished.rows.map((row) => row.receipts)).toEqual(expected);
