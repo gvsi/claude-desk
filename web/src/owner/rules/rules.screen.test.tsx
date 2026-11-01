@@ -93,7 +93,7 @@ const DANA_REFUNDS: Suggestion = {
   },
 };
 
-/** The suggestions under Ask Claude that every Desk has, in order; a question about a hold may follow them. */
+/** Rivera's suggestions under Ask Claude, in order; a question about a hold may follow them. */
 const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
 /** The words of each suggestion in `group`, in order. */
@@ -948,6 +948,32 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it('rivera_keeps_both_fixed_chips_without_a_hold', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0], exact: true })).toBeVisible();
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('another_business_without_a_hold_has_no_chips_row', async () => {
+    mockStore.reset('rivera_quiet');
+    desk().summary.business_name = 'Acme Accounting';
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThanOrEqual(2);
+    await expect.element(screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+  });
+
+  it('another_business_has_only_the_hold_question', async () => {
+    desk().summary.business_name = 'Acme Accounting';
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual(['Why was this quote held?']);
+  });
+
   it('hold_question_names_a_held_refund', async () => {
     // Dana's refund, held a minute ago, after the seed's quote: the newest hold is asked about.
     mockStore.world.addHeldRefund();
@@ -967,7 +993,7 @@ describe("Ask Claude's question about a hold", () => {
 
   it('hold_question_only_while_a_request_is_held', async () => {
     // A copy with no hold: once Needs you has been read and drawn (a second read starts only after
-    // the first one's answer), only the suggestions every Desk has.
+    // the first one's answer), only Rivera's fixed suggestions remain.
     const quiet = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const none = quiet.screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(none.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
