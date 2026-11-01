@@ -66,9 +66,12 @@ def test_the_seed_strings_pass_the_card_text_check():
     for field, text in texts.items():
         assert storable(text), field
         assert reply_check.scan_prose(text) == [], field
-        assert business_tools.public_refusal_detail({field: text}) == {}, field
-    assert business_tools.public_refusal_detail(texts) == {}
-    assert business_tools.public_refusal_detail(business_tools.public_fields(tool)) == {}
+        assert business_tools.hidden_fields({field: text}) == {}, field
+        assert reply_check.scan_public_policies({field: text}, amenities=False) == {}, field
+    assert reply_check.scan_public_policies(texts, amenities=False) == {}
+    fields = business_tools.public_fields(tool)
+    assert business_tools.card_refusal(tool, reply_check.scan_public_policies(
+        fields, allow_words=business_tools.free_allow_words(tool), amenities=False)) == {}
 
 
 async def test_a_fresh_copy_has_the_emergency_callback_enabled_and_offered_to_a_visitor(app, client):
