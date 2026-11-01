@@ -2148,7 +2148,7 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Maria's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
+    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
