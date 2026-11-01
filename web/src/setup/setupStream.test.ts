@@ -100,6 +100,23 @@ describe('stepSetupStream', () => {
     ).toEqual(['Searched your Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
   });
 
+  it('rebuilds_the_reads_from_what_a_reconnected_stream_replays', () => {
+    const reads = [
+      { type: 'reading', run, read: 'memory', host: null },
+      { type: 'reading', run, read: 'web_search', host: null },
+      { type: 'reading', run, read: 'web_search', host: null },
+      { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+      { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
+      { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
+    ] as const;
+    const replayed = through([...reads, { type: 'delta', run, text: 'Thanks. From' }, { type: 'reconnected' }, ...reads, { type: 'delta', run, text: 'Thanks. From your' }]).growing;
+    // Each read once, and the two searches still two rows.
+    expect(shownLabels(replayed)).toEqual(['Searched your Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
+    expect(replayed.text).toBe('Thanks. From your');
+    // A reconnected stream that replays no reads keeps those it showed.
+    expect(shownLabels(through([...reads, { type: 'reconnected' }, { type: 'delta', run, text: 'Thanks.' }]).growing)).toHaveLength(3);
+  });
+
   it('shows_a_label_whose_read_it_never_heard_start', () => {
     // A stream that came in late: the label still shows, after those it knows.
     expect(shownLabels(through([{ type: 'label', run, read: 'memory', text: 'Searched your Claude memory' }]).growing)).toEqual(['Searched your Claude memory']);

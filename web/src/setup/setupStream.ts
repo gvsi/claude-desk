@@ -22,6 +22,8 @@ export interface Growing {
   text: string;
   /** `done` came: the reply is whole, its last word included, until the saved turn takes its place. */
   final: boolean;
+  /** The stream reconnected and replays the turn so far: the first read it replays starts the rows again. */
+  replaying?: true;
 }
 
 export const NOTHING_YET: Growing = { labels: [], text: '', final: false };
@@ -49,21 +51,30 @@ export function hasWords(growing: Growing): boolean {
 export type StreamNext = 'read_on' | 'refetch' | 'refetch_idle' | 'wait' | 'reopen' | 'fall_back';
 
 /** What `event` changes in `now`, and what follows, while a request of the turn's is out or not. */
-export function stepSetupStream(now: Growing, event: SetupStreamEvent | { type: 'failed' }, inFlight: boolean): { growing: Growing; next: StreamNext } {
+export function stepSetupStream(
+  now: Growing,
+  event: SetupStreamEvent | { type: 'failed' } | { type: 'reconnected' },
+  inFlight: boolean,
+): { growing: Growing; next: StreamNext } {
+  const replaying = now.replaying ? { replaying: true as const } : {};
+  // A replayed read starts the rows again, so each read shows once after a reconnect.
+  const rows = now.replaying ? [] : now.labels;
   switch (event.type) {
     case 'delta':
-      return { growing: { labels: now.labels, text: event.text, final: false }, next: 'read_on' };
+      return { growing: { labels: now.labels, text: event.text, final: false, ...replaying }, next: 'read_on' };
     case 'reset':
-      return { growing: { labels: now.labels, text: '', final: false }, next: 'read_on' };
+      return { growing: { labels: now.labels, text: '', final: false, ...replaying }, next: 'read_on' };
+    case 'reconnected':
+      return { growing: { ...now, replaying: true }, next: 'read_on' };
     case 'reading':
       // A read in progress shows as Claude writing, as the setup boards draw it: a row with no label yet.
-      return { growing: { ...now, labels: [...now.labels, { read: event.read, text: null }] }, next: 'read_on' };
+      return { growing: { labels: [...rows, { read: event.read, text: null }], text: now.text, final: now.final }, next: 'read_on' };
     case 'label': {
       // The reads run at once and end in any order: a label ends the first read of its kind still
       // running, in its place, or, from a read this stream never heard start, follows the rest.
-      const at = now.labels.findIndex(({ read, text }) => read === event.read && text === null);
+      const at = rows.findIndex(({ read, text }) => read === event.read && text === null);
       const label = { read: event.read, text: event.text };
-      const labels = at === -1 ? [...now.labels, label] : now.labels.map((row, index) => (index === at ? label : row));
+      const labels = at === -1 ? [...rows, label] : rows.map((row, index) => (index === at ? label : row));
       return { growing: { labels, text: now.text, final: now.final }, next: 'read_on' };
     }
     case 'done':
@@ -188,6 +199,10 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
             }
           });
         }
+      },
+      reconnected() {
+        if (!live) return;
+        show(stepSetupStream(growingRef.current, { type: 'reconnected' }, inFlightRef.current).growing);
       },
       failed() {
         if (!live) return;

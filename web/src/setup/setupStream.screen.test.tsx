@@ -131,6 +131,25 @@ describe('useSetupStream', () => {
     await vi.waitFor(() => expect(hook.result.current.progress).toBe(3));
   });
 
+  it('shows_each_read_once_after_the_stream_reconnects', async () => {
+    let connections = 0;
+    worker.use(
+      sse<Named>(EVENTS_URL, ({ client }) => {
+        connections += 1;
+        if (connections === 1) client.send({ retry: 50 });
+        client.send({ event: 'reading', data: { run: 'r_11', read: 'memory', host: null } });
+        client.send({ event: 'label', data: { run: 'r_11', read: 'memory', text: 'Searched your Claude memory' } });
+        // The connection drops; the browser reconnects, and the API replays the turn so far.
+        if (connections === 1) client.close();
+        else client.send({ event: 'delta', data: { run: 'r_11', text: 'Thanks. From your' } });
+      }),
+    );
+    const hook = await follow({ watching: true, inFlight: false });
+    await vi.waitFor(() => expect(hook.result.current.growing?.text).toBe('Thanks. From your'));
+    expect(connections).toBe(2);
+    expect(hook.result.current.growing?.labels).toEqual([{ read: 'memory', text: 'Searched your Claude memory' }]);
+  });
+
   it('shows_the_reads_labels_and_clears_the_text_on_reset', async () => {
     worker.use(
       sse<Named>(EVENTS_URL, ({ client }) => {

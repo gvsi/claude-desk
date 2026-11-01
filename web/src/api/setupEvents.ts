@@ -63,6 +63,8 @@ export function readSetupEvent(name: string, data: string): SetupStreamEvent | n
 
 export interface SetupEventsHandlers {
   event(ev: SetupStreamEvent): void;
+  /** The browser reconnected a dropped stream: the API replays the turn so far. */
+  reconnected?(): void;
   /** The stream didn't open, or the server ended it with other than an event (a 404, a 401). */
   failed(): void;
 }
@@ -90,6 +92,12 @@ export function openSetupEvents(id: string, on: SetupEventsHandlers): () => void
     if (ev !== null) on.event(ev);
   };
   for (const name of NAMES) source.addEventListener(name, dispatch);
+  let opens = 0;
+  source.onopen = () => {
+    if (stopped) return;
+    opens += 1;
+    if (opens > 1) on.reconnected?.();
+  };
   source.onerror = (e: Event) => {
     // A named `error` event (the turn failed) reaches here too; only a plain `Event` is the connection.
     if (stopped || e instanceof MessageEvent) return;
