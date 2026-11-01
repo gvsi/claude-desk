@@ -694,6 +694,7 @@ class SetupPublicHours(BaseModel):
 
 
 class SetupPublicPriceItem(BaseModel):
+    item_id: str
     title: str
     unit_cents: int
 

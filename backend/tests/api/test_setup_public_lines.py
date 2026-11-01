@@ -72,13 +72,14 @@ PRICES = [{"title": "Visit", "unit_cents": 12500}]
 @pytest.mark.parametrize("suggested", [True, False])
 async def test_get_lists_hours_and_prices_with_source(lines_setup, engine, suggested):
     owner, state, path = lines_setup
-    await patch_answers(engine, state, hours=HOURS, price_items=PRICES,
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES * 3,
                         suggested_fields=["hours", "price_items"] if suggested else [])
     reply = await owner.browser.get(path)
     assert reply.status_code == 200, reply.text
     source = "suggested" if suggested else "owner"
     assert reply.json()["hours"] == {"source": source, "windows": HOURS}
-    assert reply.json()["prices"] == {"source": source, "items": PRICES}
+    assert reply.json()["prices"] == {"source": source, "items": [
+        {"item_id": item_id, **PRICES[0]} for item_id in ("visit", "visit-2", "visit-3")]}
     assert reply.json()["lines"][1] == {
         "key": "contact", "text": "hello@example.test", "source": "owner", "editable": True}
 
@@ -155,8 +156,9 @@ async def test_confirm_republishes_empty_suggested_parts(lines_setup, engine, mo
     calls = received_parts(monkeypatch)
     reply = await owner.browser.post(f"{path}/confirm", json={})
     assert reply.status_code == 200, reply.text
-    assert [part for part, _ in calls] == ["charter", "hours", "prices"]
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"]
     assert dict(calls)["hours"] == {"hours": []}
+    assert dict(calls)["calendar"] == {"calendar_slots": []}
     assert dict(calls)["prices"] == {"price_items": []}
     assert reply.json()["hours"] is reply.json()["prices"] is None
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == ["hours", "price_items"]
@@ -185,13 +187,14 @@ async def test_delete_republishes_after_failed_confirm_repair(lines_setup, engin
     before = await stored(engine, state["interview_id"])
     original = CredentialView.call
     lost = False
+    lost_part = "calendar" if key == "hours" else key
 
     async def lose_and_fail_repair(self, route, body=None, **kwargs):
         nonlocal lost
         if lost and route.startswith("PUT /desks/{id}/"):
             raise KernelUnavailable(route)
         result = await original(self, route, body, **kwargs)
-        if route == f"PUT /desks/{{id}}/{key}":
+        if route == f"PUT /desks/{{id}}/{lost_part}":
             lost = True
             raise KernelUnavailable(route)
         return result
@@ -202,15 +205,120 @@ async def test_delete_republishes_after_failed_confirm_repair(lines_setup, engin
     assert await stored(engine, state["interview_id"]) == before
     desk = fake.desks[state["desk_id"]]
     assert getattr(desk, key)
+    if key == "hours":
+        assert desk.slots
     monkeypatch.setattr(CredentialView, "call", original)
     calls = received_parts(monkeypatch)
     reply = await owner.browser.delete(f"{path}/{key}")
     assert reply.status_code == 200, reply.text
     assert reply.json()[key] is None
     assert (await stored(engine, state["interview_id"]))["answers"][field] == []
-    assert [part for part, _ in calls] == ["charter", key]
-    assert calls[-1][1] == {field: []}
+    assert [part for part, _ in calls] == (["charter", "hours", "calendar"] if key == "hours" else ["charter", key])
+    assert dict(calls)[key] == {field: []}
+    if key == "hours":
+        assert dict(calls)["calendar"] == {"calendar_slots": []}
+        assert desk.slots == {}
     assert not getattr(desk, key)
+
+
+async def test_delete_one_suggested_price_preserves_other_suggestions(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    prices = [*PRICES, {"title": "Repair", "unit_cents": 20000}, {"title": "Inspection", "unit_cents": 6000}]
+    await patch_answers(engine, state, hours=HOURS, price_items=prices)
+    before = (await owner.browser.get(path)).json()
+    suggested = (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"]
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/repair")
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == {**before, "prices": {"source": "suggested", "items": [
+        {"item_id": "visit", **prices[0]}, {"item_id": "inspection", **prices[2]}]}}
+    saved = await stored(engine, state["interview_id"])
+    assert saved["answers"]["price_items"] == [prices[0], prices[2]]
+    assert saved["answers"]["suggested_fields"] == suggested
+    assert saved["step"] == "rules"
+    assert [part for part, _ in calls] == ["charter", "prices"]
+    assert dict(calls)["prices"] == {"price_items": []}
+    assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
+    assert fake.desks[state["desk_id"]].prices == {}
+
+
+async def test_delete_last_suggested_price_clears_list_and_provenance(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, price_items=PRICES)
+    before = (await owner.browser.get(path)).json()
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/visit")
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == {**before, "prices": None}
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["price_items"] == []
+    assert answers["suggested_fields"] == ["pricing", "intake", "hours", "public_contact"]
+    assert [part for part, _ in calls] == ["charter", "prices"]
+    assert dict(calls)["prices"] == {"price_items": []}
+
+
+@pytest.mark.parametrize("keep_remaining", [True, False])
+async def test_delete_stale_price_id_conflicts_without_writing(lines_setup, engine, monkeypatch, keep_remaining):
+    owner, state, path = lines_setup
+    prices = [*PRICES, {"title": "Inspection", "unit_cents": 6000}] if keep_remaining else PRICES
+    await patch_answers(engine, state, price_items=prices)
+    removed = await owner.browser.delete(f"{path}/prices/visit")
+    assert removed.status_code == 200, removed.text
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/visit")
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+async def test_delete_one_owner_price_is_not_suggested(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, price_items=PRICES, suggested_fields=["hours"])
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/visit")
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "not_suggested", "key": "prices"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+async def test_cancel_price_removal_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, price_items=PRICES)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = CredentialView.call
+
+    async def pause_prices(self, route, body=None, **kwargs):
+        result = await original(self, route, body, **kwargs)
+        if route == "PUT /desks/{id}/prices":
+            entered.set()
+            await release.wait()
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", pause_prices)
+    request = asyncio.create_task(owner.browser.delete(f"{path}/prices/visit"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        request.cancel()
+        await asyncio.sleep(0.01)
+        assert not request.done()
+        assert (await owner.browser.get(path)).status_code == 409
+        request.cancel()
+        await asyncio.sleep(0.01)
+        assert not request.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["price_items"] == []
+    assert "price_items" not in answers["suggested_fields"]
+    assert "public_contact" in answers["suggested_fields"]
+    assert fake.desks[state["desk_id"]].prices == {}
+    assert (await owner.browser.get(path)).status_code == 200
 
 
 async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(lines_setup, engine, fake, monkeypatch):
@@ -342,9 +450,10 @@ async def test_delete_clears_other_suggested_items(lines_setup, engine, monkeypa
     assert key not in {line["key"] for line in reply.json()["lines"]}
     if key == "hours":
         assert reply.json()["hours"] is None
-    assert [part for part, _ in calls] == (["charter", "hours"] if key == "hours" else ["charter"])
+    assert [part for part, _ in calls] == (["charter", "hours", "calendar"] if key == "hours" else ["charter"])
     if key == "hours":
         assert dict(calls)["hours"] == {"hours": []}
+        assert dict(calls)["calendar"] == {"calendar_slots": []}
     assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
 
 
@@ -859,15 +968,19 @@ async def request_lines(client, path, method):
         return await client.get(path)
     if method == "put":
         return await client.put(path, json={"key": "policy:pricing", "text": "Quotes before repairs."})
+    if method == "delete_price":
+        return await client.delete(f"{path}/prices/visit")
     if method == "delete":
         return await client.delete(f"{path}/policy:pricing")
     return await client.post(f"{path}/confirm", json={})
 
 
 @pytest.mark.parametrize("step", ["questions", "tools", "rules", "situations", "safety_check", "preview", "live"])
-@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_public_lines_only_at_rules_or_situations(lines_setup, engine, fake, step, method):
     owner, state, path = lines_setup
+    if method == "delete_price":
+        await patch_answers(engine, state, price_items=PRICES)
     async with engine.begin() as conn:
         await conn.execute(sql("UPDATE app.setup_interviews SET step = :step WHERE interview_id = :id"),
                            {"step": step, "id": state["interview_id"]})
@@ -969,7 +1082,7 @@ async def test_invalid_edits_publish_and_save_nothing(lines_setup, engine, fake,
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_another_owners_interview_is_not_found(lines_setup, app, browser, kernel_http, engine, fake, method):
     _, state, path = lines_setup
     other = await new_owner(app, browser, kernel_http)
@@ -982,7 +1095,7 @@ async def test_another_owners_interview_is_not_found(lines_setup, app, browser, 
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_another_owners_busy_interview_is_not_found(lines_setup, app, browser, kernel_http, engine, fake, method):
     _, state, path = lines_setup
     other = await new_owner(app, browser, kernel_http)
@@ -996,7 +1109,7 @@ async def test_another_owners_busy_interview_is_not_found(lines_setup, app, brow
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_public_lines_share_the_interview_guard(lines_setup, engine, fake, method):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])

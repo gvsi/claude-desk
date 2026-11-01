@@ -223,9 +223,17 @@ async def setup_public_lines(interview_id: InterviewId, request: Request,
     return await setup.public_lines(ctx, runtime(request).started().database(), interview_id)
 
 
-@router.put("/{id}/public_lines", response_model=SetupPublicLines,
-            responses={**error_responses(401, 404, 409, 422, 503),
-                       422: {"model": SetupPublicLineError | ApiError}})
+PUBLIC_LINES_WRITE_RESPONSES = {
+    **error_responses(401, 404, 409, 422, 503),
+    409: {"model": ApiError, "description": (
+        "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. "
+        "A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts."
+    )},
+    422: {"model": SetupPublicLineError | ApiError},
+}
+
+
+@router.put("/{id}/public_lines", response_model=SetupPublicLines, responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_put_public_line(interview_id: InterviewId, body: SetupPublicLineIn, request: Request,
                                 ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Edit one public line and strictly publish the whole charter before saving its owner provenance.
@@ -245,8 +253,7 @@ async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublic
 
 
 @router.post("/{id}/public_lines/confirm", response_model=SetupPublicLines,
-             responses={**error_responses(401, 404, 409, 422, 503),
-                        422: {"model": SetupPublicLineError | ApiError}})
+             responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPublicLinesConfirmIn, request: Request,
                                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Confirm all listed public lines, hours and prices without changing the setup step; publish before saving.
@@ -258,8 +265,7 @@ async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPubli
 
 
 @router.delete("/{id}/public_lines/{key}", response_model=SetupPublicLines,
-               responses={**error_responses(401, 404, 409, 422, 503),
-                          422: {"model": SetupPublicLineError | ApiError}})
+               responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_delete_public_line(interview_id: InterviewId, key: str, request: Request,
                                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Remove a suggested public item, publishing before saving. Owner items are 422 `not_suggested`;
@@ -267,6 +273,18 @@ async def setup_delete_public_line(interview_id: InterviewId, key: str, request:
     Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
     state = runtime(request).started()
     return await _public_lines_answer(setup.delete_public_line(ctx, state.database(), interview_id, key, state.clock()))
+
+
+@router.delete("/{id}/public_lines/prices/{item_id}", response_model=SetupPublicLines,
+               responses=PUBLIC_LINES_WRITE_RESPONSES)
+async def setup_delete_public_price(interview_id: InterviewId, item_id: str, request: Request,
+                                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Remove one suggested price by its current price-list id, returning the whole public projection.
+    Owner prices are 422 `not_suggested`; a missing item id is 409 `conflict`.
+    Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.delete_public_price(ctx, state.database(), interview_id,
+                                                               item_id, state.clock()))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------

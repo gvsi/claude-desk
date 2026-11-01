@@ -2694,7 +2694,7 @@ def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
     ], hours=SetupPublicHours(source="suggested" if "hours" in answers.suggested_fields else "owner",
                              windows=answers.hours) if answers.hours else None,
        prices=SetupPublicPrices(source="suggested" if "price_items" in answers.suggested_fields else "owner",
-                                items=[item.model_dump() for item in answers.price_items])
+                                items=[item.model_dump() for item in price_items(answers.price_items)])
        if answers.price_items else None)
 
 
@@ -2808,6 +2808,27 @@ async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id:
                                           republish=frozenset({key}) if key in ("hours", "prices") else frozenset())
 
 
+async def delete_public_price(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, item_id: str,
+                              now: datetime) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        items = price_items(interview.answers.price_items)
+        if item_id not in {item.item_id for item in items}:
+            raise ApiProblem(409, "conflict")
+        if "price_items" not in interview.answers.suggested_fields:
+            raise PublicLineProblem("not_suggested", key="prices")
+        remaining = [price for price, item in zip(interview.answers.price_items, items) if item.item_id != item_id]
+        interview.answers = interview.answers.model_copy(update={
+            "price_items": remaining,
+            "suggested_fields": [field for field in interview.answers.suggested_fields
+                                 if field != "price_items" or remaining],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now, key="prices",
+                                          republish=frozenset({"prices"}))
+
+
 async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
                                now: datetime, *, key: str | None = None,
                                republish: frozenset[str] = frozenset()) -> SetupPublicLines:
@@ -2815,7 +2836,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
     after = _published_answers(interview.answers)
     changed = frozenset(field for field in ("hours", "price_items") if getattr(before, field) != getattr(after, field))
     selected = frozenset({"charter"} | republish
-                         | ({"hours", "calendar"} if "hours" in changed else set())
+                         | ({"hours", "calendar"} if "hours" in changed or "hours" in republish else set())
                          | ({"prices"} if "price_items" in changed else set()))
     sent: set[str] = set()
 

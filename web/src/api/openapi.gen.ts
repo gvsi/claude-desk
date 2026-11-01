@@ -885,6 +885,7 @@ export interface SetupPublicPrices {
   items: SetupPublicPriceItem[];
 }
 export interface SetupPublicPriceItem {
+  item_id: string;
   title: string;
   unit_cents: number;
 }
@@ -1236,6 +1237,7 @@ export const API_OPERATIONS = {
   "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
   "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
   "DELETE /api/owner/setup/{id}/public_lines/{key}": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },

@@ -3610,14 +3610,14 @@
             "description": "Not Found"
           },
           "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            },
-            "description": "Conflict"
+            }
           },
           "422": {
             "content": {
@@ -3709,14 +3709,14 @@
             "description": "Not Found"
           },
           "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            },
-            "description": "Conflict"
+            }
           },
           "422": {
             "content": {
@@ -3807,14 +3807,14 @@
             "description": "Not Found"
           },
           "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            },
-            "description": "Conflict"
+            }
           },
           "422": {
             "content": {
@@ -3829,6 +3829,104 @@
                     }
                   ],
                   "title": "Response 422 Owner Setup Delete Public Line"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/public_lines/prices/{item_id}": {
+      "delete": {
+        "summary": "Setup Delete Public Price",
+        "description": "Remove one suggested price by its current price-list id, returning the whole public projection.\nOwner prices are 422 `not_suggested`; a missing item id is 409 `conflict`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
+        "operationId": "owner_setup_delete_public_price",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Delete Public Price"
                 }
               }
             },
@@ -13122,6 +13220,10 @@
       },
       "SetupPublicPriceItem": {
         "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
           "title": {
             "type": "string",
             "title": "Title"
@@ -13133,6 +13235,7 @@
         },
         "type": "object",
         "required": [
+          "item_id",
           "title",
           "unit_cents"
         ],
