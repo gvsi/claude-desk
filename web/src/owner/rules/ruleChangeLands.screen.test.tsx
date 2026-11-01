@@ -612,11 +612,9 @@ describe('a preset or a new payment limit', () => {
 
   it.each(['Rivera Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
     // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
-    // A short window, so Payments can be wholly out of view above Stripe. Acme's Desk has no jobs:
-    // Rules' loading state draws none, so Back on a Desk that has them would restore its place on
-    // a page that then grows above it.
+    // A short window, so Payments can be wholly out of view above Stripe. The Desk keeps its job, so
+    // Back lands its place on a page whose jobs section is drawn above it (#620).
     renameBusiness(business);
-    if (business === 'Acme Accounting') desk().tools = desk().tools.filter((row) => row.source !== 'business');
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
     const root = screen.container;
     const stripe = screen.getByRole('region', { name: 'Stripe' });
@@ -745,9 +743,6 @@ describe('focus once a review Rules opened returns', () => {
   });
 
   it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
-    // A Desk with no jobs: Rules' reading state, which shows until the new version is read, draws
-    // none, so on a Desk with them Rules would come back off its place by the jobs drawn above it.
-    desk().tools = desk().tools.filter((row) => row.source !== 'business');
     const { screen, main, place } = await reviewPaymentsLimit();
     await press(screen, 'Confirm change');
 
