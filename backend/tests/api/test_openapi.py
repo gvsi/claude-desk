@@ -64,7 +64,16 @@ def test_knowledge_list_has_required_nullable_fields():
     assert schema["properties"]["created_at"]["anyOf"] == [
         {"type": "string", "format": "date-time"}, {"type": "null"}]
     assert schema["properties"]["readers"]["items"] == {"type": "string"}
-    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import"]
+    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import", "web_search"]
+
+
+def test_owner_refusal_reasons_are_required_and_nullable():
+    schemas = export_openapi()["components"]["schemas"]
+    for name in ("OwnerTranscriptItem", "ToolDecisionRow"):
+        assert "owner_plain" in schemas[name]["required"], name
+        field = schemas[name]["properties"]["owner_plain"]
+        assert field["anyOf"] == [{"type": "string"}, {"type": "null"}]
+        assert "default" not in field
 
 
 def test_every_route_has_typed_responses():

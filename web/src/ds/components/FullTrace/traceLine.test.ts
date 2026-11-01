@@ -7,6 +7,10 @@ const RECORDED = 'Recorded by the checkpoint.';
 const REPORTED = 'Reported by the chat service, not checked by the checkpoint.';
 
 describe('traceLine', () => {
+  it('names_web_search_usage', () => {
+    expect(traceLine({ kind: 'web_search', origin: 'kernel' })).toBe(`Web search. ${RECORDED}`);
+  });
+
   it('kernel_entries_are_recorded_by_the_checkpoint', () => {
     expect(traceLine({ kind: 'decide', origin: 'kernel' })).toBe(`A decision on an action Claude asked to take. ${RECORDED}`);
   });

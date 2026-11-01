@@ -509,7 +509,7 @@ export interface KnowledgeRow {
   title: string | null;
   text: string | null;
   readers: string[];
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   created_at: string | null;
 }
 /**
@@ -586,6 +586,7 @@ export interface OwnerTranscript {
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
  * draft of Claude's the reply check stopped.
+ * `owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.
  *
  * `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
  * it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
@@ -613,6 +614,10 @@ export interface OwnerTranscriptItem {
   owner_translation: string | null;
   triage: Triage | null;
   stopped_draft: StoppedDraft | null;
+  /**
+   * Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event.
+   */
+  owner_plain: string | null;
 }
 /**
  * A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
@@ -906,6 +911,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -1005,6 +1011,10 @@ export interface ToolDecisionRow {
     | "unknown"
     | "refused_at_execution";
   reason_plain: string;
+  /**
+   * Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise.
+   */
+  owner_plain: string | null;
   created_at: string;
   ledger_seq: number;
   replayed: boolean;
@@ -1023,7 +1033,7 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -1039,6 +1049,22 @@ export interface ToolsConfirmIn {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,
