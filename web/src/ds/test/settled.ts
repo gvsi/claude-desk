@@ -10,11 +10,6 @@ export async function settled(root: Element): Promise<void> {
     .getAnimations({ subtree: true })
     .filter((animation) => animation.effect?.getComputedTiming().iterations !== Number.POSITIVE_INFINITY);
   await Promise.all(
-    ending.map((animation) => {
-      const finished = animationWithin(animation.finished.catch(() => undefined), animationLabel(animation));
-      // A test-held animation cannot advance on its own; deliver its real end deterministically.
-      if (animation.playState === 'paused') animation.finish();
-      return finished;
-    }),
+    ending.map((animation) => animationWithin(animation.finished.catch(() => undefined), animationLabel(animation))),
   );
 }
