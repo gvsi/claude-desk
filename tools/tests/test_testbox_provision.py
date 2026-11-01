@@ -36,9 +36,13 @@ class AWS:
         self.documents = {name: copy.deepcopy(DENY_DOCUMENT) for name in account_policies}   # other inline policies
         self.inline = self.account_policies[:] if fresh else [POLICY_NAME, *self.account_policies]
         self.deleted_policies = []     # policy names delete-role-policy was called with
-        self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.24xlarge",
+        self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.12xlarge",
                          "IamInstanceProfile": {"Arn": PROFILE_ARN}, "MetadataOptions": {"HttpTokens": "required"},
                          "SecurityGroups": [{"GroupId": "sg-test"}], "State": {"Name": "stopped"}}
+        self.standby = None            # an instance tagged as the standby, if any
+        self.retired = []              # instances tagged as retired
+        self.tagged = []               # (resource ids, Purpose value) per create-tags call
+        self.invocation = "Success"    # the status SSM reports for a command
 
     def __call__(self, command, **kwargs):
         service, op = command[3:5]
@@ -77,7 +81,15 @@ class AWS:
         elif op == "create-security-group":
             data = {"GroupId": "sg-test"}
         elif op == "describe-instances":
-            data = {"Reservations": [] if self.fresh else [{"Instances": [self.instance]}]}
+            filters = json.loads(command[command.index("--filters") + 1])
+            purpose = next(f["Values"][0] for f in filters if f["Name"] == "tag:Purpose")
+            found = [None if self.fresh else self.instance] if purpose == provision.ACTIVE else \
+                    [self.standby] if purpose == provision.STANDBY else self.retired
+            data = {"Reservations": [{"Instances": [i for i in found if i]}]}
+        elif op == "create-tags":
+            tags = json.loads(command[command.index("--tags") + 1])
+            self.tagged.append((json.loads(command[command.index("--resources") + 1]),
+                                next(t["Value"] for t in tags if t["Key"] == "Purpose")))
         elif op == "get-parameter":
             data = {"Parameter": {"Value": "ami-test"}}
         elif op == "describe-subnets":
@@ -91,7 +103,7 @@ class AWS:
         elif op == "send-command":
             data = {"Command": {"CommandId": "test"}}
         elif op == "get-command-invocation":
-            data = {"Status": "Success"}
+            data = {"Status": self.invocation}
         return SimpleNamespace(returncode=0, stdout=json.dumps(data), stderr="")
 
 
@@ -343,3 +355,191 @@ def test_a_reprovision_that_cannot_drain_running_lanes_in_time_records_a_failed_
     assert not (opt / 'ready').exists()
     assert (opt / 'bootstrap-failed').exists()
     assert not (opt / 'bootstrap.sh').exists()
+
+
+def launched(monkeypatch, fixture, *args):
+    """The run-instances request a provisioning run makes, as instance type and instance tags."""
+    requests = []
+    def record(command, **kwargs):
+        if command[4] == 'run-instances':
+            specs = json.loads(command[command.index('--tag-specifications') + 1])
+            requests.append((command[command.index('--instance-type') + 1],
+                             {t['Key']: t['Value'] for t in next(s for s in specs if s['ResourceType'] == 'instance')['Tags']}))
+        return fixture(command, **kwargs)
+    invoke(monkeypatch, record, *args)
+    return requests
+
+
+def test_the_test_machine_is_a_c8g_12xlarge(monkeypatch):
+    assert launched(monkeypatch, AWS(fresh=True)) == [('c8g.12xlarge', {'Project': 'claude-desk', 'Purpose': 'agent-test-box', 'Name': 'claude-desk-test-box'})]
+
+
+def test_a_standby_launches_beside_the_active_machine_under_a_tag_clients_never_discover(monkeypatch):
+    """The active machine may be of another size: a replacement is proven before lanes move to it."""
+    fixture = AWS()
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'})
+    fixture.standby = None
+    def no_standby_yet(command, **kwargs):
+        result = fixture(command, **kwargs)
+        if command[4] == 'run-instances':
+            fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge')
+        return result
+    requests = launched(monkeypatch, no_standby_yet, '--standby')
+    assert requests == [('c8g.12xlarge', {'Project': 'claude-desk', 'Purpose': 'agent-test-box-standby', 'Name': 'claude-desk-test-box'})]
+    assert fixture.tagged == []
+
+
+def test_a_rerun_reuses_the_standby_and_leaves_the_active_machine_alone(monkeypatch):
+    fixture = AWS()
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'})
+    fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge')
+    assert launched(monkeypatch, fixture, '--standby') == []
+    assert 'start-instances' not in fixture.calls and fixture.tagged == []
+
+
+def machines(fixture):
+    """The old c8g.24xlarge active and a proven c8g.12xlarge standby, each with its volume and network interface."""
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'},
+                            BlockDeviceMappings=[{'Ebs': {'VolumeId': 'vol-old'}}], NetworkInterfaces=[{'NetworkInterfaceId': 'eni-old'}])
+    fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge',
+                           BlockDeviceMappings=[{'Ebs': {'VolumeId': 'vol-new'}}], NetworkInterfaces=[{'NetworkInterfaceId': 'eni-new'}])
+    handed = []
+    return handed, lambda region, active, retired, api: handed.append((region, active, retired))
+
+
+def test_promote_retires_the_active_machine_before_activating_the_proven_standby(monkeypatch):
+    """Clients discover exactly one active machine, so the old one leaves before the new one joins: a failure
+    between the two leaves none, which a re-run of the promotion repairs, never two."""
+    fixture = AWS()
+    handed, handover = machines(fixture)
+    monkeypatch.setattr(provision, 'handover', handover)
+    invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == [(['i-0123456789abcdef0', 'vol-old', 'eni-old'], 'agent-test-box-retired'),
+                              (['i-0fedcba9876543210', 'vol-new', 'eni-new'], 'agent-test-box')]
+    # The old machine is known before its retag: a tag query right after it may not see the change yet.
+    assert handed == [('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'])]
+
+
+@pytest.mark.parametrize('interrupted', ['after-retiring', 'after-activating'])
+def test_a_rerun_of_an_interrupted_promotion_finishes_the_handover(monkeypatch, interrupted):
+    fixture = AWS()
+    handed, handover = machines(fixture)
+    old = fixture.instance
+    fixture.retired, fixture.instance = [old], None
+    if interrupted == 'after-activating':
+        fixture.instance, fixture.standby = fixture.standby, None
+    monkeypatch.setattr(provision, 'handover', handover)
+    invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == ([] if interrupted == 'after-activating' else [(['i-0fedcba9876543210', 'vol-new', 'eni-new'], 'agent-test-box')])
+    assert handed == [('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'])]
+
+
+def test_promote_refuses_a_standby_whose_setup_is_running_or_failed(monkeypatch):
+    fixture = AWS()
+    handed, handover = machines(fixture)
+    fixture.invocation = 'Failed'
+    monkeypatch.setattr(provision, 'handover', handover)
+    with pytest.raises(RuntimeError, match="standby isn't ready"):
+        invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == [] and handed == []
+
+
+class Masters:
+    """This laptop's SSH masters as control sockets: `-O stop` removes one unless it is stuck, `-O check` sees it."""
+
+    def __init__(self, stuck=False):
+        self.stuck, self.stops = stuck, 0
+
+    def __call__(self, command, **kwargs):
+        socket = Path(command[command.index('-S') + 1])
+        if command[command.index('-O') + 1] == 'stop':
+            self.stops += 1
+            if not self.stuck:
+                socket.unlink()
+            return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0 if socket.exists() else 255)
+
+
+class SSM:
+    """Scripts run on instances over SSM, each answered with `status`."""
+
+    def __init__(self, status='Success'):
+        self.status, self.scripts = status, []
+
+    def __call__(self, service, operation, **params):
+        if operation == 'send-command':
+            self.scripts.append((params['instance_ids'][0], params['parameters']['commands'][0]))
+            return {'Command': {'CommandId': 'test'}}
+        return {'Status': self.status}
+
+
+def handing_over(monkeypatch, tmp_path, masters, late_client=None):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    cache = provision.cache_directory()
+    cache.mkdir(parents=True)
+    shared = cache / 'connection-us-east-1.json'
+    shared.write_text(json.dumps({'instance': 'i-0123456789abcdef0'}))
+    old = provision.control_path(cache, 'us-east-1', 'i-0123456789abcdef0')
+    old.touch()                                    # every lane's warm connection to the old machine
+    opened = []
+    monkeypatch.setattr(provision, 'open_connection', lambda cache, region, instance, api, remember: opened.append((instance, remember)))
+    monkeypatch.setattr(provision.subprocess, 'run', masters)
+    sleeps = []
+    def sleep(_):
+        sleeps.append(1)
+        if late_client and len(sleeps) == 2:
+            late_client(shared, old)
+    monkeypatch.setattr(provision.time, 'sleep', sleep)
+    monkeypatch.setattr(provision, 'HANDOVER_SECONDS', 3)
+    return shared, old, opened
+
+
+def test_handover_records_the_active_machine_and_keeps_closing_a_reopened_old_connection(monkeypatch, tmp_path):
+    """A call that chose the old machine just before the switch reopens its connection and records it; the handover
+    window closes it again and restores the record, so later calls from any branch's client reach the new machine."""
+    def late_client(shared, old):
+        old.touch()
+        shared.write_text(json.dumps({'instance': 'i-0123456789abcdef0'}))
+    masters, ssm = Masters(), SSM()
+    shared, old, opened = handing_over(monkeypatch, tmp_path, masters, late_client)
+    provision.handover('us-east-1', 'i-0fedcba9876543210', [], ssm)
+    assert opened == [('i-0fedcba9876543210', False)]
+    assert json.loads(shared.read_text()) == {'instance': 'i-0fedcba9876543210'}
+    assert not old.exists() and masters.stops == 2
+    # A caller still queued behind the old connection can't reopen it later: the old machine takes no new ones.
+    assert ssm.scripts == [('i-0123456789abcdef0', provision.REFUSE_NEW_CONNECTIONS)]
+
+
+def test_a_retired_machine_stops_only_its_ssh_listener_so_running_calls_continue():
+    assert 'KillMode=process' in provision.REFUSE_NEW_CONNECTIONS
+    assert provision.REFUSE_NEW_CONNECTIONS.index('KillMode=process') < provision.REFUSE_NEW_CONNECTIONS.index('systemctl stop')
+
+
+def test_handover_reports_a_retired_machine_that_still_takes_new_connections(monkeypatch, tmp_path):
+    handing_over(monkeypatch, tmp_path, Masters())
+    with pytest.raises(RuntimeError, match='still takes new SSH connections'):
+        provision.handover('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'], SSM('Failed'))
+
+
+def test_handover_reports_an_old_connection_that_will_not_stop(monkeypatch, tmp_path):
+    shared, old, opened = handing_over(monkeypatch, tmp_path, Masters(stuck=True))
+    with pytest.raises(RuntimeError, match='still takes calls'):
+        provision.handover('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'], SSM())
+
+
+@pytest.mark.parametrize('standby', [None, 'stopped', 'c8g.24xlarge', 'metadata'])
+def test_promote_refuses_a_standby_that_is_missing_stopped_or_misconfigured(monkeypatch, standby):
+    fixture = AWS()
+    fixture.instance.update(State={'Name': 'running'})
+    if standby:
+        fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', State={'Name': 'running'})
+        if standby == 'stopped':
+            fixture.standby['State'] = {'Name': 'stopped'}
+        elif standby == 'metadata':
+            fixture.standby['MetadataOptions'] = {'HttpTokens': 'optional'}
+        else:
+            fixture.standby['InstanceType'] = standby
+    monkeypatch.setattr(provision, 'handover', lambda *args: None)
+    with pytest.raises(RuntimeError):
+        invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == []
