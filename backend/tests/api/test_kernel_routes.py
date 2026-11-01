@@ -40,8 +40,10 @@ PENDING_KERNEL_ROUTES: dict[str, str] = {}
 API = Path(desk.api.__file__).parent
 SEGMENT = r"[^/?\s]+"     # what an f-string's formatted value stands for: one path segment
 # Receivers whose `.call` or `.stream` isn't a kernel view's: the model client and the Anthropic client inside it
-# (desk.api.model), and a Starlette request (`request.stream()`, desk.api.a2a).
-NOT_KERNEL_VIEWS = frozenset({"model", "self.model", "self._client.beta.messages", "request"})
+# (desk.api.model), a Starlette request (`request.stream()`, desk.api.a2a), and the proving runner, which streams Ask
+# Claude's answer (`state.proving.stream(...)`, desk.api.routes.setup).
+NOT_KERNEL_VIEWS = frozenset({"model", "self.model", "self._client.beta.messages", "self._client.messages", "request",
+                              "state.proving"})
 
 
 def bindings(tree: ast.AST) -> Counter[str]:
