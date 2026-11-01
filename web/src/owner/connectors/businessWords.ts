@@ -12,13 +12,16 @@ export const BUSINESS_WORDS = {
 
 export interface BusinessSetupRow { label: string; value: string }
 
-/** The kernel's description_confirmed is Claude-facing and never shown to the owner. */
+/**
+ * The owner's own line per block, signed by the project owner.
+ * The kernel's description_confirmed is Claude-facing and never shown to the owner.
+ */
 export const BUSINESS_OWNER_LINES = {
   intake: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
   typed_booking: 'Books one open time on your calendar for this kind of appointment.',
   purpose_payment: 'Sends a secure payment link for this purpose, for the amount you set.',
   urgent: 'Takes an urgent callback request and alerts you right away.',
-} as const;
+} as const satisfies Record<BusinessToolDef['config']['block'], string>;
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

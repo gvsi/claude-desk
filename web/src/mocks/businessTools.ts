@@ -4,7 +4,8 @@ import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
 
-// The fixed sentences and capabilities in the kernel's adapters/blocks.py.
+// Claude-facing, third-person drafts of the kernel's fixed block sentences (adapters/blocks.py),
+// and the blocks' capabilities. The owner sees BUSINESS_OWNER_LINES instead.
 const BLOCK_SENTENCES = {
   intake: "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up.",
   typed_booking: "Books one open time on the business's calendar for this kind of appointment.",
