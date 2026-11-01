@@ -3000,6 +3000,29 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it.each(['desktop', 'phone'] as const)('answers_the_first_panel_by_keys_after_consent_without_manual_focus_on_%s', async (viewport) => {
+    const state = await startInterview(null, CPA_DESCRIPTION);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await screen.getByRole('button', { name: 'Yes, use it', exact: true }).click();
+    const first = screen.getByRole('button', { name: 'Both, about evenly', exact: true });
+    await expect.element(first).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}2{Enter}');
+    await expect.poll(() => requests('setupAnswer').at(-1)?.body).toEqual({ question: 'what_you_do', text: 'Mostly individuals' });
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'Your answer' }).element());
+  });
+
+
+  it('focuses_the_next_docked_question_after_a_card_and_esc_opens_the_phone_composer', async () => {
+    const state = await consultantAt('status');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    await screen.getByRole('article', { name: 'Answer “Where’s my return?”', exact: true }).getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: 'Ask me before every payment', exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveFocus();
+    expect(screen.container.querySelector('.cd-setup-q3')).toBeNull();
+  });
+
   it.each(['Connect', 'Not now'] as const)('answers_google_calendar_with_%s_in_chat', async (action) => {
     const state = await consultantAt('google_calendar');
     const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
@@ -3330,7 +3353,7 @@ describe('consultant setup', () => {
     await userEvent.keyboard('{Enter}');
     await expect.poll(() => requests('setupAnswer').length).toBe(1);
     expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![2]!.text });
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true })).toHaveFocus();
   });
 
   it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {
@@ -3526,7 +3549,7 @@ describe('consultant setup', () => {
     expect(requests('setup').length).toBeGreaterThan(reads);
     await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions', exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toHaveFocus();
   });
 
   it('suggestions_finish_a_pending_card_show_read_only_leftovers_and_wait_for_continue', async () => {

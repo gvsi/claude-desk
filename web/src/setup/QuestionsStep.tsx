@@ -15,6 +15,7 @@ import { useSetupWork } from './useSetupWork.ts';
 const ANSWER_MAX = 2000;
 
 const copy = SETUP_COPY.questions;
+const ACTIVE_CHOICE = '.cd-setup-q3__list button[aria-current="true"]:not(:disabled), .cd-setup-q3__row.is-active input:not(:disabled)';
 
 export interface QuestionsStepProps {
   state: SetupState;
@@ -73,6 +74,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const scroll = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
+  const returnToTextarea = useRef(false);
   const [consenting, setConsenting] = useState<boolean | null>(null);
   const [consentError, setConsentError] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -116,14 +118,14 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
 
   useEffect(() => {
     if (asking || consentBusy) waitingForFirstQuestion.current = true;
-    if (asking || busy) return;
+    if (asking || blocked) return;
     if (!waitingForFirstQuestion.current || state.question === null) return;
     waitingForFirstQuestion.current = false;
-    const box = composer.current?.querySelector('textarea');
+    const target = panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE) : composer.current?.querySelector('textarea');
     const focus = document.activeElement;
-    if (!box || box.disabled || (focus !== document.body && !step.current?.contains(focus))) return;
-    box.focus();
-  }, [asking, busy, consentBusy, state.question]);
+    if (!target || (focus !== document.body && !step.current?.contains(focus))) return;
+    target.focus({ preventScroll: true });
+  }, [asking, blocked, consentBusy, state.question, panel?.index]);
 
   /**
    * The consent, sent once. A lost reply, or a 409 (it was given already), reads the interview,
@@ -165,7 +167,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
    * been taken. Words a read shows stored are never sent again or put back.
    */
   const submit = async (answer: Answer, again = false) => {
-    returnFocus.current = returnFocus.current || (composer.current?.contains(document.activeElement) ?? false);
+    if (composer.current?.contains(document.activeElement)) {
+      returnFocus.current = true;
+      returnToTextarea.current = true;
+    }
     setSending(answer.text);
     setFailed(null);
     setDecisionFailed(null);
@@ -246,6 +251,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const decide = async (decision: CardDecision) => {
     if (deciding !== null || busy || sending !== null) return;
     returnFocus.current = true;
+    returnToTextarea.current = false;
     setDeciding(decision);
     setDecisionFailed(null);
     setAmountRequired(null);
@@ -315,9 +321,11 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     const target = decisionFailed
       ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
       : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
-      : composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)');
+      : panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
+      : returnToTextarea.current ? composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)')
+      : step.current?.querySelector<HTMLElement>('.cd-setup-c3__actions button:not(:disabled)');
     target?.focus({ preventScroll: true });
-  }, [blocked, failed, decisionFailed, closing]);
+  }, [blocked, failed, decisionFailed, closing, panel?.index]);
 
   useLayoutEffect(() => {
     const pane = scroll.current;
@@ -393,7 +401,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       <div className="cd-setup-dock"><div className="cd-setup-dock__column">
       {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices}
         maxLength={ANSWER_MAX} disabled={blocked || failed !== null} onDismiss={dismissPanel}
-        onChoose={(text) => { returnFocus.current = true; send(text); }} /> : null}
+        onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; send(text); }} /> : null}
       {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : asking && !busy ? (
         <>
           {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}
