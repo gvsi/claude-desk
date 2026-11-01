@@ -1,4 +1,4 @@
-import { Button, Card, CopyList, Pill, ShareCard } from '../../ds/index.ts';
+import { Button, Card, CopyList, Pill, SHARE_CARD_QR_COLORS, ShareCard } from '../../ds/index.ts';
 import { CopyLink } from './CopyLink.tsx';
 import { QrCode } from './QrCode.tsx';
 import { SHARE_COPY, displayLink } from './shareCopy.ts';
@@ -59,7 +59,7 @@ export function ShareKit({ publicUrl, business, ownerName, urgentCallback }: Sha
       </Card>
       <div className="cd-share-kit__kit">
         <div className="cd-share-kit__card">
-          <ShareCard name={business} url={displayLink(publicUrl)} ownerName={ownerName} language="en" qr={<QrCode url={publicUrl} />} onPrint={printCard} />
+          <ShareCard name={business} url={displayLink(publicUrl)} ownerName={ownerName} language="en" qr={<QrCode url={publicUrl} colors={SHARE_CARD_QR_COLORS} />} onPrint={printCard} />
         </div>
         <div className="cd-share-kit__words">
           <h2 className="cd-share-kit__heading cd-type-section">

@@ -151,9 +151,13 @@ function riverasUrgentTool(status: 'enabled' | 'disabled'): void {
 const RIVERA_BUSINESS = rivera.business.name;
 const RIVERA_OWNER = rivera.business.ownerName;
 
-/** The QR code the share kit draws for `url`, as the image it shows. */
+/**
+ * The QR code the share kit draws for `url`, as the image it shows: as the signed board draws it
+ * (N-Live-REV-QR-B), dark modules #1c1b19 on the light #eae6dc of its sand tile, with a quiet zone
+ * of one module.
+ */
 async function qrImage(url: string): Promise<string> {
-  const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+  const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#1c1b19', light: '#eae6dc' } });
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -725,6 +729,34 @@ describe('share', () => {
     await expect.poll(() => voicemailIn(screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: true })[2]?.text);
   });
 
+  it('the_qr_code_sits_on_a_sand_tile', async () => {
+    // N-Live-REV-QR-B: the code on a 152 px sand tile, padded 12 px, at the card's radius, with an
+    // inset hairline; the code itself 128 px inside it.
+    const { screen } = await renderRoute(`${DESK}/share`);
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    const qr = screen.getByRole('figure').getByRole('img', { name: `QR code for ${url}` });
+    await expect.element(qr).toBeVisible();
+    const tile = qr.element().parentElement as HTMLElement;
+    expect(tile.className).toBe('cd-share-card__qr');
+    expectComputed(tile, {
+      boxSizing: 'border-box',
+      width: '152px',
+      height: '152px',
+      paddingTop: '12px',
+      paddingRight: '12px',
+      paddingBottom: '12px',
+      paddingLeft: '12px',
+      borderTopLeftRadius: '12px',
+      borderBottomRightRadius: '12px',
+      backgroundColor: 'rgb(234, 230, 220)',
+      boxShadow: 'rgba(28, 27, 25, 0.13) 0px 0px 0px 1px inset',
+    });
+    const outer = tile.getBoundingClientRect();
+    const inner = qr.element().getBoundingClientRect();
+    expect([inner.width, inner.height, inner.left - outer.left, inner.top - outer.top]).toEqual([128, 128, 12, 12]);
+    await expect.element(qr).toHaveAttribute('src', await qrImage(url));
+  });
+
   it('print_card_prints_the_card_alone', async () => {
     const { screen } = await renderRoute(`${DESK}/share`);
     await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
@@ -744,6 +776,9 @@ describe('share', () => {
       expect(getComputedStyle(card).visibility).toBe('visible');
       expect(getComputedStyle(card).backgroundColor).toBe('rgb(250, 249, 245)');
       expect(getComputedStyle(card).printColorAdjust).toBe('exact');
+      // The QR code's sand tile prints as it shows, its colors exact too.
+      const tile = card.querySelector('.cd-share-card__qr') as HTMLElement;
+      expectComputed(tile, { backgroundColor: 'rgb(234, 230, 220)', boxShadow: 'rgba(28, 27, 25, 0.13) 0px 0px 0px 1px inset', printColorAdjust: 'exact', paddingTop: '12px' });
       expect(getComputedStyle(title).visibility).toBe('hidden');
       expect(getComputedStyle(printButton).visibility).toBe('hidden');
       // A white sheet, even with background graphics on: no dark page under the card.
