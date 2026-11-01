@@ -213,9 +213,10 @@ def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, e
     native = given & set(enabled) & set(adapters.ADAPTERS)
     if hasattr(enabled, "items"):
         from desk.kernel_service.adapters import blocks
+        # Live decisions supply enabled rows; probes supply enabled profile wrappers.
         for tool, row in enabled.items():
             profile = row.profile
-            if (row.status == "enabled" and profile is not None and profile.source == "business" and profile.business is not None
+            if (profile is not None and profile.source == "business" and profile.business is not None
                     and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                     and blocks.BLOCK_BASE[profile.business.config.block] in given):
                 native.add(tool)
