@@ -5,7 +5,7 @@
  */
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 
 import { proseBlock, rivera } from '../../fixtures/index.ts';
 import { motion } from '../../test/reducedMotion.ts';
@@ -239,4 +239,28 @@ it('every_card_comes_in_on_its_own_beat', async () => {
   await pass(700);
   // However many cards there are, each is 120 ms after the one before.
   expect(arrivals(message).map((card) => card.delay)).toEqual(['0.12s', '0.24s', '0.36s', '0.48s']);
+});
+
+it('plain_prose_is_never_revealed', async () => {
+  await motion();
+  const message = mount(<ClaudeMessage blocks={[proseBlock(WORDS), QUOTE]} language="en" ownerName={OWNER} plainProse reveal />);
+  // The Vision pages' words as written, whole, their cards with them.
+  expect(message.textContent).toContain(WORDS);
+  expect(message.className).toBe('cd-claude-message');
+  expect(message.getAttribute('aria-busy')).toBeNull();
+  expect(arrivals(message).map(({ visibility, name }) => ({ visibility, name }))).toEqual([{ visibility: 'visible', name: 'none' }]);
+});
+
+it('where_the_browser_cant_list_animations_a_revealed_message_settles_at_once', async () => {
+  await motion();
+  const getAnimations = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
+  Object.defineProperty(Element.prototype, 'getAnimations', { value: undefined, configurable: true });
+  onTestFinished(() => {
+    if (getAnimations) Object.defineProperty(Element.prototype, 'getAnimations', getAnimations);
+  });
+  // With nothing to wait on, its cards are shown and it is like any other message from the start.
+  const message = mount(<ClaudeMessage blocks={[QUOTE, TIMES]} language="en" ownerName={OWNER} reveal />);
+  expect(message.className).toBe('cd-claude-message');
+  expect(message.getAttribute('aria-busy')).toBeNull();
+  expect(arrivals(message).map((card) => card.visibility)).toEqual(['visible', 'visible']);
 });

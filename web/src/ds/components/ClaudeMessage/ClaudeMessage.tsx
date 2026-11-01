@@ -49,7 +49,8 @@ export function ClaudeMessage({ blocks, language, ownerName, inertDownload = fal
   const prose = blocks.flatMap((block, index) => (hasWords(block) ? [index] : []));
   // Revealed one after another, the prose blocks share one pace, set by all their words.
   const words = prose.reduce((sum, index) => sum + (blocks[index]?.text.length ?? 0), 0);
-  const shown = useMessageReveal(ref, prose.length, blocks.filter((block) => block.kind !== 'prose').length, reveal);
+  // The Vision pages' plain prose is never revealed.
+  const shown = useMessageReveal(ref, prose.length, blocks.filter((block) => block.kind !== 'prose').length, reveal && !plainProse);
   return (
     <div ref={ref} className={`cd-claude-message${shown.root.className}`} lang={language} aria-busy={shown.root['aria-busy']} style={shown.root.style}>
       {blocks.map((block, index) => {

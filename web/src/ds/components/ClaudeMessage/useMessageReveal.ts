@@ -61,7 +61,10 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
   useLayoutEffect(() => {
     const el = ref.current;
     if (settled || !wordsIn || el === null) return undefined;
+    // Where the browser can't list its animations, nothing is waited on: the message is settled.
     const comingIn = () =>
+      typeof el.getAnimations === 'function' &&
+      typeof CSSAnimation !== 'undefined' &&
       el.getAnimations({ subtree: true }).some((a) => a instanceof CSSAnimation && COMING_IN.has(a.animationName) && a.playState !== 'finished');
     if (!comingIn()) {
       setSettled(true);
