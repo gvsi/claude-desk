@@ -4,7 +4,8 @@
  * the test it was sent in; a fresh Rivera copy before every test, which none of those the last
  * test's page sent late can reach, in a browser that has had no owner's copy; and after it, a
  * clean slate (the app unmounted, handlers a test added dropped, poll intervals and the retry delay
- * at real time, the browser's own languages, the Connectors pages as the app has them) and no
+ * at real time, the browser's own languages, the Connectors pages as the app has them, no rule
+ * change waiting to land on Rules) and no
  * request to an `/api/` path the mock doesn't serve, unless the test took it as expected with
  * `mockStore.takeUnhandled`.
  */
@@ -21,6 +22,7 @@ import { writeLocal } from '../lib/storage.ts';
 import { stampRequests, startTest, worker } from '../mocks/browser.ts';
 import { mockStore } from '../mocks/store.ts';
 import { CONNECTOR_PAGES_BUILT, setConnectorPagesBuilt } from '../owner/connectors/pages.ts';
+import { resetLandings } from '../owner/rules/landing.ts';
 import { resetBrowserLanguage } from './renderRoute.tsx';
 import { mockDrain } from './mockDrain.ts';
 
@@ -44,6 +46,7 @@ afterEach(async () => {
   setPollScale(1);
   setRetryScale(1);
   setConnectorPagesBuilt(CONNECTOR_PAGES_BUILT);
+  resetLandings();
   resetBrowserLanguage();
   expect(mockStore.unhandled, 'requests to /api/ paths the mock API does not serve').toEqual([]);
 });

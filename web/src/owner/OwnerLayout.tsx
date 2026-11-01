@@ -41,6 +41,7 @@ import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
+import { useLandingVisit } from './rules/landing.ts';
 import {
   DESKS_KEY,
   desksQuery,
@@ -286,6 +287,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const today = useToday(deskId, { retryOnMount: false });
   // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
   const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
+  // A rule change confirmed on Rules waits to land there only while the owner stays.
+  useLandingVisit();
   const layout = useRef<HTMLDivElement>(null);
   const reachPlace = useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
