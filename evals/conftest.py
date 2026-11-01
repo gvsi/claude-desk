@@ -4,7 +4,7 @@ import pytest
 
 from evals.tier1.harness import TARGETS
 
-pytest_plugins = ["desk.pytest_shard"]
+pytest_plugins = ["desk.pytest_shard", "desk.pytest_hangs"]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
