@@ -394,6 +394,42 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [(kind, rule_id, span)]
 
 
+# "Is this for this year's return or last year's?" names a tax return, not a date (the owner's decision of
+# 2026-11-01, from a live check): "last year" is no date in any form, and "this year" and "next year" are dates
+# except as possessives. The other relative dates stay blocked.
+@pytest.mark.parametrize("prose", [
+    "Is this for this year's return or last year's?",
+    "last year's return",
+    "We can look at last year too.",
+    "Is it for this year’s return?",                             # a curly apostrophe
+    "Next Year's filing is a separate return.",
+    "Last-year return or this-year's?",
+])
+def test_last_year_and_a_years_possessive_are_no_date_words(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize(("prose", "rule_id", "span"), [
+    ("We'll file it this year.", "lex.en.date", "this year"),
+    ("next year", "lex.en.date", "next year"),
+    ("Next-year filing opens soon.", "lex.en.date", "Next-year"),
+    ("next week", "lex.en.date", "next week"),
+    ("last month", "lex.en.date", "last month"),
+    ("this morning", "lex.en.date", "this morning"),
+    ("Tuesday", "lex.en.date", "Tuesday"),
+    ("2025", "digit", "2025"),
+])
+def test_the_other_relative_dates_stay_blocked(prose, rule_id, span):
+    assert ("number_in_prose", rule_id, span) in [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)]
+
+
+async def test_a_question_about_this_years_or_last_years_return_is_shown(app, client):
+    _, visitor = await visitor_of(app, client)
+    prose = "Is this for this year's return or last year's?"
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.blocks) == (True, [RenderedBlock(kind="prose", text=prose)])
+
+
 @pytest.mark.parametrize("prose", [
     "You can count on us.",                                 # "on us" after count, rely or depend
     "You can always rely on us for repairs.",
@@ -582,7 +618,7 @@ DASHES = [ch for ch in map(chr, range(sys.maxunicode + 1)) if unicodedata.catego
 DASHES.append("\u2212")
 HYPHENATED = [                       # lexicon phrases whose words a dash may join, and the rule each breaks
     ("this-morning", "lex.en.date"), ("next-week", "lex.en.date"), ("no-charge", "lex.en.promise"),
-    ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("last-year", "lex.en.date"),
+    ("money-back", "lex.en.promise"), ("on-the-house", "lex.en.promise"), ("next-year", "lex.en.date"),
     ("same-day", "lex.en.date"), ("fin-de-semana", "lex.es.date"), ("la-próxima-semana", "lex.es.date"),
     ("sin-costo", "lex.es.promise"), ("de-regalo", "lex.es.promise"), ("el-mismo-día", "lex.es.date"),
     ("entrada-libre", "lex.es.promise"), ("libre-de-impuestos", "lex.es.promise"),
