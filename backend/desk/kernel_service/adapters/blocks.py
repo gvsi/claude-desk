@@ -72,7 +72,7 @@ class BlockAdapter:
     releases_private_data = False
 
     def __init__(self, stored: ToolProfile):
-        if stored.business is None or stored.business.config.block not in SUPPORTED_BLOCKS:
+        if stored.business is None or stored.business.config.block != "intake":
             raise ValueError("unsupported_block")
         self.profile = profile(stored.tool, stored.business).model_copy(update={"status": "enabled", "review_reason": None})
 

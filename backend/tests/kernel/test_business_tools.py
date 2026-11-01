@@ -46,6 +46,18 @@ async def put(client, copy, tools):
     return await client.put(f'/desks/{copy.desk_id}/business_tools', headers=copy.owner, json={'tools': tools})
 
 
+def test_intake_adapter_refuses_an_urgent_profile_even_when_urgent_is_supported(monkeypatch):
+    from desk.contracts import BusinessToolDef
+    from desk.kernel_service.adapters import blocks
+
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake', 'urgent'}))
+    urgent = blocks.profile('desk.urgent', BusinessToolDef(
+        title='Urgent support', description='Take details.',
+        config={'block': 'urgent', 'urgent_when': 'A burst pipe'}))
+    with pytest.raises(ValueError, match='unsupported_block'):
+        blocks.BlockAdapter(urgent)
+
+
 async def test_indexed_card_keys_preserve_render_order_and_return_unindexed_details():
     from types import SimpleNamespace
     from desk.contracts import BusinessTool
