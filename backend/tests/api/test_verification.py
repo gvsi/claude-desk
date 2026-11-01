@@ -26,6 +26,7 @@ from desk.api.sse import emit_inbox
 from desk.contracts import InboxNotice
 from tests.api.conftest import CLIENT_IP, PASSCODE
 from tests.api.fakes import ScriptedModel, response, tool_use
+from tests.api.notes import conversation_notes
 from tests.api.test_public_chat import (
     DISCOUNTED_QUOTE,
     Stream,
@@ -296,7 +297,8 @@ async def test_verification_wakes_claude_with_new_tools(app, browser, fake, kern
     assert ("tool_addition", "native__release_document") in changes
     assert ("tool_removal", "native__start_verification") in changes
     assert second.tools == first.tools                                  # the context's tools stay as they were
-    assert await rows_of(engine, session_id, "note") == [("The visitor verified as the contact on record.", True)]
+    assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
+        ("The visitor verified as the contact on record.", True)]
 
 
 async def test_verify_is_rate_limited(app, browser, fake, kernel_http, clock):
@@ -356,19 +358,22 @@ async def test_the_verified_note_is_written_once_per_session(app, browser, fake,
     # The kernel verifies the session, then the note can't be written: the visitor gets the error and nothing is noted.
     with notes_fail(monkeypatch):
         assert (await answering.post(verify_path(slug, "check"), json={"code": code})).status_code == 500
-    assert fake.sessions[session_id].verified and await rows_of(engine, session_id, "note") == []
+    assert fake.sessions[session_id].verified and await conversation_notes(
+        engine, session_id, "text", "model_seq IS NOT NULL") == []
 
     # Sent again, the kernel answers that the session is verified, and as it has no note yet, the note is written and
     # Claude is woken for it.
     model.add(response(reply("Thanks, you're confirmed.")))
     assert (await answering.post(verify_path(slug, "check"), json={"code": code})).status_code == 200
     await app.state.runtime.runner.drain()
-    assert await rows_of(engine, session_id, "note") == [("The visitor verified as the contact on record.", True)]
+    assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
+        ("The visitor verified as the contact on record.", True)]
     assert len(model.requests) == 1
 
     # Once noted, it isn't again: another check writes no second note and wakes no turn.
     assert (await answering.post(verify_path(slug, "check"), json={"code": code})).status_code == 200
     await app.state.runtime.runner.drain()
-    assert await rows_of(engine, session_id, "note") == [("The visitor verified as the contact on record.", True)]
+    assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
+        ("The visitor verified as the contact on record.", True)]
     assert len(model.requests) == 1
     await answering.aclose()

@@ -650,7 +650,8 @@ class Message(Base):
     model_context: Mapped[int | None] = mapped_column(Integer)
     model_seq: Mapped[int | None] = mapped_column(Integer)         # unique per session
     model_content: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))   # frozen
-    ref_id: Mapped[str | None] = mapped_column(Text)               # the kernel's message_id or decision_id
+    # The kernel's message_id or decision_id; a note may use business_local_time:{timezone}|{local_now}.
+    ref_id: Mapped[str | None] = mapped_column(Text)
     call_id: Mapped[str | None] = mapped_column(Text)              # the tool_use id of Claude's delivered reply
     event_seq: Mapped[int | None] = mapped_column(BigInteger)      # the run_events.seq a delivered or status row published
     generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
