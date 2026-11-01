@@ -152,7 +152,8 @@ async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(a
     original = desks.refuse_public_promises
 
     async def checked(ctx, part, values, desk_id=None, **kwargs):
-        if part == 'business_tools':
+        # Only this tool's scans: every Rivera copy also seeds its urgent tool through the same check.
+        if part == 'business_tools' and any(key.startswith(f'{TOOL}.') for key in values):
             scans.append({'part': part, 'values': values, 'desk_id': desk_id, **kwargs})
         await original(ctx, part, values, desk_id, **kwargs)
 
@@ -292,7 +293,7 @@ async def test_put_refuses_unsafe_appointment_type_under_its_public_key(app, cli
     original = desks.refuse_public_promises
 
     async def checked(ctx, part, values, desk_id=None, **kwargs):
-        if part == 'business_tools':
+        if part == 'business_tools' and any(key.startswith(f'{TOOL}.') for key in values):
             seen.append(values)
         await original(ctx, part, values, desk_id, **kwargs)
 
@@ -302,7 +303,7 @@ async def test_put_refuses_unsafe_appointment_type_under_its_public_key(app, cli
     assert [list(values.items()) for values in seen] == [[(f'{TOOL}.0-title', 'Book a consult'),
                                                          (f'{TOOL}.1-appointment_type', appointment_type)]]
     assert response.json()['detail'] == {f'{TOOL}.appointment_type': ['public_promise']}
-    assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.source == 'business'))
+    assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.tool == TOOL))  # the seeded urgent tool stays
 
 
 async def test_typed_and_native_booking_race_for_the_same_slot(app, client, monkeypatch):
