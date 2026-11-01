@@ -197,10 +197,12 @@ real fresh copy's five charter cards and two agents links: beside the chat from 
 the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
 is no charter or footer, so neither is drawn.
 
-A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and its
-composer moves down to the bottom as it lands. A Desk without starters lands on the greeting alone,
-so its composer moves up by the meta line and chips. Text that depends on other Desk data, such as
-a long greeting or longer starters, can change size once when it arrives.
+A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
+its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting
+alone, without the meta line and chips: on a laptop the shorter group is centred about 30 px lower,
+and on a phone the composer moves up by the meta line, and the footer and About by the chips as
+well. Text that depends on other Desk data, such as a long greeting or longer starters, can change
+size once when it arrives.
 
 The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell's
 first view at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
