@@ -27,8 +27,12 @@ export interface SkeletonLoad {
 }
 
 /** Shared layout classes also occur in the layer: only measure the landed page outside it. */
+function findLanded(selector: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>(selector)].find((el) => !el.closest('.cd-skeleton-screen__layer'));
+}
+
 function landed(selector: string): HTMLElement {
-  const element = [...document.querySelectorAll<HTMLElement>(selector)].find((el) => !el.closest('.cd-skeleton-screen__layer'));
+  const element = findLanded(selector);
   if (!element) throw new Error(`No landed element for ${selector}`);
   return element;
 }
@@ -50,8 +54,8 @@ function watchLoad(load: SkeletonLoad) {
   let firstVisibility: string | undefined;
   let firstStatus: string | null = null;
   let firstBusy: string | null = null;
-  let leaving: { style: { name: string; duration: string; pointer: string }; anchors: DOMRect[] } | undefined;
-  let replaced: DOMRect[] | undefined;
+  let leaving: { style: { name: string; duration: string; pointer: string }; anchors: (DOMRect | undefined)[] } | undefined;
+  let replaced: (DOMRect | undefined)[] | undefined;
   // Several regions can load together. Keep each mount's history until its status identifies it.
   const candidates = new Map<
     HTMLElement,
@@ -67,6 +71,7 @@ function watchLoad(load: SkeletonLoad) {
   const read = () => {
     if (!region) {
       for (const element of document.querySelectorAll<HTMLElement>('.cd-skeleton-screen')) {
+        if (element.children.length < 2) continue;
         const parts = partsOf(element);
         if (!parts.layer) continue;
         const state = parts.layer.dataset.state as LayerState;
@@ -94,19 +99,27 @@ function watchLoad(load: SkeletonLoad) {
         break;
       }
     }
-    if (!region) return;
+    if (!region || region.children.length < 2) return;
     const parts = partsOf(region);
     const state = (parts.layer?.dataset.state ?? 'gone') as LayerState;
-    if (states.at(-1)?.state === state) return;
-    states.push({ state, at: performance.now() });
-    if (state === 'leaving' && parts.layer) {
+    if (states.at(-1)?.state !== state) states.push({ state, at: performance.now() });
+    if (state === 'leaving' && parts.layer && !leaving) {
       const style = getComputedStyle(parts.layer);
       leaving = {
         style: { name: style.animationName, duration: style.animationDuration, pointer: style.pointerEvents },
-        anchors: load.anchors.map((a) => landed(a.page).getBoundingClientRect()),
+        anchors: load.anchors.map(() => undefined),
       };
     }
-    if (state === 'gone') replaced = load.anchors.map((a) => landed(a.page).getBoundingClientRect());
+    if (state === 'gone') replaced ??= load.anchors.map(() => undefined);
+    if (state === 'leaving' || state === 'gone') {
+      // A page can commit its anchors separately. Keep each first landing, even if the fade
+      // has already ended, and retry missing anchors on later mutations of the same state.
+      load.anchors.forEach((anchor, i) => {
+        const rect = findLanded(anchor.page)?.getBoundingClientRect();
+        if (leaving) leaving.anchors[i] ??= rect;
+        if (replaced) replaced[i] ??= rect;
+      });
+    }
   };
   const observer = new MutationObserver(read);
   observer.observe(document.body, {
@@ -130,12 +143,21 @@ function watchLoad(load: SkeletonLoad) {
     },
     leaving: () => leaving,
     replaced: () => replaced,
+    stop: () => observer.disconnect(),
   };
 }
 
 async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   await loadWebFonts();
   const watch = watchLoad(load);
+  try {
+    await checkWatchedLoad(load, still, watch);
+  } finally {
+    watch.stop();
+  }
+}
+
+async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: ReturnType<typeof watchLoad>): Promise<void> {
   await load.open();
   await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'shown')).toBe(true));
   const { status, body, layer } = watch.parts();
@@ -193,6 +215,13 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   const stays = (load.stays ?? []).map((selector) => landed(selector).getBoundingClientRect());
   load.release();
   await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'gone')).toBe(true));
+  await vi.waitFor(() => {
+    for (const [i, anchor] of load.anchors.entries()) {
+      const missing = `${anchor.name} (${anchor.page}) never landed within 2000 ms`;
+      if (!still) expect(watch.leaving()?.anchors[i], `${missing} after the layer started leaving`).toBeDefined();
+      expect(watch.replaced()?.[i], `${missing} after the layer was gone`).toBeDefined();
+    }
+  }, { timeout: 2_000 });
   if (still) {
     expect(watch.states.some(({ state }) => state === 'leaving')).toBe(false);
     expect(watch.replaced()).toHaveLength(load.anchors.length);
@@ -203,6 +232,8 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   for (const [i, anchor] of load.anchors.entries()) {
     const moment = still ? watch.replaced() : watch.leaving()?.anchors;
     compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions);
+    compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
+    compare(watch.replaced()![i]!, landed(anchor.page).getBoundingClientRect(), `${anchor.name} after gone`, true);
     compare(anchors[i]!, landed(anchor.page).getBoundingClientRect(), anchor.name, anchor.size, anchor.dimensions);
   }
   (load.stays ?? []).forEach((selector, i) => compare(stays[i]!, landed(selector).getBoundingClientRect(), selector, true));
