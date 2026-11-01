@@ -998,8 +998,10 @@ describe('public chat page', () => {
     await say(stale.screen, 'Can I get 15% off if I pay cash?');
     const cancel = stale.screen.getByRole('button', { name: 'Cancel this request' });
     mockStore.inject({ route: 'cancelRequest', status: 401, delayMs: late });
-    mockStore.inject({ route: 'sendMessage', status: 401, delayMs: late });
+    // The lost send goes first: Send waits while a message's reply is on its way, and the chat
+    // stops waiting once it is reading whether the lost one went through.
     mockStore.inject({ route: 'sendMessage', status: 'network' });
+    mockStore.inject({ route: 'sendMessage', status: 401, delayMs: late });
     mockStore.inject({ route: 'visitorSession', status: 401, delayMs: late });
     await cancel.click();
     await type(stale.screen, 'How much is drain clearing?');
@@ -1776,6 +1778,54 @@ describe('public chat page', () => {
     const frames = await reply;
     expectRevealed(frames, { cards: [0.12], lines: [0.24] });
     expect(frames.at(-1)?.words).toBe("Here's the price for clearing a drain, from Maria's price list.");
+  });
+
+  it('takes_typing_while_a_reply_is_on_its_way_and_revealed_and_sends_it_once_it_has_come_in', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const box = chatBox(screen);
+    const send = screen.getByRole('button', { name: 'Send', exact: true });
+    const sends = () => requests('sendMessage').length;
+    // The message's request waits on its way, so its reply is still to come.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: held, afterCommit: true });
+    const before = chatEvents().length;
+    await box.click();
+    await userEvent.keyboard('How much is drain clearing?{Enter}');
+    await expect.element(box).toHaveValue('');
+    // While the reply is on its way, the box keeps focus and takes typing; only Send and Enter wait.
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveFocus();
+    await expect.element(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    expect(sends()).toBe(1);
+
+    // The reply comes in, its words revealed and then its card: Send waits while it does.
+    const whileComingIn: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      if (document.querySelector(COMING_IN)) whileComingIn.push((send.element() as HTMLButtonElement).disabled);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    onTestFinished(() => observer.disconnect());
+    release();
+    await turnEnded(before);
+    observer.disconnect();
+    expect(whileComingIn.length).toBeGreaterThan(0);
+    expect(whileComingIn.filter((disabled) => !disabled)).toEqual([]);
+    // It has come in: the words typed meanwhile are still there, with focus, and they send.
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(sends).toBe(2);
+    await expect.element(box).toHaveValue('');
   });
 
   it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {

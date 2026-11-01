@@ -249,6 +249,30 @@ function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
   return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
 }
 
+/** A reply of Claude's still coming in: its words being revealed, or its cards fading in after them (ClaudeMessage). */
+const REPLY_COMING_IN = '.cd-claude-message[aria-busy="true"]';
+
+/**
+ * Whether a reply of Claude's in the conversation `end` closes is still coming in, kept up to date
+ * as it does: checked as each render draws a reply, and as its words and cards settle after it.
+ */
+function useReplyComingIn(endRef: RefObject<HTMLElement | null>, drawn: boolean): boolean {
+  const [comingIn, setComingIn] = useState(false);
+  const check = useCallback(() => {
+    setComingIn(endRef.current?.parentElement?.querySelector(REPLY_COMING_IN) != null);
+  }, [endRef]);
+  // Before the first paint of a reply that has just arrived, so Send never shows ready in between.
+  useLayoutEffect(check);
+  useEffect(() => {
+    const conversation = endRef.current?.parentElement;
+    if (!drawn || !conversation) return undefined;
+    const observer = new MutationObserver(check);
+    observer.observe(conversation, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] });
+    return () => observer.disconnect();
+  }, [drawn, endRef, check]);
+  return comingIn;
+}
+
 /** The design system's classes for a reply of Claude's whose words are being revealed, and for its prose. */
 const MESSAGE = '.cd-claude-message';
 const REVEALING = '.cd-claude-message--revealing';
@@ -733,6 +757,13 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
   // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
   const drawn = !opening && chat.status !== 'not_found' && desk !== null;
+  const replyComingIn = useReplyComingIn(endRef, drawn);
+  // The stream's place when the visitor last sent, until the stream says what came of it.
+  const [sentAt, setSentAt] = useState<number | null>(null);
+  const lastSeq = chat.state.lastSeq;
+  useEffect(() => {
+    if (sentAt !== null && lastSeq !== sentAt) setSentAt(null);
+  }, [sentAt, lastSeq]);
   const { shown } = chat;
   useEffect(() => {
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
@@ -868,6 +899,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
       : [];
 
   const startNewChat = () => {
+    setSentAt(null);
     const unsent = unsentWhenEnded(state.rows);
     // Words that didn't send go back in the new chat's box; with none, an idea still waiting stays.
     carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : carried.current;
@@ -908,8 +940,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const send = (text: string) => {
     newest.follow();
     visitorTyping.sent();
+    // While the owner has the chat she answers, in her own time: nothing waits on Claude.
+    if (!chat.ownerInChat) setSentAt(state.lastSeq);
     chat.send(text);
   };
+  // Claude's reply is on its way: from the visitor's message until the stream says what came of it
+  // (writing, a reply, a line, an error), unless it didn't send; then while Claude writes and the
+  // kernel checks the reply; then while its words are revealed and its cards come in. The visitor
+  // can type meanwhile, and Send waits.
+  const lastSent = state.rows.findLast(({ item }) => item.kind === 'visitor')?.item;
+  const replyOnItsWay =
+    sentAt !== null && state.lastSeq === sentAt && state.connection === 'open' && lastSent?.kind === 'visitor' && lastSent.status === 'sent';
+  const sendHeld = ready && (replyOnItsWay || state.writing || replyComingIn);
   const resend = (id: string) => {
     newest.follow();
     chat.resend(id);
@@ -972,6 +1014,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
                 sendLabel={copy.send}
                 maxLength={MESSAGE_MAX_LENGTH}
                 disabled={!ready}
+                sendHeld={sendHeld}
                 onSend={send}
               />
             </div>
