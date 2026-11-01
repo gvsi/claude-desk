@@ -379,6 +379,7 @@ class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labe
     charter: list[RenderedBlock]
     agent_card: list[RenderedBlock]
     open_status: OpenStatus | None = None   # None without charter:hours or with no windows in it, or when computing it fails
+    starters: list[str] = []               # the Desk's seed-only starter questions, rendered in ?lang=; [] when it has none
 
 class Health(BaseModel):                  # GET /health (selftest result cached at startup)
     version: str
@@ -391,6 +392,7 @@ class Health(BaseModel):                  # GET /health (selftest result cached 
 class KernelError(BaseModel):             # the body of every non-2xx kernel answer
     code: Literal["auth", "not_found", "closed", "stale_generation", "mode_owner", "mode_paused", "replayed",
                   "conflict", "invalid", "rate_limited", "seed_unproved", "internal"]   # rate_limited: 429 (POST /agents/demo)
+    detail: dict[str, list[str]] | None = None   # refused public policy keys and rule IDs, never their values
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
     DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, TurnStarted, ToolConfirmed,

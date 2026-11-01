@@ -159,6 +159,30 @@
   min-width: 0;
 }
 
+/* The opening (SetupOpening) stays around the step once the interview is read, so its shapes hand
+   off to the step's. In the conversation's frame, where only the transcript scrolls, it passes the
+   column's height on to the conversation, so the dock keeps its place at the window's foot; and the
+   shapes fading over the conversation keep the place they had in the column, which is now the
+   transcript column's (SetupConversation.css), as this frame's main has no padding of its own. */
+.cd-setup--chat .cd-setup-opening,
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  box-sizing: border-box;
+  padding: var(--space-40) max(var(--space-40), calc((100% - 720px) / 2)) 0;
+}
+
+@media (max-width: 639px) {
+  .cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+    padding: var(--space-24) var(--space-16) 0;
+  }
+}
+
 /* Known words' lines (MeasuredLines): a box as wide as the words' own, in their type, which holds a
    pill per line they take there. */
 .cd-setup-skeleton__measured {

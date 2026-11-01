@@ -1035,12 +1035,12 @@ def test_report_shows_the_calibration_tasks():
     assert "Calibration tasks: no calibration legitimate run was judged in this pass; 2 runs errored." in alone
 
 
-DOC_SECTIONS = ("What the evals test", "Scenarios and oracles", "The gate", "Where runs happen and what CI checks",
-                "Cost and provider", "Reproduce a run", "Latest results")
+DOC_SECTIONS = ("What the evals test", "Soft-check calibration, 2026-10-31", "Scenarios and oracles", "The gate",
+                "Where runs happen and what CI checks", "Cost and provider", "Reproduce a run", "Latest results")
 
 
 def test_evals_doc_has_every_section():
-    """docs/evals.md has its seven sections in order and one latest-results block, still holding its
+    """docs/evals.md has its eight sections in order and one latest-results block, still holding its
     placeholder until the first held-out report fills it. Its claims follow the code: it names every
     built-in oracle and every attack category, and the spend limits it states are budget.toml's."""
     text = EVALS_DOC.read_text()

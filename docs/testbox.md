@@ -10,15 +10,20 @@ tools/testbox/run make web-e2e
 tools/testbox/run make evals-tier1
 ```
 
-The remote machine is available for tests and kernel builds; it is not the default runner yet. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
+A lane's first call takes about 5 minutes, to sync the worktree and build the lane's environment
+and kernel, and says so on stderr ("setting up this lane"): the machine is reachable, so don't
+retry. Later calls add seconds of overhead.
+
+Test runs and kernel builds go through this machine by default (AGENTS.md, "Tests"); run them locally only when it's unreachable. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
 QA also stay on the laptop. CI continues using its own runners.
 
-The always-on, on-demand test machine is a c8g.24xlarge (96 arm64 vCPUs, 192 GB RAM) in
+The always-on, on-demand test machine is a c8g.12xlarge (48 arm64 vCPUs, 96 GB RAM) in
 us-east-1, with Ubuntu 24.04 and an encrypted 1 TiB gp3 root disk (16,000 IOPS, 1,000 MiB/s).
-Budget about **$3,000/month** while running 24/7 (730 hours): roughly $2,795 for
-[on-demand Linux compute](https://aws.amazon.com/ec2/pricing/on-demand/) at $3.8285/hour in
+Budget about **$2.17/hour, $1,600/month** while running 24/7 (730 hours): roughly $1,397 for
+[on-demand Linux compute](https://aws.amazon.com/ec2/pricing/on-demand/) at $1.91424/hour in
 us-east-1, plus about $182 for the configured gp3 disk and a small public IPv4 charge
-(before tax and data transfer; estimate dated 2026-10-31). Stop it when sustained parallel
+(before tax and data transfer; estimate dated 2026-11-01). It replaced a c8g.24xlarge (96 vCPUs,
+about $4.08/hour) whose load peaked near 12 of its 96 vCPUs. Stop it when sustained parallel
 testing ends or before an extended idle period; stopping ends compute charges but retains
 the billed disk. The owner approves stopping or retiring it.
 CI runners remain the merge gate, but their minutes per round trip slow interactive fixes;
@@ -107,16 +112,56 @@ Do merges, rebases, fetches and commits locally: the remote copy is disposable a
 Remote test reports remain in the lane; source files are never copied back automatically.
 
 Changed kernel sources or build inputs trigger `make kernel` before the requested command.
+Web dependencies install automatically (`npm ci` in web/, from the shared npm cache) on a lane's first call and whenever web/package.json or web/package-lock.json changes, so narrow web commands work without `make web-test`. A failed install stops the call, whatever its command, and the next call retries it; keep web/package.json and web/package-lock.json in agreement.
 Each database is cloned from a template keyed by migration inputs and migrated with the
 same development role passwords as `make db-roles`. A schema change recreates that lane's
-throwaway database. The dedicated Postgres 16 server disables fsync, synchronous_commit
-and full_page_writes: its data is disposable. It never connects to a laptop database.
+throwaway database. Lanes reach Postgres directly at the test bridge's address,
+`10.200.0.1:5432`, from their network namespace; the loopback forwarder on `127.0.0.1:5432`
+remains for clients from older branches. The dedicated Postgres 16 server disables fsync,
+synchronous_commit and full_page_writes: its data is disposable. It never connects to a
+laptop database.
 
 The account's deny-only inline policies may also be on the role. Provisioning accepts any other inline
 policy, whatever its name, when all its statements deny, since such a policy can't grant anything, and
 never removes one. Another inline policy that allows anything, or has no statements, is refused. Before
 deleting the role by hand, delete its inline policies first, or `delete-role` fails; provisioning's own
 rollback does this for a role it created.
+
+## Replace in the same region
+
+A replacement (another size, say) is proven beside the active machine before any lane moves to it:
+
+```sh
+tools/testbox/provision.sh --region us-east-1 --standby    # launch and bootstrap the standby
+tools/testbox/run --standby make kernel                    # prove it from a lane; other lanes stay put
+tools/testbox/provision.sh --region us-east-1 --promote    # every lane moves on its next call
+```
+
+Clients only discover the one running instance tagged `Purpose=agent-test-box`, so the standby
+(`agent-test-box-standby`) is reached only with `--standby`, which never changes the connection
+other lanes share. Promotion refuses a standby whose setup is still running or failed, then
+re-tags the old machine `agent-test-box-retired` before tagging the standby active, so an
+interruption leaves no active machine, never two; re-running `--promote` finishes it from the tags.
+
+Every lane's client, from any branch, reuses the laptop's shared connection while it is alive and
+the machine recorded in `~/.cache/desk-testbox/connection-<region>.json`. Promotion opens a
+connection to the new machine, records it, and stops the shared connection to the old one taking
+new calls. For four minutes it keeps closing old connections and restoring the record, since a
+call that chose the old machine just before the switch can reopen or record it. Then the old
+machine's SSH server stops taking new connections (only its listener stops, so open sessions
+continue; `systemctl start ssh.socket` there undoes it), so a later caller can't reopen one:
+such a call, or one still queued behind another call in its lane there, fails once, and its
+retry runs on the new machine. Calls already running there finish. Each lane's next call runs on the new machine and sets the lane up again
+there (about 5 minutes the first time, as for any new lane). This moves the lanes of the laptop
+that promotes; another laptop's lanes move once its connection to the old machine closes.
+
+Once no call runs on the retired machine, lift its termination protection and terminate it, with
+the owner's approval. To check, open a shell with
+`aws ssm start-session --region us-east-1 --target <retired instance>` and run
+`systemctl list-units 'desk-testbox-run-*'`: it should stay empty for a few minutes. Anything
+scheduled against the old instance, such as a planned stand-down, must be pointed at the new one.
+Provisioning accepts only the current machine size, so a branch from before a size change must
+rebase before re-running `provision.sh`.
 
 ## Re-create or move
 
@@ -148,8 +193,8 @@ Allow about ten minutes for a fresh bootstrap; provisioning waits up to thirty m
 
 The replacement is independent: no data migration is needed. After testing it, retire the
 old protected instance and its regional security group with the owner's approval. The IAM
-role/profile are global and reused across regions. Recreating in the same region requires
-retiring the old instance first. Never disable termination protection as routine setup.
+role/profile are global and reused across regions. Replacing it in the same region uses
+a standby (above); plain re-provisioning reuses the tagged instance. Never disable termination protection as routine setup.
 
 The bootstrap pins Rust 1.99.1, uv 0.13.0 (SHA-256 verified), Python 3.13, cvc5 1.4.2 and Node 24.21.0.
 cvc5 is verified against [the repository checksums](../tools/cvc5.sha256). Playwright's

@@ -187,7 +187,7 @@ export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
@@ -208,6 +208,7 @@ export {
   type TranscriptRowProps,
 } from './components/TranscriptRow/TranscriptRow.tsx';
 export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
+export { RulesReceipt, type RulesReceiptProps } from './components/MarginReceipt/RulesReceipt.tsx';
 export {
   OWNER_REASON_STATES,
   OWNER_STATE_WORDS,
@@ -271,7 +272,7 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
-export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit

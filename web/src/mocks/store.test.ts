@@ -98,6 +98,21 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
+  it('answers_each_first_view_starter_in_its_language', () => {
+    const cases = [
+      ['How much is drain clearing?', 'price', 'en'],
+      ['Can someone come Tuesday?', 'book', 'en'],
+      ['¿Cuánto cuesta destapar un desagüe?', 'price', 'es'],
+      ['¿Puede venir alguien el martes?', 'book', 'es'],
+      ['Do you work in Alameda?', 'area', 'en'],
+      ['¿Trabajan en Alameda?', 'area', 'es'],
+    ];
+    for (const [words, rule, language] of cases) {
+      expect(matchRule(words!).name, words).toBe(rule);
+      expect(turnLanguage(words!), words).toBe(language);
+    }
+  });
+
   it('script_matches_the_first_rule', async () => {
     const cases: [text: string, rule: RuleName, language: 'en' | 'es'][] = [
       // "off" comes before "pay": a discount asked with cash is held, not a payment link.

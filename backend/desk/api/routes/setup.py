@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -36,6 +36,12 @@ from desk.api.schemas import (
     SafetyCheck,
     SetupAnswerIn,
     SetupConsentIn,
+    SetupProposalIn,
+    SetupPublicLineError,
+    SetupPublicLineIn,
+    SetupPublicLines,
+    SetupPublicLinesConfirmIn,
+    SetupSuggestionsIn,
     SetupStartIn,
     SetupState,
     SetupTools,
@@ -95,7 +101,8 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards,
+                             business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
@@ -103,7 +110,8 @@ async def setup_interview(interview_id: InterviewId, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The setup interview as it stands, removing abandoned turn entries and reopening consent if needed."""
     state = runtime(request).started()
-    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards)
+    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards,
+                            business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
@@ -146,7 +154,44 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
 
     answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
-                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+                                cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
+
+
+@router.post("/{id}/proposals/{proposal_id}", response_model=SetupState,
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
+async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, Path(max_length=64)],
+                          body: SetupProposalIn, request: Request,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Answer the waiting proposal and receive Claude's reply and next ask."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
+
+
+@router.post("/{id}/suggestions", response_model=SetupState,
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
+async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Use the current proposals and finish questions with safe defaults for unanswered limits."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
@@ -167,6 +212,91 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
     back pinned and waiting for the owner's review. 409 `conflict` once the rules are confirmed."""
     state = await _moving_on(request, ctx, model=False)
     return await setup.connect_tools(ctx, state.database(), interview_id)
+
+
+@router.get("/{id}/public_lines", response_model=SetupPublicLines,
+            responses=error_responses(401, 404, 409, 422, 503))
+async def setup_public_lines(interview_id: InterviewId, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupPublicLines:
+    """Read nonblank public lines in board order, hours and prices, with their provenance.
+    Allowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending."""
+    return await setup.public_lines(ctx, runtime(request).started().database(), interview_id)
+
+
+PUBLIC_LINES_WRITE_RESPONSES = {
+    **error_responses(401, 404, 409, 422, 503),
+    409: {"model": ApiError, "description": (
+        "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. "
+        "A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts."
+    )},
+    422: {"model": SetupPublicLineError | ApiError},
+}
+
+
+@router.put("/{id}/public_lines", response_model=SetupPublicLines, responses=PUBLIC_LINES_WRITE_RESPONSES)
+async def setup_put_public_line(interview_id: InterviewId, body: SetupPublicLineIn, request: Request,
+                                ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Edit one public line and strictly publish the charter before saving its owner provenance.
+    Allowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. Every write publishes
+    the confirmed lines and leaves out held lines (`held`), values still suggested, and every policy line while
+    setup's policy claims are switched off; a rewording that is published clears its line's hold. A refused charter
+    is 422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.
+    `policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.put_public_line(
+        ctx, state.database(), interview_id, body.key, body.text, state.clock(),
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
+
+
+async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublicLines | JSONResponse:
+    try:
+        return await work
+    except setup.PublicLineProblem as refused:
+        return JSONResponse(refused.answer.model_dump(mode="json", exclude_none=True), status_code=422)
+
+
+@router.post("/{id}/public_lines/confirm", response_model=SetupPublicLines,
+             responses=PUBLIC_LINES_WRITE_RESPONSES)
+async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPublicLinesConfirmIn, request: Request,
+                                     ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Confirm only the listed keys at the displayed revision; publish before saving without changing the step.
+    Allowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before
+    the keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422
+    `line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A held key
+    is 422 `line_refused` naming it, with nothing changed: only a rewording can publish it. A failed save restores
+    the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.confirm_public_lines(
+        ctx, state.database(), interview_id, state.clock(), keys=body.keys, revision=body.revision,
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
+
+
+@router.delete("/{id}/public_lines/{key}", response_model=SetupPublicLines,
+               responses=PUBLIC_LINES_WRITE_RESPONSES)
+async def setup_delete_public_line(interview_id: InterviewId, key: str, request: Request,
+                                   ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Remove a suggested public item, publishing before saving. Owner items are 422 `not_suggested`;
+    `policy:how_we_help` is 422 `not_editable`, and unknown keys are 422 `invalid`.
+    Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.delete_public_line(
+        ctx, state.database(), interview_id, key, state.clock(),
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
+
+
+@router.delete("/{id}/public_lines/prices/{item_id}", response_model=SetupPublicLines,
+               responses=PUBLIC_LINES_WRITE_RESPONSES)
+async def setup_delete_public_price(interview_id: InterviewId, item_id: str, request: Request,
+                                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)],
+                                    title: Annotated[str, Query(min_length=1, max_length=80, pattern=r"\S")],
+                                    unit_cents: Annotated[int, Query(ge=0, le=1_000_000)]) -> Any:
+    """Remove one suggested price only when its current id, title and amount match what the owner saw.
+    Owner prices are 422 `not_suggested`; a missing or mismatched item is 409 `conflict`.
+    Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.delete_public_price(
+        ctx, state.database(), interview_id, item_id, state.clock(), title=title, unit_cents=unit_cents,
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------
@@ -233,7 +363,8 @@ async def setup_rules(interview_id: InterviewId, request: Request,
     the kernel couldn't check them ("Rules can't be checked right now"); 409 `conflict` before the questions are
     done or once the rules are confirmed."""
     async def work(owner: OwnerCtx, state: Runtime) -> RulesDraft:
-        return await setup.rules(owner, state.database(), state.model, interview_id, state.clock())
+        return await setup.rules(owner, state.database(), state.model, interview_id, state.clock(),
+                                 setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled)
 
     return await _proving(request, ctx, interview_id, work, model=True)
 

@@ -439,6 +439,59 @@ it('setup_reload_hands_off', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+for (const viewport of ['desktop', 'phone'] as const) {
+  it(`setup_reload_at_the_questions_hands_off_into_the_chat: ${viewport}`, async () => {
+    // A reload mid-interview: while the interview is read, the column draws a step's header as
+    // shapes; then the conversation lands in its own frame, where the bar and the dock keep their
+    // size and only the transcript scrolls. The shapes fade where they were, the title lands where
+    // its shape was, and the dock sits at the window's foot.
+    const started = await mockStore.dispatch('startSetup', {
+      body: { description: DESCRIPTION, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
+    });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const state = started.body as SetupState;
+    const consented = await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    if ('network' in consented || consented.status !== 200) throw new Error('the mock opens the questions');
+    const interview = holdReads(path('setup', state));
+    /** How far below the bar `element` is: the bar can grow when the business's name arrives. */
+    const belowBar = (element: Element) =>
+      element.getBoundingClientRect().top - document.querySelector('.cd-setup__bar')!.getBoundingClientRect().bottom;
+    await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await vi.waitFor(() => expect(interview.held()).toBe(1));
+    const shown = await vi.waitFor(() => {
+      const layer = document.querySelector<HTMLElement>('.cd-setup__column .cd-skeleton-screen__layer[data-state="shown"]');
+      expect(layer, "the header's shapes show while the interview is read").not.toBeNull();
+      return layer!;
+    });
+    const shapeAnchor = shown.querySelector('[data-skeleton-anchor="page-title"]')!;
+    const shape = { top: belowBar(shapeAnchor), left: shapeAnchor.getBoundingClientRect().left };
+    /** The title's shape in the commit the conversation lands in, as the shapes start to fade. */
+    let leaving: { top: number; left: number } | undefined;
+    const watching = new MutationObserver(() => {
+      const anchor = document.querySelector('.cd-skeleton-screen__layer[data-state="leaving"] [data-skeleton-anchor="page-title"]');
+      if (anchor && leaving === undefined) leaving = { top: belowBar(anchor), left: anchor.getBoundingClientRect().left };
+    });
+    onTestFinished(() => watching.disconnect());
+    watching.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-state'] });
+    interview.release();
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    watching.disconnect();
+
+    expect(leaving, 'the shapes fade over the conversation').toBeDefined();
+    expect(Math.abs(leaving!.top - shape.top), 'the shapes fade where they were (top)').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(leaving!.left - shape.left), 'the shapes fade where they were (left)').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    // The title's place with the transcript at its top, wherever the transcript is pinned.
+    const scroll = document.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
+    const title = document.querySelector('.cd-setup-chat .cd-page-header__title')!;
+    expect(Math.abs(belowBar(title) + scroll.scrollTop - shape.top), 'the title lands at its shape (top)').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(title.getBoundingClientRect().left - shape.left), 'the title lands at its shape (left)').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    const dock = document.querySelector('.cd-setup-dock')!.getBoundingClientRect();
+    expect(Math.abs(dock.bottom - window.innerHeight), "the dock sits at the window's foot").toBeLessThanOrEqual(1);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
+    await expectScreenBasics(document.body, { owner: true });
+  });
+}
+
 it('setup_tools_first_read_failure_clears_the_skeleton', async () => {
   const state = await interviewAt('tools');
   const tools = holdReads(path('setupTools', state));
@@ -474,11 +527,14 @@ it('setup_interview_first_read_failure_clears_the_skeleton', async () => {
 const landedCount = () => [...document.querySelectorAll('.cd-setup-safety__count')].find((count) => !count.closest('.cd-skeleton-screen__layer'));
 
 it('safety_check_lands_under_the_fading_skeleton', async () => {
-  // The owner goes on from Real situations: the check runs as they watch. Its rows start landing
-  // one by one while the shapes fade over them, and the count ticks with them to the check's words.
+  // The owner goes on from Real situations, through what customers will read: the check runs as
+  // they watch. Its rows start landing one by one while the shapes fade over them, and the count
+  // ticks with them to the check's words.
   const state = await interviewAt('situations');
   const check = holdPosts(path('setupSafetyCheck', state));
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right', exact: true }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'What customers will read', exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Looks right', exact: true }).click();
   await vi.waitFor(() => expect(check.held()).toBe(1));
   await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));

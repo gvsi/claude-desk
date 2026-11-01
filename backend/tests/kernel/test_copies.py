@@ -107,7 +107,8 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
         ("Bob Okafor", "b•••@example.com"), ("Dana Whitfield", "d•••@example.com")]
     prices = await rows_of(app, copy_id, select(PriceItem).order_by(PriceItem.unit_cents))
     assert [(p.item_id, p.title, p.unit_cents) for p in prices] == [
-        ("deposit", "Service call deposit", 2000), ("heater", "Water heater flush", 15000),
+        ("deposit", "Service call deposit", 2000), ("short-notice", "Short-notice fee", 5000),
+        ("pipe", "Pipe repair (starting price)", 10000), ("heater", "Water heater flush", 15000),
         ("drain", "Drain clearing", 18000), ("leak", "Leak repair", 25000)]
     slots = await rows_of(app, copy_id, select(CalendarSlot).order_by(CalendarSlot.starts_at))
     assert len(slots) == 10 * 5 + 2 * 2                    # two weeks of weekday and Saturday slots
@@ -119,7 +120,8 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     # charter facts, the hours included, are public
     facts = {fact.fact_id: fact for fact in await rows_of(app, copy_id, select(Fact).where(Fact.kind == "charter"))}
     assert set(facts) == {"charter:contact", "charter:policy:service_area", "charter:policy:first_visit",
-                          "charter:policy:arrival", "charter:hours"}
+                          "charter:policy:arrival", "charter:hours",
+                          *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert all(fact.readers == ["public"] and fact.source == "kernel" and fact.status == "available"
                for fact in facts.values())
     assert [(c.key, c.value) for c in facts["charter:contact"].claims] == [("contact", "(510) 555-0142")]
@@ -221,6 +223,24 @@ def test_seeded_knowledge_states_no_amount(frozen_clock):
     assert website.text == (
         "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
         "water heater flushes. " + area)
+
+
+async def test_a_copy_prices_a_plumbing_emergency(app, client):
+    """A plumbing emergency is quoted as "pipe repairs start from $100, and there's a short-notice fee
+    of $50", each amount on a quote card. Cards come only from the price list, so a fresh copy's list
+    holds both, the pipe repair titled as the starting price it is (a price item has no "from" price)."""
+    created = await create_copy(client)
+    prices = {p.item_id: (p.title, p.unit_cents) for p in await rows_of(app, created["copy_id"], select(PriceItem))}
+    assert prices["short-notice"] == ("Short-notice fee", 5_000)
+    assert prices["pipe"] == ("Pipe repair (starting price)", 10_000)
+
+
+def test_the_price_list_knowledge_says_when_the_short_notice_fee_applies():
+    """The owner's sentence (2026-11-01) tells Claude when to add the fee, with no amount: an amount
+    reaches a visitor only on a quote card."""
+    from desk.kernel_service import seed
+    [price_list] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-price-list"]
+    assert "The short-notice fee is added to an urgent visit that Maria fits in at short notice." in price_list.text
 
 
 async def test_copies_are_isolated(app, client):

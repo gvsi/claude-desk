@@ -1,9 +1,10 @@
 /* Customers (N-History-People, N-Run2-People-*): one 760 px column, centered in the page. Each
    section 28 px under what comes before it, its head over a hairline with the count beside the
    title and, for leads that include recorded history, the caption 4 px under it; its rows 4 px
-   under the hairline, 2 px apart. While the list loads, or when it's empty, a hairline sits where
-   the first section's head would, with the loading line or the empty state under it. On a phone
-   the sections are 16 px apart. */
+   under the hairline, 2 px apart. When it's empty, a hairline sits where the first section's head
+   would, with the empty state under it. Under the header, one region holds what the people read
+   draws: while the list loads, its shapes (P12-01), built from these same classes. On a phone the
+   sections are 16 px apart. */
 
 /* No size token is the board's 760 px column (the content tokens are 960 and 640). */
 .cd-people {
@@ -25,7 +26,7 @@
   margin-left: auto;
 }
 
-.cd-people > .cd-notice,
+.cd-people__region > .cd-skeleton-screen__body > .cd-notice,
 .cd-people__section,
 .cd-people__below {
   margin-top: var(--space-28);
@@ -56,7 +57,7 @@
 }
 
 @media (max-width: 767.98px) {
-  .cd-people > .cd-notice,
+  .cd-people__region > .cd-skeleton-screen__body > .cd-notice,
   .cd-people__section {
     margin-top: var(--space-16);
   }

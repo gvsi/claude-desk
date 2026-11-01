@@ -22,6 +22,9 @@ import type { CancelReason, RulesDraft } from './views.ts';
 /** How long one request may take: a Claude turn longer, a proving route past the API's 25 s hold. */
 export const TIMEOUT_MS = { default: 10_000, model: 45_000, proving: 30_000 } as const;
 
+/** The consultant client opts in once for all setup state reads and mutations, including rereads. */
+const SETUP_CARD_ROUTES: ReadonlySet<RouteKey> = new Set(['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions']);
+
 /** A proving route's 202 is retried this often, and given up this long after the first send. */
 export const PROVING_RETRY_MS = 3_000;
 export const PROVING_GIVE_UP_MS = 60_000;
@@ -50,6 +53,7 @@ interface ApiErrorInit {
   cancelReason?: CancelReason | null;
   draft?: RulesDraft | null;
   capCents?: number | null;
+  lineKey?: string | null;
 }
 
 /** A request that didn't come back as a clear answer. Its message is its kind, never server text. */
@@ -75,6 +79,8 @@ export class ApiError extends Error {
   readonly draft: RulesDraft | null;
   /** A 422's `cap_cents`: the limit for taking money without asking that a draft went over. */
   readonly capCents: number | null;
+  /** A 422 line_refused's row key. The internal reason is deliberately discarded. */
+  readonly lineKey: string | null;
 
   constructor(kind: ApiErrorKind, init: ApiErrorInit) {
     super(kind);
@@ -91,6 +97,7 @@ export class ApiError extends Error {
     this.cancelReason = init.cancelReason ?? null;
     this.draft = init.draft ?? null;
     this.capCents = init.capCents ?? null;
+    this.lineKey = init.lineKey ?? null;
   }
 }
 
@@ -182,8 +189,10 @@ function notify(outcome: RequestOutcome): void {
 
 type HasKeys<T> = keyof T extends never ? false : true;
 
-/** `params` when the path has placeholders and `body` when the route takes one, each typed. */
-export type RequestOptions<K extends RouteKey> = { query?: RouteQuery } & (HasKeys<RouteParams<K>> extends true
+/** Path params, bodies and required query values are typed by the route. */
+export type RequestOptions<K extends RouteKey> = ({} extends RouteQuery<K>
+  ? { query?: RouteQuery<K> }
+  : { query: RouteQuery<K> }) & (HasKeys<RouteParams<K>> extends true
   ? { params: RouteParams<K> }
   : { params?: undefined }) &
   (RouteBody<K> extends undefined ? { body?: undefined } : { body: RouteBody<K> });
@@ -276,6 +285,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     cancelReason: conflict ? cancelReasonOf(body.cancel_reason) : null,
     draft: conflict ? draftOf(body.draft) : null,
     capCents: answer.status === 422 ? capCentsOf(body.cap_cents) : null,
+    lineKey: answer.status === 422 && body.error === 'line_refused' && typeof body.key === 'string' ? body.key : null,
   });
 }
 
@@ -364,13 +374,14 @@ export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs
   const route: RouteSpec = ROUTES[key];
   const options = (opts ?? {}) as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown };
   try {
-    const path = apiPath(key, options.params ?? ({} as RouteParams<K>), options.query);
+    const query = SETUP_CARD_ROUTES.has(key) ? { ...options.query, cards: 1 } : options.query;
+    const path = apiPath(key, options.params ?? ({} as RouteParams<K>), query);
     const startedAt = Date.now();
     let answer = await send(key, route.method, path, options.body, timeoutFor(route));
     if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
     if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
-    // Consent always carries an interview. Other routes may answer an empty 202 or 204.
-    const empty = answer.body === undefined && (key === 'setupConsent' || (answer.status !== 202 && answer.status !== 204));
+    // Setup turns always carry an interview, including background work answered 202.
+    const empty = answer.body === undefined && (['setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'].includes(key) || (answer.status !== 202 && answer.status !== 204));
     if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
     notify({ key, ok: true });
     return answer.body as RouteResponse<K>;

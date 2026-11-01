@@ -826,6 +826,9 @@ export interface KernelError {
     | "rate_limited"
     | "seed_unproved"
     | "internal";
+  detail?: {
+    [k: string]: string[];
+  } | null;
 }
 export interface KnowledgeItem {
   item_id: string;
@@ -1000,6 +1003,7 @@ export interface PublicDesk {
   charter: RenderedBlock[];
   agent_card: RenderedBlock[];
   open_status?: OpenStatus | null;
+  starters?: string[];
 }
 export interface ReviewThresholds {
   min_within_charter_bp: number;

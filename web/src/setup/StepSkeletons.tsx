@@ -27,7 +27,7 @@ export function SetupOpening({ loading, children }: { loading: boolean; children
   return (
     <>
       {loading ? <h1 className="cd-sr-only">{SETUP_COPY.stepsLabel}</h1> : null}
-      <SkeletonScreen loading={loading} status={SETUP_COPY.questions.loading} skeleton={<PageHeaderSkeleton subtitleLines={{ wide: 1, phone: 2 }} />}>
+      <SkeletonScreen className="cd-setup-opening" loading={loading} status={SETUP_COPY.questions.loading} skeleton={<PageHeaderSkeleton subtitleLines={{ wide: 1, phone: 2 }} />}>
         {children}
       </SkeletonScreen>
     </>

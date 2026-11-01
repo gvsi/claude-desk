@@ -1897,6 +1897,24 @@
           ],
           "title": "Code",
           "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [
@@ -3277,6 +3295,14 @@
             }
           ],
           "default": null
+        },
+        "starters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Starters",
+          "type": "array"
         }
       },
       "required": [

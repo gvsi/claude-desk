@@ -84,7 +84,7 @@ The exact kernel contract (how a configured tool is stored, pinned, reviewed and
 
 ## Part C: the visitor agent knows the business
 
-- Setup publishes text claims to the Desk's charter as `policy:` keys, so the policy card can cite them: `policy:about`, `policy:pricing` ("priced per case after a free consult"), `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:service_area` (shown as "Service area", #307). They reach the agent through `<desk_context>` and stay untrusted text.
+- Setup publishes text claims to the Desk's charter as `policy:` keys, so the policy card can cite them: `policy:about`, `policy:pricing` ("Pricing is discussed after we understand the work."), `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:service_area` (shown as "Service area", #307). They reach the agent through `<desk_context>` and stay untrusted text.
 - The visitor prompt gains a short business-aware section: use the Desk's own words; when there's no price for a request, offer the business's next step (book a consult, take the details) instead of a dead end; qualify a new request with the intake questions; treat what the business calls urgent as urgent. The API owns this prompt change, which must pass the evals gate.
 - The reply check's word list blocks "Your appointment is confirmed." but lets "Your viewing is confirmed." through: the kernel owns this reply-check change under invariant 2, alongside typed bookings.
 - The demo agent's tasks ask every Desk for a water heater visit: draw them from the Desk's own tools and catalog.

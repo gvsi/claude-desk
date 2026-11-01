@@ -8,7 +8,7 @@
 import { expect, it, onTestFinished } from 'vitest';
 import { page } from 'vitest/browser';
 
-import { SWEEP_SHAPES, expectBandLinesUp, expectNoStepAtTheEdge, mountSweep, resizeWindow } from '../../test/skeletonSweep.tsx';
+import { SWEEP_SHAPES, expectBandLinesUp, expectBandsFollowLateResizeLayout, expectNoStepAtTheEdge, mountSweep, resizeWindow } from '../../test/skeletonSweep.tsx';
 
 it('band_lines_up_across_shapes_in_webkit', async () => {
   expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(false);
@@ -27,3 +27,5 @@ it('band_edge_draws_no_step_in_webkit', async () => {
   const shapes = await mountSweep();
   await expectNoStepAtTheEdge(shapes.wide);
 });
+
+it('bands_follow_a_late_resize_layout_with_an_unchanged_region', expectBandsFollowLateResizeLayout);

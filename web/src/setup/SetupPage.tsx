@@ -58,6 +58,8 @@ interface SetupShellProps {
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
+  /** Questions have their own scrolling transcript and fixed dock. */
+  chat?: boolean;
   /**
    * What an in-app link out of setup waits for before it goes, such as the interview carried into
    * the copy's Desks, so the page it opens is drawn from it.
@@ -72,7 +74,7 @@ interface SetupShellProps {
  * business once known, the five steps and "Save and exit"; one column; the concept footer at the
  * window's foot.
  */
-function SetupShell({ business, step, live, exitTo, wide = false, beforeLeave, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, children }: SetupShellProps) {
   const navigate = useNavigate();
   // An in-app link goes once `beforeLeave` is done, whether or not it worked.
   const leave: NavigateFunction = (to: To | number, options?: NavigateOptions) => {
@@ -83,7 +85,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, beforeLeave, c
   // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
   useDocumentTitle(inApp(SETUP_COPY.stepsLabel));
   return (
-    <div className="cd-setup" onClick={followInAppLinks(leave)}>
+    <div className={`cd-setup${chat ? ' cd-setup--chat' : ''}`} onClick={followInAppLinks(leave)}>
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
@@ -108,7 +110,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, beforeLeave, c
       </header>
       <main className={`cd-setup__main${wide ? ' cd-setup__main--wide' : ''}`}>
         <div className="cd-setup__column">{children}</div>
-        <ConceptFooter />
+        {chat ? null : <ConceptFooter />}
       </main>
     </div>
   );
@@ -140,6 +142,10 @@ function SetupInterview({ setupId }: { setupId: string }) {
    * shows the rules before their draft is made, which may never be. Only the confirmed step is
    * carried into the copy's Desks, and setup reopens at it.
    */
+  // Query-cache notifications can render synchronously before a queued React state update.
+  // Record the hold before publishing a tools state, then Continue releases it on this page.
+  const closing = useRef(false);
+  const [continued, setContinued] = useState(false);
   const confirmed = useRef<SetupStep | null>(null);
   if (confirmed.current === null && setup.data !== undefined) confirmed.current = setup.data.step;
   const confirm = useCallback((step: SetupStep) => {
@@ -175,6 +181,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   /** The API answered with the interview as it stands. */
   const onState = useCallback(
     (next: SetupState) => {
+      if (confirmed.current === 'questions' && next.step === 'tools') closing.current = true;
       confirm(next.step);
       update(() => next);
     },
@@ -209,16 +216,14 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
   /** The interview read again, after a write whose answer was lost; null when it can't be read. */
   const reread = useCallback(
-    () =>
-      queryClient
-        // One read, no retry: when it fails, the step says the outcome is unknown and the owner tries again.
-        .fetchQuery({ ...setupQuery(setupId), staleTime: 0, retry: false })
-        .then((next) => {
-          confirm(next.step);
-          return next;
-        })
-        .catch(() => null),
-    [queryClient, setupId, confirm],
+    () => request('setup', { params: { id: setupId } })
+      .then((next) => {
+        // Hold the closing before publishing the read to the cache, so Tools never mounts first.
+        onState(next);
+        return next;
+      })
+      .catch(() => null),
+    [setupId, onState],
   );
 
   const state = setup.data;
@@ -258,16 +263,17 @@ function SetupInterview({ setupId }: { setupId: string }) {
   // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
   const answering = desk?.answering === true;
   let body: ReactNode;
-  switch (state.step) {
+  const shownStep = closing.current && !continued && state.step === 'tools' ? 'questions' : state.step;
+  switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} onState={onState} reread={reread} />;
+      body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={() => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;
       break;
     case 'rules':
     case 'situations':
-      body = <RulesStep state={state} business={name} onNext={moveTo} live={opened !== 'situations'} />;
+      body = <RulesStep state={state} business={name} onNext={moveTo} reread={reread} live={opened !== 'situations'} />;
       break;
     case 'safety_check':
       body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;
@@ -288,10 +294,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   return (
     <SetupShell
       business={business}
-      step={STEP_INDEX[state.step]}
+      step={STEP_INDEX[shownStep]}
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview'}
+      chat={shownStep === 'questions'}
       beforeLeave={beforeLeave}
     >
       {/* The same region as while the interview was read, so its shapes hand off to the step's. */}

@@ -204,6 +204,14 @@ async def set_hours(app: FastAPI, copy: Rivera, hours: list[HoursWindow]) -> Non
         desk.hours = hours
 
 
+async def test_a_fresh_rivera_copy_alerts_the_owner_at_once_for_a_callback(app, client):
+    """A burst pipe at night is asked for as a call-back, so the Rivera seed alerts Maria at once for one,
+    with no change to the copy's notification settings (#519)."""
+    copy, visitor = await visitor_of(app, client)
+    await callback(client, visitor)
+    assert [entry for entry in await owner_alerts(client, copy) if "Sam Lee" in entry.body]
+
+
 async def test_callback_without_an_open_hour_has_no_window(app, client):
     copy, visitor = await visitor_of(app, client)
     await alert_now(app, copy, "callback")

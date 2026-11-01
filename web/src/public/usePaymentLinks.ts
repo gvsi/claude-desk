@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
 import type { CardBlock, RenderedBlock } from '../api/contracts.ts';
 import { request } from '../api/http.ts';
+import { recordPayChat } from '../lib/payChats.ts';
 import type { ChatRow } from './chatReducer.ts';
 import { CLOSED_LINK_STATES, paymentLinkClosed, type PaymentLinkMemory } from './paymentLinks.ts';
 
@@ -12,10 +13,30 @@ function tokenOf(block: RenderedBlock): string | undefined {
     : undefined;
 }
 
-/** Chat-only action state; the stored transcript and every kernel-written word stay untouched. */
-export function usePaymentLinks(rows: readonly ChatRow[], memory: PaymentLinkMemory, composer?: RefObject<HTMLElement | null>): (block: RenderedBlock) => RenderedBlock {
+/**
+ * Chat-only action state; the stored transcript and every kernel-written word stay untouched.
+ * With `chatPath` (the chat's own `/d/<slug>`, when the chat is the page), each payment link card
+ * the chat shows notes its token, as a digest, against that path in this browser, so the paid
+ * checkout can link back here (`payChats.ts`).
+ */
+export function usePaymentLinks(
+  rows: readonly ChatRow[],
+  memory: PaymentLinkMemory,
+  composer?: RefObject<HTMLElement | null>,
+  chatPath?: string,
+): (block: RenderedBlock) => RenderedBlock {
   const cards = useMemo(() => rows.flatMap(({ item }) => item.kind === 'message'
     ? item.ev.blocks.filter((block): block is CardBlock => block.kind === 'card') : []), [rows]);
+  // Each link once while the chat is mounted, oldest card first, so the newest card is the newest entry.
+  const recorded = useRef(new Set<string>());
+  useEffect(() => {
+    if (chatPath === undefined) return;
+    for (const token of cards.flatMap((card) => tokenOf(card) ?? [])) {
+      if (recorded.current.has(token)) continue;
+      recorded.current.add(token);
+      recordPayChat(token, chatPath);
+    }
+  }, [cards, chatPath]);
   const cancellations = cards.filter((card) => card.template === 'link_cancelled');
   const refreshIds = rows.flatMap(({ item }) => item.kind === 'message' && item.ev.blocks.some(
     (block) => block.template === 'payment_confirmed' || block.template === 'link_cancelled',

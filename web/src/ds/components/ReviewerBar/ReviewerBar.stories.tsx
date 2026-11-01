@@ -59,7 +59,7 @@ export const ReviewerBarSkeleton: Story = {
         <ReviewerBar {...args} />
       </div>
       <div data-shaped-bar aria-hidden="true">
-        <ReviewerShapes />
+        <ReviewerShapes ownerName={args.ownerName} />
       </div>
     </div>
   ),

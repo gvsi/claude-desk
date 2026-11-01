@@ -29,6 +29,8 @@ from desk.api.prompts import (
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
     Choice,
+    Autonomy,
+    Cents,
     ProposalCard,
     PlannedOutcome,
     DemoTask,
@@ -634,6 +636,38 @@ class SetupAnswerIn(BaseModel):
         return self
 
 
+class SetupProposalIn(BaseModel):
+    """The owner's decision on a setup proposal, with optional changes when accepting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60,
+                                            pattern=r"^[^\n\r]*$")] | None = None
+    amount_cents: Cents | None = None
+    autonomy: Autonomy | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def one_line_title(cls, value: object) -> object:
+        if isinstance(value, str) and ("\n" in value or "\r" in value):
+            raise ValueError("proposal title must be one line")
+        return value
+
+    @model_validator(mode="after")
+    def accepting_changes(self) -> "SetupProposalIn":
+        changes = self.model_fields_set - {"accept"}
+        if changes and (not self.accept or any(getattr(self, name) is None for name in changes)):
+            raise ValueError("proposal changes require accepting and a value")
+        return self
+
+
+class SetupSuggestionsIn(BaseModel):
+    """Finish setup questions with the current suggestions; no additional answers are supplied."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
     owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
@@ -643,6 +677,61 @@ class SetupMessage(BaseModel):
     text: str
     choices: list[Choice] = []
     card: ProposalCard | None = None
+
+
+class SetupPublicLine(BaseModel):
+    """A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+    public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+    off the charter until the owner rewords it."""
+
+    key: str
+    text: str
+    source: Literal["owner", "suggested"]
+    editable: bool
+    held: bool
+
+
+class SetupPublicHours(BaseModel):
+    source: Literal["owner", "suggested"]
+    windows: list[HoursWindow]
+
+
+class SetupPublicPriceItem(BaseModel):
+    item_id: str
+    title: str
+    unit_cents: int
+
+
+class SetupPublicPrices(BaseModel):
+    source: Literal["owner", "suggested"]
+    items: list[SetupPublicPriceItem]
+
+
+class SetupPublicLines(BaseModel):
+    revision: str
+    lines: list[SetupPublicLine]
+    hours: SetupPublicHours | None
+    prices: SetupPublicPrices | None
+
+
+class SetupPublicLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+
+
+class SetupPublicLineError(BaseModel):
+    error: Literal["line_refused", "not_editable", "not_suggested"]
+    key: str | None = None
+    reason: list[str] | None = None
+
+
+class SetupPublicLinesConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keys: Annotated[list[str], Field(min_length=1)]
+    revision: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class SetupState(BaseModel):
@@ -660,6 +749,9 @@ class SetupState(BaseModel):
     question: QuestionKey | None
     pending_card: str | None = None
     busy: bool = False
+    held_policy_keys: list[str] = Field(description="Charter claim keys, such as a policy line or the public contact, "
+                                       "withheld by the kernel's public-text checks; empty when nothing was held at "
+                                       "the latest charter write.")
     messages: list[SetupMessage]
 
 

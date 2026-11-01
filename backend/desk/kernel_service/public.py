@@ -21,12 +21,20 @@ so a Desk without hours claims neither open nor closed, and None, logged as `ope
 with nothing of the Desk's, when computing it fails or it can't name its boundary: the rest of the
 page is still served.
 
+`starters` are the seed's three questions in the requested language, from separate text claims
+`starter:<n>:<lang>`. They are trimmed, limited to 80 characters and checked for canaries, never
+rendered as charter cards. A failed read logs only the error's type and serves an empty list.
+
 The header's names and brand colors are the owner's words as typed, which owner writes check for
 document canaries (`desks.refuse_public_canaries`), as they check the slug a new Desk's address is
 made from. One stored before that check and holding a canary of the copy's documents, even split
 or disguised (`labels.canary_fields`), is withheld: the page shows the field's fallback (an empty
 name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
 defaults, at most once an hour per Desk.
+
+A stored policy line that fails the public-text scan is withheld individually. The remaining
+policies are rescanned in display order after each removal. The owner isn't alerted (the owner's
+decision of 2026-11-01): the line is simply left out.
 
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
 Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
@@ -44,6 +52,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 from sqlalchemy import select
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as DemoInboxRow
@@ -130,6 +139,37 @@ def _open_status(facts: list[Fact], info: DeskInfo, now: datetime, lang: render.
         return None
 
 
+def starters(rows: Sequence[FactRow], canaries: Mapping[str, str], now: datetime,
+             lang: render.Language) -> list[str]:
+    """Up to three seed-only questions in `lang`, kept separate from charter cards and prose."""
+    by_id = {row.fact_id: row for row in rows}
+    questions = []
+    for n in (1, 2, 3):
+        key = f"{desks.STARTER_KEY_PREFIX}{n}:{lang}"
+        row = by_id.get(f"{desks.STARTER_FACT_PREFIX}{n}:{lang}")
+        if row is None or not labels.can_read(row.readers, PUBLIC):
+            continue
+        fact = labels.fact_of(row)
+        if fact.status != "available" or (fact.expires_at is not None and fact.expires_at <= now):
+            continue
+        claim = next((claim for claim in fact.claims if claim.key == key and claim.kind == "text"), None)
+        if claim is not None:
+            text = claim.value.strip()
+            if 0 < len(text) <= 80 and not labels.find_canaries_in([text], canaries):
+                questions.append(text)
+    return questions
+
+
+def _starters(rows: Sequence[FactRow], canaries: Mapping[str, str], now: datetime,
+              lang: render.Language) -> list[str]:
+    """A failed starter read leaves the public page intact; log only the error's type."""
+    try:
+        return starters(rows, canaries, now, lang)
+    except Exception as error:
+        log.warning("starters_failed error=%s", type(error).__name__)
+        return []
+
+
 async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> PublicDesk:
     """The Desk `slug` names, as anyone may read it, its charter cards in `lang`."""
     copy_id = await repo.copy_of_desk_slug(ctx, slug) if SLUG.fullmatch(slug) else None
@@ -140,9 +180,11 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
         Business, Business.business_id == Desk.business_id).where(Desk.slug == slug)))).one()
     if desk.deleted_at is not None:
         raise KernelFailure(404, "not_found", "deleted_desk")
-    rows = await ctx.db.scalars(copy.scoped(select(FactRow).where(
-        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
-    facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
+    # Match the policy write scan's order regardless of the database's default collation.
+    rows = list(await ctx.db.scalars(copy.scoped(select(FactRow).where(
+        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id.collate("C")))))
+    facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)
+             and not desks.is_starter_fact(row.fact_id)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
     if withheld:
@@ -159,8 +201,19 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                 block = render.render_clause(Clause(template=name, fact_id=fact.fact_id), fact, lang, info)
             except render.NothingToShow:
                 continue
+            if name == "contact" and not valid_public_contact(block.text):
+                continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)
+    # Scan only the policies that survived visibility, currentness and canary filtering,
+    # in the order the visitor receives them. Remove only contributing lines, then rescan:
+    # removing one line can bring formerly separated promise fragments together.
+    # Remove individual failures first, so their language evidence cannot withhold honest neighbors.
+    # The owner isn't alerted (the owner's decision of 2026-11-01).
+    failing = {fact_id for block in charter for fact_id in reply_check.policy_card_rules("", [block])}
+    charter = [block for block in charter if block.fact_id not in failing]
+    while refused := reply_check.policy_card_rules("", charter):
+        charter = [block for block in charter if block.fact_id not in refused]
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS
@@ -168,7 +221,7 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                              slug=desk.slug, tools=tools)
     return PublicDesk(**header, charter=charter,
                       agent_card=[block for block in card if not reply_check.carries(block, canaries)],
-                      open_status=_open_status(facts, info, now, lang))
+                      open_status=_open_status(facts, info, now, lang), starters=_starters(rows, canaries, now, lang))
 
 
 router = APIRouter()
