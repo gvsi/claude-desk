@@ -2547,8 +2547,8 @@ async def test_suggested_facts_never_become_owner_rule_answers(model):
 
 @pytest.mark.parametrize("suggested", [True, False])
 async def test_rule_fallback_uses_only_owner_hours(proposals, model, engine, fake, suggested):
-    from desk.api.prompts import DraftedSituations
-    from tests.api.test_setup_rules import SITUATIONS, settled, structured, unparseable
+    from desk.api.prompts import DraftedSituations, SituationDraft
+    from tests.api.test_setup_rules import settled, structured, unparseable
 
     owner, state, ids = proposals
     interview_id = state["interview_id"]
@@ -2579,7 +2579,11 @@ async def test_rule_fallback_uses_only_owner_hours(proposals, model, engine, fak
     assert booking["hours"] == (None if suggested else {
         "days": ["mon"], "start": "00:00:00", "end": "23:59:00"})
     assert fake.called("POST /policy/draft")
-    model.add(structured(DraftedSituations(situations=SITUATIONS)))
+    # This Desk has no price list, so its situations need no price and use a tool every caller is given.
+    leads = [SituationDraft(title="A client leaves contact details", who=who, tool="native.capture_lead",
+                            own_record=False, expected="allow")
+             for who in ("public", "verified", "after_hours", "public", "agent", "verified")]
+    model.add(structured(DraftedSituations(situations=leads)))
     situations = await settled(owner, f"/api/owner/policy/setup/{interview_id}/situations")
     assert situations.status_code == 200, situations.text
     for request in model.requests:
