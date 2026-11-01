@@ -608,6 +608,7 @@ README_SECTIONS = [
     "Try it",
     "Things to try",
     "What's real, mocked and unfinished",
+    "What we left out on purpose",
     "Security model",
     "Evidence",
     "Run it locally",
