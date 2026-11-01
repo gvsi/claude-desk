@@ -103,6 +103,7 @@ running nothing. The confirm activates the draft with Answering still off, and g
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import logging
@@ -232,6 +233,11 @@ from desk.api.schemas import (
     SafetyRow,
     SetupMessage,
     SetupProposalIn,
+    SetupPublicHours,
+    SetupPublicLine,
+    SetupPublicLineError,
+    SetupPublicLines,
+    SetupPublicPrices,
     SetupStartIn,
     SetupState,
     SetupStep,
@@ -2640,6 +2646,295 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
+PUBLIC_LINE_KEYS = {
+    "summary": "policy:about",
+    "public_contact": "contact",
+    "pricing": "policy:pricing",
+    "intake": "policy:intake",
+    "after_hours": "policy:after_hours",
+    "urgent": "policy:urgent",
+    "service_area": "policy:service_area",
+    "how_we_help": "policy:how_we_help",
+}
+PUBLIC_PARTS_REPAIR_TIMEOUT_S = DEFAULT_TIMEOUT_S
+
+
+class PublicLineProblem(Exception):
+    def __init__(self, error: Literal["line_refused", "not_editable", "not_suggested"], *, key: str | None = None,
+                 reason: list[str] | None = None):
+        super().__init__(error)
+        self.answer = SetupPublicLineError(error=error, key=key, reason=reason)
+
+
+def _public_refusal_detail(failure: KernelFailed) -> dict[str, list[str]]:
+    detail = failure.detail or {}
+    if not isinstance(detail, dict) or any(
+        not isinstance(key, str) or not isinstance(reasons, list)
+        or any(not isinstance(code, str) for code in reasons)
+        for key, reasons in detail.items()
+    ):
+        return {}
+    return detail
+
+
+def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> PublicLineProblem:
+    # Only known claim keys and machine reason codes leave this boundary; never claim text.
+    detail = _public_refusal_detail(failure)
+    if "charter" not in detail:
+        keys = list(PUBLIC_LINE_KEYS.values())
+        if edited_key in keys:
+            keys = [edited_key, *[key for key in keys if key != edited_key]]
+        for key in keys:
+            if key in detail:
+                reasons = [code for code in detail[key] if re.fullmatch(r"[a-z][a-z0-9_.]{0,79}", code)]
+                return PublicLineProblem("line_refused", key=key, reason=reasons)
+    return PublicLineProblem("line_refused")
+
+
+def _public_lines(interview: Interview) -> SetupPublicLines:
+    """The board's projection of the stored answers. A line the kernel held at the latest charter write, the
+    contact included, keeps its stored words and source, marked `held`; the revision covers that mark too."""
+    answers, held = interview.answers, set(interview.held_policy_keys)
+    public = SetupPublicLines(revision="", lines=[
+        SetupPublicLine(key=key, text=value.strip(),
+                        source="suggested" if field in answers.suggested_fields else "owner",
+                        editable=field != "how_we_help", held=key in held)
+        for field, key in PUBLIC_LINE_KEYS.items() if (value := getattr(answers, field)) and value.strip()
+    ], hours=SetupPublicHours(source="suggested" if "hours" in answers.suggested_fields else "owner",
+                             windows=answers.hours) if answers.hours else None,
+       prices=SetupPublicPrices(source="suggested" if "price_items" in answers.suggested_fields else "owner",
+                                items=[item.model_dump() for item in price_items(answers.price_items)])
+       if answers.price_items else None)
+    canonical = json.dumps(public.model_dump(mode="json", exclude={"revision"}), sort_keys=True,
+                           separators=(",", ":"))
+    public.revision = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return public
+
+
+async def _public_lines_interview(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Interview:
+    interview = await _read(engine, owner, interview_id)
+    if interview.step not in ("rules", "situations") or interview.busy:
+        raise ApiProblem(409, "conflict")
+    return interview
+
+
+async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)  # ownership before exposing the process's turn guard
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        return _public_lines(interview)
+
+
+async def _put_public_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts, held: list[str], *,
+                           selected: frozenset[str], sent: set[str] | None = None,
+                           edited_key: str | None = None) -> None:
+    """Writes the `selected` parts of `parts` (`seed_parts`, which holds back every suggested field). The charter
+    leaves out the `held` keys (`held_policy_keys`), so a line the kernel held never blocks another write, and is
+    written strictly (`_put_charter` without `drop_refused`): an owner's edit is never dropped to save the rest."""
+    charter = [claim for claim in parts.charter if claim.key not in held]
+    for attempt in range(2) if "charter" in selected else ():
+        try:
+            if sent is not None:
+                sent.add("charter")
+            await _put_charter(owner, desk_id, charter, drop_refused=False)
+            break
+        except KernelFailed as failure:
+            if failure.status != 422:
+                raise
+            if sent is not None:
+                sent.discard("charter")  # A definite refusal has applied nothing, including on the retry.
+            refused = _line_refused(failure, edited_key)
+            logger.warning("setup public parts refused (key=%s)", refused.answer.key)
+            if attempt == 0 and set(_public_refusal_detail(failure)) == {"policy:how_we_help"}:
+                # This claim is code-owned; editable lines must always be corrected by the owner.
+                charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
+                continue
+            raise refused from None
+    path = {"id": desk_id}
+    writes = []
+    if "hours" in selected:
+        writes.append(("hours", "hours", DeskHoursRequest(hours=parts.hours)))
+    if "calendar" in selected:
+        writes.append(("calendar", "hours", DeskCalendarRequest(calendar_slots=parts.calendar)))
+    if "prices" in selected:
+        writes.append(("prices", "prices", DeskPricesRequest(price_items=parts.prices)))
+    for part, key, body in writes:
+        try:
+            if sent is not None:
+                sent.add(part)
+            await owner.kernel.call(f"PUT /desks/{{id}}/{part}", body, path=path)
+        except KernelFailed as failure:
+            if failure.status != 422:
+                raise
+            logger.warning("setup public parts refused (key=%s)", key)
+            raise PublicLineProblem("line_refused", key=key) from None
+
+
+async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
+                          now: datetime, *, setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        fields = {key: field for field, key in PUBLIC_LINE_KEYS.items()}
+        if key not in fields:
+            raise ApiProblem(422, "invalid")
+        field = fields[key]
+        if field == "how_we_help":
+            raise PublicLineProblem("not_editable", key=key)
+        try:
+            interview.answers = SetupAnswers.model_validate({
+                **interview.answers.model_dump(), field: text.strip(),
+                "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
+            })
+        except ValidationError:
+            raise ApiProblem(422, "invalid") from None
+        # A rewording clears its hold only when it is published in its place (or nothing is saved): with policies
+        # switched off, a policy line is never sent, so the kernel hasn't checked it and it stays held.
+        if key in interview.held_policy_keys and (key == "contact" or setup_policy_claims_enabled):
+            interview.hold_policies([held for held in interview.held_policy_keys if held != key])
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
+
+
+async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str,
+                            now: datetime, *, setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        fields = {key: field for field, key in PUBLIC_LINE_KEYS.items()} | {"hours": "hours", "prices": "price_items"}
+        if key not in fields:
+            raise ApiProblem(422, "invalid")
+        field = fields[key]
+        if field == "how_we_help":
+            raise PublicLineProblem("not_editable", key=key)
+        if field not in interview.answers.suggested_fields:
+            raise PublicLineProblem("not_suggested", key=key)
+        interview.answers = interview.answers.model_copy(update={
+            field: [] if field in ("hours", "price_items") else "",
+            "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
+                                          republish=frozenset({key}) if key in ("hours", "prices") else frozenset(),
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
+
+
+async def delete_public_price(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, item_id: str,
+                              now: datetime, *, title: str, unit_cents: int,
+                              setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        items = price_items(interview.answers.price_items)
+        item = next((item for item in items if item.item_id == item_id), None)
+        if item is None or item.title != title or item.unit_cents != unit_cents:
+            raise ApiProblem(409, "conflict")
+        if "price_items" not in interview.answers.suggested_fields:
+            raise PublicLineProblem("not_suggested", key="prices")
+        remaining = [price for price, item in zip(interview.answers.price_items, items) if item.item_id != item_id]
+        interview.answers = interview.answers.model_copy(update={
+            "price_items": remaining,
+            "suggested_fields": [field for field in interview.answers.suggested_fields
+                                 if field != "price_items" or remaining],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now, key="prices",
+                                          republish=frozenset({"prices"}),
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
+
+
+async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
+                               now: datetime, *, key: str | None = None, republish: frozenset[str] = frozenset(),
+                               setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    timezone = (await _business(owner, interview.desk_id))["timezone"]
+    today = now.astimezone(ZoneInfo(timezone)).date()
+
+    def published(answers: SetupAnswers) -> SeedParts:
+        return seed_parts(answers, timezone, business_type=interview.business_type, today=today,
+                          publish_policies=setup_policy_claims_enabled)
+
+    before, after = published(SetupAnswers.model_validate(seen["answers"])), published(interview.answers)
+    changed = frozenset(part for part in ("hours", "prices") if getattr(before, part) != getattr(after, part))
+    selected = frozenset({"charter"} | republish
+                         | ({"hours", "calendar"} if "hours" in changed or "hours" in republish else set())
+                         | ({"prices"} if "prices" in changed else set()))
+    sent: set[str] = set()
+
+    async def repair() -> None:
+        try:
+            async with asyncio.timeout(PUBLIC_PARTS_REPAIR_TIMEOUT_S * (1 + len(sent))):
+                stored = await _read(engine, owner, interview.interview_id)
+                await _put_public_parts(owner, stored.desk_id, published(stored.answers), stored.held_policy_keys,
+                                        selected=frozenset(sent), edited_key=key)
+        except Exception as restore_failed:
+            logger.error("setup public parts restore failed (%s, key=%s)", type(restore_failed).__name__, key)
+        else:
+            logger.warning("setup public parts restored from stored answers (key=%s)", key)
+
+    async def settle() -> SetupPublicLines:
+        try:
+            await _put_public_parts(owner, interview.desk_id, after, interview.held_policy_keys, selected=selected,
+                                    sent=sent, edited_key=key)
+        except Exception:
+            if sent:
+                await repair()
+            raise
+        try:
+            await _commit(engine, owner, interview, seen)
+        except Exception as failed:
+            logger.warning("setup public lines save failed (%s)", type(failed).__name__)
+            await repair()
+            raise ApiProblem(409, "conflict") from None
+        return _public_lines(interview)
+
+    task = asyncio.create_task(settle())
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Keep the caller's _turn and owner context open until publication, save and repair settle.
+        # Repeated disconnect/shutdown cancellation must not release either resource early.
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()  # consume a settlement failure even when the request can no longer answer
+        raise
+
+
+async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, now: datetime, *,
+                                keys: list[str], revision: str,
+                                setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        public = _public_lines(interview)
+        listed = {line.key for line in public.lines}
+        listed.update(key for key in ("hours", "prices") if getattr(public, key) is not None)
+        if not keys or not revision.strip():
+            raise ApiProblem(422, "invalid")
+        if revision != public.revision:                 # a stale view first: a key it named may have gone since
+            raise ApiProblem(409, "conflict")
+        if not set(keys) <= listed:
+            raise ApiProblem(422, "invalid")
+        if held := [line.key for line in public.lines if line.key in keys and line.key in interview.held_policy_keys]:
+            raise PublicLineProblem("line_refused", key=held[0])   # only a rewording can publish a held line
+        confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in keys}
+        confirmed.update(field for key, field in (("hours", "hours"), ("prices", "price_items")) if key in keys)
+        republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))
+                              if field in confirmed and field in interview.answers.suggested_fields)
+        interview.answers = interview.answers.model_copy(update={
+            "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now, republish=republish,
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
+
+
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
                publish_policies: bool = True) -> SeedParts:
     """The Desk's parts from the answers: the public charter (the contact and the business's policies, or the
@@ -2664,7 +2959,8 @@ CHARTER_CAPS = frozenset({"policy_count_limit", "policy_text_limit"})
 POLICY_RETRIES = 2
 
 
-async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim], *,
+                       drop_refused: bool = True) -> list[str]:
     """Writes the charter, holding back what the kernel's public-text checks refuse, and returns the held keys in
     the order they were dropped once a write succeeds.
 
@@ -2676,6 +2972,9 @@ async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> l
     whatever other keys (such as the contact) come with it. That is at most four writes when the contact is refused
     on its own and three otherwise. A refusal with nothing left to drop, a third, or any other failure propagates.
     Each drop is logged by key and rule ids, never text.
+
+    Without `drop_refused` (the owner's own edit of a public line) the write is strict: the first refusal propagates
+    and nothing is dropped or sent again, so the owner hears what the kernel refused and recorded.
     """
     held: list[str] = []
     policy_refusals = 0
@@ -2685,7 +2984,7 @@ async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> l
                                     path={"id": desk_id})
             return held
         except KernelFailed as refused:
-            if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+            if not drop_refused or refused.status != 422 or refused.code != "invalid" or not refused.detail:
                 raise
             named = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
             capped = not CHARTER_CAPS.isdisjoint(refused.detail.get("charter", ()))

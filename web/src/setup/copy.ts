@@ -130,6 +130,9 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
 /** The steps, as the bar lists them. */
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;
 
+/** The public About panel's charter claims, in setup's signed order. Labels come from cardChrome. */
+export { SETUP_PUBLIC_LINE_KEYS as PUBLIC_LINE_KEYS } from '../api/views.ts';
+
 /** Where each interview step sits in the bar. */
 export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
   questions: 0,
@@ -249,6 +252,20 @@ export const SETUP_COPY = {
     conflictSubtitle: 'Confirming your rules.',
     back: 'Back',
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
+  },
+
+  publicLines: {
+    suggestedTitle: 'Suggested by Claude, please check',
+    suggestedIntro: 'Claude found these in your memory and online. Customers see them only once you choose “Looks right”.',
+    remove: 'Remove',
+    hours: 'Hours',
+    prices: 'Price list',
+    title: 'What customers will read',
+    subtitle: 'Your Desk answers customers from these. Check them before the safety check.',
+    edit: 'Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    refused: "This line can't state a price, a time or a promise. Prices come from your price list, and times from your opening hours.",
   },
 
   live: {
