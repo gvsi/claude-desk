@@ -555,6 +555,8 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
     block = script[script.index('# Every lane on a laptop shares one SSH connection'):script.index('# This server holds only disposable test data')]
     assert int(re.search(r'MaxSessions (\d+)', block).group(1)) >= 256
+    # On a fresh machine no connection has started ssh.service yet, so the check's runtime directory may be missing.
+    assert block.index('install -d -o root -g root -m 0755 /run/sshd') < block.index('sshd -t')
     (tmp_path / 'bin').mkdir()
     log = tmp_path / 'services'
     for tool in ('systemctl', 'sshd'):
@@ -563,6 +565,7 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     config = tmp_path / 'sshd_config.d'
     config.mkdir()
     commands = block.replace('/etc/ssh/sshd_config.d', str(config)).replace('/tmp/desk-testbox-sshd.conf', str(tmp_path / 'desired.conf'))
+    commands = commands.replace('install -d -o root -g root -m 0755 /run/sshd', 'mkdir -p ' + str(tmp_path / 'run-sshd'))
     env = {**os.environ, 'PATH': str(tmp_path / 'bin') + ':' + os.environ['PATH']}
     for _ in range(2):
         subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)

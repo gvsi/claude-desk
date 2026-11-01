@@ -26,6 +26,8 @@ MaxStartups 200:30:400
 SSHD
 if ! cmp -s /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf; then
   install -m 644 /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf
+  # The check needs sshd's runtime directory, which only a started ssh.service creates (it starts on first connection).
+  install -d -o root -g root -m 0755 /run/sshd
   sshd -t
   systemctl try-reload-or-restart ssh.service
 fi
