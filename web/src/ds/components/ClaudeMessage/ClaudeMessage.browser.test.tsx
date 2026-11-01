@@ -264,3 +264,24 @@ it('where_the_browser_cant_list_animations_a_revealed_message_settles_at_once', 
   expect(message.getAttribute('aria-busy')).toBeNull();
   expect(arrivals(message).map((card) => card.visibility)).toEqual(['visible', 'visible']);
 });
+
+it('a_revealed_reply_s_link_stays_inert_in_every_frame', async () => {
+  await motion();
+  vi.useFakeTimers();
+  const text = 'Maria keeps her hours up to date. You can see them on [our website](https://riveraplumbing.example/hours), with the holidays too.';
+  const message = mount(<ClaudeMessage blocks={[proseBlock(text)]} language="en" ownerName={OWNER} reveal />);
+  // Every frame of the reveal: nothing to click and no link marks, only words.
+  const frames = [words(message)[0] ?? ''];
+  expect(message.querySelectorAll('a')).toHaveLength(0);
+  for (let elapsed = 0; elapsed < 900; elapsed += 50) {
+    await pass(50);
+    expect(message.querySelectorAll('a'), `at ${elapsed + 50} ms`).toHaveLength(0);
+    frames.push(words(message)[0] ?? '');
+  }
+  for (const frame of frames) expect(frame).not.toMatch(/\[|\]\(/);
+  expect(frames.length).toBeGreaterThan(5);
+  // Whole, the link shows its text, then its address as written.
+  expect(frames.at(-1)).toBe(
+    'Maria keeps her hours up to date. You can see them on our website (https://riveraplumbing.example/hours), with the holidays too.',
+  );
+});
