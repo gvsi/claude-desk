@@ -84,6 +84,8 @@ export const ROUTE_MODELS = {
   setup: 'SetupState',
   setupConsent: 'SetupState',
   setupAnswer: 'SetupState',
+  setupProposal: 'SetupState',
+  setupSuggestions: 'SetupState',
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
 
@@ -129,9 +131,6 @@ export const NEVER_CALLED = [
   'POST /api/a2a/{slug}',
   // A new Desk goes through setup (`startSetup`).
   'POST /api/owner/desks',
-  // Called by plan 09's setup web (D2), which adds these routes.
-  'POST /api/owner/setup/{id}/proposals/{proposal_id}',
-  'POST /api/owner/setup/{id}/suggestions',
   // Settings is read-only by the owner's ruling, and no plan 04 task edits these parts.
   'PUT /api/owner/desks/{desk_id}/people',
   'PUT /api/owner/desks/{desk_id}/business',
