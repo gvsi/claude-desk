@@ -62,8 +62,8 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
         {connected || proposal.state === 'declined' ? <DecisionLine accepted={connected} connector /> : null}
       </div>
       {connector.connectable && live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
-        <Button variant="primary" disabled={disabled} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.connect}</Button>
-        <Button variant="ghost" disabled={disabled} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
+        <Button variant="primary" waiting={disabled && busyAction !== 'accept'} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.connect}</Button>
+        <Button variant="ghost" waiting={disabled && busyAction !== 'decline'} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
       </div> : null}
     </div>
   </Card>;
@@ -118,8 +118,10 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
         <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} {...(error ? { error } : {})} />
       </div> : null}
       {live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
-        <Button variant="primary" disabled={disabled || (payment && !amount.trim())} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>
-        <Button variant="ghost" disabled={disabled} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
+        {payment && !amount.trim()
+          ? <Button variant="primary" disabled onClick={() => decide('accept')}>{copy.setItUp}</Button>
+          : <Button variant="primary" waiting={disabled && busyAction !== 'accept'} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>}
+        <Button variant="ghost" waiting={disabled && busyAction !== 'decline'} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
       </div> : null}
     </div>
   </Card>;

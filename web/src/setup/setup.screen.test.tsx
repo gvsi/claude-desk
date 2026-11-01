@@ -3480,7 +3480,7 @@ describe('consultant setup', () => {
     expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
   });
 
-  it.each(['answer', 'suggestions'] as const)('disables_cards_choices_and_the_dock_during_an_%s_turn', async (action) => {
+  it.each(['answer', 'suggestions'] as const)('keeps_cards_and_the_dock_waiting_during_an_%s_turn', async (action) => {
     const state = await consultantAt('intake');
     const id = state.interview_id;
     let release: () => void;
@@ -3500,9 +3500,14 @@ describe('consultant setup', () => {
     else await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     await expect.element(box).toBeDisabled();
-    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true })).toBeDisabled();
+    const setup = screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(setup).not.toHaveAttribute('disabled');
     expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
-    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeDisabled();
+    const suggestions = screen.getByRole('button', { name: 'Use your suggestions', exact: true });
+    await expect.element(suggestions).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(suggestions).not.toHaveAttribute('disabled');
+    if (action === 'suggestions') await expect.element(suggestions).toHaveAttribute('aria-busy', 'true');
     if (action === 'answer') await expect.poll(() => requests(key).length).toBe(mark + 1);
     release();
     if (action === 'answer') await expect.element(screen.getByRole('article', { name: 'Stripe' }).getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
@@ -3668,28 +3673,53 @@ describe('consultant setup', () => {
     expect((current.body as SetupState).messages.some(({ role, text }) => role === 'owner' && text === 'Keep these words for my next answer.')).toBe(false);
   });
 
-  it('a_202_decision_keeps_the_pressed_button_busy_and_polls_the_next_card', async () => {
-    const state = await consultantAt('schedule');
+  it.each([
+    ['schedule', 'Book a free intro call', 'Set it up', 'Ask new clients three questions'],
+    ['google_calendar', 'Google Calendar', 'Connect', 'Book a free intro call'],
+    ['payment', 'Send a retainer link', 'Set it up', 'Answer “Where’s my return?”'],
+  ] as const)('a_202_%s_decision_keeps_the_pressed_button_busy_and_its_neighbors_waiting', async (kind, title, action, next) => {
+    const state = await consultantAt(kind);
     const release = holdNextDecision(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    const card = screen.getByRole('article', { name: 'Book a free intro call' });
-    const accept = card.getByRole('button', { name: 'Set it up', exact: true });
+    const card = screen.getByRole('article', { name: title, exact: true });
+    const accept = card.getByRole('button', { name: action, exact: true });
+    if (kind === 'payment') {
+      await expect.element(accept).toBeDisabled();
+      await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
+    }
+    const decline = card.getByRole('button', { name: 'Not now', exact: true });
+    const suggestions = screen.getByRole('button', { name: 'Use your suggestions', exact: true });
     const reads = requests('setup').length;
     const posts = requests('setupProposal').length;
+    const suggested = requests('setupSuggestions').length;
     await accept.click();
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     await expect.element(accept).toHaveAttribute('aria-busy', 'true');
-    await expect.element(card.getByRole('button', { name: 'Not now', exact: true })).toBeDisabled();
+    await expect.element(accept).not.toHaveAttribute('disabled');
+    await expect.element(accept).toHaveFocus();
+    await expect.element(decline).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(decline).not.toHaveAttribute('disabled');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
-    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeDisabled();
+    await expect.element(suggestions).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(suggestions).not.toHaveAttribute('disabled');
+    if (kind !== 'schedule') {
+      await userEvent.keyboard('{Tab}');
+      await expect.element(decline).toHaveFocus();
+      await userEvent.keyboard('{Enter} ');
+      await userEvent.keyboard('{Tab}');
+      await expect.element(suggestions).toHaveFocus();
+      await userEvent.keyboard('{Enter} ');
+    }
+    expect(requests('setupSuggestions')).toHaveLength(suggested);
     expect(screen.getByText('Putting together what I’d have your Desk do. This can take a minute or so.', { exact: true }).elements()).toHaveLength(0);
     await expect.poll(() => requests('setupProposal').length).toBe(posts + 1);
     release();
-    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('article', { name: next, exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toBeVisible();
     expect(requests('setup').length).toBeGreaterThan(reads);
     await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
-    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions', exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toHaveFocus();
+    if (kind === 'schedule') await expect.element(screen.getByRole('article', { name: next, exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toHaveFocus();
+    else await expect.element(suggestions).toHaveFocus();
   });
 
   it('suggestions_finish_a_pending_card_show_read_only_leftovers_and_wait_for_continue', async () => {
