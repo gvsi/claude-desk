@@ -5,13 +5,13 @@ NULL; only the Rivera seed falls back to its fixture. No kernel_ro view or colum
 ALTER TABLE runs as the table's admin owner without SUPERUSER or BYPASSRLS.
 
 Revision ID: desk_simulated_memory
-Revises: kernel_ro_knowledge_created_at
+Revises: 0013_decision_owner_plain
 """
 
 from alembic import op
 
 revision = "desk_simulated_memory"
-down_revision = "kernel_ro_knowledge_created_at"
+down_revision = "0013_decision_owner_plain"
 branch_labels = None
 depends_on = None
 
