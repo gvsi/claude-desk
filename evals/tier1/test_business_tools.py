@@ -32,6 +32,12 @@ async def put_intake(k: KernelHarness, desk: GoldenDesk, tool: dict) -> None:
 @pytest.mark.requires("01c-setup")
 async def test_business_card_titles_refuse_prices_dates_and_unaccepted_promises(k: KernelHarness, records):
     desk = await golden_desk(k)
+
+    async def business_rows() -> list[dict]:
+        return sorted((row for row in await records.tools(desk.copy.copy_id) if row['source'] == 'business'),
+                      key=lambda row: (row['desk_id'], row['tool']))
+
+    before = await business_rows() if k.is_real else None     # the seed's urgent tool, as it was written
     for title in ('Pay $twenty', 'twenty dollars', '20 percent', 'Guaranteed help',
                   'Half-price check', 'Tuesday 5pm drop-in', 'Reply within 24 hours',
                   'We will call you back today'):
@@ -39,7 +45,8 @@ async def test_business_card_titles_refuse_prices_dates_and_unaccepted_promises(
                      body={'tools': [{**intake(), 'title': title}]}, auth=desk.owner,
                      expect=Expect(status=422, fields={'code': 'invalid'}))
     if k.is_real:
-        assert not [row for row in await records.tools(desk.copy.copy_id) if row['tool'] == TOOL]
+        assert await business_rows() == before, "a refused business tools batch changed the Desk's business rows"
+        assert not [row for row in before if row['tool'] == TOOL]
     await put_intake(k, desk, {**intake(), 'title': 'Book a free intro consult'})
 
 
