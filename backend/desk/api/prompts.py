@@ -1336,6 +1336,9 @@ SETUP_POLICY_CLAIMS = {
 }
 
 SetupPolicyField = Literal[*SETUP_POLICY_CLAIMS]
+# The facts a suggestion can fill besides the policies: held off the Desk until the owner confirms them.
+SuggestedFactField = Literal["hours", "public_contact", "price_items"]
+SUGGESTED_FIELD_NAMES = (*SETUP_POLICY_CLAIMS, "hours", "public_contact", "price_items")
 
 
 class SetupAnswers(BaseModel):
@@ -1363,9 +1366,10 @@ class SetupAnswers(BaseModel):
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
     # Written by code when setup fills from suggestions, never by a model turn or patch.
-    suggested_fields: list[SetupPolicyField] = Field(
-        default_factory=list, max_length=len(SETUP_POLICY_CLAIMS),
-        description="Unconfirmed policy suggestions only; hours, contact and prices are not gated by this list.")
+    suggested_fields: list[SetupPolicyField | SuggestedFactField] = Field(
+        default_factory=list, max_length=len(SUGGESTED_FIELD_NAMES),
+        description="Fields whose values came from Claude's homework, not the owner; "
+                    "held from every kernel write until the owner confirms them.")
 
 
 # Setup's rules (Plan 02b, Task 7) --------------------------------------------------------------------------------

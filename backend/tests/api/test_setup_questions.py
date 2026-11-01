@@ -1721,14 +1721,17 @@ def test_suggested_fields_are_stored_only_by_code():
     assert all("suggested_fields" not in output.model_fields for output in SETUP_TURNS.values())
     assert "suggested_fields" not in SetupStart.model_fields
     schema = SetupAnswers.model_json_schema()["properties"]["suggested_fields"]
-    assert set(schema["items"]["enum"]) == set(desk_setup.SETUP_POLICY_CLAIMS)
-    assert schema["maxItems"] == len(desk_setup.SETUP_POLICY_CLAIMS)
-    assert "hours, contact and prices" in schema["description"]
-    for name in ("hours", "public_contact", "price_items", "unknown"):
+    names = {*desk_setup.SETUP_POLICY_CLAIMS, "hours", "public_contact", "price_items"}
+    assert set(schema["items"]["anyOf"][0]["enum"]) | set(schema["items"]["anyOf"][1]["enum"]) == names
+    assert schema["maxItems"] == len(names)
+    assert "held from every kernel write until the owner confirms them" in schema["description"]
+    assert SetupAnswers(summary="Tax advice.", suggested_fields=["hours", "public_contact", "price_items"]
+                        ).suggested_fields == ["hours", "public_contact", "price_items"]
+    for name in ("unknown", "quote_auto_max_cents", "auto_money_cap_cents"):
         with pytest.raises(ValidationError):
             SetupAnswers(summary="Tax advice.", suggested_fields=[name])
     with pytest.raises(ValidationError):
-        SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(desk_setup.SETUP_POLICY_CLAIMS) + 1))
+        SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(names) + 1))
 
 
 def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
