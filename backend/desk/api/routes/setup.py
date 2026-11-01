@@ -241,8 +241,9 @@ async def setup_put_public_line(interview_id: InterviewId, body: SetupPublicLine
     422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.
     `policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409."""
     state = runtime(request).started()
-    return await _public_lines_answer(setup.put_public_line(ctx, state.database(), interview_id, body.key,
-                                                           body.text, state.clock()))
+    return await _public_lines_answer(setup.put_public_line(
+        ctx, state.database(), interview_id, body.key, body.text, state.clock(),
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
 
 
 async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublicLines | JSONResponse:
@@ -262,8 +263,9 @@ async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPubli
     `line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A failed save
     restores the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
     state = runtime(request).started()
-    return await _public_lines_answer(setup.confirm_public_lines(ctx, state.database(), interview_id, state.clock(),
-                                                               keys=body.keys, revision=body.revision))
+    return await _public_lines_answer(setup.confirm_public_lines(
+        ctx, state.database(), interview_id, state.clock(), keys=body.keys, revision=body.revision,
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
 
 
 @router.delete("/{id}/public_lines/{key}", response_model=SetupPublicLines,
@@ -274,7 +276,9 @@ async def setup_delete_public_line(interview_id: InterviewId, key: str, request:
     `policy:how_we_help` is 422 `not_editable`, and unknown keys are 422 `invalid`.
     Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
     state = runtime(request).started()
-    return await _public_lines_answer(setup.delete_public_line(ctx, state.database(), interview_id, key, state.clock()))
+    return await _public_lines_answer(setup.delete_public_line(
+        ctx, state.database(), interview_id, key, state.clock(),
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
 
 
 @router.delete("/{id}/public_lines/prices/{item_id}", response_model=SetupPublicLines,
@@ -287,9 +291,9 @@ async def setup_delete_public_price(interview_id: InterviewId, item_id: str, req
     Owner prices are 422 `not_suggested`; a missing or mismatched item is 409 `conflict`.
     Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
     state = runtime(request).started()
-    return await _public_lines_answer(setup.delete_public_price(ctx, state.database(), interview_id,
-                                                               item_id, state.clock(), title=title,
-                                                               unit_cents=unit_cents))
+    return await _public_lines_answer(setup.delete_public_price(
+        ctx, state.database(), interview_id, item_id, state.clock(), title=title, unit_cents=unit_cents,
+        setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------

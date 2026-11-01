@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import date
 
 import httpx
@@ -982,6 +983,44 @@ async def test_put_refusal_names_key_without_saving(lines_setup, engine, fake, m
     assert charter(fake, state["desk_id"]) == published
     assert_public_parts_logs(caplog, "setup public parts refused (key=policy:pricing)")
     assert "private marker" not in caplog.text
+
+
+def refused_charter_entries(fake, desk_id):
+    return [entry.event.summary for entry in fake.desks[desk_id].ledger
+            if entry.event.kind == "desk_data" and entry.event.summary.get("refused")]
+
+
+async def test_kernel_scan_refuses_the_owners_edit_strictly(lines_setup, engine, fake, monkeypatch, caplog):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.put(path, json={"key": "policy:pricing", "text": "Repairs from 99 private marker."})
+    assert reply.status_code == 422, reply.text
+    refused = reply.json()
+    assert (refused["error"], refused["key"]) == ("line_refused", "policy:pricing")
+    assert "digit" in refused["reason"]
+    # One write, refused and signed by the kernel; nothing dropped and sent again.
+    assert [part for part, _ in calls] == ["charter"]
+    assert refused_charter_entries(fake, state["desk_id"]) == [
+        {"part": "charter", "refused": "promise", "fields": {"policy:pricing": refused["reason"]}}]
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:pricing)")
+    assert "private marker" not in caplog.text
+
+
+async def test_writes_follow_the_policy_claim_switch(app, lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, suggested_fields=["pricing"])
+    runtime = app.state.runtime
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=False)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.put(path, json={"key": "policy:intake", "text": "Describe the problem."})
+    assert reply.status_code == 200, reply.text
+    assert calls == [("charter", {"charter": [{"key": "contact", "kind": "text", "value": "hello@example.test"}]})]
+    assert (await stored(engine, state["interview_id"]))["answers"]["intake"] == "Describe the problem."
+    assert set(charter(fake, state["desk_id"])) == {"charter:hours", "charter:contact"}
 
 
 @pytest.mark.parametrize("method", ["put", "confirm"])

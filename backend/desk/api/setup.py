@@ -2717,19 +2717,17 @@ async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
         return _public_lines(interview.answers)
 
 
-async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime, *,
+async def _put_public_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts, *,
                            selected: frozenset[str], sent: set[str] | None = None,
                            edited_key: str | None = None) -> None:
-    timezone = (await _business(owner, interview.desk_id))["timezone"]
-    parts = seed_parts(_published_answers(interview.answers), timezone, business_type=interview.business_type,
-                       today=now.astimezone(ZoneInfo(timezone)).date())
+    """Writes the `selected` parts of `parts` (`seed_parts`, which holds back every suggested field). The charter is
+    written strictly (`_put_charter` without `drop_refused`): an owner's edit is never dropped to save the rest."""
     charter = parts.charter
     for attempt in range(2) if "charter" in selected else ():
         try:
             if sent is not None:
                 sent.add("charter")
-            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
-                                    path={"id": interview.desk_id})
+            await _put_charter(owner, desk_id, charter, drop_refused=False)
             break
         except KernelFailed as failure:
             if failure.status != 422:
@@ -2743,7 +2741,7 @@ async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime
                 charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
                 continue
             raise refused from None
-    path = {"id": interview.desk_id}
+    path = {"id": desk_id}
     writes = []
     if "hours" in selected:
         writes.append(("hours", "hours", DeskHoursRequest(hours=parts.hours)))
@@ -2763,14 +2761,8 @@ async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime
             raise PublicLineProblem("line_refused", key=key) from None
 
 
-def _published_answers(answers: SetupAnswers) -> SetupAnswers:
-    return answers.model_copy(update={
-        field: [] if field in ("hours", "price_items") else "" for field in answers.suggested_fields
-    })
-
-
 async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
-                          now: datetime) -> SetupPublicLines:
+                          now: datetime, *, setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
@@ -2788,11 +2780,12 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
             })
         except ValidationError:
             raise ApiProblem(422, "invalid") from None
-        return await _commit_public_lines(owner, engine, interview, seen, now, key=key)
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
 
 
 async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str,
-                            now: datetime) -> SetupPublicLines:
+                            now: datetime, *, setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
@@ -2810,11 +2803,13 @@ async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id:
             "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
         })
         return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
-                                          republish=frozenset({key}) if key in ("hours", "prices") else frozenset())
+                                          republish=frozenset({key}) if key in ("hours", "prices") else frozenset(),
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
 
 
 async def delete_public_price(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, item_id: str,
-                              now: datetime, *, title: str, unit_cents: int) -> SetupPublicLines:
+                              now: datetime, *, title: str, unit_cents: int,
+                              setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
@@ -2832,25 +2827,33 @@ async def delete_public_price(owner: OwnerCtx, engine: AsyncEngine, interview_id
                                  if field != "price_items" or remaining],
         })
         return await _commit_public_lines(owner, engine, interview, seen, now, key="prices",
-                                          republish=frozenset({"prices"}))
+                                          republish=frozenset({"prices"}),
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
 
 
 async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
-                               now: datetime, *, key: str | None = None,
-                               republish: frozenset[str] = frozenset()) -> SetupPublicLines:
-    before = _published_answers(SetupAnswers.model_validate(seen["answers"]))
-    after = _published_answers(interview.answers)
-    changed = frozenset(field for field in ("hours", "price_items") if getattr(before, field) != getattr(after, field))
+                               now: datetime, *, key: str | None = None, republish: frozenset[str] = frozenset(),
+                               setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
+    timezone = (await _business(owner, interview.desk_id))["timezone"]
+    today = now.astimezone(ZoneInfo(timezone)).date()
+
+    def published(answers: SetupAnswers) -> SeedParts:
+        return seed_parts(answers, timezone, business_type=interview.business_type, today=today,
+                          publish_policies=setup_policy_claims_enabled)
+
+    before, after = published(SetupAnswers.model_validate(seen["answers"])), published(interview.answers)
+    changed = frozenset(part for part in ("hours", "prices") if getattr(before, part) != getattr(after, part))
     selected = frozenset({"charter"} | republish
                          | ({"hours", "calendar"} if "hours" in changed or "hours" in republish else set())
-                         | ({"prices"} if "price_items" in changed else set()))
+                         | ({"prices"} if "prices" in changed else set()))
     sent: set[str] = set()
 
     async def repair() -> None:
         try:
             async with asyncio.timeout(PUBLIC_PARTS_REPAIR_TIMEOUT_S * (1 + len(sent))):
                 stored = await _read(engine, owner, interview.interview_id)
-                await _put_public_parts(owner, stored, now, selected=frozenset(sent), edited_key=key)
+                await _put_public_parts(owner, stored.desk_id, published(stored.answers), selected=frozenset(sent),
+                                        edited_key=key)
         except Exception as restore_failed:
             logger.error("setup public parts restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
@@ -2858,7 +2861,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
     async def settle() -> SetupPublicLines:
         try:
-            await _put_public_parts(owner, interview, now, selected=selected, sent=sent, edited_key=key)
+            await _put_public_parts(owner, interview.desk_id, after, selected=selected, sent=sent, edited_key=key)
         except Exception:
             if sent:
                 await repair()
@@ -2889,8 +2892,9 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
         raise
 
 
-async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
-                                now: datetime, *, keys: list[str], revision: str) -> SetupPublicLines:
+async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, now: datetime, *,
+                                keys: list[str], revision: str,
+                                setup_policy_claims_enabled: bool = True) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
@@ -2911,7 +2915,8 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
         interview.answers = interview.answers.model_copy(update={
             "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
         })
-        return await _commit_public_lines(owner, engine, interview, seen, now, republish=republish)
+        return await _commit_public_lines(owner, engine, interview, seen, now, republish=republish,
+                                          setup_policy_claims_enabled=setup_policy_claims_enabled)
 
 
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
@@ -2938,7 +2943,8 @@ CHARTER_CAPS = frozenset({"policy_count_limit", "policy_text_limit"})
 POLICY_RETRIES = 2
 
 
-async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim], *,
+                       drop_refused: bool = True) -> list[str]:
     """Writes the charter, holding back what the kernel's public-text checks refuse, and returns the held keys in
     the order they were dropped once a write succeeds.
 
@@ -2950,6 +2956,9 @@ async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> l
     whatever other keys (such as the contact) come with it. That is at most four writes when the contact is refused
     on its own and three otherwise. A refusal with nothing left to drop, a third, or any other failure propagates.
     Each drop is logged by key and rule ids, never text.
+
+    Without `drop_refused` (the owner's own edit of a public line) the write is strict: the first refusal propagates
+    and nothing is dropped or sent again, so the owner hears what the kernel refused and recorded.
     """
     held: list[str] = []
     policy_refusals = 0
@@ -2959,7 +2968,7 @@ async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> l
                                     path={"id": desk_id})
             return held
         except KernelFailed as refused:
-            if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+            if not drop_refused or refused.status != 422 or refused.code != "invalid" or not refused.detail:
                 raise
             named = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
             capped = not CHARTER_CAPS.isdisjoint(refused.detail.get("charter", ()))
