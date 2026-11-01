@@ -3689,8 +3689,12 @@ async def test_public_contact_is_structured(kernel, create):
 
 
 PUBLIC_CONTACTS = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
-                   "Email: help@example.test · Llámanos al 555-0142"]
-PUBLIC_CONTACT_PROSE = ["Call us at (510) 555-0142 for a free quote"]
+                   "Email: help@example.test · Llámanos al 555-0142",
+                   "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
+                   "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
+                   "example.com", "help@example.test\r\nother@example.test"]
+PUBLIC_CONTACT_PROSE = ["Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
+                        "https://example.test/book for a free quote"]
 
 
 @pytest.mark.kernel_plan("01b")

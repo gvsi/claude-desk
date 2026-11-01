@@ -31,6 +31,26 @@ def test_contact_labels_and_extensions(contact, valid):
     assert valid_public_contact(contact) is valid
 
 
+# Whole https URLs keep their commas and semicolons; lists may use words, spaced slashes and bars; a bare
+# domain is a web address; CRLF is one separator and a trailing separator is ignored.
+LISTED = ["https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
+          "https://example.test/a/b/c", "help@example.test, https://example.test/book?services=drain,repair; 555-0142",
+          "https://example.test/contact; 555-0142", "https://example.test/book?services=drain,repair, help@example.test",
+          "maria@x.test or (510) 555-0142", "a@x.test / (510) 555-0142", "a@x.test | (510) 555-0142",
+          "a@x.test and (510) 555-0142", "maria@x.test o (510) 555-0142", "maria@x.test y 555-0142",
+          "Email: maria@x.test or call us at (510) 555-0142", "www.x.com", "x.com", "riverplumbing.com",
+          "www.example.test or (510) 555-0142", "help@example.test\r\nother@example.test", "help@example.test,",
+          "help@example.test\n"]
+LISTED_PROSE = ["maria@x.test or call for a free quote", "https://example.test/book for a free quote",
+                "x.com is the best", "help@example.test,,", ",", "", "x.c", "x.123", "http://example.test",
+                "a@x.test/(510) 555-0142", "www.x.com/free-consultations"]
+
+
+@pytest.mark.parametrize(("contact", "valid"), [*[(c, True) for c in LISTED], *[(c, False) for c in LISTED_PROSE]])
+def test_contact_lists_urls_and_domains(contact, valid):
+    assert valid_public_contact(contact) is valid
+
+
 @pytest.mark.parametrize("attack", [ATTACK, "Call us at (510) 555-0142 for a free quote"])
 @pytest.mark.parametrize("create", [False, True])
 async def test_public_contact_refuses_prose_on_every_write(app, client, create, attack):
@@ -66,7 +86,10 @@ HONEST = ["help@example.test", "+1 (510) 555-0142", "555.0142", "https://example
           "help@example.test · +1 (510) 555-0142",
           "help@example.test, https://example.test/contact; 555-0142\nother@example.test",
           "(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
-          "Email: help@example.test · Llámanos al 555-0142"]
+          "Email: help@example.test · Llámanos al 555-0142",
+          "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
+          "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
+          "example.com", "help@example.test\r\nother@example.test"]
 
 
 async def assert_contact_shown(client, copy, contact):
