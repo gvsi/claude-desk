@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, observeRequests, type RequestOutcome } from './http.ts';
+import { ApiError, PROVING_GIVE_UP_MS, observeRequests, type RequestOutcome } from './http.ts';
 import { askRuleChat, canStream } from './ruleChatStream.ts';
 import type { RuleChatOut } from './views.ts';
 
@@ -280,6 +280,36 @@ describe('askRuleChat', () => {
       const err = await asked;
       expect((err as DOMException).name).toBe('AbortError');
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks_again_without_streaming_when_only_keepalives_come_past_the_deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const pinging = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(frame('delta', { text: 'Yes' })));
+          timer = setInterval(() => controller.enqueue(encoder.encode(': ping\n\n')), 15_000);
+        },
+        cancel() {
+          clearInterval(timer);
+        },
+      });
+      fetchMock
+        .mockResolvedValueOnce(new Response(pinging, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+        .mockResolvedValueOnce(json(200, FINAL));
+      const texts: string[] = [];
+      const asked = askRuleChat(DESK, 'Hi', { onText: (text) => texts.push(text) });
+      await vi.advanceTimersByTimeAsync(PROVING_GIVE_UP_MS - 1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await asked).toEqual(FINAL);
+      expect(texts).toEqual(['Yes', '']);
+      expect(headersOf(1).get('accept')).toBe('application/json');
     } finally {
       vi.useRealTimers();
     }

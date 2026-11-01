@@ -485,8 +485,8 @@ export interface EventsCall<T> {
  * `request` reads it, as is a JSON answer from a server that streams nothing. Rejects with the
  * `ApiError` of a refusal or of the event that failed it, with `StreamBroken` when the stream can't
  * be read to its answer (the caller asks again as JSON), and with an `AbortError` once `signal`
- * closes it. Between pieces the stream may go quiet for `TIMEOUT_MS.model`: its keepalives come
- * every 15 seconds.
+ * closes it. Between pieces the stream may go quiet for `TIMEOUT_MS.model` (its keepalives come
+ * every 15 seconds), and it may run `PROVING_GIVE_UP_MS` in all: keepalives alone never hold it open.
  */
 export async function requestEvents<K extends RouteKey, T>(
   key: K,
@@ -508,6 +508,7 @@ export async function requestEvents<K extends RouteKey, T>(
     quiet = setTimeout(close, TIMEOUT_MS.model);
   };
   heard();
+  const deadline = setTimeout(close, PROVING_GIVE_UP_MS);
   try {
     let res: Response;
     try {
@@ -567,6 +568,7 @@ export async function requestEvents<K extends RouteKey, T>(
     throw err;
   } finally {
     clearTimeout(quiet);
+    clearTimeout(deadline);
     call.signal?.removeEventListener('abort', close);
   }
 }
