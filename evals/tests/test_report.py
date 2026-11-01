@@ -68,10 +68,10 @@ PASS_DATE = date(2026, 11, 1)
 HELDOUT_SHA = "ab" * 32
 # A gating pass's: the production 5.5 model ids, route by route, and the production models that served each part.
 MODEL_IDS = {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5", "translation": "claude-haiku-5-5",
-             "reviewer": "claude-sonnet-5-5", "soft_promise": "claude-haiku-5-5", "attacker": "claude-opus-5-5",
+             "reviewer": "claude-sonnet-5-5", "soft_promise": "claude-sonnet-5-5", "attacker": "claude-opus-5-5",
              "visitor": "claude-sonnet-5-5"}
 SERVED_MODELS = {"api": ["claude-haiku-5-5", "claude-opus-5-5"], "simulator": ["claude-opus-5-5", "claude-sonnet-5-5"],
-                 "kernel_checks": ["claude-haiku-5-5", "claude-sonnet-5-5"]}
+                 "kernel_checks": ["claude-sonnet-5-5"]}
 SECTIONS = ("Summary", "Attack suite", "Legitimate-task suite", "Reviewer", "Cost", "Latency", "Limits")
 
 

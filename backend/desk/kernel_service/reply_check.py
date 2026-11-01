@@ -32,7 +32,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
    pass; their refusals follow the scan's.
-5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
+5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). Timeout, error or unparsable output gets one unchanged-input recheck,
@@ -100,7 +100,8 @@ from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
-from desk.kernel_service.sessions import verified
+from desk.kernel_service.sessions import principal_for, verified
+from desk.next_steps import next_steps
 from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -661,7 +662,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage = await soft_promises(ctx, language, prose, backing)
+        found, usage = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
         blocks = blocked_blocks(cards, violations, language, desk)
@@ -673,13 +674,18 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                           handoff_backed=handoff_backed, final=final, rendered_claims=rendered_claims)
 
 
-async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
+async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None]:
     """Step 5: one unchanged-input recheck after timeout, error or invalid output, within one
     deadline of twice the per-try timeout. Under 0.5 s left skips the recheck; a refusal never
     retries. Only a verdict can pass. Usage is summed once for the reply ledger, with the first
-    status and the deciding try's status. `finalize` still checks handoff backing under lock."""
-    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards])
+    status and the deciding try's status. `finalize` still checks handoff backing under lock.
+    The model is shown the session's fixed next steps, from its resolved tools."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards],
+                            next_steps=next_steps(tools))
     timeout = decisions.SOFT_PROMISE_TIMEOUT_S
     deadline = time.monotonic() + 2 * timeout
     verdict, first = await ctx.decisions.soft_promise(data, timeout_s=timeout)

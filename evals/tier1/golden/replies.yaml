@@ -15,8 +15,8 @@
 #                  other-session-owner-statement, an owner say in another visitor's session, Plan
 #                  01b); own-payment-link, a link for this session's drain quote, Plan 01c; fact_id is sent as written
 #   final          false for the first draft of a reply; default true
-#   soft_promise   list of tries (claude-haiku-5-5): [pass], the default; flag
-#                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
+#   soft_promise   list of tries (claude-sonnet-5-5): [pass], the default; flag
+#                  (promises_beyond_cards true); error (HTTP 500); timeout (7 s, past the check's 6 s);
 #                  unparsable (the text "maybe"); refusal (no recheck). Timeout, error and unparsable
 #                  stage a second try; the deciding try fixes the verdict.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;

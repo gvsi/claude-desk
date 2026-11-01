@@ -35,6 +35,18 @@ from evals.tier2.schema import RecordedRates
 from evals.tier2.suite import load_recorded_rates
 
 EMPTY = RecordedRates(history=[])
+
+
+def test_changing_only_next_steps_moves_the_inputs_key(repo):
+    path = "backend/desk/next_steps.py"
+    before = inputs_key("HEAD", repo)
+    write(repo, path, 'NEXT_STEPS = {"native.book": "booking a time a card shows"}\n')
+    commit(repo, "add fixed next steps")
+    assert inputs_key("HEAD", repo) != before
+    before = inputs_key("HEAD", repo)
+    write(repo, path, 'NEXT_STEPS = {"native.book": "a changed phrase"}\n')
+    commit(repo, "change a fixed phrase")
+    assert inputs_key("HEAD", repo) != before
 # Why a pass made without --results is neither exported nor certified, by pass id.
 UNCHECKED = ("pass {} wasn't made with --results, so nothing checked that its tree held its commit's gated inputs, "
              "and nothing built the kernel from them; run tier2 --suite all --split all --results")
@@ -141,6 +153,7 @@ OWNERS_SCOPE = {
     "backend/desk/presets.py": "backend/desk/presets.py",
     "backend/desk/money_cap.py": "backend/desk/money_cap.py",
     "backend/desk/rewrites.py": "backend/desk/rewrites.py",
+    "backend/desk/next_steps.py": "backend/desk/next_steps.py",
     "backend/desk/api/model.py": "backend/desk/api/model.py",
     "evals/tier2/runner.py": "evals/tier2/runner.py",
     "evals/tier2/simulator.py": "evals/tier2/simulator.py",
@@ -1349,7 +1362,7 @@ async def test_results_record_the_provider_and_model_ids(repo):
     assert bedrock.model_ids == {
         "conversation": BEDROCK_MODEL_IDS["claude-opus-5-5"], "triage": BEDROCK_MODEL_IDS["claude-haiku-5-5"],
         "translation": BEDROCK_MODEL_IDS["claude-haiku-5-5"], "reviewer": "claude-sonnet-5-5",
-        "soft_promise": "claude-haiku-5-5", "attacker": BEDROCK_MODEL_IDS["claude-opus-5-5"],
+        "soft_promise": "claude-sonnet-5-5", "attacker": BEDROCK_MODEL_IDS["claude-opus-5-5"],
         "visitor": BEDROCK_MODEL_IDS["claude-sonnet-5-5"]}
     with pytest.raises(ResultsRefused, match="needs a pass on the Claude API"):
         write_results(bedrock, EMPTY, root=repo)
@@ -1381,7 +1394,7 @@ async def test_results_export_needs_a_claude_api_pass_on_the_production_models(r
     full = await run_pass(config(results=True), deps(repo))
     assert full.model_ids == {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5",
                               "translation": "claude-haiku-5-5", "reviewer": "claude-sonnet-5-5",
-                              "soft_promise": "claude-haiku-5-5", "attacker": "claude-opus-5-5",
+                              "soft_promise": "claude-sonnet-5-5", "attacker": "claude-opus-5-5",
                               "visitor": "claude-sonnet-5-5"}
     assert PRODUCTION_MODELS == {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
     # What the pass recorded is checked, not only what it was asked for.

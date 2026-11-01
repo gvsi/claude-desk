@@ -16,6 +16,10 @@ prices and the kernel's checks at the Claude API's, which they always use; setup
 Desk, drafting cards, situations and the rules chat) reported apart as setup cost; the visiting
 agent's and the simulated visitor's calls left out. `percentile(samples, q)` is the nearest-rank
 percentile every spread here and in `evals.latency` uses.
+
+The production soft check uses Sonnet 5.5 (the 220-case calibration averaged $0.0017/check).
+Costs use each ledger entry's actual model and token counts, including thinking in output_tokens;
+historical Haiku checks retain their own price. Latency is recorded without a two-second cutoff.
 """
 
 import math
