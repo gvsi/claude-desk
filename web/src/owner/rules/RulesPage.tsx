@@ -218,7 +218,8 @@ export function RulesPage() {
     takeLanding(landing);
   }, [ready, landing]);
   // The first row it changed, if it is out of view, scrolls to the middle: after the frame in which
-  // a closing sheet gives focus back to what opened it, so that doesn't scroll the page back.
+  // a closing sheet gives focus back to what opened it, so that doesn't scroll the page back. Once
+  // per landing, at the rules it landed on.
   const page = useRef<HTMLDivElement>(null);
   const shown = rules.data;
   useEffect(() => {
@@ -229,8 +230,6 @@ export function RulesPage() {
       if (row !== null) bringToMiddle(row);
     });
     return () => cancelAnimationFrame(frame);
-    // Once per landing, at the rules it landed on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toReveal]);
 
   /** Opens a card draft's review, with what it was drafted from. */
