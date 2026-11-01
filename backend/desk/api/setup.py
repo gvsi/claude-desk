@@ -109,7 +109,7 @@ import logging
 import re
 import secrets
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -1685,12 +1685,14 @@ def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswer
     return fields
 
 
-def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
+def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
+           owner_fields: Collection[str] = frozenset()) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
     its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
     on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
     question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
-    logged (by its label or field name, never its value). Off-topic facts cannot replace owner facts.
+    logged (by its label or field name, never its value). Off-topic facts cannot replace owner facts, nor refill a
+    fact the owner set or cleared (`owner_fields`).
     Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
@@ -1718,7 +1720,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
         elif name == "business_name":
             value = " ".join(value.split()) or None
         if (name in FACT_TOPICS and FACT_TOPICS[name] != key
-                and getattr(answers, name) and name not in answers.suggested_fields):
+                and (name in owner_fields or (getattr(answers, name) and name not in answers.suggested_fields))):
             if value != getattr(answers, name):
                 logger.warning("setup dropped off-topic field %s", name)
             continue
@@ -2097,7 +2099,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
-        updated = merged(interview.answers, patch, key)
+        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields)
         owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
         said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text)
         for name in _fact_patch_fields(patch, key):

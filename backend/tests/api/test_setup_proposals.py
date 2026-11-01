@@ -344,6 +344,37 @@ async def test_owner_hours_demoted_by_unchanged_reemission(proposals, model, eng
     assert parts.hours == answers.hours and parts.calendar
 
 
+async def test_off_topic_hours_never_refill_hours_the_owner_cleared(proposals, model, engine, caplog):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "9am to 5pm weekdays.", turn(hours=hours), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "Remove our hours, we're by appointment only now.",
+                         turn(clear_hours=True), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert record["answers"]["hours"] == []
+    assert "hours" in [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]["owner_fields"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    caplog.clear()
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.",
+                         turn(public_contact="415-555-0118", hours=hours), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.hours == []
+    assert "hours" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said["owner_fields"] == ["public_contact"]
+    logs = [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"]
+    assert logs == ["setup dropped off-topic field hours"]
+
+
 @pytest.mark.parametrize("source", ["owner", "suggested", "empty"])
 async def test_off_topic_contact_preserves_owner_facts(proposals, model, engine, caplog, source):
     from tests.api.test_setup_questions import answer, turn
