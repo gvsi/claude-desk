@@ -16,8 +16,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
    route, in T2 by the execution of an adapter that writes the session's own rows
-   (`locks_session`: a verification start, and a call-back request, which keeps one open handoff
-   per session) on either path, and by the owner's writes that close
+   (`locks_session`: a verification start, a call-back request, which keeps one open handoff
+   per session, and a purpose payment, which keeps one open link per tool in a session) on either
+   path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
    Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
    nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any

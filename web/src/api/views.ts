@@ -282,8 +282,14 @@ export interface OwnerTranscript {
   replayed?: boolean;
 }
 
-/** Owner-only annotation beside the signed event, absent on older API responses. */
-export interface OwnerTranscriptItem extends TranscriptItem {
+/** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */
+export interface OwnerTranscriptItem extends Omit<TranscriptItem, 'kind'> {
+  /**
+   * A `stopped_draft` item stands where the check stopped Claude's draft, before the rewrite or the
+   * handoff that followed in the same turn; it has no `text` or `event` (openapi.json).
+   */
+  kind: TranscriptKind | 'stopped_draft';
+  /** Owner-only annotation beside the signed event, absent on older API responses. */
   owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
 }
 
