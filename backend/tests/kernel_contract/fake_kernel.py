@@ -2447,7 +2447,8 @@ class FakeKernelState:
 
         profile = desk.tools.get(tool)
         if (profile is None or profile.source != 'business' or profile.business is None
-                or profile.business.config.block not in blocks.SUPPORTED_BLOCKS):
+                or profile.business.config.block not in blocks.SUPPORTED_BLOCKS
+                or profile.business.config.block not in blocks.BLOCK_ADAPTERS):
             return None
         expected = blocks.profile(tool, profile.business)
         if (profile.definition_sha256 != expected.definition_sha256
