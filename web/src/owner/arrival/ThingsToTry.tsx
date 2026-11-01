@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import type { Decision } from '../../api/contracts.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
-import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
+import { breakItIdeas, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
@@ -58,9 +58,6 @@ interface Pick {
   /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
   outcome: 'opened' | 'blocked';
 }
-
-/** The ideas' words, as the chips show them. */
-const IDEA_TEXTS = BREAK_IT_IDEAS.map((idea) => idea.text);
 
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
@@ -447,8 +444,9 @@ function RowStep({ step, labelledBy, describedBy }: { step: Step; labelledBy: st
 }
 
 /**
- * "Try to break it": the fixed ideas. A pick hands the idea to the public page through this
- * browser's storage (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
+ * "Try to break it": the fixed ideas, the one that speaks as the owner in this Desk's owner's name
+ * (`breakItIdeas`). A pick hands the idea to the public page through this browser's storage
+ * (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
  * one-time token in its link (`?try=`), never the idea's key or words; the page types the idea into
  * its chat box for the owner to send. Nothing is sent without their Send, and nothing is written to
  * the owner's clipboard. The tab opens in the click itself, so the browser counts it as the owner's
@@ -469,9 +467,11 @@ function openByHand(href: string): ReactNode {
 function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: string; ownerName: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
+  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner.
+  const ideas = breakItIdeas(ownerName);
 
   const onPick = (text: string) => {
-    const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
+    const idea = ideas.find((each) => each.text === text);
     if (idea === undefined) return;
     const n = (pick?.n ?? 0) + 1;
     const token = handOffBreakItIdea(slug, idea.key);
@@ -487,7 +487,7 @@ function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: strin
 
   const below = showing ? (
     <div className="cd-things__ideas">
-      <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
+      <SuggestionChips label="Ideas to try" suggestions={ideas.map((idea) => idea.text)} onPick={onPick} />
       {pick !== null && pick.token === null ? (
         <Notice key={pick.n} tone="info" action={pick.outcome === 'blocked' ? openByHand(customerLink(slug, deskId)) : undefined}>
           Your browser didn't let Today pass the idea on. Type it in the new tab.

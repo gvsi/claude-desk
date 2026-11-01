@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 
+import { tokenHex } from '../../contrast.ts';
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 
@@ -11,6 +12,13 @@ const ANSWERED_BY = {
   es: (owner: ReactNode) => <>Responde Claude, una IA. Puedes pedir hablar con {owner} cuando quieras.</>,
 } as const satisfies Record<CopyLanguage, (owner: ReactNode) => ReactNode>;
 
+/**
+ * The colors the screen's QR code draws in on the card's sand tile: `qr-ink` modules on `qr-tile`,
+ * the tile's own sand, as the code's light quiet zone. The code reads no CSS, so they are given as
+ * hex values.
+ */
+export const SHARE_CARD_QR_COLORS: Readonly<{ dark: string; light: string }> = Object.freeze({ dark: tokenHex('qr-ink'), light: tokenHex('qr-tile') });
+
 export interface ShareCardProps {
   /** The business's name (`business_name`). */
   name: string;
@@ -20,7 +28,7 @@ export interface ShareCardProps {
   ownerName: string;
   /** The card's language: who answers, and `lang` on the card. */
   language: CopyLanguage;
-  /** The QR code for `url`, which the web app draws. It fills a 152 px square. */
+  /** The QR code for `url`, which the web app draws in `SHARE_CARD_QR_COLORS`. It fills the 128 px inside the card's 152 px sand tile. */
   qr: ReactNode;
   /** Prints the card. Without it, no Print card button. */
   onPrint?: () => void;
