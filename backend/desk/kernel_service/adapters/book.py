@@ -35,13 +35,11 @@ class BookArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     slot_id: str = Field(pattern=SLOT_ID_PATTERN)
-    note: str | None = Field(None, max_length=500)
+    note: str | None = Field(None, max_length=QUOTED_CHARS, description='Optional details for the owner only.')
 
     @field_validator('note')
     @classmethod
-    def short_owner_note(cls, note: str | None) -> str | None:
-        if note is not None and len(note) > QUOTED_CHARS:
-            raise ValueError('booking note is too long')
+    def blank_owner_note(cls, note: str | None) -> str | None:
         return note if note and note.strip() else None
 
 
