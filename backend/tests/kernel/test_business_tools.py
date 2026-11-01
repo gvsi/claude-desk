@@ -424,6 +424,7 @@ async def test_batches_refuse_duplicates_limits_canaries_and_other_copies(app, c
     for batch in batches:
         response = await put(client, copy, batch)
         assert response.status_code == 422, response.text
+        assert 'detail' not in response.json()          # only card-text refusals carry detail
         assert (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256 == original
     assert len([row for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']) == 6
     response = await client.put(f'/desks/{copy.desk_id}/business_tools', headers=other.owner, json={'tools': []})
@@ -526,8 +527,8 @@ async def test_payment_titles_refuse_free_and_complimentary_without_changing_int
     from desk.contracts import BusinessTool
     from desk.kernel_service import business_tools, reply_check
 
-    if without_shared_lexicon:
-        monkeypatch.setattr(reply_check, 'scan_prose', lambda text: [])
+    if without_shared_lexicon:   # the card path's shared scan, so only the payment-title rule refuses
+        monkeypatch.setattr(reply_check, 'scan_public_policies', lambda values, allow_words={}, **_: {})
     copy = await rivera(app, client)
     payment = intake(tool='desk.deposit', title=title, config={
         'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000})
@@ -579,6 +580,7 @@ async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client
     ('USD', 422),
     ('EUR', 422),
     ('Pay 20 GBP', 422),
+    ('GBP', 200),                   # a bare code states no amount: the shared scan's ruling
     ('MXN', 422),
 ])
 async def test_ambiguous_currency_codes_need_an_adjacent_amount(app, client, title, status):
@@ -592,7 +594,7 @@ async def test_card_fields_refuse_hidden_characters_and_other_language_commitmen
     from desk.kernel_service import business_tools, reply_check
 
     copy = await rivera(app, client)
-    for title in ('Call ‮yadot‬', 'guaran​teed', 'Consultation gratuite', 'Kostenlose Beratung',
+    for title in ('Call \u202eyadot\u202c', 'guaran\u200bteed', 'Consultation gratuite', 'Kostenlose Beratung',
                   'Consultation offerte', 'sans frais', 'sem custo', 'grátis', 'senza costi', 'umsonst'):
         response = await put(client, copy, [intake(title=title)])
         assert response.status_code == 422, (title, response.text)
@@ -600,8 +602,8 @@ async def test_card_fields_refuse_hidden_characters_and_other_language_commitmen
             'format_control' if any(map(reply_check._unseen, title)) else 'public_promise']}
         assert await business_rows(app, copy) == {}
     # Use exactly the reply check's unseen predicate, including ignorables beyond Cf, on the text as written.
-    for char in ('‪', '‫', '‬', '‭', '‮', '⁦', '⁧', '⁨',
-                 '⁩', '‍', '­', '͏', '️'):
+    for char in ('\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068',
+                 '\u2069', '\u200d', '\u00ad', '\u034f', '\ufe0f'):
         assert reply_check._unseen(char)
         assert business_tools.hidden_fields({'desk.x.0-title': 'Intake', 'desk.x.1-purpose': 'Retainer' + char}) == {
             'desk.x.title': ['format_control'], 'desk.x.purpose': ['format_control']}
