@@ -14,6 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -541,11 +542,18 @@ describe('rules page', () => {
     };
 
     // With room beside the panel, the menu stays at the right of the title's line (N-Conn-12-Chat).
+    // Beside both actions the subtitle may take a third line, but never leaves its last word alone
+    // (`text-wrap: pretty`; where the lone word falls depends on the platform's text, so the rule is
+    // checked as well as the lines).
     for (const width of [1440, 1280]) {
-      const { title, menu } = await at(width);
+      const { title, header, menu } = await at(width);
       expect(lines(title), `${width}`).toBe(1);
       expect(box(menu).left, `${width}`).toBeGreaterThan(box(title).right);
       expect(Math.round(box(menu).top - box(title).top), `${width}`).toBe(4);
+      const subtitle = header.querySelector<HTMLElement>('.cd-page-header__subtitle')!;
+      expect(getComputedStyle(subtitle).textWrapStyle, `${width}`).toBe('pretty');
+      const words = lineWords(subtitle);
+      expect(words.at(-1)?.length ?? 0, `${width}: ${JSON.stringify(words)}`).toBeGreaterThan(1);
     }
     // In the narrowest column beside the panel, 360 px at 1024 px, the actions go under the title and
     // its subtitle, which keep the column's whole width, and the title stays on one line.

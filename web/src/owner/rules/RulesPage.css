@@ -38,6 +38,11 @@
   }
 }
 
+/* In that narrower column the subtitle can take a third line; it never leaves a word alone on it. */
+.cd-rules__header .cd-page-header__subtitle {
+  text-wrap: pretty;
+}
+
 .cd-rules__ask {
   display: grid;
   gap: var(--space-10);
