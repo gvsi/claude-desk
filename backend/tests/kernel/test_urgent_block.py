@@ -91,6 +91,10 @@ async def test_urgent_opens_native_callback_and_alerts_without_notification_pref
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         adapter = await adapters.resolve(ctx, copy.desk_id, TOOL)
+        assert (adapter.locks_session, adapter.free_text_fields, adapter.model_view_keys,
+                adapter.releases_private_data) == (
+            True, request_callback.ADAPTER.free_text_fields, request_callback.ADAPTER.model_view_keys, False)
+        assert isinstance(adapter, request_callback.RequestCallbackAdapter)
         [desk] = await ctx.db.scalars(ctx.repo.scoped(select(Desk)))
         [session] = await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
             ActorSession.session_id == visitor.session_id)))
