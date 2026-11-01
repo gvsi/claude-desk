@@ -49,11 +49,11 @@ import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
-/** Plan 02's limits on the business's description and on an answer. */
-const DESCRIPTION_MAX = 1500;
-
 /** Setup's business types (the API's `BusinessType`), each also a set of the agent's task words. */
 type BusinessType = Exclude<DemoTaskSet, 'rivera'>;
+
+/** Plan 02's limits on the business's description and on an answer. */
+const DESCRIPTION_MAX = 1500;
 const ANSWER_MAX = 2000;
 /** The platform ceiling on the money limit (master "Money cap"): $10,000. */
 const MONEY_CAP_MAX_CENTS = 1_000_000;
