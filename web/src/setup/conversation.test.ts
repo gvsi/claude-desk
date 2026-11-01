@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ProposalCard, SetupMessage, SetupState } from '../api/views.ts';
+import type { ProposalCard, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
 import { decisionBody, isCard, liveChoices } from './conversation.ts';
 
 const payment: ProposalCard = {
@@ -68,6 +68,14 @@ describe('setup conversation', () => {
       expect(liveChoices({ ...state(messages), ...fields })).toBeNull();
     }
     expect(liveChoices({ ...state(messages), consent: false })).toEqual({ index: 0, choices });
+  });
+
+  it('keeps_the_test_client_offers_choices_live_and_answers_it_by_name', () => {
+    const choices = [{ text: 'Add me as a test client', recommended: true }, { text: 'Not now', recommended: false }];
+    const offer: SetupState = { ...state([message({ text: 'Want to try your Desk the way a client would?', choices })]), question: 'test_client' };
+    expect(liveChoices(offer)).toEqual({ index: 0, choices });
+    const answer: SetupAnswerBody = { question: 'test_client', text: 'Not now' };
+    expect(answer.question).toBe(offer.question);
   });
 
   it('identifies_card_messages_and_tolerates_older_messages', () => {

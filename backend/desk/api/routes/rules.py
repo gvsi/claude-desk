@@ -161,7 +161,8 @@ Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 
 
 async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, body: BaseModel | None = None,
-                    admit: Callable[[], Awaitable[None]] | None = None, changes_rules: bool = False) -> Any:
+                    admit: Callable[[], Awaitable[None]] | None = None, changes_rules: bool = False,
+                    owner_stream: bool = False, stream: bool = False) -> Any:
     """`work` on one of the copy's Desks through `proving_answer`; a card above the money cap, or one that would change
     starting a verification (answered by `proving_answer`), is 422. New work counts on `admit`, by default the copy's
     `drafts` limit (drafting and confirming call no model, but the kernel proves each)."""
@@ -176,18 +177,25 @@ async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *
         admit = drafts
     try:
         return await proving_answer(request, ctx, desk_id, work, started=started, admit=admit, body=body,
-                                    changes_rules=changes_rules)
+                                    changes_rules=changes_rules, owner_stream=owner_stream, stream=stream)
     except rules.AboveMoneyCap as above:
         return JSONResponse(AboveMoneyCap(cap_cents=above.cap_cents).model_dump(mode="json"), status_code=422)
 
 
 @policy_router.post("/chat", response_model=RuleChatOut, responses=DRAFTING_RESPONSES)
 async def rule_chat(desk_id: DeskId, body: RuleChatIn, request: Request,
-                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+                    # Its connection closes when the route returns, so an open stream holds none.
+                    ctx: Annotated[OwnerCtx, Depends(owner_ctx, scope="function")]) -> Any:
     """Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes
     back as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes
     until `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget
-    (503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer."""
+    (503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.
+
+    Accept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final
+    RuleChatOut after any kernel proof, or an error: the JSON error body this route would answer,
+    plus its status. Admission failures remain JSON. Without that header the existing JSON/202
+    behavior is unchanged.
+    """
     async def admit() -> None:
         state = runtime(request).started()
         ledger = RateLimitLedger(ctx.kernel, desk_id=desk_id, session_id=ctx.owner_session_id)
@@ -197,7 +205,9 @@ async def rule_chat(desk_id: DeskId, body: RuleChatIn, request: Request,
     async def work(owner: OwnerCtx, state: Runtime) -> RuleChatOut:
         return await rules.chat(owner, state.database(), state.model, desk_id, body.text)
 
-    return await _drafting(request, ctx, desk_id, work, body=body, admit=admit)
+    stream = any(value.strip().lower() == "text/event-stream"
+                 for value in request.headers.get("accept", "").split(","))
+    return await _drafting(request, ctx, desk_id, work, body=body, admit=admit, owner_stream=True, stream=stream)
 
 
 @policy_router.post("/draft", response_model=RulesDraft, responses=DRAFTING_RESPONSES)

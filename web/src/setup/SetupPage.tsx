@@ -15,7 +15,7 @@ import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
-import { SETUP_REACHES, laterStep } from './shared.ts';
+import { SETUP_REACHES, laterStep, useOpensAtTop } from './shared.ts';
 import { SetupOpening } from './StepSkeletons.tsx';
 import { ToolsStep } from './ToolsStep.tsx';
 
@@ -233,6 +233,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
   if (openedAt === null && state !== undefined) setOpenedAt(state.step);
   const opened = openedAt ?? state?.step;
+  // While Questions closes, the tools the API has moved on to wait for its "Continue".
+  const closingQuestions = state !== undefined && closing.current && !continued && state.step === 'tools';
+  // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
+  // (RulesStep), and the preview going live stays the same screen.
+  useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions ? 'questions' : state.step]);
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -258,12 +263,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   const name = business ?? '';
   const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
-  // "Answering now" follows the latest Desks read alone, whatever this page saw happen: going live
+  // "Acting for you now" follows the latest Desks read alone, whatever this page saw happen: going live
   // here writes Answering on into them, and a Desk whose owner has turned Answering off since, here
   // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
   const answering = desk?.answering === true;
   let body: ReactNode;
-  const shownStep = closing.current && !continued && state.step === 'tools' ? 'questions' : state.step;
+  const shownStep = closingQuestions ? 'questions' : state.step;
   switch (shownStep) {
     case 'questions':
       body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={() => setContinued(true)} />;
@@ -280,7 +285,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'preview':
     case 'live':
-      // Live, the title names the business and "Answering now" follows the Desks, so while they are
+      // Live, the title names the business and "Acting for you now" follows the Desks, so while they are
       // first read (on a reload) the step waits whole on the loading line, rather than drawing a
       // title and a link that their arrival would rewrite and push down.
       body =

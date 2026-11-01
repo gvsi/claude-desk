@@ -547,6 +547,12 @@ describe('design tokens', () => {
     expect(unclassified).toEqual([]);
   });
 
+  test('word_settle_is_a_token', () => {
+    // Each new word of Claude's reply settles in over 150 ms as it streams or is revealed, as the
+    // signed Markdown and streaming boards draw it.
+    expect(tokenValue('motion-settle')).toBe('150ms');
+  });
+
   test('motion_stays_in_range', () => {
     const loops = ['motion-breathe', 'motion-writing', 'motion-dots', 'motion-spin'];
     const easings = ['motion-ease', 'motion-ease-emphasis', 'motion-ease-bounce'];

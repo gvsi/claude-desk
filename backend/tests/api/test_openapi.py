@@ -200,7 +200,7 @@ def test_a2a_request_body_is_documented():
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
                    "id", "proposal_id", "key", "item_id"}
-SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
+SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/events", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
                "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
                "/api/owner/setup/{id}/public_lines", "/api/owner/setup/{id}/public_lines/confirm",

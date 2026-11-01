@@ -73,6 +73,9 @@ def web_read_paths(file, source):
             if not args or any(arg is None for arg in args):
                 return None
             if expression.startswith("new URL"):
+                # One argument parses an address; only new URL(path, base) names a file.
+                if len(args) < 2:
+                    return None
                 return posixpath.normpath(posixpath.join(posixpath.dirname(args[1]), args[0]))
             if args[0].startswith("."):
                 args.insert(0, folder)
@@ -132,6 +135,16 @@ def test_web_external_reads_always_select_web():
 def test_web_read_scan_sees_relative_literals_segments_urls_and_aliases(expression):
     paths = web_read_paths("web/scripts/read.mjs", expression)
     assert "backend/new.json" in paths or "backend/*.json" in paths
+
+
+@pytest.mark.parametrize("expression", [
+    "new URL(`http://${label}`)",
+    "new URL('https://example.com/')",
+    "new URL(href)",
+])
+def test_web_read_scan_skips_a_one_argument_url(expression):
+    # new URL(address) parses an address; only new URL(path, base) names a file.
+    assert web_read_paths("web/src/ds/components/ChatMarkdown/ChatMarkdown.tsx", expression) == set()
 
 
 # These deployment paths do not make a CI suite consume the web source. CI synth uses

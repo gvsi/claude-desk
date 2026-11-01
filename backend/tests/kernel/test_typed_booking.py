@@ -174,6 +174,16 @@ async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(a
     assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Maria Rivera\'s calendar'
 
 
+async def test_a_reply_may_name_an_enabled_free_consult_by_its_appointment_type(app, client):
+    """The owner's decision of 2026-10-31: the free word in an enabled tool's appointment type passes
+    in Claude's prose inside a repeat of it, before any booking card."""
+    from .test_reply_check import checked
+
+    copy, visitor = await configured(app, client, config={'appointment_type': 'Free consult'})
+    verdict = await checked(client, visitor, 'I can book you a Free consult with Maria.')
+    assert verdict.ok, verdict.violations
+
+
 @pytest.mark.solver
 async def test_identical_put_refreshes_and_reproves_an_old_typed_booking_profile(app, client, desk_prove):
     from desk.kernel_service import adapters
@@ -218,8 +228,8 @@ async def test_native_booking_keeps_the_existing_card_and_fact(app, client):
     [fact] = result.facts
     assert not any(claim.key.startswith('appointment_') for claim in fact.claims)
     for lang, title, lines in [
-        ('en', 'Monday, November 2', ['Arriving 10:00 am to 11:00 am', 'With Maria Rivera']),
-        ('es', 'lunes 2 de noviembre', ['Llegada de 10:00 a 11:00', 'Con Maria Rivera'])]:
+        ('en', 'Monday, November 2', ['10:00 am to 11:00 am', 'With Maria Rivera']),
+        ('es', 'lunes 2 de noviembre', ['De 10:00 a 11:00', 'Con Maria Rivera'])]:
         card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, lang, DESK)
         assert (card.title, card.lines) == (title, lines)
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))

@@ -1,5 +1,5 @@
-/* ClaudeMessage: Claude's words as serif paragraphs, document style. No bubble, no avatar: the
-   reading column itself is Claude's voice. Cards sit in the same flow. */
+/* ClaudeMessage: Claude's words as Markdown in the serif reply type, document style. No bubble, no
+   avatar: the reading column itself is Claude's voice. Cards sit in the same flow. */
 
 .cd-claude-message {
   min-width: 0;
@@ -8,9 +8,13 @@
 .cd-claude-message__prose {
   margin: 0;
   color: var(--text-primary);
-  /* Claude's line breaks stay; a long unbroken word wraps inside the column. */
-  white-space: pre-line;
+  /* A long unbroken word wraps inside the column. */
   overflow-wrap: anywhere;
+}
+
+/* Plain prose keeps Claude's line breaks; Markdown prose keeps them inside its paragraphs. */
+.cd-claude-message__prose--plain {
+  white-space: pre-line;
 }
 
 .cd-claude-message > * + * {
