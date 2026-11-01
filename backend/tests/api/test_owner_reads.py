@@ -1326,6 +1326,38 @@ async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     assert [(item["kind"], item["ref_id"]) for item in listed] == [("booking", held.decision_id)]
 
 
+def purpose_payment_quote(scene: Scene, who: Guest, when: datetime, amount_cents: int = 5_000) -> str:
+    """A deposit taken through a purpose payment business tool: its quote record, as the kernel writes one, whose one
+    line names the business tool; returns its quote ID."""
+    desk = scene.fake.desks[scene.owner.desk_id]
+    quote_id = f"quote-deposit-{next(_CALL_IDS)}"
+    scene.fake._put("quotes", (quote_id,), {
+        "quote_id": quote_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "session_id": who.session_id,
+        "items": [{"item_id": "desk.deposit", "title": "Service call deposit", "qty": 1, "unit_cents": amount_cents}],
+        "list_cents": amount_cents, "discount_bp": 0, "amount_cents": amount_cents, "status": "available",
+        "expires_at": when + timedelta(hours=72), "created_at": when})
+    scene.fake.flush()
+    return quote_id
+
+
+async def test_a_deposit_is_never_a_bookings_amount_in_the_last_7_days(scene, clock):
+    # A deposit, then a booking: the booking has no quote behind it.
+    deposit_only = await scene.visitor(local(2026, 10, 29, 10))
+    purpose_payment_quote(scene, deposit_only, local(2026, 10, 29, 10))
+    await scene.booking(deposit_only, local(2026, 10, 29, 10, 5))
+    # A quote, a deposit, then a booking: the quote backs it.
+    quoted = await scene.visitor(local(2026, 10, 29, 11))
+    amount = await scene.quote(quoted, local(2026, 10, 29, 11))
+    purpose_payment_quote(scene, quoted, local(2026, 10, 29, 11, 1))
+    await scene.booking(quoted, local(2026, 10, 29, 11, 5))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    this_week = (await owner.get(f"desks/{owner.desk_id}/today")).json()["this_week"]
+
+    assert (this_week["bookings"], this_week["booked_cents"]) == (2, amount)
+
+
 async def test_stopped_counts_only_attempts(scene, clock):
     stopped = await scene.visitor(local(2026, 10, 29, 19))
     refused = await scene.refusal(stopped, local(2026, 10, 29, 19))

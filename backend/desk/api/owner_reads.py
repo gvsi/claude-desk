@@ -59,7 +59,7 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import MESSAGES, WITH_EVENTS, triaged
-from desk.contracts import Decision, DecisionState
+from desk.contracts import Decision, DecisionState, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -472,14 +472,22 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     return found
 
 
+def from_price_list(quote: dict) -> bool:
+    """Whether a quote was priced from the Desk's price list, not written by a business tool: a purpose payment's
+    quote record names its tool (`desk.<name>`) as its line's item, which no price list item can (`ITEM_ID_PATTERN`
+    has no dot)."""
+    return not any(is_business_tool(line["item_id"]) for line in quote["items"])
+
+
 def booked_amounts(bookings: Iterable[Timed], quotes: Iterable[dict]) -> dict[str, int]:
     """What each booking was booked for, by its decision ID. Taking the bookings in time order, each takes the newest
     quote of its session made at or before it (the latest `created_at`, then the greatest `quote_id`) that no earlier
     booking took, and is booked for its `amount_cents`; with none it is booked for 0, so a quote backs at most one
-    booking. A quote with no `created_at` can't be placed before a booking and backs none."""
+    booking. A quote with no `created_at` can't be placed before a booking and backs none, nor does a purpose
+    payment's quote record, such as a deposit's (`from_price_list`)."""
     by_session: dict[str, list[dict]] = {}
     for quote in quotes:
-        if quote["created_at"] is not None and quote["session_id"] is not None:
+        if quote["created_at"] is not None and quote["session_id"] is not None and from_price_list(quote):
             by_session.setdefault(quote["session_id"], []).append(quote)
     taken: set[str] = set()
     amounts: dict[str, int] = {}
