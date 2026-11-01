@@ -184,7 +184,7 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
         </div>
         <p className="cd-connector-review__hint cd-type-meta">
           {app === 'not_connected'
-            ? `${name} asks you to sign in. Then you review its tools here.`
+            ? "You review its tools here once it's connected."
             : "You'll see the change to your rules before anything runs."}
         </p>
       </div>

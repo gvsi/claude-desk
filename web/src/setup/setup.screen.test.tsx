@@ -1837,7 +1837,7 @@ describe('setup', () => {
     expect([getComputedStyle(placeholder).paddingTop, getComputedStyle(placeholder).paddingBottom]).toEqual(['0px', '0px']);
     const cardBox = waiting.element().getBoundingClientRect().height;
     expect(Math.abs(cardBox - (placeholder.getBoundingClientRect().height + 2 * 16 + 2))).toBeLessThanOrEqual(1);
-    await expect.element(screen.getByText('Stripe asks you to sign in. Then you review its tools here.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText("You review its tools here once it's connected.", { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Turn it on' }).elements()).toHaveLength(0);
     expect(requests('setupConnect', mark)).toHaveLength(0);

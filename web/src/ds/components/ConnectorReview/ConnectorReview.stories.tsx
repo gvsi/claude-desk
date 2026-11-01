@@ -322,7 +322,7 @@ export const AppNotConnected: Story = {
     await expect(within(tools).getByText('They show here once Stripe is connected, each with the rule it starts at.')).toBeVisible();
     await expect(within(tools).getByText('Not connected', { exact: true })).toBeVisible();
     await expect(canvasElement.querySelector('.cd-connector-review__status .cd-status-dot--held')).not.toBeNull();
-    await expect(canvas.getByText('Stripe asks you to sign in. Then you review its tools here.')).toBeVisible();
+    await expect(canvas.getByText("You review its tools here once it's connected.", { exact: true })).toBeVisible();
     await expect(canvas.queryByRole('button', { name: 'Turn it on' })).toBeNull();
     await userEvent.click(canvas.getByRole('button', { name: 'Connect Stripe' }));
     await userEvent.click(canvas.getByRole('button', { name: 'Connect Stripe' }));
