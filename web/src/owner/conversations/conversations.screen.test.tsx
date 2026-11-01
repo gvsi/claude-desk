@@ -258,6 +258,25 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('callback_keeps_its_mark_when_a_later_needs_you_read_fails', async () => {
+    // A read that fails after one that worked leaves the handoff open: the row keeps "Wants you".
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    chat.displayName = DANA;
+    await expect.poll(() => [...mockStore.world.handoffs.values()].some((h) => h.handoff.session_id === chat.state.session_id)).toBe(true);
+    // Needs you is read every 150 ms here, and a failed read is retried at once.
+    const { screen } = await renderRoute(LIST, { retryScale: 0 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    mockStore.inject({ route: 'needsYou', status: 500, times: 10_000 });
+    // Several failed reads later.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(row.element().textContent).toContain('Wants you');
+    expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
+
   it('callback_marks_the_list_and_closes_in_the_chat_with_focus_on_its_name', async () => {
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
