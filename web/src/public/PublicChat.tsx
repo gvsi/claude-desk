@@ -698,6 +698,17 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
+        firstView={!conversationStarted(state, chat.status)}
+        starters={{
+          words: (desk.starters ?? []).slice(0, 3),
+          disabled: !ready,
+          onPick: (text) => {
+            if (document.activeElement?.matches('.cd-chip:focus-visible') || !window.matchMedia('(pointer: coarse)').matches) {
+              composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+            }
+            send(text);
+          },
+        }}
         composer={
           <div ref={composerRef} onInput={visitorTyping.onInput}>
             <Composer
