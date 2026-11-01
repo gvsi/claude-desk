@@ -103,7 +103,8 @@ contract test, before the task that first uses them.
   writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
   route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
   `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
-  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
+  specificity order between overlapping cards but a purpose payment's (the compiler's, which the contract suite
+  checks), and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -194,6 +195,7 @@ from desk.contracts import (
     ToolProfile,
     Violation,
     money_tool,
+    money_tools_of,
     moves_money,
 )
 from desk.kernel_api import (
@@ -1297,6 +1299,7 @@ class PaymentLink:
     state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
     cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
     cancelled_by_version: int | None = None
+    mandate_id: str | None = None               # purpose-payment reservation, kept while issued
     customer_person_id: str | None = None       # the person a verified visitor's session was when the link was issued
 
     def ro_row(self) -> dict:
@@ -2489,6 +2492,11 @@ class FakeKernelState:
             return None
         return profile
 
+    def _business_block(self, desk: Desk, tool: str) -> str | None:
+        """The block of a business tool `_business_profile` accepts, else None."""
+        profile = self._business_profile(desk, tool)
+        return profile.business.config.block if profile is not None else None
+
     def tools_given(self, session: Session, desk: Desk) -> tuple[str, ...]:
         """The tools this session may call now ("Model-visible tools"): an owner session has the setup tools only."""
         if session.kind == "owner":
@@ -2631,6 +2639,9 @@ class FakeKernelState:
         if profile.source == 'business' and profile.business.config.block == 'intake':
             if len(args['answers']) != len(profile.business.config.questions):
                 raise AdapterCheckRefused('answer_count')
+        elif profile.source == 'business' and profile.business.config.block == 'purpose_payment':
+            list_cents = amount_cents = profile.business.config.amount_cents
+            discount_bp = 0
         from desk.kernel_service.adapters import profile_sha256
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -2646,6 +2657,8 @@ class FakeKernelState:
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):
             return "refuse", [f"never-{tool}"], None
+        if self._business_block(desk, tool) == 'purpose_payment':
+            return self._purpose_payment_rule(session, desk, action)
         if self._business_profile(desk, tool) is not None:
             covering = [card for card in desk.cards if (
                 card.applies_to == tool or card.applies_to.removeprefix('effect:') in action.effects) and (
@@ -2688,6 +2701,34 @@ class FakeKernelState:
         if preset is not None:
             return "allow", [preset], None
         return "hold", [f"default-{tool}"], None
+
+    def _purpose_payment_rule(self, session: Session, desk: Desk, action: NormalizedAction):
+        if not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+            return 'refuse', [], 'money_has_amount'
+        if session.kind == 'agent' and not self._room_for(session, action):
+            return 'refuse', [], 'agent_charge_within_mandate'
+        covering = [card for card in desk.cards if (
+            card.applies_to == action.tool or card.applies_to.removeprefix('effect:') in action.effects) and (
+            card.who == 'anyone' or card.who == 'verified' and session.verified
+            or card.who == 'person' and card.person_id == session.person_id and session.verified
+            or card.who == 'agent' and session.kind == 'agent' and card.agent_key_id == session.agent_key_id)]
+        never = [card for card in covering if card.mode == 'never']
+        if never:
+            return 'refuse', [card.card_id for card in never], None
+        asks = [card for card in covering if card.mode == 'ask' and not card.is_default]
+        autos = [card for card in covering if card.mode == 'auto']
+        # The compiler's precedence: an auto card decides only where no ask card at its specificity or above, and no
+        # more specific auto card, covers the call; its limits, hours and review come after.
+        ranked = [card for card in autos if all(_specificity(ask) < _specificity(card) for ask in asks)
+                  and all(_specificity(other) <= _specificity(card) for other in autos)]
+        within = [card for card in ranked
+                  if card.max_amount_cents is not None and action.amount_cents <= card.max_amount_cents
+                  and action.amount_cents <= desk.auto_money_cap_cents
+                  and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+        if within and not any(card.review for card in within):
+            return 'allow', [card.card_id for card in within], None
+        holds = asks or within or autos
+        return 'hold', [card.card_id for card in holds] or [f'default-{action.tool}'], None
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
@@ -2932,6 +2973,14 @@ class FakeKernelState:
                 if approved:
                     return ExecResult(action_id=action.action_id, state='failed', facts=[], model_view={})
                 raise Refusal(409, 'conflict')
+        if self._business_block(desk, action.tool) == 'purpose_payment':
+            approved = record.decision.state == 'approved'
+            if ((session.kind == 'agent' and not self._room_for(session, action))
+                    or (not approved and self._rule(session, desk, action)[0] != 'allow')):
+                self._transition(record, 'refused_at_execution', kind='execute', reason='rules_changed')
+                if approved:
+                    return ExecResult(action_id=action.action_id, state='failed', facts=[], model_view={})
+                raise Refusal(409, 'conflict')
         script = self._scripts.get(action.tool)
         if exec_state is None:
             exec_state = script.exec_state if script is not None else "succeeded"
@@ -3016,6 +3065,50 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
+        elif (self._business_block(desk, tool) == 'purpose_payment'
+              and (open_link := self._open_purpose_link(session, desk, action)) is not None):
+            # asked again in the session, its open link answers: no second quote, checkout or link
+            facts.append(desk.facts[f'payment_link:{open_link.link_id}'])
+            view = {'fact_id': facts[0].fact_id, 'title': open_link.title, 'amount_cents': open_link.amount_cents}
+        elif self._business_block(desk, tool) == 'purpose_payment':
+            config = desk.tools[tool].business.config
+            if config.amount_cents != action.amount_cents:
+                return [], None, []
+            quote_id = new_id('quote')
+            expires = self.now + timedelta(hours=72)
+            self.quotes[quote_id] = {
+                'quote_id': quote_id, **ids, 'session_id': session.session_id,
+                'items': [{'item_id': tool, 'title': config.purpose, 'qty': 1, 'unit_cents': config.amount_cents}],
+                'list_cents': action.list_cents, 'discount_bp': 0, 'amount_cents': action.amount_cents,
+                'status': 'available', 'expires_at': expires, 'created_at': self.now}
+            self._put('quotes', (quote_id,), dict(self.quotes[quote_id]))
+            facts.append(Fact(fact_id=f'quote:{quote_id}', kind='quote', status='available', source='kernel',
+                              label=label, expires_at=expires, claims=[
+                                  Claim(key='items', kind='text', value=config.purpose),
+                                  Claim(key='list', kind='money', value=action.list_cents),
+                                  Claim(key='total', kind='money', value=action.amount_cents),
+                                  Claim(key='discount', kind='percent_bp', value=0),
+                                  Claim(key='expires', kind='datetime', value=expires.astimezone(ZoneInfo(desk.timezone)).isoformat())]))
+            link = PaymentLink(link_id=new_id('link'), token=secrets.token_urlsafe(32), **ids,
+                               session_id=session.session_id, quote_id=quote_id, action_id=action.action_id,
+                               title=config.purpose, amount_cents=action.amount_cents, expires_at=self.now + LINK_TTL,
+                               customer_person_id=session.person_id if session.kind == 'visitor' and session.verified else None,
+                               mandate_id=session.mandate_id if session.kind == 'agent' else None)
+            if link.mandate_id is not None:
+                mandate = self.mandates[link.mandate_id]
+                mandate.reserved_cents += action.amount_cents
+                self._put('mandates', (link.mandate_id,), mandate.ro_row())
+            self.payment_links[link.link_id] = link
+            self._put('payment_links', (link.link_id,), link.ro_row())
+            self.append(desk, 'payment', {'link_id': link.link_id, 'state': 'issued', 'version': desk.policy_version},
+                        session_id=session.session_id)
+            link_fact = Fact(fact_id=f'payment_link:{link.link_id}', kind='payment_link', status='available',
+                             source='kernel', label=label, expires_at=link.expires_at, claims=[
+                                 Claim(key='title', kind='text', value=config.purpose),
+                                 Claim(key='total', kind='money', value=action.amount_cents),
+                                 Claim(key='ref', kind='ref', value=link.link_id)])
+            facts.append(link_fact)
+            view = {'fact_id': link_fact.fact_id, 'title': config.purpose, 'amount_cents': action.amount_cents}
         elif tool == "native.capture_lead" or (
                 self._business_profile(desk, tool) is not None and desk.tools[tool].business.config.block == 'intake'):
             lead_id = new_id("lead")
@@ -3806,10 +3899,12 @@ class FakeKernelState:
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
         cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
+        money_tools = money_tools_of((profile.tool, profile.effects) for profile in desk.tools.values())
         ids = [card.card_id for card in body.cards]
         if len(set(ids)) != len(ids) or any(
                 card.is_default or changes_always_on(card)
-                or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
+                or (card.mode == "auto" and moves_money(card, money_tools)
+                    and (card.max_amount_cents is None or card.max_amount_cents > cap))
                 for card in body.cards):
             raise Refusal(422, "invalid")
         profiles = self._draft_profiles(desk, enables)
@@ -4005,6 +4100,11 @@ class FakeKernelState:
         if tool not in self._probe_tools(desk, probe, enables) or not matches(desk.tools[tool].input_schema, probe.call.args):
             return result("refuse", [], "Claude has no such tool for them here.")
         profile = desk.tools[tool]
+        if self._business_block(desk, tool) == 'purpose_payment':
+            if not 0 < (probe.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+                return result('refuse', [], 'Money moves only for a known positive amount.')
+            if probe.amount_cents > desk.auto_money_cap_cents:
+                return result('hold', [], 'It would ask you first.')
         discount = probe.call.args.get("requested_discount_bp", 0) if tool == "native.quote" else 0
         amount = probe.amount_cents
         if amount is not None and discount:
@@ -4341,6 +4441,12 @@ class FakeKernelState:
     def _move_link(self, link: PaymentLink, state: str, **summary) -> None:
         """The link leaves `issued`: its fact expires, and the move is mirrored and ledgered `payment`."""
         desk = self.desks[link.desk_id]
+        if link.state == 'issued' and link.mandate_id is not None:
+            mandate = self.mandates[link.mandate_id]
+            mandate.reserved_cents -= link.amount_cents
+            if state == 'paid':
+                mandate.committed_cents += link.amount_cents
+            self._put('mandates', (link.mandate_id,), mandate.ro_row())
         link.state = state
         fact = desk.facts.get(f"payment_link:{link.link_id}")
         if fact is not None:
@@ -4373,6 +4479,19 @@ class FakeKernelState:
         return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state,
                                language=session.last_language or "en", business_name=desk.business_name,
                                customer_name=customer, cancel_reason="rules_changed" if rules_changed else None)
+
+    def _open_purpose_link(self, session: Session, desk: Desk, action: NormalizedAction) -> PaymentLink | None:
+        """The session's newest open link from an earlier call of the purpose payment tool, at its purpose and
+        amount, on a quote still unpaid (the kernel's open-link answer for a repeated purpose payment)."""
+        config = desk.tools[action.tool].business.config
+        if config.amount_cents != action.amount_cents:
+            return None
+        return next((link for link in reversed(self.payment_links.values())
+                     if link.desk_id == desk.desk_id and link.session_id == session.session_id
+                     and link.title == config.purpose and link.amount_cents == action.amount_cents
+                     and self.quotes[link.quote_id]['items'][0]['item_id'] == action.tool
+                     and self.quotes[link.quote_id]['status'] == 'available'
+                     and self._open_link(link.quote_id) is link), None)
 
     def _open_link(self, quote_id: str) -> PaymentLink | None:
         """The quote's open link (issued and unexpired), if it has one."""

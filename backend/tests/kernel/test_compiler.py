@@ -495,10 +495,12 @@ def test_invalid_cards_are_rejected():
                   max_amount_cents=2000),
              card("late", "native.book", hours=HoursWindow(days=["fri"], start=time(22), end=time(0))),
              card("default:native.book", "native.book", mode="ask", is_default=True)]   # a default: dropped, unchecked
-    assert compiler.validate_cards(valid, people=people, agent_keys=agent_keys, auto_money_cap_cents=TEST_CAP) == []
+    assert compiler.validate_cards(valid, people=people, agent_keys=agent_keys,
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
 
     def errors(*cards: RuleCard, cap: int = TEST_CAP) -> list[str]:
-        return compiler.validate_cards(list(cards), people=people, agent_keys=agent_keys, auto_money_cap_cents=cap)
+        return compiler.validate_cards(list(cards), people=people, agent_keys=agent_keys,
+                                       auto_money_cap_cents=cap, money_tools=frozenset())
 
     assert errors(card("Quote", "native.quote"))                                # IDs are lower case
     assert errors(card("-quote", "native.quote"))
@@ -537,7 +539,8 @@ def test_no_card_can_change_verification():
     any mode and scope, is refused with a reason that names the tool (the presets' own card for it
     is the one exception, in the next test), and one such card refuses the whole set."""
     def errors(*cards: RuleCard) -> list[str]:
-        return compiler.validate_cards(list(cards), people={"dana"}, agent_keys=(), auto_money_cap_cents=TEST_CAP)
+        return compiler.validate_cards(list(cards), people={"dana"}, agent_keys=(),
+                                       auto_money_cap_cents=TEST_CAP, money_tools=frozenset())
 
     valid = [card("quote", "native.quote"), card("dana-book", "native.book", who="person", **DANA)]
     assert errors(*valid) == []
@@ -555,7 +558,8 @@ def test_the_shipped_verification_card_stays_as_it_is():
     which compile to nothing, as `lower_to_cap` matches a carried card); any other change to it
     is refused."""
     def errors(*cards: RuleCard) -> list[str]:
-        return compiler.validate_cards(list(cards), people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP)
+        return compiler.validate_cards(list(cards), people=(), agent_keys=(),
+                                       auto_money_cap_cents=TEST_CAP, money_tools=frozenset())
 
     [shipped] = [c for c in PRESETS["ask_first"] if c.applies_to == "native.start_verification"]
     # every field pinned (no review, hours or limits), so a preset edit can't tighten it unseen
@@ -615,7 +619,7 @@ def test_no_effect_card_can_change_verification():
     ranks below the presets' card and stays, as the master plan's joint-coverage cards use it."""
     def errors(*cards: RuleCard) -> list[str]:
         return compiler.validate_cards(list(cards), people={"dana"}, agent_keys={AGENT["agent_key_id"]},
-                                       auto_money_cap_cents=TEST_CAP)
+                                       auto_money_cap_cents=TEST_CAP, money_tools=frozenset())
 
     refused = [card("send", "effect:send_message", mode="never"),
                card("send", "effect:send_message", mode="never", who="person", **DANA),
@@ -654,7 +658,7 @@ def test_an_effect_card_a_draft_may_hold_leaves_every_start_allowed():
     accepted = 0
     for send in sends:
         errors = compiler.validate_cards([*presets, send], people={"dana"}, agent_keys={AGENT["agent_key_id"]},
-                                         auto_money_cap_cents=TEST_CAP)
+                                         auto_money_cap_cents=TEST_CAP, money_tools=frozenset())
         if errors:
             assert errors == [f"send: {ALWAYS_ON}"], send
             continue
@@ -692,7 +696,7 @@ def test_no_review_can_hold_a_start():
     for base, extra in itertools.product(bases, extras):
         cards = [*base, *extra]
         if compiler.validate_cards(cards, people={"dana"}, agent_keys={AGENT["agent_key_id"]},
-                                   auto_money_cap_cents=TEST_CAP):
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()):
             continue
         accepted += 1
         engine = load_compiled(cards, NATIVE)
@@ -796,9 +800,11 @@ def test_the_compiler_refuses_cards_with_the_shared_check(monkeypatch):
     assert compiler.specificity is always_on.specificity
     # validate_cards reads it when it runs: whatever the shared check names is refused with that tool
     send = card("send", "effect:send_message")
-    assert compiler.validate_cards([send], people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    assert compiler.validate_cards([send], people=(), agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
     monkeypatch.setattr(always_on, "ALWAYS_ON_CARDS", ())
-    assert compiler.validate_cards([send], people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == [
+    assert compiler.validate_cards([send], people=(), agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == [
         f"send: {ALWAYS_ON}"]
 
 
