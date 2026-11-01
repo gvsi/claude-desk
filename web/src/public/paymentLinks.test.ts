@@ -10,9 +10,9 @@ describe('payment link closure', () => {
     expect(paymentLinkClosed(link, [cancelled], undefined)).toBe(true);
     expect(paymentLinkClosed(link, [{ ...cancelled, fact_id: 'payment_link:other' }], undefined)).toBe(false);
   });
-  it('closes paid and cancelled states only, keeping the action after a failed read', () => {
+  it('closes paid, cancelled and expired states, keeping the action after a failed read', () => {
     const link = rivera.blocks.payment_link.en;
-    for (const state of ['paid', 'cancelled']) expect(paymentLinkClosed(link, [], state)).toBe(true);
-    for (const state of ['issued', 'unknown', 'expired', 'future_state', undefined]) expect(paymentLinkClosed(link, [], state)).toBe(false);
+    for (const state of ['paid', 'cancelled', 'expired']) expect(paymentLinkClosed(link, [], state)).toBe(true);
+    for (const state of ['issued', 'unknown', 'future_state', undefined]) expect(paymentLinkClosed(link, [], state)).toBe(false);
   });
 });

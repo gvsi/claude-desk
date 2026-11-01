@@ -116,13 +116,37 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     expectNoHorizontalScroll();
     expect(reads()).toHaveLength(2);
   });
+  it('removes an expired action after a read and preserves the title and lines on reload', async () => {
+    const { screen, token, words } = await issue(viewport);
+    await vi.waitFor(() => expect(reads()).toHaveLength(1));
+    const content = (view: RenderResult) => ({
+      title: card(view).element().querySelector('.cd-reply-card__headline')?.textContent,
+      lines: [...card(view).element().querySelectorAll('.cd-reply-card__detail')].map((line) => line.textContent),
+      note: card(view).element().querySelector('.cd-reply-card__note')?.textContent,
+    });
+    const before = content(screen);
+    const link = mockStore.world.links.get(token);
+    if (!link) throw new Error('the chat issued its link');
+    // The mock has no expiry transition; return the contract's expired state on this read.
+    mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view, state: 'expired' }, times: 2 });
+    visibility('hidden');
+    visibility('visible');
+    await unchanged(screen, words);
+    expect(content(screen)).toEqual(before);
+    expect(reads()).toHaveLength(2);
+    const reload = await renderRoute(CHAT, { viewport, strict: true });
+    await expect.element(card(reload.screen)).toBeVisible();
+    await unchanged(reload.screen, words);
+    expect(content(reload.screen)).toEqual(before);
+    expect(reads()).toHaveLength(3);
+  });
   it('keeps the button after unavailable or non-closed reads and performs no background polling', async () => {
     const { screen, token } = await issue(viewport);
     await vi.waitFor(() => expect(reads()).toHaveLength(1));
     const link = mockStore.world.links.get(token);
     if (!link) throw new Error('the chat issued its link');
     let count = 1;
-    for (const state of ['issued', 'unknown', 'expired']) {
+    for (const state of ['issued', 'unknown']) {
       mockStore.inject({ route: 'paymentLink', status: 200, body: { ...link.view, state }, times: 1 });
       visibility('hidden');
       visibility('visible');
