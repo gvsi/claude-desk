@@ -149,6 +149,90 @@
   }
 }
 
+/* A step's part that waits on a read (StepSkeletons): its parts keep the step's 20 px rhythm
+   inside the region, as its shapes do in the layer, so the part lands where its shapes were. */
+.cd-setup-step__region > .cd-skeleton-screen__body,
+.cd-setup-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+/* The opening (SetupOpening) stays around the step once the interview is read, so its shapes hand
+   off to the step's. In the conversation's frame, where only the transcript scrolls, it passes the
+   column's height on to the conversation, so the dock keeps its place at the window's foot; and the
+   shapes fading over the conversation keep the place they had in the column, which is now the
+   transcript column's (SetupConversation.css), as this frame's main has no padding of its own. */
+.cd-setup--chat .cd-setup-opening,
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  box-sizing: border-box;
+  padding: var(--space-40) max(var(--space-40), calc((100% - 720px) / 2)) 0;
+}
+
+@media (max-width: 639px) {
+  .cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+    padding: var(--space-24) var(--space-16) 0;
+  }
+}
+
+/* Known words' lines (MeasuredLines): a box as wide as the words' own, in their type, which holds a
+   pill per line they take there. */
+.cd-setup-skeleton__measured {
+  display: block;
+  min-width: 0;
+}
+
+/* Lines the words take at one width only: a phone's wrap onto more of them. */
+.cd-skeleton-line.cd-setup-skeleton__phone-line {
+  display: none;
+}
+
+@media (max-width: 639.98px) {
+  .cd-skeleton-line.cd-setup-skeleton__phone-line {
+    display: flex;
+  }
+
+  .cd-skeleton-line.cd-setup-skeleton__wide-line {
+    display: none;
+  }
+}
+
+/* A shape set on a line of words' middle, as a name and its badge are: the line is as deep as the
+   tallest of them, as it is under the words. */
+.cd-skeleton.cd-setup-skeleton__inline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.cd-setup-skeleton__badge {
+  margin-left: var(--space-4);
+}
+
+/* The always-on rules' lock, on the middle of its rule's first line, and the rule's lines beside it. */
+.cd-setup-skeleton__lock {
+  display: flex;
+  align-items: center;
+}
+
+.cd-setup-skeleton__fill {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* "Not what we planned" as a line where the words go, 6 px under who is asking, without the held
+   bar beside it: a skeleton draws no status. */
+.cd-setup-skeleton__flag {
+  margin-top: var(--space-6);
+}
+
 .cd-setup-step__actions {
   display: flex;
   flex-wrap: wrap;
@@ -191,11 +275,115 @@
   list-style: none;
 }
 
-/* The preview: the public page in a frame of its own. */
+/* The preview: the public page in a frame of its own. In a window 480 px tall or more, a phone's as
+   well as a laptop's, it is a full-height chat, as the public page fills its window: the step and its
+   column grow down to the footer, the frame fills the height they leave it, from under the title down
+   to the launch bar, and its one grid cell gives the page a set height. It is at least 300 px; no size
+   token holds that value. In a shorter window, such as a phone on its side, the frame grows with what
+   it holds and the page scrolls. */
 .cd-setup-live__preview {
   overflow: hidden;
   border: 1px solid var(--line-card);
   border-radius: var(--radius-card);
+}
+
+@media (min-height: 480px) {
+  /* The opening (SetupOpening) stays around the step, so it passes the column's height on to it. */
+  .cd-setup__main--wide .cd-setup-opening,
+  .cd-setup__main--wide .cd-setup-opening > .cd-skeleton-screen__body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cd-setup__main--wide > .cd-setup__column,
+  .cd-setup__main--wide .cd-setup-opening,
+  .cd-setup__main--wide .cd-setup-opening > .cd-skeleton-screen__body,
+  .cd-setup__main--wide .cd-setup-step {
+    flex: 1 0 auto;
+  }
+
+  .cd-setup-live__preview {
+    display: grid;
+    flex: 1 1 0;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    /* The window is at least 480 px tall here, so this is 300 px, unless a phone's toolbars leave a
+       dynamic viewport shorter than the height the media query sees. */
+    min-height: min(300px, 100dvh);
+  }
+
+  /* The page shown when the Desk can't be reached fills the frame rather than the window, so its
+     notice sits at the frame's middle. */
+  .cd-setup-live__preview .cd-public-state {
+    min-height: 100%;
+  }
+}
+
+/* The launch bar, the step's gap under the preview: at its left two lines, the first after an info
+   dot and the second 2 px under it, lined up with the first one's words; at its right "Go live", at
+   least as wide as the margin column. One row, centred. On a phone it stacks in the page's flow, the
+   lines over "Go live" at the bar's full width. How it looks is in the rules after these. */
+.cd-setup-live__launch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-24);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-20) var(--space-20) var(--space-20) var(--space-24);
+}
+
+.cd-setup-live__launch-text {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The dot and its words are one flex item, so the dot sets no baseline that would make the line taller. */
+.cd-setup-live__launch-line {
+  display: flex;
+  margin: 0;
+}
+
+.cd-setup-live__launch-note {
+  margin: var(--space-2) 0 0;
+  padding-left: calc(var(--size-dot) + var(--space-8));
+}
+
+/* "Go live" fills its cell, which is never narrower than the margin column. */
+.cd-setup-live__go {
+  display: grid;
+  flex: none;
+  min-width: var(--size-margin);
+}
+
+@media (max-width: 639.98px) {
+  .cd-setup-live__launch {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-12);
+    padding: var(--space-16);
+  }
+
+  .cd-setup-live__go {
+    min-width: 0;
+  }
+}
+
+/* The launch bar's emphasis, together so that a bolder or quieter version changes only these rules:
+   the bar's surface, border, corners and shadow, and each line's ink. Each line's type is its
+   cd-type class in LiveStep. */
+.cd-setup-live__launch {
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-dialog);
+}
+
+.cd-setup-live__launch-line {
+  color: var(--text-primary);
+}
+
+.cd-setup-live__launch-note {
+  color: var(--text-secondary);
 }
 
 /* Live: the title and its line, then "Answering now" 10 px under them in primary ink, its handled

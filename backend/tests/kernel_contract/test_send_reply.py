@@ -25,6 +25,8 @@ from tests.kernel_contract.test_contract import (
     ledger_page,
     new_copy,
     new_visitor,
+    issue_payment_link,
+    item_id,
     session_handoffs,
 )
 
@@ -78,6 +80,70 @@ async def delivered(conn: AsyncConnection, session_id: str) -> list[list[str | N
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("source", ["api_fallback", "model_clause"])
+async def test_a_passing_handoff_clause_is_delivered_as_a_handoff(kernel, ro_read, conn, source):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    if source == "api_fallback":
+        outcome = await tools.hand_off(conn, caller, 0)
+    else:
+        outcome = await tools.send_reply(conn, caller, 0, {"prose": "", "clauses": [{"template": "handoff"}]},
+                                         1, call_id="toolu_handoff")
+    assert outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.delivered == "handoff" and outcome.is_error
+    assert await delivered(conn, session_id) == [["handoff"]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert payload["handoff"]
+    entries = (await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])).entries
+    assert [entry.event.summary["ok"] for entry in entries
+            if entry.event.kind == "reply" and entry.event.session_id == session_id] == [True]
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
+        ("card", "open")]
+    assert await handed_to_you(http, copy) == 1
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_handoff(kernel, ro_read, conn):
+    """Only the prose fails on the final check: the checked hours card and, after it, the handoff clause Claude
+    drafted are shown as one handoff, which opens the owner's item, with one check and no handoff of the API's own."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    draft = {"prose": "It comes to $89 for the visit.",
+             "clauses": [{"template": "hours", "fact_id": "charter:hours"}, {"template": "handoff"}]}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept_then_handoff")
+    assert outcome.result == {"outcome": "delivered_handoff", "prose_shown": False}
+    assert outcome.delivered == "handoff" and outcome.is_error
+    assert [check["final"] for check in caller.kernel.checks] == [True]
+    assert await delivered(conn, session_id) == [["hours", "handoff"]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert payload["handoff"] and "89" not in str(payload["blocks"])
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
+        ("card", "open")]
+    assert await handed_to_you(http, copy) == 1
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_clause_missing_its_fact_id_is_pointed_at_in_the_correction(kernel, ro_read, conn):
+    """A card template sent with no fact ID names no fact in the kernel's violation, so the correction points at the
+    clause by its place and template."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller = caller_of(http, ro_schema, copy, visitor)
+    outcome = await tools.send_reply(conn, caller, 0, {"prose": "Here are our opening hours.",
+                                                       "clauses": [{"template": "hours"}]}, 1, call_id="toolu_no_id")
+    assert outcome.result["outcome"] == "blocked"
+    assert outcome.result["violations"] == [
+        {"kind": "unknown_fact", "rule_id": "no_such_fact", "clause_index": 0, "template": "hours"}]
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_rewritten_first_draft_opens_no_handoff_through_the_api(kernel, ro_read, conn):
     """A blocked first draft the API will rewrite is sent with `final` false: it shows nothing, and the kernel records
     it as not final and opens no handoff and no alert. The clean rewrite, sent as final, is what the visitor sees,
@@ -117,10 +183,46 @@ async def test_a_first_draft_no_rewrite_fixes_opens_the_handoff_the_visitor_sees
     outcome = await tools.send_reply(conn, caller, 0, {"prose": f"Your invoice reference is {canary}.",
                                                        "clauses": []}, 1)
 
-    assert outcome.delivered == "handoff" and outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.delivered == "handoff" and outcome.result == {"outcome": "delivered_handoff", "prose_shown": False}
     assert [check["final"] for check in caller.kernel.checks] == [False]
     assert await finals_recorded(http, copy, session_id) == [False]
     assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
         ("card", "open")]
     assert await handed_to_you(http, copy) == 1
     assert await delivered(conn, session_id) == [["handoff"]]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_payment_caption_rewrites_through_the_api_and_keeps_final_cards(kernel, ro_read, conn):
+    """The combined API/kernel path: one uncertain-language correction, retained checked cards, and a hard control."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    _, issued = await issue_payment_link(http.session(visitor.session_token), session_id,
+        item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+        owner=http.owner(copy.owner_token) if state is None else None)
+    clauses = [{"template": "payment_link", "fact_id": issued.facts[0].fact_id}]
+    draft = {"prose": "Absolutely. Payment link below.", "clauses": clauses}
+    first = await tools.send_reply(conn, caller, 0, draft, 1, call_id="toolu_uncertain")
+    assert first.result["delivered"] is False
+    assert first.result["violations"] == [{"kind": "uncertain_language", "rule_id": "language_uncertain"}]
+    assert await delivered(conn, session_id) == []
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+
+    corrected = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Here is the link to pay."}, 2,
+                                       call_id="toolu_corrected")
+    assert corrected.result["outcome"] == "delivered" and corrected.delivered == "reply"
+    assert "prose_shown" not in corrected.result
+    assert [check["final"] for check in caller.kernel.checks] == [False, True]
+    final = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept")
+    assert final.result["outcome"] == "delivered" and final.delivered == "reply" and not final.is_error
+    assert final.result["prose_shown"] is False
+    assert await delivered(conn, session_id) == [[None, "payment_link"], ["payment_link"]]
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    stored = await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"
+                                    " ORDER BY seq"), {"s": session_id})
+    assert all(not payload["handoff"] for (payload,) in stored)
+    control = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Bonjour, je peux vous aider."}, 1,
+                                      call_id="toolu_unsupported")
+    assert control.result == {"outcome": "delivered_handoff", "prose_shown": False} and control.delivered == "handoff"

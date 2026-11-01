@@ -16,6 +16,7 @@ import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
 import { SETUP_REACHES, laterStep } from './shared.ts';
+import { SetupOpening } from './StepSkeletons.tsx';
 import { ToolsStep } from './ToolsStep.tsx';
 
 import './SetupPage.css';
@@ -237,20 +238,20 @@ function SetupInterview({ setupId }: { setupId: string }) {
   if (state === undefined) {
     return (
       <SetupShell business={null} step={0} exitTo="/">
-        {setup.isError ? (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" onClick={() => void setup.refetch()}>
-                {SETUP_COPY.questions.tryAgain}
-              </Button>
-            }
-          >
-            {ownerErrorCopy(setup.error)}
-          </Notice>
-        ) : (
-          <LoadingLine>{SETUP_COPY.questions.loading}</LoadingLine>
-        )}
+        <SetupOpening loading={!setup.isError}>
+          {setup.isError ? (
+            <Notice
+              tone="error"
+              action={
+                <Button variant="secondary" onClick={() => void setup.refetch()}>
+                  {SETUP_COPY.questions.tryAgain}
+                </Button>
+              }
+            >
+              {ownerErrorCopy(setup.error)}
+            </Notice>
+          ) : null}
+        </SetupOpening>
       </SetupShell>
     );
   }
@@ -272,7 +273,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'rules':
     case 'situations':
-      body = <RulesStep state={state} business={name} onNext={moveTo} live={opened !== 'situations'} />;
+      body = <RulesStep state={state} business={name} onNext={moveTo} reread={reread} live={opened !== 'situations'} />;
       break;
     case 'safety_check':
       body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;
@@ -300,7 +301,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
       chat={shownStep === 'questions'}
       beforeLeave={beforeLeave}
     >
-      {body}
+      {/* The same region as while the interview was read, so its shapes hand off to the step's. */}
+      <SetupOpening loading={false}>{body}</SetupOpening>
     </SetupShell>
   );
 }

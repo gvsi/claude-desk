@@ -283,6 +283,7 @@ function nativeTool(
   return {
     tool,
     source: 'native',
+    business: null,
     adapter: tool.slice('native.'.length),
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     definition_sha256: placeholderHex(`sha256:profile:${tool}`, 32),
@@ -328,8 +329,8 @@ export function riveraTools(): ToolRecord[] {
     nativeTool('native.fetch_website', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: "Read the business's website." }),
     nativeTool('native.read_memory', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Read the notes the owner brought in.' }),
     nativeTool('native.web_search', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Searches the web to learn how businesses like yours work.' }),
-    { ...rivera.toolProfiles.listCharges, review_reason: null },
-    { ...rivera.toolProfiles.createRefund, review_reason: null },
+    { ...rivera.toolProfiles.listCharges, business: null, review_reason: null },
+    { ...rivera.toolProfiles.createRefund, business: null, review_reason: null },
   ];
 }
 

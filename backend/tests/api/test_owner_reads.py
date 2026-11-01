@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
-from desk.api import owner_reads
+from desk.api import loop, owner_reads
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.main import create_app
 from desk.api.owner_reads import (
@@ -47,7 +47,8 @@ from desk.api.store import (
     prepare_model_input,
     start_fresh_context,
 )
-from desk.contracts import Decision, ExecResult, RenderedBlock, ReplyDraft, ToolCall
+from desk.api.tools import Caller
+from desk.contracts import Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, ToolCall
 from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
@@ -58,9 +59,16 @@ from desk.kernel_api import (
     ExecuteRequest,
 )
 from desk.kernel_service import reply_check
-from tests.api.fakes import ScriptedModel
+from tests.api.fakes import ScriptedModel, response, tool_use, unavailable
 from tests.api.test_store import SYSTEM
 from tests.kernel_contract.fake_kernel import fake_kernel_app, signed_time
+
+
+def test_reply_reason_distinguishes_checker_outage_from_unclear_language():
+    assert owner_reads.reply_reason([("check_unavailable", None)]) == (
+        "A reply was stopped before it was shown, because the checkpoint wasn't available.")
+    assert owner_reads.reply_reason([("uncertain_language", "language_uncertain")]) == (
+        "A reply was stopped before it was shown, because it didn't read clearly as English or Spanish.")
 
 OWNER = "x-owner-session"
 
@@ -187,10 +195,23 @@ class Scene:
     async def text(self, who: Guest, when: datetime, text: str = "Hi, do you fix leaks?") -> int:
         return await write(self.engine, self.admin, who.ids, "visitor_text", when, text=text)
 
-    async def reply(self, who: Guest, when: datetime, *, handoff: bool = False) -> int:
-        block = (RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")
-                 if handoff else RenderedBlock(kind="prose", text="Yes, we do. When suits you?"))
-        return await write(self.engine, self.admin, who.ids, "delivered", when, author="claude", blocks=[block])
+    async def reply(self, who: Guest, when: datetime, *, handoff: bool = False, blocked: bool = False) -> int:
+        if handoff:
+            self.fake.now = when
+            verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+                session_id=who.session_id, generation=who.generation,
+                prose="That's 180 dollars." if blocked else "", clauses=[Clause(template="handoff")])))
+            assert verdict.ok is not blocked
+        else:
+            verdict = ReplyVerdict(ok=True, language="en", blocks=[
+                RenderedBlock(kind="prose", text="Yes, we do. When suits you?")], violations=[],
+                message_id=f"msg-scene-{next(_CALL_IDS)}", generation=who.generation,
+                visitor_plain="Checked", ledger_seq=1, signature="fake:scene")
+        async with self.engine.connect() as conn:
+            seq = await deliver(conn, who.ids, Reply(verdict, "claude", "api"), ro_schema="fake_kernel_ro")
+            await conn.commit()
+        self.admin.execute("UPDATE app.messages SET created_at = %s WHERE ref_id = %s", (when, verdict.message_id))
+        return seq
 
     async def refusal(self, who: Guest, when: datetime) -> Decision:
         self.fake.now = when
@@ -714,21 +735,68 @@ async def test_briefing_answers_after_a_stopped_draft(scene, clock):
     assert [(item["kind"], item["ref_id"]) for item in safety] == [("reply_blocked", str(seq))]
 
 
-async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_handoff(scene, clock):
+@pytest.mark.parametrize("blocked", [False, True])
+async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_handoff(scene, clock, blocked):
     who = await scene.visitor(local(2026, 10, 29, 19))
     await scene.text(who, local(2026, 10, 29, 19))
     await scene.reply(who, local(2026, 10, 29, 19, 1))
     await scene.text(who, local(2026, 10, 29, 19, 2))
     seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 3))
-    await scene.reply(who, local(2026, 10, 29, 19, 4), handoff=True)
+    await scene.reply(who, local(2026, 10, 29, 19, 4), handoff=True, blocked=blocked)
     clock.now = local(2026, 10, 30, 9)
     owner = scene.owner
 
     brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
     assert brief["newest"]["lead_or_answer"] is None and brief["total"] == 0
     assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
-    assert [(item["kind"], item["ref_id"]) for item in
-            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [("reply_blocked", str(seq))]
+    safety = (await owner.get(f"desks/{owner.desk_id}/safety")).json()
+    assert ("reply_blocked", str(seq)) in [(item["kind"], item["ref_id"]) for item in safety]
+    assert len(safety) == (2 if blocked else 1)
+
+
+@pytest.mark.parametrize(("blocked", "handoff"), [(True, True), (False, True), (True, False)])
+async def test_briefing_uses_event_flag_for_cards_and_a_handoff_clause(scene, clock, blocked, handoff):
+    when = local(2026, 10, 30, 8)
+    who = await scene.visitor(when)
+    await scene.text(who, when)
+    clauses = [] if blocked and handoff else [Clause(template="hours", fact_id="charter:hours")]
+    verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=who.session_id, generation=0, prose="That's 180 dollars." if blocked else "Here is the information.",
+        clauses=[*clauses, *([Clause(template="handoff")] if handoff else [])])))
+    assert verdict.ok is not blocked
+    assert any(block.template == "handoff" for block in verdict.blocks) is handoff
+    async with scene.engine.connect() as conn:
+        await deliver(conn, who.ids, Reply(verdict, "claude", "api"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+    scene.admin.execute("UPDATE app.messages SET created_at = %s WHERE ref_id = %s", (when, verdict.message_id))
+    clock.now = local(2026, 10, 30, 9)
+    items = (await scene.owner.get(f"desks/{scene.owner.desk_id}/briefing")).json()["items"]
+    assert [item["kind"] for item in items] == ([] if handoff else ["answer"])
+
+
+@pytest.mark.parametrize("cause", ["model_unavailable", "call_cap", "malformed_final"])
+async def test_briefing_counts_the_api_fallback_as_a_handoff(scene, clock, monkeypatch, cause):
+    when = local(2026, 10, 30, 8)
+    who = await scene.visitor(when)
+    await scene.text(who, when)
+    monkeypatch.setattr(loop, "MAX_MODEL_CALLS", 1)
+    script = {"model_unavailable": unavailable(),
+              "call_cap": response(tool_use("native__find_slots", {})),
+              "malformed_final": response(tool_use("send_reply", {"prose": 7}))}
+    model = ScriptedModel([script[cause]])
+    caller = Caller(copy_id=who.ids.copy_id, desk_id=who.ids.desk_id, session_id=who.session_id,
+                    kind="visitor", kernel=who.kernel, ro_schema="fake_kernel_ro")
+    async with scene.engine.connect() as conn:
+        assert await loop.run_turn(conn, caller, model, clock=lambda: when) == "handoff"
+    scene.admin.execute("UPDATE app.messages SET created_at = %s WHERE session_id = %s", (when, who.session_id))
+    (payload,) = scene.admin.execute(
+        "SELECT payload FROM app.run_events WHERE session_id = %s AND type = 'message'", (who.session_id,)).fetchone()
+    assert payload["handoff"] and [block["template"] for block in payload["blocks"]] == ["handoff"]
+    assert len(model.requests) == 1
+    clock.now = local(2026, 10, 30, 9)
+    today = (await scene.owner.get(f"desks/{scene.owner.desk_id}/today")).json()
+    assert today["briefing"]["total"] == 0
+    assert (await scene.owner.get(f"desks/{scene.owner.desk_id}/briefing")).json()["items"] == []
 
 
 async def test_briefing_omits_stopped_drafts_when_the_only_delivered_reply_is_a_handoff(scene, clock):

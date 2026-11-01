@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
+import type { BusinessToolDef, Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -772,7 +772,7 @@ export interface RulesView {
  */
 export interface ToolRow {
   tool: string;
-  source: "native" | "mcp";
+  source: "native" | "mcp" | "business";
   effects: string[];
   reversible: boolean;
   status: "enabled" | "needs_review" | "disabled";
@@ -781,6 +781,7 @@ export interface ToolRow {
   pending_definition_text: string | null;
   pending_sha256: string | null;
   cards: CoveringCard[];
+  business?: BusinessToolDef | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
@@ -852,6 +853,53 @@ export interface SetupProposalIn {
   title?: string | null;
   amount_cents?: number | null;
   autonomy?: ("auto" | "ask") | null;
+}
+export interface SetupPublicHours {
+  source: "owner" | "suggested";
+  windows: HoursWindow[];
+}
+/**
+ * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+ * public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+ * off the charter until the owner rewords it.
+ */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: "owner" | "suggested";
+  editable: boolean;
+  held: boolean;
+}
+export interface SetupPublicLineError {
+  error: "line_refused" | "not_editable" | "not_suggested";
+  key?: string | null;
+  reason?: string[] | null;
+}
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
+}
+export interface SetupPublicLines {
+  revision: string;
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+}
+export interface SetupPublicPrices {
+  source: "owner" | "suggested";
+  items: SetupPublicPriceItem[];
+}
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+export interface SetupPublicLinesConfirmIn {
+  /**
+   * @minItems 1
+   */
+  keys: [string, ...string[]];
+  revision: string;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
@@ -1048,52 +1096,9 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 14
+   * @maxItems 22
    */
-  tools:
-    | [ToolPin]
-    | [ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin
-      ]
-    | [
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin
-      ];
+  tools: [ToolPin, ...ToolPin[]];
   enable: boolean;
 }
 /**
@@ -1196,6 +1201,11 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
+  "GET /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/{key}": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },

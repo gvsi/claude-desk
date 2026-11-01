@@ -18,6 +18,7 @@ import pytest
 
 from tests import public_policy_cases as policy_cases
 
+from desk.api.deliver import Reply
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
@@ -700,6 +701,35 @@ async def test_check_reply_hands_off_other_languages(kernel, ro_read):
     assert not french.ok and french.language == "es" and [block.template for block in french.blocks] == ["handoff"]
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(kernel, ro_read):
+    """One unchanged payment action, one checked correction; final prose failures keep the checked link alone."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    _, issued = await issue_payment_link(view, session_id,
+        item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+        owner=http.owner(copy.owner_token) if state is None else None)
+    clause = Clause(template="payment_link", fact_id=issued.facts[0].fact_id)
+
+    async def caption(prose: str, final: bool):
+        return await view.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+            session_id=session_id, generation=0, prose=prose, clauses=[clause]), final=final))
+
+    blocked = await caption("Absolutely. Payment link below.", False)
+    assert not blocked.ok and blocked.blocks == []
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("uncertain_language", "language_uncertain")]
+    corrected = await caption("Here is the link to pay.", True)
+    assert corrected.ok and [b.template for b in corrected.blocks] == [None, "payment_link"]
+    for prose in ("Absolutely. Payment link below.", "Here is $20."):
+        kept = await caption(prose, True)
+        assert not kept.ok and [b.template for b in kept.blocks] == ["payment_link"]
+        assert kept.blocks[0].href == corrected.blocks[1].href
+    french = await caption("Bonjour, je peux vous aider.", False)
+    assert not french.ok and [b.template for b in french.blocks] == ["handoff"]
+
+
 @pytest.mark.kernel_plan("01a")
 async def test_status_lines_are_the_kernels(kernel, ro_read):
     """A decision's and a reply's status line is the kernel's template for its state, naming the owner, in the
@@ -1026,6 +1056,72 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
         404, "not_found")
 
 
+# The Rivera seed's starter questions, in the order the public chat's chips show them.
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_public_desk_serves_the_seeds_starters_in_its_language(kernel, ro_read):
+    """Rivera's three seed-only starter questions, in the language asked for and never in a session's context; a Desk
+    the owner makes has none."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    for lang, starters in RIVERA_STARTERS.items():
+        assert (await public_page(http, slug, lang)).starters == starters, lang
+    visitor = await new_visitor(http, slug)
+    facts = (await context(http.session(visitor.session_token), visitor.state.session_id)).facts
+    assert "charter:contact" in [fact.fact_id for fact in facts]
+    assert not [fact for fact in facts if fact.fact_id.startswith("charter:starter:")]
+    created = await http.owner(copy.owner_token).call("POST /desks", a_new_desk())
+    assert (await public_page(http, created.slug, "es")).starters == []
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_charter_write_naming_a_starter_is_refused(kernel, ro_read):
+    """Only the seed writes starters: an owner's charter write naming one is 422 `invalid`, naming the key, and changes
+    nothing; a write without one keeps the seed's starters, as it keeps the hours."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    slug, path = desk_slug(ro_read, schema, copy), {"id": desk_id}
+    contact = Claim(key="contact", kind="text", value="(510) 555-0199")
+    query = "SELECT fact_id, claims FROM {ro}.facts WHERE desk_id = %s AND kind = 'charter' ORDER BY fact_id"
+    before = ro_read(schema, copy.copy_id, query, (desk_id,))
+    with pytest.raises(KernelFailed) as failure:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+            contact, Claim(key="starter:1", kind="text", value="Is the first visit free today?")]), path=path)
+    assert (failure.value.status, failure.value.code, failure.value.detail) == (
+        422, "invalid", {"starter:1": ["starter_seed_only"]})
+    assert ro_read(schema, copy.copy_id, query, (desk_id,)) == before
+    assert (await public_page(http, slug, "en")).starters == RIVERA_STARTERS["en"]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[contact]), path=path)
+    assert (await public_page(http, slug, "es")).starters == RIVERA_STARTERS["es"]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_new_desk_naming_a_starter_is_refused(kernel, ro_read):
+    """A new Desk's charter can't name a starter either: `POST /desks` with one is 422 `invalid`, naming the key, and
+    makes no Desk."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    query = "SELECT desk_id FROM {ro}.desks ORDER BY desk_id"
+    before = ro_read(schema, copy.copy_id, query)
+    body = a_new_desk()
+    body.desk.charter = [Claim(key="contact", kind="text", value="(212) 555-0187"),
+                         Claim(key="starter:1", kind="text", value="Is the first visit free today?")]
+    with pytest.raises(KernelFailed) as failure:
+        await owner.call("POST /desks", body)
+    assert (failure.value.status, failure.value.code, failure.value.detail) == (
+        422, "invalid", {"starter:1": ["starter_seed_only"]})
+    assert ro_read(schema, copy.copy_id, query) == before
+    assert (await owner.whoami()).desk_ids == copy.desk_ids
+
+
 RIVERA_TIME = ZoneInfo("America/Los_Angeles")
 # The Rivera seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
 RIVERA_OPEN = {**{day: (time(8), time(18)) for day in range(5)}, 5: (time(9), time(13))}
@@ -1326,6 +1422,62 @@ async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_r
 
 BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: a kind a rewrite fixes
 OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
+    ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], True, False, ["hours"],
+     "Reply checked against Maria Rivera's rules"),
+    (BLOCKED_PROSE, [], False, False, [], "Passed to Maria Rivera to answer"),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_read, prose, clauses, final, ok,
+                                                                  templates, receipt):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=final))
+    assert verdict.ok is ok
+    assert [block.template for block in verdict.blocks] == templates
+    assert verdict.visitor_plain == receipt
+
+
+HOURS_CLAUSE = Clause(template="hours", fact_id="charter:hours")
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "templates"), [
+    ("", [Clause(template="handoff")], ["handoff"]),
+    (BLOCKED_PROSE, [], ["handoff"]),
+    (BLOCKED_PROSE, [HOURS_CLAUSE], ["hours"]),
+    (BLOCKED_PROSE, [HOURS_CLAUSE, Clause(template="handoff")], ["hours", "handoff"]),
+    ("Here are our opening hours.", [HOURS_CLAUSE], [None, "hours"]),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "final-kept-card-then-drafted-handoff",
+        "passing-checked"])
+async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read, prose, clauses, templates):
+    """The visitor's delivered event flag and the kernel's signed reply receipt can't disagree about a handoff, and a
+    shown handoff clause opens the owner's handoff: Claude's cited one, the kernel's in a blocked draft's place, or
+    Claude's drafted one kept after the cards a prose-only failure keeps."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    session_id = visitor.state.session_id
+    draft = ReplyDraft(session_id=session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=True))
+    reply = Reply(verdict, "claude", "api")
+    assert [block.template for block in verdict.blocks] == templates
+    assert reply.handoff is ("handoff" in templates)
+    assert reply.handoff is (verdict.visitor_plain == "Passed to Maria Rivera to answer")
+    assert verdict.visitor_plain in ("Passed to Maria Rivera to answer", "Reply checked against Maria Rivera's rules")
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == (
+        [("card", "open")] if reply.handoff else [])
+    (entry,) = [entry for entry in (await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])).entries
+                if entry.event.kind == "reply" and entry.event.session_id == session_id]
+    assert entry.event.summary["dropped"] == []                 # no card was refused at signing
 
 
 async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:

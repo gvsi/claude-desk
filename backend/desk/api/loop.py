@@ -70,15 +70,16 @@ from desk.api.store import (
     unanswered_tool_use,
 )
 from desk.api.tools import (
-    DELIVERED_HANDOFF,
     SEND_REPLY,
     UNAVAILABLE,
     Caller,
     FrozenTools,
     ToolOutcome,
+    delivered_result,
     hand_off,
     model_tools,
     not_run,
+    prose_unshown,
     recover_call,
     route_call,
     send_reply,
@@ -451,7 +452,8 @@ class _Turn:
         if stop is not None:
             return stop
         if outcome.result["outcome"] == "blocked":         # once, with kinds a rewrite can fix: say why, call again
-            violations = json.dumps({"violations": outcome.result["violations"]}, ensure_ascii=False)
+            violations = json.dumps({key: outcome.result[key] for key in ("violations", "diagnostics")},
+                                    ensure_ascii=False)
             await append_message(self.conn, self.caller.ids, "note", text=NOTES["prose_blocked"] + "\n" + violations)
             await self.conn.commit()                       # with the stopped draft `_reply` kept for the owner
             return None
@@ -522,9 +524,9 @@ class _Turn:
         await conn.commit()
         if stop is not None:
             return stop
-        if shown and (self.delivered == "reply" or self.end_on_reply):
+        if shown:
             return self._ended()
-        return None                                        # Claude reads its results (or the handoff) and goes on
+        return None                                        # Claude reads its results and goes on
 
     async def _route(self, block: dict) -> ToolOutcome:
         """One call, decided and run on a pooled connection of its own, so its status shows as soon as it is known.
@@ -729,7 +731,9 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
                  jobs: procrastinate.App | None = None,
                  limiter: RateLimiter | None = None,
                  resend_since: datetime | None = None) -> tuple[PendingOutcome, int | None]:
-    """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits.
+    """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits. The recovered
+    results get a turn of their own for Claude to read only when no recovered reply showed: a shown reply, a handoff
+    included, had ended the turn, as it does in `_tool_use`.
 
     A turn that hands off with no model call (past the daily budget, or paused) stops the work it answers from waking
     turns (`clear_wake`), so neither this run nor the next request's hands off again for it; work that arrives after
@@ -753,7 +757,7 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
         if (stop := _stop(recovered)) is not None:
             return await _end(conn, caller, model, stop), None
         shown = {outcome.delivered for outcome in recovered} - {None}
-        must_call = not ("reply" in shown or (end_on_reply and shown))     # Claude reads the results, as in a turn
+        must_call = not shown          # any shown reply ended the turn, a handoff included; else Claude reads them
     if session.mode == "owner":
         return "not_ai", None                             # the owner has the conversation: work waits for hand-back
     outcome: PendingOutcome = "idle"
@@ -788,7 +792,7 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
     outcomes = []
     for block in open_tool_use.tool_uses:
         if block["name"] == SEND_REPLY:
-            outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"])))
+            outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"]), block))
             await conn.commit()
         else:
             outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation,
@@ -801,13 +805,14 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
     return outcomes
 
 
-def _recovered_reply(shown: Any | None) -> ToolOutcome:
-    """A `send_reply` call's result from what it put on screen: nothing, the handoff alone, or the reply."""
+def _recovered_reply(shown: Any | None, block: dict) -> ToolOutcome:
+    """A `send_reply` call's (`block`'s) result from its delivered row, as `send_reply` answered it: its event's
+    handoff flag, and `prose_shown` false when the prose the call drafted isn't among the shown blocks."""
     if shown is None:
         return not_run()
-    if [block.template for block in shown.blocks] == ["handoff"]:
-        return ToolOutcome(dict(DELIVERED_HANDOFF), True, delivered="handoff", message_id=shown.ref_id)
-    return ToolOutcome({"outcome": "delivered", "message_id": shown.ref_id}, False, delivered="reply",
+    result = delivered_result(shown.handoff, shown.ref_id, prose_shown=not prose_unshown(
+        block["input"], [shown_block.kind for shown_block in shown.blocks or []]))
+    return ToolOutcome(result, shown.handoff, delivered="handoff" if shown.handoff else "reply",
                        message_id=shown.ref_id)
 
 

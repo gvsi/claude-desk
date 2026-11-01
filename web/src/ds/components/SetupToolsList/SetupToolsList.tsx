@@ -13,7 +13,8 @@ import './SetupToolsList.css';
 
 /**
  * One connector in setup's tools step, and where it stands on the new Desk: `on` once its tools
- * are turned on, `always_on` on every Desk (Verification), or `off` with its button.
+ * are turned on, `always_on` on every Desk (Verification), `off` with its button, or
+ * `needs_review` for an app already connected whose tools are listed and none of them on.
  */
 export type SetupToolsRow =
   | { connector: ConnectorView; state: 'on' | 'always_on' }
@@ -24,6 +25,14 @@ export type SetupToolsRow =
       tools?: number;
       /** "Add" (built in) or "Connect" (an app): the screen opens the connector's review or sign-in. */
       onChoose: () => void;
+    }
+  | {
+      connector: ConnectorView;
+      state: 'needs_review';
+      /** How many tools it brings, before where it stands: "2 tools". */
+      tools?: number;
+      /** "Review": the screen opens the review of its tools; nothing connects again. */
+      onReview: () => void;
     };
 
 export interface SetupToolsListProps {
@@ -49,7 +58,8 @@ const STATUS_WORDS = { on: 'On', always_on: 'Always on' } as const;
  * Setup's tools step (N-R2-Setup-05-Tools): "Built in" and "Connect your own", each a card of
  * rows. A row is the connector's tile, its name and line, and at its right where it stands ("On",
  * "Always on") or its button ("Add" for a built-in connector, "Connect" for an app, after how many
- * tools it brings). Rows are not links; nothing turns on from here.
+ * tools it brings). An app already connected, its tools waiting (N-Live-REV-560), says how many it
+ * brings, then "Needs review" and "Review", as a job does. Rows are not links; nothing turns on from here.
  */
 export function SetupToolsList({ jobs = [], builtIn, external }: SetupToolsListProps) {
   return (
@@ -79,11 +89,7 @@ function Jobs({ rows }: { rows: readonly SetupJobRow[] }) {
               <span className="cd-setup-tools__end cd-type-meta"><StatusDot tone="handled" />{STATUS_WORDS.on}</span>
             ) : row.state === 'needs_review' ? (
               <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
-                <span className="cd-setup-tools__job-status"><StatusDot tone="held" />{BUSINESS_WORDS.needsReview}</span>
-                <Button variant="secondary" onClick={row.onReview}>
-                  <span aria-hidden="true">{BUSINESS_WORDS.review}</span>
-                  <span className="cd-sr-only">{`${BUSINESS_WORDS.review} ${row.title}`}</span>
-                </Button>
+                <NeedsReview name={row.title} onReview={row.onReview} />
               </span>
             ) : null}
           </li>
@@ -113,12 +119,42 @@ function Group({ title, verb, rows }: { title: string; verb: 'Add' | 'Connect'; 
   );
 }
 
+/**
+ * What a job, or an app connected with its tools waiting, says before it is on: "Needs review"
+ * beside a held dot, then a secondary "Review" named for what it reviews ("Review Stripe").
+ */
+function NeedsReview({ name, onReview }: { name: string; onReview: () => void }) {
+  return (
+    <>
+      <span className="cd-setup-tools__job-status"><StatusDot tone="held" />{BUSINESS_WORDS.needsReview}</span>
+      <Button variant="secondary" onClick={() => onReview()}>
+        <span aria-hidden="true">{BUSINESS_WORDS.review}</span>
+        <span className="cd-sr-only">{`${BUSINESS_WORDS.review} ${name}`}</span>
+      </Button>
+    </>
+  );
+}
+
+/** How many tools an app brings, in secondary meta before where it stands or its button. */
+function ToolCount({ tools }: { tools: number | undefined }) {
+  if (tools === undefined) return null;
+  return <span className="cd-setup-tools__count">{tools === 1 ? '1 tool' : `${tools} tools`}</span>;
+}
+
 function End({ row, verb }: { row: SetupToolsRow; verb: 'Add' | 'Connect' }) {
+  if (row.state === 'needs_review') {
+    return (
+      <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
+        <ToolCount tools={row.tools} />
+        <NeedsReview name={row.connector.name} onReview={row.onReview} />
+      </span>
+    );
+  }
   if (row.state === 'off') {
     const { connector, tools, onChoose } = row;
     return (
       <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
-        {tools === undefined ? null : <span className="cd-setup-tools__count">{tools === 1 ? '1 tool' : `${tools} tools`}</span>}
+        <ToolCount tools={tools} />
         {/* Named "Add Documents", "Connect Stripe", so each button says which connector it adds. */}
         <Button variant="secondary" onClick={() => onChoose()}>
           <span aria-hidden="true">{verb}</span>

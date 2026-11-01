@@ -83,6 +83,7 @@ On a short shell, pinning the brand header and the footer as well would leave th
 - below 520 px of shell height (a phone on its side, a short phone, a 640 px phone with its on-screen keyboard open), or
 - when the banner (if any), the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
 - It turns tall again only with 16 px more than that to spare, so it can't flap as a draft grows and shrinks at the edge.
+- While the page passes `keepComposerRoom`, the composer area counts at the tallest it has been since. The public chat passes it while a request is open, because the line it shows above the composer for that request comes and goes as the request's receipt leaves the view and comes back. Each switch between tall and short moves the conversation, which can bring that receipt into view or out of it again, so without kept room the line and the shell would answer each other for ever on a window at the edge. Once the page lets the room go, the shell fits itself again at once.
 
 The shell decides in a layout effect and sets `cd-public-shell--short` on its root itself (React's class for the shell leaves it out, and the shell puts it back after each render), so it is in place before the page's own layout effects run and the page scrolls the right element from the first render on, as when a chat is reopened.
 
@@ -170,6 +171,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
 | `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
+| `keepComposerRoom` | `boolean` | While true, the composer area counts at the tallest it has been since when the shell decides whether it is short, so a line the page shows above the composer and takes away again can't switch it (see "A short shell"). `false` by default. |
 | `banner` | `ReactNode` | Above the brand header, inside the window's height; pinned with the header, and scrolls with it on a short shell. |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
@@ -190,12 +192,47 @@ at 390 px, closed and no-hours headers change height once (19 px taller and 16 p
 The agents page passes `hours={false}` because its real header has no hours.
 
 The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
-windows and embedded panels. It draws the real fresh copy's five charter cards and two agents
-links: beside the chat from 900 px, and opening the conversation's scroll region below that,
-as the current page does. Greeting and starter chips are left out until those ship. In setup's
-fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn. Text that
-depends on other Desk data can change size once when it arrives.
+windows and embedded panels. History is unknown until the page lands, so every load draws the first
+view, placed by the same `useFirstView` hook as the real one: a greeting line (two on a phone), its
+meta line, the inline composer and three starter chips as wide as the fresh copy's. It draws the
+real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
+the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
+is no charter or footer, so neither is drawn.
 
-The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
-at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
+A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
+its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting
+alone, without the meta line and chips: on a laptop the shorter group is centred about 30 px lower,
+and on a phone the composer moves up by the meta line, and the footer and About by the chips as
+well. Text that depends on other Desk data, such as a long greeting or longer starters, can change
+size once when it arrives.
+
+The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell's
+first view at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
 (`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.
+
+## Before the first message
+
+Pass `firstView` only after session history has loaded and while the chat is empty. The shell shows
+“How can {business} help?” and, when there are starters, “Try one of these, or ask in your own
+words.” (with the signed Spanish copy when `language="es"`). The business name keeps `data-copy="user"`; the surrounding words are
+app copy. The disclosure and its punctuation stay in their usual head above the invitation.
+
+`starters={{ words, onPick, disabled }}` supplies localized business content to `SuggestionChips`;
+only the first three words entries appear. Omit it, or pass an empty array, for the greeting alone: no meta line and no chips. `onPick`
+must use the same send path as the composer. PublicChat reads `(desk.starters ?? []).slice(0, 3)`
+and sends picks through its ordinary visitor send handler, including in Today and setup previews.
+
+On a wide shell, the invitation and composer sit slightly above the middle of the transcript column,
+with 20 px between the invitation and composer and the chips below. On a narrow shell they sit inline
+under the chat head, before the footer and About cards. The narrow body scrolls with its disclosure
+head sticky and the brand header above it. Existing conversations keep their normal scroll layout.
+
+When `firstView` becomes false, the invitation and chips fade for `motion-fast`. The desktop composer
+moves to its dock using only a transform, for `motion-base + motion-instant` (260 ms) with
+`motion-ease-emphasis`; the transcript can show the visitor's bubble immediately. A narrow shell
+only fades. With reduced motion, the invitation disappears and the composer moves immediately.
+A shell that opens without `firstView` plays none of this motion.
+
+The vision pages use populated, static conversations; they omit `firstView` and retain their existing
+inert composers and suggestions. Stories: `FirstViewEnglish`, `FirstViewSpanish`,
+`FirstViewWithoutStarters`.

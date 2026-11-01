@@ -58,6 +58,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from desk.contracts import (
     ApprovalAnswer,
+    BusinessToolDef,
+    ToolProfile,
     Decision,
     InboxNotice,
     LedgerEntry,
@@ -76,7 +78,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, mandates,
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, desks, explain, ledger, mandates,
                                  render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -210,7 +212,18 @@ def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, e
             given |= {"native.payment_link", "native.charge_mandate"}
         if not desk_row.answering and not session_row.preview:
             given &= ANSWERING_OFF_TOOLS
-    return given & set(enabled) & set(adapters.ADAPTERS)
+    native = given & set(enabled) & set(adapters.ADAPTERS)
+    if hasattr(enabled, "items"):
+        from desk.kernel_service.adapters import blocks
+        # Rows own their status; wrappers must carry an explicitly enabled profile.
+        for tool, row in enabled.items():
+            profile = row if isinstance(row, ToolProfile) else row.profile
+            if (profile is not None and profile.source == "business" and profile.business is not None
+                    and (row.status if hasattr(row, "status") else row.profile.status) == "enabled"
+                    and profile.business.config.block in blocks.SUPPORTED_BLOCKS
+                    and blocks.BLOCK_BASE[profile.business.config.block] in given):
+                native.add(tool)
+    return native
 
 
 # ---- Evaluation (steps 2 to 5) --------------------------------------------------------------------
@@ -336,7 +349,8 @@ def _sign(ctx: KernelCtx, row: DecisionRow) -> None:
                                   visitor_plain=row.visitor_plain, ledger_seq=row.ledger_seq)
 
 
-def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: str | None = None) -> str:
+def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: str | None = None,
+                business=None) -> str:
     """A decision's status line in `state`, in the session's language: the template `key` when
     given (why a refusal happened, say, or `tool_unavailable` for a `refused_at_execution` whose
     connected tool couldn't be reached); once a visitor's or an agent's action has run, what was
@@ -350,7 +364,7 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
     if key is not None:
         return render.status(key, lang, owner=owner)
     if state == "executed" and session.kind != "owner":
-        return render.executed_status(tool, lang, owner=owner)
+        return render.executed_status(tool, lang, owner=owner, business=business)
     return render.status(state, lang, owner=owner)
 
 
@@ -401,8 +415,10 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     state clears it. It isn't signed and never enters the summary, so no ledger entry holds it."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
+    adapter = await adapters.resolve(ctx, row.desk_id, row.tool) if state == "executed" else None
     visitor_plain = status_line(state, tool=row.tool, session=session,
-                                owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status)
+                                owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status,
+                                business=adapter.profile.business if adapter is not None else None)
     owner_plain = None
     if state == "refused_at_execution":
         owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
@@ -692,16 +708,23 @@ def held_answers(principal: Principal, action: NormalizedAction | None, *, ask_h
 
 def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
     """The call's free-text arguments (the adapter's `free_text_fields`) that hold any text."""
-    return {name: value for name in sorted(adapter.free_text_fields)
-            if isinstance(value := getattr(args, name, None), str) and value}
+    texts = {}
+    for name in sorted(adapter.free_text_fields):
+        value = getattr(args, name, None)
+        if isinstance(value, str) and value:
+            texts[name] = value
+        elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+            texts.update({f"{name}[{index}]": item for index, item in enumerate(value) if item})
+    return texts
 
 
-def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
+def _asked(subject: str, tool: str, action: NormalizedAction | None, *,
+           business: BusinessToolDef | None = None) -> str:
     """"<subject> asked to <what>.", with the amount and discount the kernel computed
     (`explain.asked`, which setup probes share)."""
     if action is None:
-        return explain.asked(subject, "asked", tool, None, None)
-    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp)
+        return explain.asked(subject, "asked", tool, None, None, business=business)
+    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp, business=business)
 
 
 @dataclass
@@ -766,7 +789,7 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
         return await _refuse(ctx, call, "paused")
 
     tool = req.call.tool
-    call.adapter = adapters.ADAPTERS.get(tool) if tool in TOOL_NAMES else None
+    call.adapter = await adapters.resolve(ctx, principal.desk_id, tool)
     if call.adapter is None:
         return await _refuse(ctx, call, "unknown_tool")
     tools = await enabled_tools(ctx, principal.desk_id)
@@ -843,13 +866,14 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
 
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
     """Asks the reviewer about the call's action: the action as the adapter resolved it, the
-    pending cards, the Desk's public charter facts and the free-text arguments, never the
-    conversation. Only a normalized action is reviewed: without one this raises, and the call ends
-    with nothing stored."""
+    pending cards, the Desk's public charter facts but the seed-only starter questions
+    (`charter:starter:*`), and the free-text arguments, never the conversation. Only a normalized
+    action is reviewed: without one this raises, and the call ends with nothing stored."""
     if call.action is None:
         raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter",
+        desks.not_starter()).order_by(FactRow.fact_id)))
     data = ReviewInput(action=ReviewAction.of(call.action, tz=call.business.timezone),
                        cards=[ReviewCard.of(card) for card in pending],
                        facts=[ReviewFact(key=claim.key, value=claim.value) for fact in facts
@@ -897,7 +921,8 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`). A decision not refused early
     takes its reasons from its evaluation and version: without them this raises, and the call ends
     with nothing stored."""
-    parts = [_asked(call.subject, call.req.call.tool, call.action)]
+    parts = [_asked(call.subject, call.req.call.tool, call.action,
+                    business=call.adapter.profile.business if call.adapter is not None else None)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
     else:

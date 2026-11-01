@@ -38,7 +38,7 @@ from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, ow
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
 from .test_reply_check import (assert_handed_off, checked, clause, keep_alive_until, post_check, public_key,
-                               reply_entries, verify_verdict)
+                               reply_entries, verify_verdict, own_quote)
 from .test_verification import api_rows, check, code_in, entry_of, started
 
 CARD_REASON = "The Desk handed this to you."
@@ -49,6 +49,167 @@ CLEAN = "I can help with that."
 FLAGGED = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
 HANDOFF_CARD = {"en": "Let me check with Maria Rivera.\nMaria Rivera will reply here.",
                 "es": "Déjame consultarlo con Maria Rivera.\nMaria Rivera te responderá aquí."}
+
+
+@pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
+    ("", [clause("handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED, [clause("hours", "charter:hours")], True, False, ["hours"],
+     "Reply checked against Maria Rivera's rules"),
+    (BLOCKED, [], False, False, [], "Passed to Maria Rivera to answer"),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+async def test_reply_receipt_follows_the_shown_handoff_clause(app, client, prose, clauses, final, ok, templates,
+                                                            receipt):
+    _, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose, clauses, final=final)
+    assert verdict.ok is ok
+    assert [block.template for block in verdict.blocks] == templates
+    assert verdict.visitor_plain == receipt
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+async def quote_and_payment(client, reviewer, visitor):
+    from .test_decide import PASS
+    from .test_payment_links import link_for
+
+    quote = await own_quote(client, visitor)
+    reviewer.answer = PASS
+    decision = await link_for(client, visitor, quote.fact_id.removeprefix("quote:"))
+    assert decision.outcome == "allow", decision.reason_plain
+    result = await executed(client, visitor, decision)
+    [payment] = [fact for fact in result.facts if fact.kind == "payment_link"]
+    return [clause("quote", quote.fact_id), clause("payment_link", payment.fact_id)]
+
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["quote-first", "payment-first"])
+async def test_final_prose_failure_keeps_only_checked_cards(app, client, reviewer, reverse):
+    copy, visitor = await visitor_of(app, client)
+    clauses = await quote_and_payment(client, reviewer, visitor)
+    if reverse:
+        clauses.reverse()
+    verdict = await checked(client, visitor, "Here is $20.", clauses)
+    assert not verdict.ok
+    assert {v.kind for v in verdict.violations} == {"number_in_prose"}
+    assert [(b.template, b.fact_id) for b in verdict.blocks] == [(c["template"], c["fact_id"]) for c in clauses]
+    assert verdict.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert await handoffs_of(app, copy) == []
+    assert await handoff_alerts(app, copy) == []
+    assert handoff_entries(await ledger_rows(app, copy)) == []
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("failure", ["unentitled", "unknown", "stale", "canary", "language", "paused", "empty"])
+async def test_card_retention_never_salvages_non_prose_failures(app, client, reviewer, failure):
+    from desk.db.models import Document
+    from .test_reply_check import own_quote
+
+    copy, visitor = await visitor_of(app, client)
+    clauses, prose = await quote_and_payment(client, reviewer, visitor), "Here is $20."
+    quote_id = clauses[0]["fact_id"]
+    if failure == "unentitled":
+        other = await open_visitor(client, copy)
+        clauses.append(clause("quote", (await own_quote(client, other)).fact_id))
+    elif failure == "unknown":
+        clauses.append(clause("quote", "quote:missing"))
+    elif failure == "stale":
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            row = (await ctx.db.scalars(ctx.repo.scoped(select(Fact).where(Fact.fact_id == quote_id)))).one()
+            row.status = "expired"
+    elif failure == "canary":
+        [document, *_] = await rows_of(app, copy.copy_id, select(Document))
+        prose += f" {document.canary}"
+    elif failure == "language":
+        prose = "Je peux envoyer un plombier pour la fuite."
+    elif failure == "paused":
+        await set_session(app, copy, visitor.session_id, mode="paused")
+    else:
+        clauses = []
+    verdict = await checked(client, visitor, prose, clauses)
+    assert_handed_off(verdict)
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+
+
+@pytest.mark.parametrize("kind", ["number_in_prose", "promise_word", "soft_promise", "uncertain_language",
+                                  "check_unavailable", "denies_ai"])
+@pytest.mark.parametrize("final", [False, True])
+@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
+async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewer, kind, final, drafted):
+    """A shown block failing only for its prose keeps its checked cards and drops the prose. A
+    handoff clause Claude drafted follows them and opens the owner's item and alert, as the handoff
+    card does (the owner's ruling of 2026-11-01); without one, no owner item opens."""
+    from desk.kernel_service.decisions import CallUsage
+
+    copy, visitor = await visitor_of(app, client)
+    clauses = await quote_and_payment(client, reviewer, visitor)
+    if drafted:          # drafted between the cards: it is shown after them
+        clauses.insert(1, clause("handoff"))
+    prose = {"number_in_prose": "Here is $20.", "promise_word": "I guarantee it.",
+             "uncertain_language": "Absolutely. Payment link below.",
+             "denies_ai": "I'm a real person at the shop, not a bot."}.get(kind, "Here is your quote.")
+    if kind == "soft_promise":
+        reviewer.soft_answer = FLAGGED
+    elif kind == "denies_ai":
+        reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True)
+    elif kind == "check_unavailable":
+        async def refusal(data):
+            return None, CallUsage(model="claude-haiku-5-5", status="refusal", input_tokens=0, cached_tokens=0,
+                                   output_tokens=0, latency_ms=0)
+        reviewer.soft_promise = refusal
+    verdict = await checked(client, visitor, prose, clauses, final=final)
+    assert not verdict.ok
+    assert {v.kind for v in verdict.violations} == {"soft_promise" if kind == "denies_ai" else kind}
+    shown = final
+    assert [b.template for b in verdict.blocks] == (
+        ["quote", "payment_link"] + (["handoff"] if drafted else []) if shown else [])
+    assert all(b.kind == "card" for b in verdict.blocks)                    # the prose is never kept
+    assert prose not in [b.text for b in verdict.blocks]
+    opened = shown and drafted
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == ([("card", "open")] if opened else [])
+    assert len(await handoff_alerts(app, copy)) == int(opened)
+    assert verdict.visitor_plain == ("Passed to Maria Rivera to answer" if opened or not shown
+                                     else "Reply checked against Maria Rivera's rules")
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("session", ["card open", "call-back open", "hold awaiting", "preview"])
+@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
+async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, client, reviewer, session, drafted):
+    """Kept cards, and a drafted handoff kept after them, open no second owner item: not while a
+    handoff or a held request is open, and never in the owner's preview."""
+    from desk.kernel_service.decisions import CallUsage
+
+    copy, visitor = await visitor_of(app, client)
+    if session == "preview":
+        response = await client.post("/sessions", headers=copy.owner, json={
+            "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+        assert response.status_code == 200, response.text
+        created = SessionCreated.model_validate(response.json())
+        visitor = Visitor(session_id=created.state.session_id, token=created.session_token)
+    clauses = await quote_and_payment(client, reviewer, visitor)
+    if drafted:
+        clauses.append(clause("handoff"))
+    if session == "card open":
+        await checked(client, visitor, BLOCKED)
+    elif session == "call-back open":
+        await callback(client, visitor)
+    elif session == "hold awaiting":
+        await held_quote(client, visitor)
+    before = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
+    alerts_before = len(await handoff_alerts(app, copy))
+
+    async def refusal(data):
+        return None, CallUsage(model="claude-haiku-5-5", status="refusal", latency_ms=0)
+
+    reviewer.soft_promise = refusal
+    # A first attempt is rewritten (the owner's ruling of 2026-11-01): nothing shows, no owner item.
+    first = await checked(client, visitor, CLEAN, clauses, final=False)
+    assert [v.kind for v in first.violations] == ["check_unavailable"] and first.blocks == []
+    verdict = await checked(client, visitor, CLEAN, clauses, final=True)
+    assert not verdict.ok and [v.kind for v in verdict.violations] == ["check_unavailable"]
+    assert [b.template for b in verdict.blocks] == ["quote", "payment_link"] + (["handoff"] if drafted else [])
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == before
+    assert len(await handoff_alerts(app, copy)) == alerts_before
 
 
 def waiting(who: str) -> str:
@@ -147,7 +308,7 @@ async def test_claudes_own_draft_citing_the_handoff_card_opens_one(app, client, 
     verdict = await checked(client, visitor, prose, [clause("handoff")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [block.template or block.kind for block in verdict.blocks] == blocks
-    assert verdict.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert verdict.visitor_plain == "Passed to Maria Rivera to answer"
     [handoff] = await handoffs_of(app, copy)
     assert (handoff.session_id, handoff.kind, handoff.status, handoff.callback_window) == (
         visitor.session_id, "card", "open", None)

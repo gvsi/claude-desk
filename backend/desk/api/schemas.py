@@ -39,6 +39,8 @@ from desk.api.prompts import (
     Triage,
 )
 from desk.contracts import (
+    ToolName,
+    BusinessToolDef,
     AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
     ApprovalAnswer,
@@ -60,7 +62,6 @@ from desk.contracts import (
     SeedDocument,
     SessionMode,
     SessionState,
-    ToolName,
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
@@ -679,6 +680,61 @@ class SetupMessage(BaseModel):
     card: ProposalCard | None = None
 
 
+class SetupPublicLine(BaseModel):
+    """A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+    public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+    off the charter until the owner rewords it."""
+
+    key: str
+    text: str
+    source: Literal["owner", "suggested"]
+    editable: bool
+    held: bool
+
+
+class SetupPublicHours(BaseModel):
+    source: Literal["owner", "suggested"]
+    windows: list[HoursWindow]
+
+
+class SetupPublicPriceItem(BaseModel):
+    item_id: str
+    title: str
+    unit_cents: int
+
+
+class SetupPublicPrices(BaseModel):
+    source: Literal["owner", "suggested"]
+    items: list[SetupPublicPriceItem]
+
+
+class SetupPublicLines(BaseModel):
+    revision: str
+    lines: list[SetupPublicLine]
+    hours: SetupPublicHours | None
+    prices: SetupPublicPrices | None
+
+
+class SetupPublicLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+
+
+class SetupPublicLineError(BaseModel):
+    error: Literal["line_refused", "not_editable", "not_suggested"]
+    key: str | None = None
+    reason: list[str] | None = None
+
+
+class SetupPublicLinesConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keys: Annotated[list[str], Field(min_length=1)]
+    revision: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
@@ -720,7 +776,7 @@ class ToolRow(BaseModel):
     active rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."""
 
     tool: str
-    source: Literal["native", "mcp"]
+    source: Literal["native", "mcp", "business"]
     effects: list[str]
     reversible: bool
     status: Literal["enabled", "needs_review", "disabled"]
@@ -729,6 +785,7 @@ class ToolRow(BaseModel):
     pending_definition_text: str | None   # a changed definition, untrusted text to show as quoted
     pending_sha256: str | None
     cards: list[CoveringCard]
+    business: BusinessToolDef | None = None
 
 
 class SetupTools(BaseModel):

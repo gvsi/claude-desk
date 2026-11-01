@@ -78,6 +78,17 @@ function call(n: number): { url: string; init: RequestInit } {
   return { url: String(args[0]), init: args[1] ?? {} };
 }
 
+it('carries only a refused public line key, never its internal reason', async () => {
+  reply({ status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: 'internal untrusted text' } });
+  const err = await failure(request('setupPublicLinesConfirm', { params: { id: 'i1' }, body: { keys: ['policy:pricing'], revision: 'revision-1' } }));
+  expect(err.lineKey).toBe('policy:pricing');
+  expect(JSON.stringify(err)).not.toContain('internal untrusted text');
+  replies = [{ status: 500, body: { error: 'line_refused', key: 'policy:pricing' } }];
+  expect((await failure(request('setupPublicLines', { params: { id: 'i1' } }))).lineKey).toBeNull();
+  replies = [{ status: 422, body: { error: 'line_refused', key: { bad: true } } }];
+  expect((await failure(request('setupPublicLines', { params: { id: 'i1' } }))).lineKey).toBeNull();
+});
+
 const draft: RulesDraft = {
   version: 8,
   cards: [rivera.ruleCards['rv-quote']],

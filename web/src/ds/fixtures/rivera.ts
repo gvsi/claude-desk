@@ -1789,8 +1789,9 @@ const directory = {
 };
 
 const listChargesProfile = {
-  tool: 'payments.list_charges',
+  tool: 'payments.list_charges' as const,
   source: 'mcp',
+  business: null,
   effects: ['private_data'],
   reversible: true,
   adapter: 'payments_mcp.list_charges',
@@ -1805,8 +1806,9 @@ const listChargesProfile = {
 } satisfies ToolProfile;
 
 const createRefundProfile = {
-  tool: 'payments.create_refund',
+  tool: 'payments.create_refund' as const,
   source: 'mcp',
+  business: null,
   effects: ['pay_out', 'private_data'],
   reversible: false,
   adapter: 'payments_mcp.create_refund',
@@ -1947,6 +1949,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['How much is drain clearing?', 'Can someone come Tuesday?', 'Do you work in Alameda?'],
     agent_card: [],
   },
   es: {
@@ -1964,6 +1967,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['¿Cuánto cuesta destapar un desagüe?', '¿Puede venir alguien el martes?', '¿Trabajan en Alameda?'],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;

@@ -3472,6 +3472,502 @@
         }
       }
     },
+    "/api/owner/setup/{id}/public_lines": {
+      "get": {
+        "summary": "Setup Public Lines",
+        "description": "Read nonblank public lines in board order, hours and prices, with their provenance.\nAllowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending.",
+        "operationId": "owner_setup_public_lines",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "put": {
+        "summary": "Setup Put Public Line",
+        "description": "Edit one public line and strictly publish the charter before saving its owner provenance.\nAllowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. Every write publishes\nthe confirmed lines and leaves out held lines (`held`), values still suggested, and every policy line while\nsetup's policy claims are switched off; a rewording that is published clears its line's hold. A refused charter\nis 422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.\n`policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409.",
+        "operationId": "owner_setup_put_public_line",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupPublicLineIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Put Public Line"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/public_lines/confirm": {
+      "post": {
+        "summary": "Setup Confirm Public Lines",
+        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before\nthe keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422\n`line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A held key\nis 422 `line_refused` naming it, with nothing changed: only a rewording can publish it. A failed save restores\nthe stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
+        "operationId": "owner_setup_confirm_public_lines",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupPublicLinesConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Confirm Public Lines"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/public_lines/{key}": {
+      "delete": {
+        "summary": "Setup Delete Public Line",
+        "description": "Remove a suggested public item, publishing before saving. Owner items are 422 `not_suggested`;\n`policy:how_we_help` is 422 `not_editable`, and unknown keys are 422 `invalid`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
+        "operationId": "owner_setup_delete_public_line",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Delete Public Line"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/public_lines/prices/{item_id}": {
+      "delete": {
+        "summary": "Setup Delete Public Price",
+        "description": "Remove one suggested price only when its current id, title and amount match what the owner saw.\nOwner prices are 422 `not_suggested`; a missing or mismatched item is 409 `conflict`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
+        "operationId": "owner_setup_delete_public_price",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "\\S",
+              "title": "Title"
+            }
+          },
+          {
+            "name": "unit_cents",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Unit Cents"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "A stale item id, an unavailable setup step, an active turn or a failed save returns `error: conflict`. A kernel part conflict returns `error: kernel`, `code: conflict`, after attempting repair of sent parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Delete Public Price"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/public/{slug}": {
       "get": {
         "summary": "Public Desk",
@@ -8003,6 +8499,54 @@
         ],
         "title": "BusinessSeed"
       },
+      "BusinessToolDef": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Description"
+          },
+          "config": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntakeConfig"
+              },
+              {
+                "$ref": "#/components/schemas/TypedBookingConfig"
+              },
+              {
+                "$ref": "#/components/schemas/PurposePaymentConfig"
+              },
+              {
+                "$ref": "#/components/schemas/UrgentConfig"
+              }
+            ],
+            "title": "Config",
+            "discriminator": {
+              "propertyName": "block",
+              "mapping": {
+                "intake": "#/components/schemas/IntakeConfig",
+                "purpose_payment": "#/components/schemas/PurposePaymentConfig",
+                "typed_booking": "#/components/schemas/TypedBookingConfig",
+                "urgent": "#/components/schemas/UrgentConfig"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "config"
+        ],
+        "title": "BusinessToolDef"
+      },
       "CalendarSlot": {
         "properties": {
           "slot_id": {
@@ -9626,6 +10170,32 @@
         ],
         "title": "InboxNotice"
       },
+      "IntakeConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "intake",
+            "title": "Block"
+          },
+          "questions": {
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Questions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "questions"
+        ],
+        "title": "IntakeConfig"
+      },
       "IntakeProposalConfig": {
         "properties": {
           "block": {
@@ -10026,7 +10596,8 @@
               "agent_auth",
               "head_checkpoint",
               "desk_data",
-              "web_search"
+              "web_search",
+              "business_tools"
             ],
             "title": "Kind"
           },
@@ -10395,22 +10966,30 @@
             "title": "Generation"
           },
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -11590,6 +12169,14 @@
                 "type": "null"
               }
             ]
+          },
+          "starters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Starters",
+            "default": []
           }
         },
         "type": "object",
@@ -11602,6 +12189,34 @@
           "agent_card"
         ],
         "title": "PublicDesk"
+      },
+      "PurposePaymentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "purpose_payment",
+            "title": "Block"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Purpose"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Amount Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "purpose",
+          "amount_cents"
+        ],
+        "title": "PurposePaymentConfig"
       },
       "PurposePaymentProposalConfig": {
         "properties": {
@@ -12579,6 +13194,248 @@
         "title": "SetupProposalIn",
         "description": "The owner's decision on a setup proposal, with optional changes when accepting it."
       },
+      "SetupPublicHours": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "suggested"
+            ],
+            "title": "Source"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/HoursWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "windows"
+        ],
+        "title": "SetupPublicHours"
+      },
+      "SetupPublicLine": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "suggested"
+            ],
+            "title": "Source"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "text",
+          "source",
+          "editable",
+          "held"
+        ],
+        "title": "SetupPublicLine",
+        "description": "A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's\npublic-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay\noff the charter until the owner rewords it."
+      },
+      "SetupPublicLineError": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "line_refused",
+              "not_editable",
+              "not_suggested"
+            ],
+            "title": "Error"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "SetupPublicLineError"
+      },
+      "SetupPublicLineIn": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "text"
+        ],
+        "title": "SetupPublicLineIn"
+      },
+      "SetupPublicLines": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SetupPublicLine"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPublicHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPublicPrices"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "lines",
+          "hours",
+          "prices"
+        ],
+        "title": "SetupPublicLines"
+      },
+      "SetupPublicLinesConfirmIn": {
+        "properties": {
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Keys"
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "keys",
+          "revision"
+        ],
+        "title": "SetupPublicLinesConfirmIn"
+      },
+      "SetupPublicPriceItem": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "unit_cents": {
+            "type": "integer",
+            "title": "Unit Cents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "unit_cents"
+        ],
+        "title": "SetupPublicPriceItem"
+      },
+      "SetupPublicPrices": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "suggested"
+            ],
+            "title": "Source"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SetupPublicPriceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "items"
+        ],
+        "title": "SetupPublicPrices"
+      },
       "SetupStartIn": {
         "properties": {
           "description": {
@@ -13181,22 +14038,30 @@
       "ToolPin": {
         "properties": {
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -13217,22 +14082,30 @@
       "ToolProfile": {
         "properties": {
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -13240,7 +14113,8 @@
             "type": "string",
             "enum": [
               "native",
-              "mcp"
+              "mcp",
+              "business"
             ],
             "title": "Source"
           },
@@ -13345,6 +14219,16 @@
               }
             ],
             "title": "Review Reason"
+          },
+          "business": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessToolDef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -13371,7 +14255,8 @@
             "type": "string",
             "enum": [
               "native",
-              "mcp"
+              "mcp",
+              "business"
             ],
             "title": "Source"
           },
@@ -13438,6 +14323,16 @@
             },
             "type": "array",
             "title": "Cards"
+          },
+          "business": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessToolDef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -13463,7 +14358,7 @@
               "$ref": "#/components/schemas/ToolPin"
             },
             "type": "array",
-            "maxItems": 14,
+            "maxItems": 22,
             "minItems": 1,
             "title": "Tools"
           },
@@ -13603,6 +14498,34 @@
         "title": "Triage",
         "description": "A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk\ndid, and a category for the Safety page's filters. AI-written, for the owner alone."
       },
+      "TypedBookingConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "typed_booking",
+            "title": "Block"
+          },
+          "appointment_type": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Appointment Type"
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 15.0,
+            "title": "Minutes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "appointment_type",
+          "minutes"
+        ],
+        "title": "TypedBookingConfig"
+      },
       "TypedBookingProposalConfig": {
         "properties": {
           "block": {
@@ -13633,6 +14556,27 @@
           "minutes"
         ],
         "title": "TypedBookingProposalConfig"
+      },
+      "UrgentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "urgent",
+            "title": "Block"
+          },
+          "urgent_when": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Urgent When"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "urgent_when"
+        ],
+        "title": "UrgentConfig"
       },
       "UrgentProposalConfig": {
         "properties": {
@@ -13735,6 +14679,8 @@
               "stale_fact",
               "canary",
               "unsupported_language",
+              "uncertain_language",
+              "check_unavailable",
               "session_paused"
             ],
             "title": "Kind"
