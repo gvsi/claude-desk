@@ -608,9 +608,10 @@ _JOBS = """\
 Jobs (reference)
 - Kinds: answer, intake, schedule, price, documents, status, payment, urgent. Plan "answer" only when answering \
 questions is itself a main job, titled by what it answers.
-- Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters, with no amounts, numbers or promise words \
-("free" is fine: "Book a free intro call", never "Free 20-minute intro call"), since the kernel refuses the \
-whole set of business tools when one title has them; who, who it's \
+- Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters, with no amounts, numbers, durations or promise \
+words ("free" is fine, as in "Book a free intro call", but never "Free 20-minute intro call" or "Half-hour chat", and \
+never "free" or "complimentary" in a payment job's title, which names what is paid for), since the kernel refuses \
+the whole set of business tools when one title has them; who, who it's \
 for in a few words ("New clients", "Tenants"), empty when it's for everyone, at most 60; why, the value in the \
 owner's terms, at most 200; how: one plain line on what happens, in the third person with no "you" or "your", and with no \
 prices, "free", durations, times, days or numbers, since customers read it and those come from the price list and \
@@ -618,8 +619,10 @@ hours. Example: "New clients book a short introductory call." At most 300; auton
 safely do it on its own and ask when the owner should approve each one (start every payment at ask); config.
 - config is null unless the job uses its block: intake takes questions (the business's own, at most five, each \
 under 120 characters); schedule takes typed_booking with an appointment_type (at most 60) and minutes from 15 to \
-60 (use 60 for anything longer); payment takes purpose_payment with a purpose only (at most 60), never an amount; \
-urgent takes urgent with urgent_when (at most 300).
+60 (use 60 for anything longer), the length going only in minutes; payment takes purpose_payment with a purpose \
+only (at most 60), never an amount; urgent takes urgent with urgent_when (at most 300). An appointment_type and a \
+purpose keep to the title's rule: no amounts, numbers, durations or promise words, and never "free" or \
+"complimentary" in a purpose, for the same reason.
 - Code drops a job that breaks a length, so keep to them.
 - A job's why and how are also shown to the business's customers, so they describe only what the Desk really does: \
 takes the details, books within the opening hours, quotes the price list, holds a request for the owner, sends a \
@@ -879,7 +882,7 @@ when they ask a question or it's unclear. A payment needs its amount entered on 
 accepted, so when they say yes to one with no amount, choose none and ask them to enter the amount there.
 - revised: on change to a job, the one revised job in their words, with its title, how (third person, no "you" or "your", and no prices, "free", durations, times, days or numbers, as \
 customers read it), autonomy and matching \
-config, keeping its kind unless the change calls for another; never an amount. Code shows it as a new card, and \
+config (titles and config by the rules in Jobs (reference)), keeping its kind unless the change calls for another; never an amount. Code shows it as a new card, and \
 question is the short line before it. For an app or an unclear change, choose none. Empty otherwise.
 - reply: one or two short sentences answering what they typed: answer a question, say what a revised proposal \
 would do, or reply to the decision as you would after a button. \

@@ -5,8 +5,9 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import type { PublicDesk } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, SetupState } from '../api/views.ts';
+import type { BusinessOut, CopyOut, SetupState, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS, holdNextConsent, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
@@ -271,6 +272,49 @@ describe('the owner and the line about the business, from the description', () =
       ["Hi! I'm Ana. Ana's Bakery.", null],
     ];
     for (const [description, about] of cases) expect((await started(description)).about, description).toBe(about);
+  });
+
+  it('with_no_name_given_the_owner_is_setups_fallback', async () => {
+    // As the API's setup names the owner (`owner_name`): the name they gave, else "Owner", never
+    // the business's name. The same name on the Desk's public page, in the owner's Desks and in
+    // Today's greeting.
+    const ownerNames = async (description: string) => {
+      const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: `start-${++starts}` } });
+      if ('network' in answer || answer.status !== 201) throw new Error('the mock starts a setup');
+      const { desk_id: deskId, slug } = answer.body as SetupState;
+      const read = async <T,>(key: RouteKey, init: Parameters<typeof mockStore.dispatch>[1]): Promise<T> => {
+        const got = await mockStore.dispatch(key, init);
+        if ('network' in got || got.status !== 200) throw new Error(`the mock answers ${key}`);
+        return got.body as T;
+      };
+      const desk = await read<PublicDesk>('publicDesk', { params: { slug }, query: { lang: 'en' } });
+      const businesses = await read<BusinessOut[]>('desks', {});
+      const today = await read<Today>('today', { params: { desk_id: deskId } });
+      return {
+        publicPage: desk.owner_display_name,
+        business: businesses.find((business) => business.desks.some((d) => d.desk_id === deskId))?.owner_display_name,
+        greeting: today.greeting_name,
+      };
+    };
+    expect(await ownerNames('Fenster & Fenster. Bespoke windows and doors in Oakland.')).toEqual({ publicPage: 'Owner', business: 'Owner', greeting: 'Owner' });
+    expect(await ownerNames("I'm Ana. I run Ana's Bakery in Oakland.")).toEqual({ publicPage: 'Ana', business: 'Ana', greeting: 'Ana' });
+  });
+
+  it('the_owner_in_a_setup_desks_chat_is_its_own', async () => {
+    // The stream names whoever takes a chat over and types in it as the Desk's business names its
+    // owner: setup's fallback when no name was given, never the seeded Rivera's.
+    const joinedAs = async (description: string) => {
+      const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: `start-${++starts}` } });
+      if ('network' in answer || answer.status !== 201) throw new Error('the mock starts a setup');
+      const desk = mockStore.world.desk((answer.body as SetupState).desk_id);
+      if (!desk) throw new Error('setup made a Desk');
+      const chat = mockStore.world.addSession(desk);
+      mockStore.world.takeOver(chat);
+      mockStore.world.ownerTyping(chat);
+      return chat.events.flatMap(({ ev }) => (ev.type === 'owner_joined' || ev.type === 'owner_typing' ? [`${ev.type} ${ev.name}`] : []));
+    };
+    expect(await joinedAs('Fenster & Fenster. Bespoke windows and doors in Oakland.')).toEqual(['owner_joined Owner', 'owner_typing Owner']);
+    expect(await joinedAs("I'm Ana. I run Ana's Bakery in Oakland.")).toEqual(['owner_joined Ana', 'owner_typing Ana']);
   });
 });
 

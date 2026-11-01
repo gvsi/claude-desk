@@ -132,6 +132,11 @@ export interface DeskRecord {
   tools: ToolRecord[];
   /** Rules the owner's answers suggest, newest first; none until a test adds one. */
   suggestions: Suggestion[];
+  /**
+   * Who the stream names as the owner who takes a chat over and types in it: a Desk setup made
+   * names its own owner; the seeded Desks leave it out and name Rivera's (`BUSINESS`).
+   */
+  ownerName?: string;
 }
 
 /**
@@ -331,6 +336,11 @@ export class MockWorld {
     return desk;
   }
 
+  /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
+  ownerNameOf(session: SessionRecord): string {
+    return this.deskOf(session).ownerName ?? BUSINESS.owner_display_name;
+  }
+
   sessionsOf(deskId: string): SessionRecord[] {
     return [...this.sessions.values()].filter((s) => s.deskId === deskId);
   }
@@ -514,7 +524,7 @@ export class MockWorld {
     const now = this.now();
     if (session.ownerTypedAt !== null && now - session.ownerTypedAt < TYPING_EVERY_MS) return;
     session.ownerTypedAt = now;
-    this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
+    this.emit(session, { type: 'owner_typing', name: this.ownerNameOf(session), until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
   /**
@@ -1123,7 +1133,7 @@ export class MockWorld {
       summary: { from: previous, to: 'owner', generation: session.state.generation },
     });
     this.closeCardHandoffs(session, 'takeover');
-    this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
+    this.emit(session, { type: 'owner_joined', name: this.ownerNameOf(session) });
     return session.state;
   }
 

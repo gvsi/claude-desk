@@ -1315,6 +1315,7 @@ def test_the_booking_line_goes_by_the_kernels_booking_rules():
 @pytest.mark.parametrize(("rule_id", "why"), [
     ("soft.unavailable", "the checkpoint wasn't available"),
     ("soft.denies_ai", "it said it wasn't an AI"),
+    ("soft.jev", "a second check flagged a promise the business's records don't back"),
 ])
 async def test_a_stopped_soft_check_gives_its_actual_cause(scene, clock, rule_id, why):
     clock.now = local(2026, 10, 30, 9)
