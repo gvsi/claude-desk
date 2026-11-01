@@ -30,8 +30,24 @@ defaults:
 jobs:
   backend:
     name: backend tests
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    needs: backend-shard
+    if: always()
+    steps:
+      - name: Require every shard to pass
+        env:
+          SHARD_RESULT: ${{ needs.backend-shard.result }}
+        run: test "$SHARD_RESULT" = success
+
+  backend-shard:
+    name: backend tests ${{ matrix.shard }}/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-{3}"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
@@ -71,6 +87,8 @@ jobs:
       - name: Make the job's database skip durable commits
         run: make db-throwaway
       - name: Run the backend tests
+        env:
+          PYTEST_ADDOPTS: --shard=${{ matrix.shard }}/4
         run: cd backend && uv run pytest -q
 
   kernel:
@@ -103,8 +121,24 @@ jobs:
 
   tier1:
     name: tier 1 evals
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    needs: tier1-shard
+    if: always()
+    steps:
+      - name: Require every shard to pass
+        env:
+          SHARD_RESULT: ${{ needs.tier1-shard.result }}
+        run: test "$SHARD_RESULT" = success
+
+  tier1-shard:
+    name: tier 1 evals ${{ matrix.shard }}/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-{3}"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
@@ -144,8 +178,12 @@ jobs:
       - name: Make the job's database skip durable commits
         run: make db-throwaway
       - name: Run the tier 1 evals
+        env:
+          PYTEST_ADDOPTS: --shard=${{ matrix.shard }}/4
         run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
       - name: Run the kernel contract tests against the real kernel
+        env:
+          PYTEST_ADDOPTS: --shard=${{ matrix.shard }}/4
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier2:
