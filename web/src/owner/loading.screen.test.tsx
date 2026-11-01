@@ -373,7 +373,9 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
       await renderRoute(TODAY, { pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       await page.viewport(620, 900);
+      // The app shell drops its sidebar here; the skeleton re-places its bands on the next frame.
       await nextFrames();
+      expect(window.innerWidth).toBe(620);
     },
     release: () => {
       before = TODAY_WIDTH_ANCHORS.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
