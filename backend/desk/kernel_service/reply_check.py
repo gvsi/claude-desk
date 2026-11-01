@@ -35,10 +35,11 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    and has at most nine items are blanked from the raw text and left out of the rendered one, and
    every other number stays a violation (the owner's decision of 2026-11-01). Every link a reader
    can click, shown or hidden (a Markdown link or autolink, or a URL with a scheme or "www." or an
-   email address, which the chats autolink), must go to the business's public contact (`https` to
-   a host, or `mailto:` an email, that `charter:contact` names), else `markdown.link` (the owner's
-   decision of 2026-11-01, which replaces the 2026-10-30 one for clickable links); a domain alone
-   isn't a link. Any image is `markdown.image` (`markdown_violations`).
+   email address, which the chats autolink, and any written anywhere in the raw prose), must go to
+   the business's public contact (`https` to a host, or `mailto:` an email, that `charter:contact`
+   names), else `markdown.link` (the owner's decision of 2026-11-01, which replaces the 2026-10-30
+   one for clickable links); a domain alone isn't a link. Any image is `markdown.image`
+   (`markdown_violations`).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
