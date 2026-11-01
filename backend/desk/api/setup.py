@@ -188,6 +188,7 @@ from desk.api.prompts import (
     DraftOutput,
     JobDraft,
     JobProposal,
+    MemoryDraft,
     PlannedOutcome,
     PriceAnswer,
     ProposalCard,
@@ -267,9 +268,11 @@ from desk.kernel_api import (
     DeskCalendarRequest,
     DeskCharterRequest,
     DeskHoursRequest,
+    DeskMemoryRequest,
     DeskNotificationsRequest,
     DeskPricesRequest,
     ExecuteRequest,
+    MemoryItem,
     PolicyConfirmRequest,
     PolicyProbeRequest,
 )
@@ -279,7 +282,7 @@ logger = logging.getLogger(__name__)
 
 INTERVIEWS = SetupInterview.__table__
 ROUTE = "setup"
-START_MAX_TOKENS = 2048
+START_MAX_TOKENS = 4096
 TURN_MAX_TOKENS = 4096
 # The most one structured setup call may take, the SDK's retries included (and each of its tries): a stalled call ends
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
@@ -296,9 +299,9 @@ START_RETRY_S = 2               # when to send a repeat again that found its fir
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
 # The longest a start can run: Claude's reading of the description and its one retry, each bounded by
 # `SETUP_TIMEOUT_S`, then its kernel calls (`POST /desks`, two tries at turning Answering off and a failed start's
-# `DELETE`), each bounded by the kernel client's timeout, with a minute's slack for the database and the process. A
-# keyed row still starting after this is abandoned: its request stopped.
-START_KERNEL_CALLS = 4
+# `DELETE`), plus the sample memory write, each bounded by the kernel client's timeout, with a minute's slack for
+# the database and the process. A keyed row still starting after this is abandoned: its request stopped.
+START_KERNEL_CALLS = 5
 START_ABANDONED_S = 2 * SETUP_TIMEOUT_S + START_KERNEL_CALLS * DEFAULT_TIMEOUT_S + 60
 _STALE = INTERVIEWS.c.created_at < func.now() - literal(timedelta(seconds=START_ABANDONED_S), Interval())
 DESK_NAME = "Main line"
@@ -410,6 +413,7 @@ class Entry(BaseModel):
     dropped: list[str] = []
     cards: bool | None = None
     pending: str | None = None
+    connected_apps: list[ConnectorKey] | None = None
 
 
 @dataclass
@@ -448,6 +452,13 @@ class Interview:
     def busy(self) -> bool:
         """A stored transcript entry explicitly marks a pending background run."""
         return any(entry.pending is not None for entry in self.transcript)
+
+    @property
+    def connected_apps(self) -> list[ConnectorKey]:
+        """The simulated apps kept with the owner's opening description, absent on older interviews."""
+        if not self.transcript:
+            return []
+        return self.transcript[0].connected_apps or []
 
     @property
     def question(self) -> QuestionKey | None:
@@ -806,13 +817,45 @@ async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelCl
         business=BusinessSeed(name=business_name, owner_display_name=name, timezone=body.timezone), desk=seed)
 
 
+def memory_items(drafts: list[MemoryDraft]) -> list[MemoryItem]:
+    """Build kernel-safe IDs and topics that make every drafted note findable by setup's memory query."""
+    items = []
+    used: set[str] = set()
+    query = set(MEMORY_QUERY.split())
+    for draft in drafts:
+        slug = "-".join(re.findall(r"[a-z]+", draft.title.lower()))
+        base = ("m-" + slug)[:60].rstrip("-") if slug else "m-note"
+        item_id = base
+        suffix = ord("b")
+        while item_id in used:
+            item_id = base[:58].rstrip("-") + "-" + chr(suffix)
+            suffix += 1
+        used.add(item_id)
+        topics = list(dict.fromkeys(topic for value in draft.topics
+                                    if 1 <= len(topic := value.strip().lower()) <= 60))[:9]
+        if not query.intersection(topics):
+            topics.append("business")
+        items.append(MemoryItem(id=item_id, title=draft.title, topics=topics, text=draft.text))
+    return items
+
+
 async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart, desk: CreateDeskRequest,
                      interview_id: str, link: Callable[[str], Awaitable[None]]) -> tuple[Interview, str]:
     """Ask the kernel for the Desk and turn its Answering off: the interview asking for consent, and the Desk's slug.
-    Commit its link as soon as the kernel returns, before turning Answering off and building the interview."""
+    Commit its link as soon as the kernel returns, before writing sample memory, turning Answering off and building
+    the interview."""
     created = await owner.kernel.call("POST /desks", desk)
     try:
         await link(created.desk_id)
+        if described.memory:
+            try:
+                memory = DeskMemoryRequest(about=described.summary[:500], items=memory_items(described.memory))
+                await owner.kernel.call("PUT /desks/{id}/memory", memory,
+                                        path={"id": created.desk_id})
+            except ValidationError as failure:
+                logger.warning("the sample memory couldn't be written (%s)", type(failure).__name__)
+            except (KernelFailed, KernelUnavailable) as failure:
+                logger.warning("the sample memory couldn't be written (%s %s)", type(failure).__name__, failure.code)
     finally:
         # A failed link write must still try to stop answering before start deletes the Desk.
         await _answering_off(owner, created.desk_id)
@@ -823,7 +866,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
                              owner_display_name=(reduce_name(body.owner_display_name)
                                                  or reduce_name(described.owner_display_name) or None)),
-        transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None),
+        transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
+                          connected_apps=described.connected_apps),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
 

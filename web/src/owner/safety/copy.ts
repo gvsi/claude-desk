@@ -31,6 +31,7 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
+  web_search: 'Web search',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**

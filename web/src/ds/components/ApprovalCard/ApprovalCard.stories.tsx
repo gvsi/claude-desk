@@ -1568,10 +1568,27 @@ export const Unknown: Story = {
 
 export const RulesChanged: Story = {
   args: { decision: rivera.decisions.refused_at_execution, waiting: 'Web chat, 4 min ago' },
-  parameters: { canvasNote: "No board shows an answered request; the final line takes the place of 'Waiting for your answer'." },
+  parameters: { canvasNote: "Signed owner refusal reason board: the kernel's owner-only line takes the place of 'Waiting for your answer'." },
   play: async ({ canvasElement }) => {
     // rules_changed_has_no_answers
     await expectFinal(canvasElement, rivera.decisions.refused_at_execution, "Your rules changed before this ran, so it wasn't done.", 'refused');
+  },
+};
+
+export const NotShared: Story = {
+  args: {
+    decision: { ...rivera.decisions.refused_at_execution, owner_plain: 'Not shared: their session ended when their contact changed' },
+    waiting: 'Web chat, 4 min ago',
+  },
+  play: async ({ canvasElement, args }) => {
+    await expectFinal(canvasElement, args.decision, 'Not shared: their session ended when their contact changed', 'refused');
+  },
+};
+
+export const RefusedWithoutOwnerReason: Story = {
+  args: { decision: { ...rivera.decisions.refused_at_execution, owner_plain: null }, waiting: 'Web chat, 4 min ago' },
+  play: async ({ canvasElement, args }) => {
+    await expectFinal(canvasElement, args.decision, "Your rules changed before this ran, so it wasn't done.", 'refused');
   },
 };
 

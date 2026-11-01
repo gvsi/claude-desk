@@ -168,7 +168,9 @@ const HOLDS_CARDS_FILE = 'public/agents/SendAgentPanel.tsx';
 
 // An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
 // to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
-const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
+const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b|\bowner_plain\b|\bownerPlain\b/;
+// Imported aliases still name the original export; renamed wrappers still import the owner path.
+const OWNER_RECEIPT_PATH = /\bApprovalCard\b|\buseOwnerReceipt\b|\b(?:from\s*|import\s*(?:\(\s*)?)['"][^'"]*\bowner\//;
 
 // The open status: the kernel's object, passed on as it came, and its times read in one place.
 const SHELL_FILE = 'ds/components/PublicShell/PublicShell.tsx';
@@ -359,6 +361,11 @@ const LIB_IMPORT = /\bfrom\s+['"](?:\.\.\/)+lib\/([\w.-]+)['"]/g;
 function libModulesOf(visitor: Source[], all: Source[] = sources): Source[] {
   const files = new Set(visitor.flatMap(({ text }) => [...text.matchAll(LIB_IMPORT)].map((m) => `lib/${m[1]}`)));
   return all.filter((s) => files.has(s.file));
+}
+
+/** Owner annotations and owner-only rendering paths in visitor code and its library modules. */
+function ownerReasonLeaks(scanned: Source[]): string[] {
+  return [...hits(OWNER_REASON, scanned), ...hits(OWNER_RECEIPT_PATH, scanned)];
 }
 
 /** Object literals (or types) that pair `open:` with `text:`: an open status the page made itself. */
@@ -891,11 +898,17 @@ describe('app source guards', () => {
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
-    const visitor = (s: Source) => s.file.startsWith('public/');
-    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />';
-    expect(hits(OWNER_REASON, sample(bad))).toHaveLength(3);
+    const visitor = sources.filter((s) => s.file.startsWith('public/'));
+    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />; decision.owner_plain; const ownerPlain = line;';
+    expect.soft(hits(OWNER_REASON, sample(bad))).toHaveLength(5);
     expect(hits(OWNER_REASON, sample('<MarginReceipt {...receipt} onOpenTrace={open} />; const why = reasonPlain;'))).toEqual([]);
-    expect(hits(OWNER_REASON, sources.filter(visitor))).toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { ApprovalCard as CustomerCard } from '../ds/index.ts'; <CustomerCard {...decision} />"))).not.toEqual([]);
+    const wrapper: Source[] = [{ file: 'lib/receipt.ts', text: "export { useOwnerReceipt as receiptFor } from '../owner/conversations/ownerReceipt.ts';" }];
+    expect.soft(ownerReasonLeaks(libModulesOf(sample("import { receiptFor } from '../lib/receipt.ts';"), wrapper))).not.toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { View as CustomerReceipt } from '../owner/Receipt.tsx'; <CustomerReceipt />"))).not.toEqual([]);
+    expect(ownerReasonLeaks([...visitor, ...libModulesOf(visitor)])).toEqual([]);
+    // Leak assertions in public tests may name the key; tests already sit outside this source scan.
+    expect(isScanned('public/leak.test.ts')).toBe(false);
   });
 
   it('open_status_comes_from_the_ds_once_it_has_the_slot', () => {
