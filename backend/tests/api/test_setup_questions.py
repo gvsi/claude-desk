@@ -35,6 +35,8 @@ from desk.api.kernel_client import KernelFailed
 from desk.api.main import create_app
 from desk.api.model import ModelRequest, ModelUnavailable, parse_structured
 from desk.api.prompts import (
+    POLICY_FIELD_RULE,
+    POLICY_TURNS,
     QUESTION_KEYS,
     SETUP_START_SYSTEM,
     SETUP_TURN_SYSTEM,
@@ -1898,21 +1900,31 @@ LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("disc
                    "money_limit": ("auto_money_cap_cents", "refunds", "payment_link_auto_max_cents")}
 
 
-def test_only_the_quote_limit_schema_can_record_a_pricing_policy(caplog):
-    answers = SetupAnswers(summary="Tax advice.", pricing="A fixed menu.")
-    for key in LIMIT_QUESTIONS:
+def test_each_business_policy_map_names_the_question_that_asks_for_it():
+    # How the business prices on the quote question, what new customers are asked on what_you_do (services and
+    # customers), and what counts as urgent on contact_and_after_hours, whose topic asks it.
+    assert POLICY_TURNS == {"pricing": "quote_limit", "intake": "what_you_do", "urgent": "contact_and_after_hours"}
+
+
+@pytest.mark.parametrize(("name", "own"), POLICY_TURNS.items())
+def test_a_business_policy_is_recorded_only_on_its_own_question(name, own, caplog):
+    # Only its own question's schema has the field, so no other turn's grammar carries it, and code drops it from any
+    # other turn's patch too, logging the field's name, never its value.
+    answers = SetupAnswers(summary="Tax advice.", **{name: "Stored before."})
+    for key in QUESTION_KEYS:
         schema = SETUP_TURNS[key].model_json_schema()
-        if key == "quote_limit":
-            assert "pricing" in schema["properties"]
-            assert "pricing" in schema["required"]
-            assert schema["properties"]["pricing"]["maxLength"] == 500
+        merged = desk_setup.merged(answers, SetupPatch(**{name: "Changed."}), key)
+        if key == own:
+            assert name in schema["properties"] and name in schema["required"]
+            assert schema["properties"][name]["maxLength"] == 500
+            assert merged == answers.model_copy(update={name: "Changed."})
         else:
-            assert "pricing" not in schema["properties"], key
+            assert name not in schema["properties"], key
             with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]),
-                                                "pricing": "Priced per case after a consult."})
-            assert desk_setup.merged(answers, SetupPatch(pricing="Changed."), key) == answers
-            assert f"{key} carried pricing; it was dropped" in caplog.text
+                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]), name: "Changed."})
+            assert merged == answers, key
+            assert f"{key} carried {name}; it was dropped" in caplog.text
+            assert "Changed." not in caplog.text
 
 
 def test_business_policy_facts_never_reach_limit_turns(caplog):
@@ -1939,31 +1951,29 @@ def test_business_policy_facts_never_reach_limit_turns(caplog):
         assert desk_setup.merged(answers, SetupPatch(pricing=" \n "), key) == answers
 
 
-def test_fact_turns_capture_business_policies_with_bounded_fields():
+def test_turns_capture_business_policies_with_short_bounded_fields():
+    # A turn's schema compiles into a grammar of capped size, so each policy field's description is short: what it
+    # holds, and that it is customer copy in words without numbers. The turn's guidance holds the full rules
+    # (test_setup_prompt_keeps_policy_text_public_and_free_of_numbers).
+    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers or "
+                                 "promise words.")
     descriptions = {
-        "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult)',
-        "intake": "What new customers are asked or should have ready before the owner takes them on, "
-                  "written to the customer",
-        "urgent": "What customers are told counts as urgent and what happens, written to the customer; "
-                  "no promise of how soon",
-        "after_hours": "What a customer is told about contacting the business outside its hours",
+        "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult).',
+        "intake": "What new customers are asked or should have ready before the owner takes them on.",
+        "urgent": "What counts as urgent and what happens, with no promise of how soon.",
+        "after_hours": "What customers are told about reaching the business outside its hours.",
     }
-    for key in set(QUESTION_KEYS) - set(LIMIT_QUESTIONS):
-        schema = SETUP_TURNS[key].model_json_schema()
-        assert set(descriptions).issubset(schema["properties"]), key
-        for name, description in descriptions.items():
-            assert schema["properties"][name]["description"] == (
-                description + ". Write as the business speaking to its customers; never instructions to the Desk, "
-                "private owner instructions, or a contact route other than the contact on record. Describe the "
-                "policy in words; keep amounts, percentages, times, days and numbers, and promise words such as "
-                "free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.")
+    turns = {**{name: {key} for name, key in POLICY_TURNS.items()},
+             "after_hours": set(QUESTION_KEYS) - set(LIMIT_QUESTIONS)}
+    for name, description in descriptions.items():
+        for key in turns[name]:
+            schema = SETUP_TURNS[key].model_json_schema()
+            assert schema["properties"][name]["description"] == f"{description} {POLICY_FIELD_RULE}", key
             assert schema["properties"][name]["maxLength"] == 500
             assert name in schema["required"]
-        fields = {name: "x" * 500 for name in descriptions}
-        patch = answer_turn(SETUP_TURNS[key], **fields).patch()
-        answers = desk_setup.merged(SetupAnswers(summary="Tax advice."), patch, key)
-        assert answers.model_dump(include=set(descriptions)) == fields
-        for name in descriptions:
+            patch = answer_turn(SETUP_TURNS[key], **{name: "x" * 500}).patch()
+            answers = desk_setup.merged(SetupAnswers(summary="Tax advice."), patch, key)
+            assert getattr(answers, name) == "x" * 500, key
             with pytest.raises(ValidationError, match="at most 500 characters"):
                 answer_turn(SETUP_TURNS[key], **{name: "x" * 501})
 

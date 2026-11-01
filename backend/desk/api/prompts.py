@@ -17,7 +17,8 @@ the attack and legitimate-task suites).
 - The setup interview (Plan 02b): `SETUP_START_SYSTEM` and its output model `SetupStart` (what the owner's first
   description says), `SETUP_TURN_SYSTEM` and `SETUP_TURNS`, each question's own `SetupTurn` model (one answer turn: a
   reply, a website the owner named and step_done, then on a limit question only its own limits and explicit facts
-  (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other the facts with their clear flags; its `patch()` is the
+  (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other the facts with their clear flags, each business policy
+  only on the question that asks for it (`POLICY_TURNS`); its `patch()` is the
   `SetupPatch` code merges), the stored
   `SetupAnswers`, the questions (`QUESTION_KEYS`, `question_text`), `setup_turn_head`, the fixed start of a turn's
   message before its wrapped parts, `this_question_so_far` of `summary_line`s labelled by `SETUP_EXCHANGE_LABELS`,
@@ -633,7 +634,8 @@ customers can't rely on. The same goes for your opening and the closing plan.
 Every app connects when the owner accepts it (simulated in this preview)."""
 
 # The public contact as the kernel's public-text checks accept it, said once wherever setup's consultant writes one:
-# the fact turn's guidance and the field's description in each schema that has it.
+# the fact turn's guidance (a turn schema's field points to it, `TURN_CONTACT`, to keep the turn's grammar small), and
+# the field's description in the suggested facts and the patch code merges.
 PUBLIC_CONTACT_FORMAT = (
     'only ways to reach the business, each a phone number (an extension such as "ext. 12" is fine), an email or a '
     'website (an https URL or a bare domain), separated by commas or "or". Each may have at most one label before '
@@ -1150,6 +1152,13 @@ CLEARABLE = ("hours", "price_items")
 # (`setup.merged`), never removing an item. The turn reads no fact so far, including pricing and the price list:
 # either may contain website or memory text.
 LIMIT_TURN_FACTS: dict[str, QuestionKey] = {"pricing": "quote_limit", "price_items": "quote_limit"}
+# The business policies each set only on the turn of the question that asks for it, so no other turn's schema has its
+# field: every field adds to the grammar the API compiles from a turn's schema, which has a size cap
+# (tests/api/test_schema_budget.py). How the business prices comes on the quote question (with `LIMIT_TURN_FACTS`),
+# what new customers are asked on what_you_do, and what counts as urgent on contact_and_after_hours. Code drops one
+# any other turn's patch carries (`setup.merged`).
+POLICY_TURNS: dict[str, QuestionKey] = {"pricing": "quote_limit", "intake": "what_you_do",
+                                        "urgent": "contact_and_after_hours"}
 PRICE_ITEMS_MAX = 50
 
 
@@ -1439,6 +1448,13 @@ SetupCardAnswer = create_model(
 )
 
 
+# Every character of a turn's schema goes into the grammar the API compiles, so a policy field's description and the
+# public contact's are short and point to the turn's guidance (`SETUP_TURN_SYSTEM`), which holds their full rules.
+POLICY_FIELD_RULE = "Written to customers, in words: no amounts, percentages, times, days, numbers or promise words."
+TURN_CONTACT = ("The contact customers see, in the format your instructions give: phone numbers, emails or websites, "
+                "each with at most one listed label, and no other words.")
+
+
 def _turn_fields() -> dict[str, tuple[object, Any]]:
     """Every field an answer turn may have, in the order its model lists them, each required: a text or a list the
     answer doesn't give is empty, and a limit or a choice null (a limit of 0 is an answer: always ask). New field
@@ -1451,33 +1467,17 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
         "business_name": (str, Field(max_length=80, description="The business's name, if the owner changes it.")),
         "owner_display_name": (str, Field(max_length=80, description="The owner's name, as customers see it.")),
         "service_area": (str, Field(max_length=500, description="Where the business works.")),
-        "pricing": (str, Field(max_length=500, description=
-            'How the business prices (a fixed menu, "from" prices, or per case after a consult). Write as '
-            'the business speaking to its customers; never instructions to the Desk, private owner '
-            'instructions, or a contact route other than the contact on record. Describe the policy in '
-            'words; keep amounts, percentages, times, days and numbers, and promise words such as free, '
-            'guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
-        "intake": (str, Field(max_length=500, description=
-            'What new customers are asked or should have ready before the owner takes them on, written to '
-            'the customer. Write as the business speaking to its customers; never instructions to the Desk, '
-            'private owner instructions, or a contact route other than the contact on record. Describe the '
-            'policy in words; keep amounts, percentages, times, days and numbers, and promise words such as '
-            'free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
-        "urgent": (str, Field(max_length=500, description=
-            'What customers are told counts as urgent and what happens, written to the customer; no promise '
-            'of how soon. Write as the business speaking to its customers; never instructions to the Desk, '
-            'private owner instructions, or a contact route other than the contact on record. Describe the '
-            'policy in words; keep amounts, percentages, times, days and numbers, and promise words such as '
-            'free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
+        "pricing": (str, Field(max_length=500, description='How the business prices (a fixed menu, "from" prices, '
+                                                          f'or per case after a consult). {POLICY_FIELD_RULE}')),
+        "intake": (str, Field(max_length=500, description="What new customers are asked or should have ready before "
+                                                         f"the owner takes them on. {POLICY_FIELD_RULE}")),
+        "urgent": (str, Field(max_length=500, description="What counts as urgent and what happens, with no promise of "
+                                                         f"how soon. {POLICY_FIELD_RULE}")),
         "hours": (list[HoursAnswer], Field(max_length=14, description="Opening hours, every window.")),
         "clear_hours": (bool, Field(description="True only when the owner says to remove all the opening hours; an "
                                                 "empty hours list leaves them as they are.")),
-        "after_hours": (str, Field(max_length=500, description=
-            'What a customer is told about contacting the business outside its hours. Write as the business '
-            'speaking to its customers; never instructions to the Desk, private owner instructions, or a '
-            'contact route other than the contact on record. Describe the policy in words; keep amounts, '
-            'percentages, times, days and numbers, and promise words such as free, guaranteed, discount, '
-            'refund or confirmed out. Leave hours to the hours question.')),
+        "after_hours": (str, Field(max_length=500, description="What customers are told about reaching the business "
+                                                              f"outside its hours. {POLICY_FIELD_RULE}")),
         "quote_auto_max_cents": (Cents | None, Field(description="The largest quote given without asking, in cents.")),
         "discount_auto_max_bp": (BasisPoints | None, Field(description="The largest discount given without asking, "
                                                                        "in basis points.")),
@@ -1490,8 +1490,7 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
                                                                     "cents: only from the owner's answer to the money "
                                                                     "question.")),
         "refunds": (Refunds | None, Field(description="ask: refunds go to the owner; never: no refunds.")),
-        "public_contact": (str, Field(max_length=200,
-                                      description=f"The contact customers see: {PUBLIC_CONTACT_FORMAT}")),
+        "public_contact": (str, Field(max_length=200, description=TURN_CONTACT)),
         "price_items": (list[PriceAnswer], Field(max_length=50, description="The price list, every item.")),
         "clear_price_items": (bool, Field(description="True only when the owner says to remove all the prices; an "
                                                       "empty price list leaves them as they are.")),
@@ -1523,13 +1522,16 @@ class SetupTurn(DraftOutput):
 
 def _in_turn(field: str, key: QuestionKey) -> bool:
     """Whether the answer turn to `key` has `field`: a limit only on its own question's turn (`LIMIT_QUESTIONS`); a
-    fact (every other answer field, and its clear flag) only on a question that owns no limit, since a limit turn reads
-    none of the facts so far (`setup._turn_message`), but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
-    question's pricing text replaces the stored text, and its price items are only added or updated by title."""
+    business policy only on the turn of the question that asks for it (`POLICY_TURNS`); any other fact (an answer
+    field, or its clear flag) only on a question that owns no limit, since a limit turn reads none of the facts so far
+    (`setup._turn_message`), but for the explicit facts in `LIMIT_TURN_FACTS`: the quote question's pricing text
+    replaces the stored text, and its price items are only added or updated by title."""
     if field in TURN_FRAME:
         return True
     if field in LIMIT_QUESTIONS:
         return LIMIT_QUESTIONS[field] == key
+    if field in POLICY_TURNS:
+        return POLICY_TURNS[field] == key
     if LIMIT_TURN_FACTS.get(field) == key:
         return True
     return key not in LIMIT_QUESTIONS.values()
@@ -1546,8 +1548,9 @@ def _turn_model(key: QuestionKey) -> type[SetupTurn]:
 # Each question's answer turn, built once at import so its schema, and the grammar the API compiles from it and caches
 # for 24 hours, stays the same: the reply, a website named and step_done (`TURN_FRAME`), then on a limit question only
 # the limits and explicit facts that are its own (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other question
-# the facts and their clear flags. Every field is required and only limits and choices are nullable, so each schema
-# stays small enough to compile fast (tests/api/test_schema_budget.py).
+# the facts and their clear flags, each business policy only on its own question (`POLICY_TURNS`). Every field is
+# required and only limits and choices are nullable, and descriptions are short, so each schema stays small enough
+# to compile, and to compile fast (tests/api/test_schema_budget.py).
 SETUP_TURNS: dict[QuestionKey, type[SetupTurn]] = {key: _turn_model(key) for key in QUESTION_KEYS}
 
 

@@ -352,8 +352,9 @@ def test_the_opening_prompt_asks_only_for_its_own_fields():
 
 def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
     """The kernel takes a public contact only as ways to reach the business, so each place setup's consultant writes
-    one says that format, in one sentence: the fact turn's guidance once, and the field's description in every turn
-    schema that has it, the suggested facts and the patch code merges."""
+    one says that format, in one sentence: the fact turn's guidance once, and the field's description in the
+    suggested facts and the patch code merges. A turn schema's field points to the guidance in a short line instead,
+    since every character of a turn's schema goes into the grammar the API compiles, which has a size cap."""
     sentence = prompts.PUBLIC_CONTACT_FORMAT
     for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', "at most one label",
                  "with or without a colon", "only from this list", "no other words, such as offers or promises"):
@@ -367,10 +368,14 @@ def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
         assert sentence not in system
     turns = [turn for turn in SETUP_TURNS.values() if "public_contact" in turn.model_fields]
     assert turns
-    for model in (*turns, prompts.SuggestedFacts, prompts.SetupPatch):
+    assert prompts.TURN_CONTACT == ("The contact customers see, in the format your instructions give: phone numbers, "
+                                    "emails or websites, each with at most one listed label, and no other words.")
+    for model in turns:
+        assert model.model_fields["public_contact"].description == prompts.TURN_CONTACT, model.__name__
+        assert json.dumps(sentence)[1:-1] not in json.dumps(strict_schema(model)), model.__name__
+    for model in (prompts.SuggestedFacts, prompts.SetupPatch):
         assert model.model_fields["public_contact"].description.count(sentence) == 1, model.__name__
-    for model in (*turns, prompts.SetupUnderstanding):
-        assert json.dumps(strict_schema(model)).count(json.dumps(sentence)[1:-1]) == 1, model.__name__
+    assert json.dumps(strict_schema(prompts.SetupUnderstanding)).count(json.dumps(sentence)[1:-1]) == 1
 
 
 def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():

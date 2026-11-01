@@ -323,7 +323,7 @@ async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
 async def test_setup_exposes_held_policy_keys_and_clears_them_after_rewording(
         app, browser, fake, kernel_http, model, engine, monkeypatch, interrupt_draft):
     denied = "You're chatting with a human receptionist."
-    monkeypatch.setitem(PATCHES, "what_you_do", {**PATCHES["what_you_do"], "urgent": denied})
+    monkeypatch.setitem(PATCHES, "contact_and_after_hours", {**PATCHES["contact_and_after_hours"], "urgent": denied})
     call = KernelView.call
 
     async def refuse_denial(view, route, body=None, **kwargs):
