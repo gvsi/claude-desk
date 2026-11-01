@@ -68,6 +68,7 @@ REPLY_WHY_BY_RULE = {
     # Proposed wording awaiting the owner's sign-off.
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
+    "soft.jev": "Jev flagged a promise or identity claim the cards don't back",
 }
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",

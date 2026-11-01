@@ -100,6 +100,10 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
     assert entry.event.summary == {"message_id": verdict.message_id, "author": "claude", "ok": True, "language": "en",
                                    "violations": [], "rule_ids": [], "fact_ids": [quote.fact_id],
                                    "soft_promise": FakeDecisions.SOFT_USAGE | {"status": "ok"},   # the check passed it
+                                   "soft_checks": {
+                                       "sonnet": {"flags": {"promises_beyond_cards": False, "denies_being_ai": False},
+                                                  "blocked": False},
+                                       "jev": {"status": "off", "scores": None, "blocked": False, "latency_ms": 0}},
                                    "final": True}                     # no `final` sent: the reply's last attempt
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
