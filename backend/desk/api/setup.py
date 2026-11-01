@@ -1621,8 +1621,8 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
     needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
     it has fewer) in one number the owner typed, plus any words beyond labels and separators. A contact with no part
-    needs its whole text. With `stated`, prices need a dollar sign and their title's words of four or more letters;
-    hours need a meridiem, a clock time or a range, never unrelated bare counts."""
+    needs its whole text. With `stated`, prices need a dollar sign and their title's words of four or more letters,
+    ignoring regular plurals on both sides; hours need a meridiem, a clock time or a range, never unrelated bare counts."""
     if not value:
         return True
     folded = owner_text.casefold()
@@ -1636,12 +1636,19 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
             ) and _contact_words(contact) <= set(re.findall(r"\w+", folded))
         return contact in folded
     if field == "price_items":
+        def singular(word: str) -> str:
+            if re.search(r"(?:s|x|z|ch|sh)es$", word):
+                return word[:-2]
+            return word[:-1] if word.endswith("s") else word
+
+        title_text = re.sub(r"[^\W\d_]{4,}", lambda match: singular(match.group()), folded)
         sign = r"\$\s?" if stated else r"\$?"
         amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
                    for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
                                             owner_text)}
         return all(item.unit_cents in amounts
-                   and (not stated or all(word in folded for word in re.findall(r"[^\W\d_]{4,}", item.title.casefold())))
+                   and (not stated or all(singular(word) in title_text
+                                          for word in re.findall(r"[^\W\d_]{4,}", item.title.casefold())))
                    for item in cast(list[PriceAnswer], value))
 
     def has_time(clock: str, text: str, *, explicit: bool = False) -> bool:

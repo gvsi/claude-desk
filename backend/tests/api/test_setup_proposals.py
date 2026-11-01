@@ -53,6 +53,22 @@ def test_owner_supports_structured_facts(field, value, owner_text, supported):
     assert setup.owner_supports(field, value, owner_text) is supported
 
 
+@pytest.mark.parametrize("singular,plural", [
+    ("Repair", "Repairs"),
+    ("Consultation", "Consultations"),
+    ("Bus", "Buses"),
+    ("Box", "Boxes"),
+    ("Waltz", "Waltzes"),
+    ("Match", "Matches"),
+    ("Brush", "Brushes"),
+])
+def test_owner_supports_price_title_regular_plurals_both_ways(singular, plural):
+    assert setup.owner_supports("price_items", [setup.PriceAnswer(title=plural, unit_cents=17500)],
+                                f"A {singular.lower()} is $175 now.", stated=True)
+    assert setup.owner_supports("price_items", [setup.PriceAnswer(title=singular, unit_cents=17500)],
+                                f"{plural} are $175 now.", stated=True)
+
+
 @pytest.mark.parametrize("contact,owner_text,supported", [
     ("415-555-0118 or hello@bobsplumbing.com",
      "Customers can call 415-555-0118 or email hello@bobsplumbing.com.", True),
@@ -635,6 +651,29 @@ async def test_off_topic_price_correction_keeps_other_items_and_provenance(
     assert ("price_items" in said["owner_fields"]) is not stays_held
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert len(parts.prices) == (0 if stays_held else 3)
+
+
+async def test_off_topic_plural_price_title_accepts_singular_owner_correction(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers.price_items = [setup.PriceAnswer(title="Repairs", unit_cents=15000)]
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "A repair is $175 now", turn(
+        price_items=[{"title": "Repairs", "unit_cents": 17500}]), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert [(item.title, item.unit_cents) for item in answers.price_items] == [("Repairs", 17500)]
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert [(item.title, item.unit_cents) for item in parts.prices] == [("Repairs", 17500)]
 
 
 async def test_off_topic_website_price_never_demotes_published_owner_prices(proposals, model, engine):
