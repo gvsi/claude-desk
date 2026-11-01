@@ -304,8 +304,8 @@ evals-merge-ready:
 	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"
 
 # The soft-promise check measured on the real model. It spends money: every case in
-# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Haiku 5.5 call
-# on the Claude API each (estimated at $0.0005), for at most MAX_USD dollars, which it needs on the
+# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Sonnet 5.5 call
+# on the Claude API each (estimated at $0.0026), for at most MAX_USD dollars, which it needs on the
 # command line or in the environment (the tier 2 default doesn't count). The prompt is this tree's,
 # decisions.py's at PROMPT_REF or PROMPT_FILE's text; LABEL names the run. ANTHROPIC_API_KEY comes from
 # the environment. It writes evals/out/soft-promise/<label>-<time>.json and a row in the shared spend file.
@@ -314,6 +314,18 @@ SAMPLES ?= 5
 evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
+
+# Select candidate arms new and sonnet, or diagnostic steps_only; unchanged old evidence is reused.
+# SAMPLES accepts a common count or per-arm counts, e.g. new:5,steps_only:5,sonnet:2.
+# All measured arms share MAX_USD and the durable $3.20 cap in evals/out/soft-promise/experiment.json.
+.PHONY: evals-soft-promise-experiment
+CASES ?= evals/calibration/soft_promise.yaml
+ARMS ?= new,steps_only
+RESULTS ?= evals/out/soft-promise/next-steps-experiment.json
+evals-soft-promise-experiment:
+	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise-experiment spends money: give the remaining MAX_USD=<dollars>))
+	$(if $(BASELINE_SHA),,$(error evals-soft-promise-experiment needs a frozen BASELINE_SHA))
+	$(EVALS) python -m evals.calibration.soft_promise_experiment --cases "$(CASES)" --arms "$(ARMS)" --baseline-sha "$(BASELINE_SHA)" --samples "$(SAMPLES)" --max-usd $(MAX_USD) --output "$(RESULTS)"
 
 # Compare frozen reviewer cases with prompts read from two refs. DRY_RUN=1 builds
 # inputs and estimates Sonnet 5.5 list-price cost without credentials or model calls.
