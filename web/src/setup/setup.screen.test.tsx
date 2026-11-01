@@ -3737,6 +3737,57 @@ describe('consultant setup', () => {
     else await expect.element(suggestions).toHaveFocus();
   });
 
+  it('the_last_answer_answered_202_holds_the_closing_until_continue', async () => {
+    let state = await consultantAt('payment');
+    const id = state.interview_id;
+    // Accept the retainer and status cards to reach the last, opt-in money question.
+    for (const body of [{ accept: true, amount_cents: 75000 }, { accept: true }]) {
+      const response = await mockStore.dispatch('setupProposal', { params: { id, proposal_id: state.pending_card! }, query: { cards: '1' }, body });
+      expect(response).toMatchObject({ status: 200 });
+      if ('network' in response) throw new Error('fixture decision failed');
+      state = response.body as SetupState;
+    }
+    expect(state).toMatchObject({ step: 'questions', question: 'money_limit', pending_card: null });
+    const release = holdNextAnswer(mockStore.world, id);
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    let answerStatus: number | undefined;
+    const answered = ({ request, response }: { request: Request; response: Response }) => {
+      if (request.method === 'POST' && new URL(request.url).pathname === `/api/owner/setup/${id}/answer`) answerStatus = response.status;
+    };
+    worker.events.on('response:mocked', answered);
+    onTestFinished(() => { worker.events.removeListener('response:mocked', answered); });
+    const answers = requests('setupAnswer').length;
+    await screen.getByRole('button', { name: 'Ask me before every payment', exact: true }).click();
+    await expect.poll(() => answerStatus).toBe(202);
+    expect(requests('setupAnswer')).toHaveLength(answers + 1);
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'money_limit', text: 'Ask me before every payment' });
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue', exact: true }).elements()).toHaveLength(0);
+    const reads = requests('setup').length;
+    release();
+    // Only the page's real polling reads the completed turn; the test does not re-read it.
+    const transcript = screen.getByRole('log');
+    await expect.element(transcript.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    for (const line of [
+      'It books free 20-minute intro consults and asks new clients three questions first. Once you’ve priced the work, it sends the retainer link, and it asks you before every payment. Questions about where a return stands come to you for now.',
+      'A few conversations it’s ready for:',
+      'Someone asks if you can do their 2025 return and their LLC’s books. The Desk explains the free consult, asks its three questions and books a time.',
+      'A client you’ve priced asks how to pay. The Desk asks you first, then sends them the retainer link.',
+      'Someone asks where their return is. The Desk takes their name and question and tells them you’ll reply.',
+      'Next, check the tools these jobs use.',
+    ]) await expect.element(transcript.getByText(line, { exact: true })).toBeVisible();
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+    expect(next.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(screen.container.querySelector('.cd-composer')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'What Claude can use', exact: true }).elements()).toHaveLength(0);
+    expect(requests('setupTools')).toHaveLength(0);
+    await next.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+  });
+
   it('suggestions_finish_a_pending_card_show_read_only_leftovers_and_wait_for_continue', async () => {
     const state = await consultantAt('intake');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
