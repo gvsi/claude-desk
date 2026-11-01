@@ -22,6 +22,7 @@ from desk.api.jobs import RESUME_AFTER_ANSWER, surface_due_decisions
 from desk.api.main import create_app
 from desk.kernel_api import AnswerRequest, CreateCopyRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
+from tests.api.test_jobs import session_rows
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, cookie, events_path, open_session, reply, types
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
@@ -334,7 +335,10 @@ async def test_retried_answer_during_execution_doesnt_resume(app, browser, fake,
     assert retried.status_code == 409
     assert retried.json() == {"error": "already_resolved", "decision": approved.model_dump(mode="json")}
     assert await resume_jobs(jobs_connector) == []
-    assert await sse_events(engine, held.session_id) == before
+    assert await sse_events(engine, held.session_id) == [
+        *before, ("receipt", {**signed(approved.model_dump(mode="json")), "type": "receipt"})]
+    assert (await session_rows(engine, held.session_id))["control"] == [
+        ("decision_pending", held.decision_id, False)]
     async with engine.connect() as conn:
         assert (await conn.execute(text(
             "SELECT count(*) FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
@@ -343,6 +347,56 @@ async def test_retried_answer_during_execution_doesnt_resume(app, browser, fake,
             "SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'control'"
             " AND type = 'run_resumable'"), {"s": held.session_id})).scalar_one() == 0
     assert len(model.requests) == 1
+
+
+async def test_lost_answer_while_approved_keeps_an_unknown_outcome_pending(
+        app, browser, fake, kernel_http, model, engine, jobs_connector, monkeypatch):
+    held = await held_request(app, browser, fake, kernel_http, model)
+    run = fake._run
+
+    def response_lost(record, session, exec_state=None):
+        # Approval committed, but the adapter is still running when the answer times out.
+        record.running = True
+        raise httpx.ReadTimeout("the answer's response was lost during execution")
+
+    monkeypatch.setattr(fake, "_run", response_lost)
+    lost = await answer(held, "allow_once")
+    approved = fake.decisions[held.decision_id].decision
+    assert approved.state == "approved"
+    assert lost.status_code == 409
+    assert lost.json() == {"error": "already_resolved", "decision": approved.model_dump(mode="json")}
+    found = await session_rows(engine, held.session_id)
+    assert found["control"] == [("decision_pending", held.decision_id, False)]
+    assert [payload for type, payload in await sse_events(engine, held.session_id) if type == "receipt"] == [
+        {**signed(approved.model_dump(mode="json")), "type": "receipt"}]
+    assert found["action_update"] == []
+    assert (await answer(held, "allow_once")).status_code == 409
+    assert await session_rows(engine, held.session_id) == found       # retry adds no receipt or pending row
+    assert await resume_jobs(jobs_connector) == []
+
+    monkeypatch.setattr(fake, "_run", run)
+    assert fake.finish(held.decision_id, "unknown").state == "unknown"
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        await stream.until(lambda events: "receipt" in types(events))
+    await app.state.runtime.runner.drain()
+    assert await session_rows(engine, held.session_id) == found       # unknown stays pending, without waking Claude
+    assert len(model.requests) == 1
+
+    final = fake.reconcile(held.decision_id)
+    model.add(response(reply("Good news: Maria said yes.")))
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        events = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    assert [event.model_dump(mode="json") for _, event in events if event.type == "resolved"] == [
+        signed(final.model_dump(mode="json"))]
+    found = await session_rows(engine, held.session_id)
+    assert [state for type, state in found["sse"] if type in ("held", "receipt", "resolved")] == [
+        "held", "approved", "executed"]
+    assert found["control"] == [("decision_pending", held.decision_id, True)]
+    assert found["action_update"] == [(held.decision_id, final.visitor_plain, True)]
+    assert len(model.requests) == 2
+    assert (await answer(held, "allow_once")).status_code == 409
+    assert await session_rows(engine, held.session_id) == found       # final retry publishes nothing
 
 
 async def test_unreadable_or_unanswered_is_503(app, browser, fake, kernel_http, model, engine, jobs_connector):

@@ -37,7 +37,7 @@ from desk.api.jobs import (
     surface_due_decisions,
 )
 from desk.api.runner import TurnRunner
-from desk.api.sse import append_control
+from desk.api.sse import append_control, unhandled_controls
 from desk.api.tools import Caller
 from desk.contracts import Decision, ToolCall
 from desk.db.session import procrastinate_connector
@@ -146,12 +146,60 @@ async def test_resume_job_is_idempotent(copy, engine, db, approved_shown):
     # request, which shows its final state once the kernel has one.
     copy.fake.script("native.quote", exec_state="unknown")
     third = await copy.visitor()
-    unsure = await copy.answer(await copy.decide(third, "call-3", discount_bp=500))
+    waiting = await copy.decide(third, "call-3", discount_bp=500)
+    await show(engine, third, waiting, "held")
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": waiting.decision_id})
+    unsure = result.decision
+    assert result.approved is not None
     assert unsure.state == "unknown"
     async with engine.connect() as conn:
-        assert await resume_after_answer(conn, third.ids, unsure) is True
-    assert (await session_rows(engine, third.session_id))["control"] == [
+        assert await resume_after_answer(conn, third.ids, unsure, result.approved) is True
+        assert await resume_after_answer(conn, third.ids, unsure, result.approved) is False
+    found = await session_rows(engine, third.session_id)
+    assert found["sse"] == [("held", "held"), ("receipt", "approved"), ("resolved", "unknown")]
+    assert found["control"] == [
         ("run_resumable", unsure.decision_id, False), ("decision_pending", unsure.decision_id, False)]
+    assert found["action_update"] == [(unsure.decision_id, unsure.visitor_plain, True)]
+
+    final = copy.fake.reconcile(unsure.decision_id)
+    runner = TurnRunner(ScriptedModel(), engine=engine, lock_engine=engine, production=False, clock=lambda: copy.fake.now)
+    async with engine.connect() as conn:
+        await runner.handle_controls(conn, third)
+        await runner.handle_controls(conn, third)
+        assert await resume_after_answer(conn, third.ids, unsure, result.approved) is False
+    found = await session_rows(engine, third.session_id)
+    assert found["sse"] == [
+        ("held", "held"), ("receipt", "approved"), ("resolved", "unknown"), ("resolved", "executed")]
+    assert found["control"] == [
+        ("run_resumable", unsure.decision_id, True), ("decision_pending", unsure.decision_id, True)]
+    assert found["action_update"] == [
+        (unsure.decision_id, unsure.visitor_plain, True), (unsure.decision_id, final.visitor_plain, True)]
+
+
+async def test_duplicate_decision_controls_wake_only_for_a_new_state(copy, engine, fake, monkeypatch):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-1", discount_bp=1500)
+    await show(engine, caller, held, "held")
+    final = await copy.answer(held)
+    async with engine.begin() as conn:
+        for type in ("decision_pending", "decision_due"):
+            await append_control(conn, caller.ids, type, {"decision_id": held.decision_id})
+    runner = TurnRunner(ScriptedModel(), engine=engine, lock_engine=engine, production=False, clock=lambda: fake.now)
+    started = []
+    monkeypatch.setattr(runner, "start", started.append)
+    async with engine.connect() as conn:
+        rows = await unhandled_controls(conn, caller.ids)
+        await conn.commit()
+        for row in rows:
+            assert await runner.handle_control(conn, caller, row) is True
+        assert await runner.handle_control(conn, caller, rows[0]) is False
+
+    assert started == [caller]
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("held", "held"), ("resolved", "executed")]
+    assert found["action_update"] == [(held.decision_id, final.visitor_plain, True)]
+    assert found["control"] == [("decision_pending", held.decision_id, True), ("decision_due", held.decision_id, True)]
 
 
 async def test_resume_drops_an_approved_snapshot_with_swapped_ledger_sequences(copy, engine, caplog):
