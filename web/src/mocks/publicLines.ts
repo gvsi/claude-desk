@@ -5,15 +5,15 @@ import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
 import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 
-/** The signed Chen & Co. board's starter lines. */
+/** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
   ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
-  ['pricing', 'The intro consult is free and takes 20 minutes. We price each engagement after it, and new work starts with a retainer.'],
+  ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
   ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
   ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-  ['how_we_help', 'Book a free intro call: New clients pick a time within your opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients you’ve priced get a secure link to pay a retainer before you start.'],
+  ['how_we_help', 'Book a free intro call: New clients pick a time within opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients who have been priced get a secure link to pay a retainer before work starts.'],
 ] as const;
 
 /** Only an explicit after-hours clause is known; contact details and ambiguous answers stay out. */

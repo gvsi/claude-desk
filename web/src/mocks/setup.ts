@@ -1275,7 +1275,8 @@ export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
 
 /**
  * A setup Desk's public page: its name, owner and public lines that pass the mock scan (the
- * original About before its lines are seeded, also scanned); null for any other Desk.
+ * original About before its lines are seeded, also scanned). How we help is built from accepted
+ * jobs and exempt from the text scan; null for any other Desk.
  */
 export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: Language): PublicDesk | null {
   const interview = interviewForDesk(world, desk.summary.desk_id);
@@ -1286,7 +1287,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
-    charter: lines?.filter(({ text }) => !publicLineRefused(text)).map(({ key, text }) => cardBlock('policy', { fact_id: `charter:${key}`, title: text }))
+    charter: lines?.filter(({ key, text }) => key === 'policy:how_we_help' || !publicLineRefused(text)).map(({ key, text }) => cardBlock('policy', { fact_id: `charter:${key}`, title: text }))
       ?? (interview.about === null || publicLineRefused(interview.about) ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
     agent_card: [],
     open_status: null,

@@ -38,7 +38,7 @@ it('reads the seven public lines in order without moving the interview', async (
   expect(await mockStore.dispatch('setup', { params })).toMatchObject({ body: { step: 'rules' } });
 });
 
-it('seeds the CPA starter exactly from the board and keeps limit answers out of every line', async () => {
+it('seeds the signed CPA starter lines and keeps limit answers out of every line', async () => {
   const limits = {
     quote_limit: 'Always ask me first.',
     discounts: 'Never offer discounts.',
@@ -53,12 +53,12 @@ it('seeds the CPA starter exactly from the board and keeps limit answers out of 
   });
   const board = [
     ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
-    ['pricing', 'The intro consult is free and takes 20 minutes. We price each engagement after it, and new work starts with a retainer.'],
+    ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
     ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
     ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
     ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
     ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-    ['how_we_help', 'Book a free intro call: New clients pick a time within your opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients you’ve priced get a secure link to pay a retainer before you start.'],
+    ['how_we_help', 'Book a free intro call: New clients pick a time within opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients who have been priced get a secure link to pay a retainer before work starts.'],
   ];
   const expected = { lines: board.map(([key, text]) => ({ key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
   const read = await mockStore.dispatch('setupPublicLines', { params });
@@ -242,5 +242,47 @@ it('refuses dollar amounts written as cents or with a sign', async () => {
     expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:pricing', text } })).toMatchObject({
       status: 422, body: { error: 'line_refused', key: 'policy:pricing' },
     });
+  }
+});
+
+it('refuses free and numeric durations in seeded public lines, confirm and edits', async () => {
+  for (const text of [
+    'free', 'FREE', '20 minutes', '1 minute', '2 hours', '1 hour', '2 days', '1 day',
+    '20-minute', '1-hour', '2-day', '0.5 hours',
+  ]) {
+    mockStore.reset('rivera');
+    const key = 'policy:after_hours';
+    const seeded = `After hours, ${text}.`;
+    const params = await atRules({ contact_and_after_hours: seeded }, 'Lakeview Accounts. We help local businesses.');
+    const setup = await mockStore.dispatch('setup', { params });
+    if ('network' in setup) throw new Error('setup read failed');
+    const publicParams = { slug: (setup.body as SetupState).slug };
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({
+      status: 200, body: { lines: expect.arrayContaining([expect.objectContaining({ key, text: seeded })]) },
+    });
+    const hiddenClaim = { status: 200, body: { charter: expect.not.arrayContaining([expect.objectContaining({ fact_id: `charter:${key}` })]) } };
+    expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject(hiddenClaim);
+    expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({
+      status: 422, body: { error: 'line_refused', key },
+    });
+    expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject(hiddenClaim);
+    expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:about', text } })).toMatchObject({
+      status: 422, body: { error: 'line_refused', key: 'policy:about' },
+    });
+  }
+});
+
+it('seeds How we help in third person without you or your', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  expect(read.status).toBe(200);
+  const line = (read.body as PublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
+  expect(line).toMatchObject({ editable: false });
+  const jobs = line!.text.split('\n');
+  expect(jobs).toHaveLength(3);
+  for (const job of jobs) {
+    expect(job).toMatch(/^.+: .+$/);
+    expect(job).not.toMatch(/\b(?:you|your)\b/i);
   }
 });
