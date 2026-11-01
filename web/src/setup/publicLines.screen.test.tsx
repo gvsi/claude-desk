@@ -149,6 +149,27 @@ it('removes a suggested policy line through its encoded URL and redraws the list
   await expect.element(screen.getByText('Tax return review, $250', { exact: true })).toBeVisible();
 });
 
+it('keeps price row identity and restores Remove focus to the next row or fallback', async () => {
+  const { screen } = await openLines('phone');
+  const monthlyRemove = screen.getByRole('button', { name: /^Remove/ }).nth(4).element();
+  await screen.getByRole('button', { name: /^Remove/ }).nth(3).click();
+  await expect.element(screen.getByText('Business tax return, $600', { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Remove/ }).nth(3).element()).toBe(monthlyRemove);
+  expect(document.activeElement).toBe(monthlyRemove);
+  await screen.getByRole('button', { name: /^Remove/ }).nth(3).click();
+  await expect.element(screen.getByText('Monthly bookkeeping, $150', { exact: true })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.container.querySelector('.cd-public-lines-suggested__heading'));
+  await screen.getByRole('button', { name: /^Remove/ }).first().click();
+  await expect.element(screen.getByText('(408) 555-0199, linda@chenandco.com', { exact: true })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove Hours', exact: true }).element());
+  await screen.getByRole('button', { name: 'Remove Hours', exact: true }).click();
+  await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Remove/ }).element());
+  await screen.getByRole('button', { name: /^Remove/ }).click();
+  await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Looks right' }).element());
+});
+
 it('confirms rendered group keys with the latest revision after removing Hours', async () => {
   const { screen, state } = await openLines('phone');
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).toBeVisible();

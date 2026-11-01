@@ -68,6 +68,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const invalid = text.trim() === '' || Array.from(text).length > limit;
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
+  const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const returnRemoveFocus = useRef<{ revision: string; index: number } | null>(null);
+  const suggestedHeading = useRef<HTMLDivElement>(null);
+  const looksRightButton = useRef<HTMLButtonElement>(null);
   const openedHeldOnLoad = useRef(false);
   const firstReadHandled = useRef(false);
   useEffect(() => {
@@ -100,6 +104,15 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const hasSuggestions = suggested.length > 0 || hours.length > 0 || prices.length > 0;
   const confirmKeys = [...confirmable.map((line) => line.key), ...(hours.length > 0 ? ['hours'] : []), ...(prices.length > 0 ? ['prices'] : [])];
   const empty = lines.data !== undefined && !lines.isError && shown.length === 0 && !hasSuggestions && !unknown;
+  const removeRows = [...suggested.map((line) => line.key), ...(hours.length ? ['hours-0'] : []), ...prices.map((item) => `prices-${item.item_id}`)];
+  useEffect(() => {
+    const target = returnRemoveFocus.current;
+    if (!target || busy !== null || lines.data?.revision !== target.revision) return;
+    const row = removeRows[target.index];
+    const button = row === undefined ? null : removeButtons.current.get(row);
+    (button ?? suggestedHeading.current ?? looksRightButton.current)?.focus();
+    returnRemoveFocus.current = null;
+  }, [busy, lines.data, removeRows]);
   useEffect(() => {
     const current = lines.data;
     if (!current || openedHeldOnLoad.current) return;
@@ -173,6 +186,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       } else changed = key === 'hours' ? saved.hours !== null : saved.lines.some((line) => line.key === key);
       queryClient.setQueryData(queryKey, saved);
       if (changed) setError(CHANGED_REFRESHED.en);
+      else returnRemoveFocus.current = { revision: saved.revision, index: removeRows.indexOf(row) };
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'not_suggested'))) {
         const current = await reread();
@@ -229,10 +243,14 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
 
   const renderRemove = (key: string, row: string, describedBy: string, itemId?: string) => {
     const label = <>{copy.remove}{key === 'hours' ? <span className="cd-sr-only"> {copy.hours}</span> : null}</>;
+    const buttonRef = (button: HTMLButtonElement | null) => {
+      if (button) removeButtons.current.set(row, button);
+      else removeButtons.current.delete(row);
+    };
     return editingKey !== null ? (
-      <Button variant="ghost" disabled describedBy={describedBy}>{label}</Button>
+      <Button variant="ghost" disabled describedBy={describedBy} buttonRef={buttonRef}>{label}</Button>
     ) : (
-      <Button variant="ghost" waiting={busy !== null} busy={removing === row} describedBy={describedBy}
+      <Button variant="ghost" waiting={busy !== null} busy={removing === row} describedBy={describedBy} buttonRef={buttonRef}
         onClick={() => void remove(key, row, itemId)}>{label}</Button>
     );
   };
@@ -300,15 +318,18 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       )}
     </div>
   );
-  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string, itemId?: string) => (
-    <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={`${key}-${index}`}>
+  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string, itemId?: string) => {
+    const row = key === 'prices' ? `prices-${itemId}` : `hours-${index}`;
+    return (
+    <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={row}>
       <span className="cd-public-lines__label cd-type-meta">{label}</span>
-      <div id={`${fieldId}-${key}-${index}`} className="cd-public-lines__text" data-copy="user">{value}</div>
+      <div id={`${fieldId}-${row}`} className="cd-public-lines__text" data-copy="user">{value}</div>
       {key !== 'hours' || index === 0 ? <div className="cd-public-lines__actions">
-        {renderRemove(key, `${key}-${index}`, `${fieldId}-${key}-${index}`, itemId)}
+        {renderRemove(key, row, `${fieldId}-${row}`, itemId)}
       </div> : null}
     </div>
-  );
+    );
+  };
 
   if (empty && !firstReadHandled.current) return null;
 
@@ -329,7 +350,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
           {hasSuggestions ? (
             <Card padding={16}>
               <div className="cd-public-lines-suggested">
-                <div className="cd-public-lines-suggested__heading cd-type-control">
+                <div ref={suggestedHeading} tabIndex={-1} className="cd-public-lines-suggested__heading cd-type-control">
                   <StatusDot tone="held" /><span>{copy.suggestedTitle}</span>
                 </div>
                 <p className="cd-public-lines-suggested__intro cd-type-meta">{copy.suggestedIntro}</p>
@@ -346,9 +367,9 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
           ) : null}
           <div className="cd-setup-step__actions">
             {editingKey !== null || unknown ? (
-              <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
+              <Button variant="primary" size="main" disabled buttonRef={looksRightButton}>{SETUP_COPY.situations.looksRight}</Button>
             ) : (
-              <Button variant="primary" size="main" waiting={busy !== null && busy !== 'confirm'} busy={busy === 'confirm'} onClick={() => void confirm()}>
+              <Button variant="primary" size="main" buttonRef={looksRightButton} waiting={busy !== null && busy !== 'confirm'} busy={busy === 'confirm'} onClick={() => void confirm()}>
                 {SETUP_COPY.situations.looksRight}
               </Button>
             )}
