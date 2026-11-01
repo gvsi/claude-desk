@@ -887,10 +887,19 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
     by_seq = {row["ledger_seq"]: row for row in by_id.values()}
     ledger = ro_view(ctx.ro.schema, "ledger_entries")
     event = type_coerce(ledger.c.event, JSONB)
+    starts_turn = MESSAGES.c.kind.in_((*VISITOR_TEXT, "whisper", "action_update")) | MESSAGES.c.wake
+    ended = RUN_EVENTS.alias("ended_turn")
+    # Event IDs also order turn metrics (agents need not publish an SSE turn_end).
+    last_end = select(func.max(ended.c.id)).where(
+        ended.c.copy_id == ctx.copy_id, ended.c.desk_id == desk_id,
+        ended.c.session_id == MESSAGES.c.session_id, ended.c.id < RUN_EVENTS.c.id,
+        ((ended.c.kind == "sse") & (ended.c.type == "turn_end"))
+        | ((ended.c.kind == "metric") & (ended.c.type == "turn"))).correlate(MESSAGES, RUN_EVENTS).scalar_subquery()
     # Keep card template names and receipt identifiers, leaving message text and card contents in SQL.
     messages = select(
         MESSAGES.c.session_id, MESSAGES.c.created_at, MESSAGES.c.n, MESSAGES.c.kind,
         func.jsonb_build_object(
+            "starts_turn", starts_turn, "last_end", last_end,
             "state", RUN_EVENTS.c.payload["state"], "decision_id", RUN_EVENTS.c.payload["decision_id"],
             "author", RUN_EVENTS.c.payload["author"], "handoff", RUN_EVENTS.c.payload["handoff"],
             "ledger_seq", RUN_EVENTS.c.payload["ledger_seq"],
@@ -898,7 +907,7 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
                                                   cast('$.blocks[*] ? (@.kind == "card").template', JSONPATH))).label("payload")
     ).select_from(WITH_EVENTS).where(
         MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
-        MESSAGES.c.session_id.in_(sessions), MESSAGES.c.kind.in_(AUDIENCE_KINDS["owner"]),
+        MESSAGES.c.session_id.in_(sessions), MESSAGES.c.kind.in_(AUDIENCE_KINDS["owner"]) | starts_turn,
         MESSAGES.c.kind != "stopped_draft")
     # Handoff creation has a kind; closing/replacing one has no kind and cannot restore a success.
     entries = select(
@@ -923,6 +932,7 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
                 decision_times.get(decision["ledger_seq"], utc(decision["created_at"])),
                 decision["ledger_seq"], 0, 0, outcome))
     pending: dict[str, list[dict]] = {}
+    turn_ends: dict[str, int | None] = {}
     tools = {"booking_confirmed": ("native.book", "visit_booked"),
              "charge_confirmed": ("native.charge_mandate", "deposit_paid")}
     for row in sorted(rows, key=lambda row: row.n):
@@ -931,6 +941,13 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
             if (payload.get("kind") == "desk_data" and (payload.get("summary") or {}).get("part") == "handoffs"):
                 events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))
             continue
+        if payload.get("starts_turn"):
+            pending.pop(session, None)
+        if row.kind in {"status", "delivered"}:
+            last_end = payload.get("last_end")
+            if last_end != turn_ends.get(session):
+                pending.pop(session, None)
+            turn_ends[session] = last_end
         if row.kind == "status":
             decision = by_id.get(payload.get("decision_id"))
             if payload.get("state") == "executed" and decision and decision["state"] == "executed":

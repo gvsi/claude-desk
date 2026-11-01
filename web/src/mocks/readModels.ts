@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, SseEvent, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -148,9 +148,24 @@ function latestAgentOutcome(world: MockWorld, session: SessionRecord): Conversat
     booking_confirmed: { tool: 'native.book', outcome: 'visit_booked' },
     charge_confirmed: { tool: 'native.charge_mandate', outcome: 'deposit_paid' },
   };
+  // Turn ends live in the stream rather than the transcript. Tag each event with its last end,
+  // just as the API does, so an undelivered turn cannot lend its receipt to a later card.
+  const turnEnds = new Map<SseEvent, number>();
+  let lastEnd = 0;
+  for (const { seq, ev } of session.events) {
+    if (ev.type === 'turn_end') lastEnd = seq;
+    turnEnds.set(ev, lastEnd);
+  }
   let pending: Decision[] = [];
+  let previousEnd = 0;
   for (const item of [...session.items].sort((a, b) => a.n - b.n)) {
     const event = item.event;
+    if (['visitor_text', 'agent_text', 'whisper'].includes(item.kind)) pending = [];
+    if (event && (item.kind === 'status' || item.kind === 'delivered')) {
+      const end = turnEnds.get(event) ?? 0;
+      if (end !== previousEnd) pending = [];
+      previousEnd = end;
+    }
     if (item.kind === 'status') {
       const decision = event && 'decision_id' in event ? decisions.get(event.decision_id) : undefined;
       if (event && 'state' in event && event.state === 'executed' && decision?.state === 'executed') pending.push(decision);

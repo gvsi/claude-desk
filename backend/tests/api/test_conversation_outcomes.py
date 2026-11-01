@@ -5,8 +5,11 @@ from datetime import timedelta
 import pytest
 
 from desk.api.deliver import Reply, Status, deliver
-from desk.api.store import Ids
+from desk.api.metrics import TurnMetric
+from desk.api.sse import append_metric, emit
+from desk.api.store import Ids, NOTES, append_message
 from desk.contracts import Decision, RenderedBlock, ReplyVerdict
+from desk.events import EvTurnEnd
 from tests.api.test_owner_reads import app, model, scene, local  # noqa: F401 (shared fixtures)
 
 
@@ -44,6 +47,40 @@ async def record(scene, ids, at, *, state="executed", tool="native.book", card="
     return decision
 
 
+@pytest.mark.parametrize("boundary", [
+    "agent_text", "visitor_text", "whisper", "action_update", "note", "turn_end", "turn", "ended_agent_text",
+])
+async def test_agent_outcome_does_not_reuse_receipts_across_turns(scene, boundary):
+    at = local(2026, 10, 30, 9)
+    fake, owner = scene.fake, scene.owner
+    fake.now = at
+    session, _ = fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    fake.flush()
+    ids = Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=session.session_id)
+    booking = await record(scene, ids, at, card=None)
+    async with scene.engine.connect() as conn:
+        if boundary in {"turn_end", "ended_agent_text"}:
+            await emit(conn, ids, EvTurnEnd(type="turn_end"))
+        elif boundary == "turn":
+            await append_metric(conn, ids, TurnMetric(turn_id="unfinished-reply", model_calls=1, tool_calls=1,
+                                                     decide_ms=0, execute_ms=0, total_ms=0, outcome="internal"))
+        if boundary not in {"turn_end", "turn"}:
+            kind = "agent_text" if boundary == "ended_agent_text" else boundary
+            extra = {"state": "executed", "ref_id": booking.decision_id} if kind == "action_update" else {}
+            await append_message(conn, ids, kind, text=NOTES["verified"] if kind == "note" else "New request",
+                                 wake=True, **extra)
+        verdict = ReplyVerdict(ok=True, language="en",
+                               blocks=[RenderedBlock(kind="card", template="booking_confirmed", text="Checked card")],
+                               violations=[], message_id="later-card", generation=0, visitor_plain="Checked",
+                               ledger_seq=booking.ledger_seq, signature="fake:outcome")
+        await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+    result = await owner.get(f"desks/{owner.desk_id}/conversations")
+    assert result.status_code == 200, result.text
+    summary = next(row for row in result.json() if row["session_id"] == session.session_id)
+    assert summary["latest_outcome"] is None
+
+
 @pytest.mark.parametrize("reverse_publication", [False, True])
 @pytest.mark.parametrize("newer_refusal", [False, True])
 async def test_agent_outcome_uses_ledger_order_not_receipt_publication(scene, reverse_publication, newer_refusal):
@@ -63,9 +100,12 @@ async def test_agent_outcome_uses_ledger_order_not_receipt_publication(scene, re
                            violations=[], message_id=booking.decision_id, generation=0, visitor_plain="Checked",
                            ledger_seq=booking.ledger_seq, signature="fake:outcome")
     async with scene.engine.connect() as conn:
+        await emit(conn, ids, EvTurnEnd(type="turn_end"))
+        await append_message(conn, ids, "agent_text", text="Book a visit")
         for decision in reversed(decisions) if reverse_publication else decisions:
             await deliver(conn, ids, Status(decision, "receipt"))
         await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema="fake_kernel_ro")
+        await emit(conn, ids, EvTurnEnd(type="turn_end"))
         await conn.commit()
     result = await owner.get(f"desks/{owner.desk_id}/conversations")
     assert result.status_code == 200, result.text
