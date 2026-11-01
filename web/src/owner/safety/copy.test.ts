@@ -11,18 +11,20 @@ import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { HandoffEntry } from '../../api/handoffEntry.ts';
-import type { Attempt, RefusalCause } from '../../api/views.ts';
+import type { Attempt, RefusalCause, TriageCategory } from '../../api/views.ts';
 // The trace's line comes from its own module: the design system's index doesn't export it, and
 // tests are outside the screens' index-only import rule.
 import { traceLine } from '../../ds/components/FullTrace/traceLine.ts';
 import {
   CATEGORY_COPY,
+  CATEGORY_LABELS,
   CAUSE_COPY,
   HANDOFF_ENTRY_COPY,
   LEDGER_KIND_COPY,
   ORIGIN_COPY,
   anythingStoppedIn,
   anythingTurnedDownIn,
+  categoryLabel,
   causeLabel,
   entryCopy,
   entryFor,
@@ -81,8 +83,8 @@ const SIGNED_CAUSES = {
   no_rule: 'No rule covers this yet',
 } as const;
 
-/** The triage categories, as the API owner plan's triage task names them (plan 02b, Task 10). */
-const TRIAGE_CATEGORIES = ['impersonation', 'discount_push', 'private_data', 'code_redirect', 'injection', 'over_limit', 'other'];
+/** The descriptive subjects in the owner's signed order. */
+const TRIAGE_CATEGORIES = ['prices', 'records', 'codes', 'instructions', 'limits', 'wording', 'other'] as const satisfies readonly TriageCategory[];
 
 const sorted = (values: readonly string[]) => [...values].sort();
 
@@ -119,6 +121,18 @@ function page(entries: LedgerEntry[]): LedgerPage {
 }
 
 describe('Safety copy', () => {
+  it('each_subject_has_its_own_label_in_the_signed_order', () => {
+    const labels = ['Prices and discounts', "Someone's records", 'Verification codes', 'Instructions in a message', 'Above a limit', "The AI's wording", 'Other'];
+    expect(Object.keys(CATEGORY_COPY)).toEqual(TRIAGE_CATEGORIES);
+    expect(CATEGORY_LABELS).toEqual(labels);
+    for (const [index, category] of TRIAGE_CATEGORIES.entries()) {
+      const triage = { summary: 'The person asked a question. The Desk checked its reply.', category };
+      expect(categoryLabel({ triage })).toBe(labels[index]);
+    }
+    expect(categoryLabel({ triage: null })).toBe('Not sorted yet');
+    expect(categoryLabel({ triage: { summary: 'A new subject.', category: 'future' } as unknown as Attempt['triage'] })).toBe('Other');
+  });
+
   it('copy_tables_are_exhaustive', () => {
     expect(sorted(Object.keys(LEDGER_KIND_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'kind')));
     expect(sorted(Object.keys(ORIGIN_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'origin')));
