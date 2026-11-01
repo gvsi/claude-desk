@@ -146,16 +146,17 @@ async def test_typed_booking_confirmation_requires_its_booking_card(app, client,
 
 
 async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(app, client, monkeypatch):
-    from desk.kernel_service import business_tools
+    from desk.kernel_service import desks
 
     scans = []
-    original = business_tools.refuse_public_promises
+    original = desks.refuse_public_promises
 
-    async def checked(ctx, part, values, desk_id, **kwargs):
-        scans.append({'part': part, 'values': values, 'desk_id': desk_id, **kwargs})
+    async def checked(ctx, part, values, desk_id=None, **kwargs):
+        if part == 'business_tools':
+            scans.append({'part': part, 'values': values, 'desk_id': desk_id, **kwargs})
         await original(ctx, part, values, desk_id, **kwargs)
 
-    monkeypatch.setattr(business_tools, 'refuse_public_promises', checked)
+    monkeypatch.setattr(desks, 'refuse_public_promises', checked)
     copy, visitor = await configured(app, client, config={'appointment_type': 'Free consult'})
     assert len(scans) == 1
     assert list(scans[0]['values'].items()) == [(f'{TOOL}.0-title', 'Book a consult'),
@@ -284,23 +285,23 @@ async def test_config_changed_after_approval_fails_before_booking(app, client, m
 
 @pytest.mark.parametrize('appointment_type', ['$50 consultation', 'guaranteed', '20% discount'])
 async def test_put_refuses_unsafe_appointment_type_under_its_public_key(app, client, monkeypatch, appointment_type):
-    from desk.kernel_service import business_tools
+    from desk.kernel_service import desks
 
     copy = await rivera(app, client)
     seen = []
-    original = business_tools.refuse_public_promises
+    original = desks.refuse_public_promises
 
-    async def checked(ctx, part, values, desk_id, **kwargs):
-        seen.append(values)
+    async def checked(ctx, part, values, desk_id=None, **kwargs):
+        if part == 'business_tools':
+            seen.append(values)
         await original(ctx, part, values, desk_id, **kwargs)
 
-    monkeypatch.setattr(business_tools, 'refuse_public_promises', checked)
+    monkeypatch.setattr(desks, 'refuse_public_promises', checked)
     response = await put(client, copy, [typed_booking(appointment_type=appointment_type)])
     assert response.status_code == 422, response.text
     assert [list(values.items()) for values in seen] == [[(f'{TOOL}.0-title', 'Book a consult'),
                                                          (f'{TOOL}.1-appointment_type', appointment_type)]]
-    assert response.json()['detail'] == {f'{TOOL}.title': ['public_promise'],
-                                          f'{TOOL}.appointment_type': ['public_promise']}
+    assert response.json()['detail'] == {f'{TOOL}.appointment_type': ['public_promise']}
     assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.source == 'business'))
 
 
