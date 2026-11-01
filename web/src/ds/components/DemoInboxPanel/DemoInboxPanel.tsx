@@ -161,7 +161,8 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
       {/* Always present, so an entry that arrives later is read out. */}
       <div className="cd-demo-inbox__entries" aria-live="polite">
         {shown.length === 0 ? (
-          <p className="cd-demo-inbox__empty cd-type-meta">{copy.empty}</p>
+          // A notice (a read that failed) stands alone: the inbox may not be empty.
+          notice ? null : <p className="cd-demo-inbox__empty cd-type-meta">{copy.empty}</p>
         ) : (
           <ul role="list" className="cd-demo-inbox__list">
             {shown.map((item) => (

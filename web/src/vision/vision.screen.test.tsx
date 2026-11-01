@@ -596,7 +596,7 @@ describe('Vision pages against their boards', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
     await expect.element(sidebar.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
     await expect.element(sidebar.getByRole('link', { name: 'Teammates' })).toBeVisible();
-    await expect.element(sidebar.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers your team under your rules');
+    await expect.element(sidebar.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
 
     // The title and its line, "Add a teammate" at the right.
     expectComputed(title.element(), SPEC.pageTitle);
@@ -691,7 +691,7 @@ describe('Vision pages against their boards', () => {
     await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
       sidebar.getByRole('button', { name: 'Switch Desk, current: Team' }).element() as HTMLElement,
-      sidebar.getByRole('switch', { name: 'Answering' }).element() as HTMLElement,
+      sidebar.getByRole('switch', { name: 'Claude acts for you' }).element() as HTMLElement,
       add.element() as HTMLElement,
       ...rows,
       chat.getByRole('button', { name: 'Whisper' }).element() as HTMLElement,

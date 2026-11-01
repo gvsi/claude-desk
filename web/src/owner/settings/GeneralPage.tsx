@@ -4,13 +4,10 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, OWNER_ERROR_COPY, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { BusinessOut } from '../../api/views.ts';
-import { Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
+import { ACTING_SWITCH_COPY, Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
 import { hoursParts } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { DESKS_KEY, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
-
-/** What Answering on means, under its switch: the short line, on a laptop as on a phone (owner decision, 2026-10-30). */
-const ANSWERING_LINE = 'Claude answers under your rules.';
 
 /**
  * A Desk's hours window in the signed board's words, "Weekdays 8:00 am to 6:00 pm". No board draws
@@ -169,9 +166,9 @@ export function GeneralPage() {
         <SectionHeader id={businessId} title="Your business" />
         <DetailList items={details} />
       </section>
-      <Card as="section" label="Answering" padding={0}>
+      <Card as="section" label={ACTING_SWITCH_COPY.label} padding={0}>
         <div className="cd-settings__answering">
-          <Switch label="Answering" description={ANSWERING_LINE} checked={desk.answering} onChange={setAnswering} />
+          <Switch label={ACTING_SWITCH_COPY.label} description={ACTING_SWITCH_COPY[desk.answering ? 'on' : 'off']} checked={desk.answering} onChange={setAnswering} />
         </div>
       </Card>
       <section aria-labelledby={deleteId} className="cd-settings__section cd-settings__delete">

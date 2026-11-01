@@ -314,7 +314,7 @@ describe('ArchitectureFigure', () => {
       // The caption: the figure's number, the reader's own words, and the name.
       const caption = screen.container.querySelector('figcaption');
       expect(caption?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-        `Figure 1 v1 architecture: two processes, two checkpoints. ${name}.`,
+        `Figure 1 The first release’s architecture: two processes, two checkpoints. ${name}.`,
       );
       await screen.unmount();
     }

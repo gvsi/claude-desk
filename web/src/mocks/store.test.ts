@@ -1138,6 +1138,59 @@ describe('the scripted Desk', () => {
     expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
   });
 
+  it('booking_closes_the_chats_card_handoff_as_the_kernel_does', async () => {
+    // As the kernel's `native.book` does (the owner's decision of 2026-11-01): a booking closes the
+    // chat's open handoff the handoff card opened, exactly as the owner's mark of done does
+    // (`done`), recorded `desk_data` naming it with `closed_by: "booking"` just before the
+    // booking's own execution entry, so Needs you stops listing the chat. Finding open times
+    // closes nothing, and another chat's card handoff stays open.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const other = mockStore.world.addSession(desk);
+    mockStore.world.reply(other, [rivera.blocks.handoff.en], 'en');
+    const handoffsOf = (sessionId: string) => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === sessionId);
+    expect(handoffsOf(other.state.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    await send('Can I talk to Maria?');
+    await drain();
+    const card = handoffsOf(session.session_id)[0]?.handoff_id ?? '';
+    await send('Can someone come Tuesday?');
+    await drain();
+    expect(handoffsOf(session.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+
+    const ledgered = desk.ledger.length;
+    await send('The first one, please.');
+    await drain();
+    expect(handoffsOf(session.session_id).map((h) => [h.handoff_id === card, h.kind, h.status])).toEqual([[true, 'card', 'done']]);
+    expect(handoffsOf(other.state.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    const events = desk.ledger.slice(ledgered).map((entry) => entry.event);
+    const ran = events.findIndex((event) => event.kind === 'execute');
+    expect(events[ran - 1]).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], closed_by: 'booking' } });
+    expect(events.filter((event) => event.kind === 'desk_data')).toHaveLength(1);
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id)).toEqual([]);
+    expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
+  });
+
+  it('booking_leaves_a_call_back_open', async () => {
+    // A call-back promises the visitor a call, which a booking doesn't keep: it stays open, and
+    // nothing is recorded closing it.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can you call me back?');
+    await drain();
+    await send('Can someone come Tuesday?');
+    await drain();
+    const ledgered = desk.ledger.length;
+    await send('The first one, please.');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['callback', 'open']]);
+    expect(desk.ledger.slice(ledgered).map((entry) => entry.event.kind)).toContain('execute');
+    expect(desk.ledger.slice(ledgered).filter((entry) => entry.event.kind === 'desk_data')).toEqual([]);
+  });
+
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
     // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
     // most recently, their previous and last messages joined with " · ", on every read, not what

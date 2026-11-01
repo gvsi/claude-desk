@@ -106,6 +106,7 @@
   --motion-fast: 120ms;
   --motion-base: 200ms;
   --motion-stagger: 150ms;
+  --motion-settle: 150ms;
   --motion-ease: ease-out;
   --motion-ease-emphasis: cubic-bezier(.165,.84,.44,1);
   --motion-ease-bounce: cubic-bezier(0.37, 0, 0.63, 1);
