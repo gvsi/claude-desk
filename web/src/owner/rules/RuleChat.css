@@ -8,11 +8,11 @@
 }
 
 /* Each turn is one of the conversation's rows, so a new one can be brought into view. It stops
-   4 px from the conversation's edge, the room the conversation keeps at its own ends for focus
-   rings, so a turn brought into view sits where scrolling to an end would leave it. */
+   where scrolling to an end would leave it: 4 px from the conversation's top, the room kept there
+   for focus rings, and 24 px from its foot, the room a chat leaves under its last message. */
 .cd-rule-chat__turn {
   min-width: 0;
-  scroll-margin-block: var(--space-4);
+  scroll-margin-block: var(--space-4) var(--space-24);
 }
 
 .cd-rule-chat__answer {
