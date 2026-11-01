@@ -58,7 +58,7 @@ function outcomeOf(now: SetupState, answer: Answer): 'taken' | 'refused' | 'unkn
 
 /** One line of the conversation: Claude's in its serif, the owner's as theirs, a read as its label. */
 function Line({ message }: { message: SetupMessage }) {
-  if (message.role === 'claude') return <ClaudeMessage blocks={message.text.split(/\n\s*\n/).map((text) => ({ kind: 'prose' as const, text }))} language="en" ownerName="" />;
+  if (message.role === 'claude') return <ClaudeMessage blocks={[{ kind: 'prose' as const, text: message.text }]} language="en" ownerName="" />;
   if (message.role === 'owner') return <VisitorMessage text={message.text} />;
   return <ToolLabel text={message.text} />;
 }

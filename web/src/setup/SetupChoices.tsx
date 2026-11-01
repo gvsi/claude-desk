@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Choice } from '../api/views.ts';
-import { Card, IconButton } from '../ds/index.ts';
+import { Card, ChatMarkdown, IconButton } from '../ds/index.ts';
 import { Icon } from '../ds/icons/index.tsx';
 import { SETUP_COPY } from './copy.ts';
 
@@ -18,6 +18,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   const [other, setOther] = useState('');
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  const questionId = useId();
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -59,11 +60,11 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
     return () => document.removeEventListener('keydown', keydown);
   }, [active, choices, disabled, onChoose, onDismiss, other]);
   return (
-    <div className="cd-setup-question-panel"><Card as="section" label={question} padding={16}>
+    <div className="cd-setup-question-panel"><Card as="section" labelledBy={questionId} padding={16}>
       <div className="cd-setup-q3" ref={root}>
         <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
-          <div className="cd-setup-q3__question cd-type-reply">{question.split(/\n\s*\n/).map((text, index) => <p key={index}>{text}</p>)}</div>
+          <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} /></div>
           <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} />
         </div>
         <ol className="cd-setup-q3__list" role="list">
