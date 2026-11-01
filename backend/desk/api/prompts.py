@@ -464,7 +464,9 @@ Jobs (reference)
 questions is itself a main job, titled by what it answers.
 - Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters; who, who it's \
 for in a few words ("New clients", "Tenants"), empty when it's for everyone, at most 60; why, the value in the \
-owner's terms, at most 200; how, one plain line on what happens, at most 300; autonomy, auto when the Desk can \
+owner's terms, at most 200; how: one plain line on what happens, in the third person with no "you" or "your", and with no \
+prices, "free", durations, times, days or numbers, since customers read it and those come from the price list and \
+hours. Example: "New clients book a short introductory call." At most 300; autonomy, auto when the Desk can \
 safely do it on its own and ask when the owner should approve each one (start every payment at ask); config.
 - config is null unless the job uses its block: intake takes questions (the business's own, at most five, each \
 under 120 characters); schedule takes typed_booking with an appointment_type (at most 60) and minutes from 15 to \
@@ -723,7 +725,8 @@ What you answer
 now; change when they want the proposal itself different (how it works, asking first, its length or name); none \
 when they ask a question or it's unclear. A payment needs its amount entered on the card before it can be \
 accepted, so when they say yes to one with no amount, choose none and ask them to enter the amount there.
-- revised: on change to a job, the one revised job in their words, with its title, how, autonomy and matching \
+- revised: on change to a job, the one revised job in their words, with its title, how (third person, no "you" or "your", and no prices, "free", durations, times, days or numbers, as \
+customers read it), autonomy and matching \
 config, keeping its kind unless the change calls for another; never an amount. Code shows it as a new card, and \
 question is the short line before it. For an app or an unclear change, choose none. Empty otherwise.
 - reply: one or two short sentences answering what they typed: answer a question, say what a revised proposal \
@@ -1087,7 +1090,9 @@ class JobDraft(BaseModel):
     title: str = Field(max_length=60, description="Title, at most 60 characters.")
     who: str = Field(max_length=60, description="Who this is for, at most 60 characters; empty if unclear.")
     why: str = Field(max_length=200, description="Why this helps, at most 200 characters.")
-    how: str = Field(max_length=300, description="How the Desk helps, at most 300 characters.")
+    how: str = Field(max_length=300,
+                     description='One plain line on what happens, third person, no "you"/"your", no prices, "free", '
+                                 'durations, times, days or numbers; at most 300 characters.')
     autonomy: Autonomy
     config: BlockConfigDraft | None
 

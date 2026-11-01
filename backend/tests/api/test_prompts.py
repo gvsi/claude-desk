@@ -211,7 +211,8 @@ def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():
         assert "title, a short name in the owner's words, at most 60 characters" in system
         assert "empty when it's for everyone, at most 60" in system
         assert "why, the value in the owner's terms, at most 200" in system
-        assert "how, one plain line on what happens, at most 300" in system
+        assert "how: one plain line on what happens" in system
+        assert "At most 300; autonomy" in system
 
 
 def test_setup_job_cards_use_short_names_and_one_plain_line():
@@ -220,6 +221,22 @@ def test_setup_job_cards_use_short_names_and_one_plain_line():
     assert "who, who it's for in a few words" in system
     assert "empty when it's for everyone, at most 60" in system
     assert "Never say the Desk reads or uses a connected app's data" in system
+
+
+def test_job_how_is_written_for_customers_too():
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
+                   SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert 'how: one plain line on what happens, in the third person with no "you" or "your"' in system
+        assert 'prices, "free", durations, times, days or numbers, since customers read it' in system
+        assert 'those come from the price list and hours' in system
+        assert 'Example: "New clients book a short introductory call." At most 300' in system
+    revised = SETUP_CARD_ANSWER_SYSTEM.split("- revised:", 1)[1].split("- reply:", 1)[0]
+    assert 'how (third person, no "you" or "your", and no prices, "free", durations, times, days or numbers' in revised
+    assert "customers read it" in revised
+    assert prompts.JobDraft.model_fields["how"].description == (
+        'One plain line on what happens, third person, no "you"/"your", no prices, "free", '
+        'durations, times, days or numbers; at most 300 characters.'
+    )
 
 
 def test_setup_search_stays_general_and_asks_about_possible_business_matches():
