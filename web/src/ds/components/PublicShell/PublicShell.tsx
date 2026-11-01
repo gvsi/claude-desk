@@ -108,6 +108,7 @@ export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as c
 const COPY = {
   en: {
     chatWith: (name: ReactNode) => <>Chat with {name}</>,
+    /** @param nameText The name's plain text, used only to decide the period. */
     disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
       <>
         You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for ')}{owner} anytime.
@@ -125,6 +126,7 @@ const COPY = {
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
+    /** @param nameText The name's plain text, used only to decide the period. */
     disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
       <>
         Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con ')}{owner} cuando quieras.
