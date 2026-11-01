@@ -1589,9 +1589,15 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
                                      question=answer.next_topic, choices=_normalize_choices(answer.choices)))
 
 
+# A payment job settled as declined because it never got an amount (`settle_plan`), not by the owner's own no: Claude
+# must not say they turned it down.
+SETUP_PLAN_NO_AMOUNT = "left out: no amount was entered on its card"
+
+
 def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
     transcript = _history(interview, run_id)
     shown = {entry.card.proposal_id: entry.card for entry in transcript if entry.card}
+    owner_decided = {entry.card.proposal_id for entry in transcript if entry.card and entry.owner_decided}
     planned = [shown.get(card.proposal_id, card) for entry in transcript for card in entry.planned]
     dropped = {proposal_id for entry in transcript for proposal_id in entry.dropped}
     # The one real Stripe attempt runs after Claude's reply; once it's claimed, an accepted Stripe card still not
@@ -1607,6 +1613,8 @@ def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
         if (attempted and card.state == "accepted" and card.connector is not None
                 and card.connector.app == "stripe" and not card.connector.connected):
             status = SETUP_PLAN_NOT_CONNECTED
+        if card.state == "declined" and card.proposal_id not in owner_decided and _unpriced_payment(card.job):
+            status = SETUP_PLAN_NO_AMOUNT
         payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
                    card.connector.model_dump(include={"app", "label", "why"}))
         items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})
@@ -2422,10 +2430,10 @@ def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
         if failed.error == "amount_required":
             return False
         raise
-    if accept:
-        entry = next(entry for entry in reversed(interview.transcript)
-                     if entry.card is not None and entry.card.proposal_id == proposal_id)
-        entry.owner_decided = True
+    # The owner's own decision either way, as a click is (a typed no isn't code settling the card).
+    entry = next(entry for entry in reversed(interview.transcript)
+                 if entry.card is not None and entry.card.proposal_id == proposal_id)
+    entry.owner_decided = True
     return True
 
 
