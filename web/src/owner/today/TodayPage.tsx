@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
@@ -11,7 +12,7 @@ import { customerLink, publicLink } from '../customerLink.ts';
 import { useInboxOpen } from '../inbox/inboxOpen.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, heldOldestFirst, isLive, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
@@ -34,6 +35,10 @@ export interface TodayPageProps {
 
 /** What the copy button's press did, read out to screen readers. */
 type LinkCopy = 'idle' | 'copied' | 'failed';
+
+type PendingFocus =
+  | { kind: 'dismiss'; next: string | undefined }
+  | { kind: 'done'; handoffId: string; readAt: number; failedAt: number };
 
 const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   copied: 'Your Desk link is copied.',
@@ -59,6 +64,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // The page's heading greets the owner, so the tab takes the sidebar's row.
   useDocumentTitle(namesTheTab ? inApp(NAV_LABELS.today) : null);
   const deskId = desk.desk_id;
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const opening = useTodayOpening(deskId);
@@ -121,23 +127,42 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
-  // Decide from the committed sections, since dismissing before the answer's refresh lands can
-  // expose a cached hold and keep Needs you mounted. Only move on once that section is gone.
+  // Share the post-commit landing for dismissed answers and completed callbacks. A cached hold
+  // can keep Needs you mounted, and a closed callback stays until its refreshed list commits.
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
-  const dismissedFocus = useRef<{ next: string | undefined } | null>(null);
+  const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
-    dismissedFocus.current = { next };
+    pendingFocus.current = { kind: 'dismiss', next };
     answers.dismiss(id);
   };
+  const callbackDone = (handoffId: string) => {
+    // The close may have waited through another read: snapshot the query as it stands now,
+    // before CallbackCard starts its refresh, rather than the render that began the close.
+    const read = queryClient.getQueryState(needsYouKey(deskId));
+    pendingFocus.current = { kind: 'done', handoffId, readAt: read?.dataUpdatedAt ?? 0, failedAt: read?.errorUpdatedAt ?? 0 };
+  };
   useLayoutEffect(() => {
-    const dismissed = dismissedFocus.current;
-    if (dismissed === null) return;
-    dismissedFocus.current = null;
+    const pending = pendingFocus.current;
+    if (pending === null) return;
+    if (pending.kind === 'done') {
+      if (needsYouSection.current !== null && callbacks.some((item) => item.handoff.handoff_id === pending.handoffId)) {
+        // Wait for the committed list to lose this card. A settled read that keeps it (including
+        // a failed or paused read) spends the request, so a later poll cannot move focus unexpectedly.
+        if (readAt > pending.readAt || needsYou.errorUpdatedAt > pending.failedAt || needsYou.isPaused) pendingFocus.current = null;
+        return;
+      }
+      pendingFocus.current = null;
+      if (document.activeElement !== null && document.activeElement !== document.body) return;
+    } else {
+      pendingFocus.current = null;
+    }
     if (needsYouSection.current !== null) {
-      const card = dismissed.next === undefined ? undefined : answeredFocus.cardFor(dismissed.next);
-      (card ?? needsYouSection.current).focus();
+      const card = pending.kind === 'dismiss' && pending.next !== undefined ? answeredFocus.cardFor(pending.next) : undefined;
+      const target = card ?? needsYouSection.current;
+      if (pending.kind === 'done') target.focus({ preventScroll: true });
+      else target.focus();
     } else {
       (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
     }
@@ -250,6 +275,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 readFailure={readFailure}
                 sectionRef={needsYouSection}
                 onDismiss={dismissAnswer}
+                onDone={callbackDone}
               />
             ) : null}
             {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} openHandoffs={handoffs} /> : null}

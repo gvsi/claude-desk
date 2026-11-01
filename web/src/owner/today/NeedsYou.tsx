@@ -39,6 +39,8 @@ export interface NeedsYouProps {
   sectionRef: Ref<HTMLElement>;
   /** Dismisses the answer, then focuses the adjacent answered card or section after React commits. */
   onDismiss: (id: string, next: string | undefined) => void;
+  /** Records the closed callback before its refresh removes the card, so Today can restore focus. */
+  onDone: (handoffId: string) => void;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface NeedsYouProps {
  * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss, onDone }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -108,7 +110,7 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
           })}
           {callbacks.map((item) => (
             <li key={item.handoff.handoff_id} className="cd-needs-you__item">
-              <CallbackCard item={item} showSummary={!heldChats.has(item.handoff.session_id)} />
+              <CallbackCard item={item} showSummary={!heldChats.has(item.handoff.session_id)} onDone={() => onDone(item.handoff.handoff_id)} />
             </li>
           ))}
         </ul>

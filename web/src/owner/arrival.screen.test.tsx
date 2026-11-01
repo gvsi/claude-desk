@@ -2111,6 +2111,55 @@ describe('Things to try ticks off', () => {
     expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
   });
 
+  it('answer_done_line_stays_on_the_starting_desk_while_progress_follows_the_copy', async () => {
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+
+    await router.navigate(`/app/${RIVERA.emergenciesDeskId}/today`);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
+    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    // Its words don't say it's done, so the Done pill is read out.
+    expect(row.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).toBeNull();
+    await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+
+    await router.navigate(TODAY);
+    const home = thingRow(screen, 'Answer a held request');
+    await expect.element(home.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    expect(home.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it('break_done_line_stays_on_the_starting_desk_while_progress_follows_the_copy', async () => {
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
+    const doneLine = 'Done. Safety shows what was stopped.';
+    await expect.element(thingRow(screen, 'Try to break it').getByText(doneLine, { exact: true })).toBeVisible();
+
+    await router.navigate(`/app/${RIVERA.emergenciesDeskId}/today`);
+    const row = thingRow(screen, 'Try to break it');
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
+    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(row.getByText("Ask for a discount, another customer's address or Maria's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
+    expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    // Its words don't say it's done, so the Done pill is read out.
+    expect(row.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).toBeNull();
+
+    await router.navigate(TODAY);
+    const home = thingRow(screen, 'Try to break it');
+    await expect.element(home.getByText(doneLine, { exact: true })).toBeVisible();
+    expect(home.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
   it('second_desk_reads_the_desk_the_copy_started_with', async () => {
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     const things = thingsToTry(screen);
@@ -2124,11 +2173,14 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
 
-    // The main line's held request is answered elsewhere: its record ticks the row here, which shows done.
+    // The main line's record ticks the row here, keeping the words about this Desk.
     const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.deskId && d.decision.state === 'held')?.decision;
     if (!held) throw new Error('the main line holds a request');
     await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'deny_once' } });
-    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(things.getByText('3 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
     // Every read behind them was the main line's.
@@ -2157,7 +2209,10 @@ describe('Things to try ticks off', () => {
 
     // What this view saw stays done, drawn still; Emergencies is a Desk besides the one the copy started with.
     const expectWhatWasSeen = async () => {
-      await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+      const row = thingRow(screen, 'Answer a held request');
+      await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+      await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+      expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
       await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
       await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     };

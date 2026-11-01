@@ -3,7 +3,7 @@
  * place, callbacks to join), who is live now, what happened since last night with its full list,
  * and the last 7 days, every figure as the API reads it.
  */
-import { QueryClient } from '@tanstack/react-query';
+import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { useLayoutEffect } from 'react';
 import { useLocation } from 'react-router';
@@ -12,7 +12,7 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
-import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
+import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
@@ -168,6 +168,28 @@ async function focusDismissAtTheFoot(screen: RenderResult, next: Element): Promi
   await nextFrames();
   expect(column.scrollTop, 'the page is scrolled down to Dismiss').toBeGreaterThan(0);
   expect(button.getBoundingClientRect().bottom, 'Dismiss is in sight').toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
+  expect(next.getBoundingClientRect().top, 'the next section is out of sight below').toBeGreaterThan(column.getBoundingClientRect().bottom);
+  button.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(button);
+  return column;
+}
+
+/** Opens a callback directly, without waiting for a scripted visitor turn. */
+function openCallback(sessionId = 'ses-dana-web'): void {
+  const chat = mockStore.world.sessions.get(sessionId);
+  if (!chat) throw new Error('the seed has the callback chat');
+  mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call me back', callbackWindow: null, lead: 'Visitor' });
+}
+
+/** Keeps the next section below the viewport while Mark done has keyboard focus. */
+async function focusMarkDoneAtTheFoot(screen: RenderResult, next: Element): Promise<HTMLElement> {
+  const column = document.querySelector('main');
+  if (!column) throw new Error('the owner frame draws the page column');
+  const button = region(screen, 'Needs you').getByRole('button', { name: 'Mark done' }).element() as HTMLElement;
+  column.scrollTop += button.getBoundingClientRect().bottom - column.getBoundingClientRect().bottom + 8;
+  await nextFrames();
+  expect(column.scrollTop, 'the page is scrolled down to Mark done').toBeGreaterThan(0);
+  expect(button.getBoundingClientRect().bottom, 'Mark done is in sight').toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
   expect(next.getBoundingClientRect().top, 'the next section is out of sight below').toBeGreaterThan(column.getBoundingClientRect().bottom);
   button.focus({ preventScroll: true });
   expect(document.activeElement).toBe(button);
@@ -1711,6 +1733,143 @@ describe('Today', () => {
     // Dismissed, it goes.
     await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
     await expect.element(card).not.toBeInTheDocument();
+  });
+
+  it('marking_the_last_callback_done_focuses_live_now', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(screen.getByRole('article', { name: 'Wants you' })).toBeVisible();
+    const live = region(screen, 'Live now');
+    const column = await focusMarkDoneAtTheFoot(screen, live.element());
+    const before = { column: column.scrollTop, window: window.scrollY };
+
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(live.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+  });
+
+  it('marking_the_last_callback_done_with_no_live_chat_focuses_since_last_night', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    await injectToday((t) => ({ ...t, live: [] }));
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(screen.getByRole('article', { name: 'Wants you' })).toBeVisible();
+    expect(region(screen, 'Live now').elements()).toHaveLength(0);
+    const since = region(screen, 'Since last night');
+    const column = await focusMarkDoneAtTheFoot(screen, since.element());
+    const before = { column: column.scrollTop, window: window.scrollY };
+
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(since.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+  });
+
+  it('marking_a_callback_done_with_another_still_open_focuses_needs_you', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    openCallback('ses-visitor-web');
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    await expect.element(needs.getByRole('article').nth(1)).toBeVisible();
+    const done = needs.getByRole('button', { name: 'Mark done' }).first().element() as HTMLElement;
+    const focus = vi.spyOn(needs.element() as HTMLElement, 'focus');
+    done.focus({ preventScroll: true });
+
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => needs.getByRole('article').elements().length).toBe(1);
+    expect(document.activeElement).toBe(needs.element());
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('marking_a_callback_done_leaves_focus_alone_when_the_owner_moved_on', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    openCallback('ses-visitor-web');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needs = region(screen, 'Needs you');
+    await expect.element(needs.getByRole('article').nth(1)).toBeVisible();
+    // First resolve one callback, then make sure the next completion respects a new focus target.
+    (needs.getByRole('button', { name: 'Mark done' }).first().element() as HTMLElement).focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => needs.getByRole('article').elements().length).toBe(1);
+    expect(document.activeElement).toBe(needs.element());
+
+    const read = holdReads(needsYouPath);
+    const done = needs.getByRole('button', { name: 'Mark done' }).element() as HTMLElement;
+    done.focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(document.activeElement).toBe(done);
+    const elsewhere = region(screen, 'Live now').getByRole('link').first().element() as HTMLElement;
+    elsewhere.focus({ preventScroll: true });
+
+    read.release();
+    await expect.element(needs).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('marking_a_callback_done_clears_pending_focus_when_the_reread_fails', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    openCallback('ses-visitor-web');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    await expect.element(needs.getByRole('article').nth(1)).toBeVisible();
+    (needs.getByRole('button', { name: 'Mark done' }).first().element() as HTMLElement).focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => needs.getByRole('article').elements().length).toBe(1);
+    expect(document.activeElement).toBe(needs.element());
+
+    // Both attempts at the refreshed read fail. The closed callback stays on screen.
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+    const done = needs.getByRole('button', { name: 'Mark done' });
+    (done.element() as HTMLElement).focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.element(needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(done).not.toHaveAttribute('aria-busy');
+    expect(document.activeElement).toBe(done.element());
+
+    // With focus deliberately on the body, retry without focusing its button. The old completion
+    // must have expired: removing the stale card now must not trigger a delayed focus handoff.
+    (done.element() as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    (needs.getByRole('button', { name: 'Try again' }).element() as HTMLElement).click();
+    await expect.element(needs).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('marking_a_callback_done_clears_pending_focus_when_the_reread_pauses_offline', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needs = region(screen, 'Needs you');
+    const done = needs.getByRole('button', { name: 'Mark done' });
+    await expect.element(done).toBeVisible();
+    onTestFinished(() => onlineManager.setOnline(true));
+    worker.use(
+      http.post(ROUTES.handoffDone.path.replace('{handoff_id}', ':handoff_id'), () => {
+        // The close succeeds, but its refreshed reads cannot start until reconnection.
+        onlineManager.setOnline(false);
+        return undefined;
+      }),
+    );
+    (done.element() as HTMLElement).focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.element(needs.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true })).toBeVisible();
+    await expect.element(done).not.toHaveAttribute('aria-busy');
+    expect(document.activeElement).toBe(done.element());
+
+    // Reconnection removes the stale card, after the paused read has spent its focus request.
+    (done.element() as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    onlineManager.setOnline(true);
+    await expect.element(needs).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('dismissing_the_last_answer_focuses_live_now', async () => {
