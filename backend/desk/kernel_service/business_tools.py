@@ -119,10 +119,18 @@ def _invalid(ctx: KernelCtx, desk_id: str, reason: str, *,
                          persist=partial(_refusal, copy_id=ctx.copy_id, desk_id=desk_id, reason=reason))
 
 
-@router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
-async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, request: Request) -> DeskUpdated:
-    owner = await desks.owner_alone(ctx, request)
-    desk = await desks.held_desk(ctx, request, owner, id)
+async def replace_business_tools(ctx: KernelCtx, id: str, body: BusinessToolsRequest) -> list[Tool]:
+    """Replace Desk `id`'s business tools with `body`, in the caller's transaction, once the caller
+    holds the Desk (the owner's PUT, or a seed on a new copy).
+
+    The whole batch is refused, with 422 `invalid` and a `business_tools` ledger entry naming a fixed
+    reason, for a repeated tool, more than 8 tools (BusinessToolsRequest allows at most 8, and the PUT
+    route refuses a longer batch the same way), unstorable text, a document canary, a format control,
+    or card text the public-promise check refuses (`desks.refuse_public_promises`, one combined scan
+    per tool in render order). A card-text refusal's `detail` names every refused `<tool>.<field>` in
+    the batch with `public_promise` or `format_control`; the others carry no detail. Otherwise each new
+    or changed tool waits for review, each one left out is disabled, and the batch is ledgered
+    `business_tools`. Returns the batch's rows in batch order, without the disabled leftovers."""
     if len({tool.tool for tool in body.tools}) != len(body.tools):
         raise _invalid(ctx, id, "business_tools_duplicate")
     shown = body.model_dump(mode="json")
@@ -137,7 +145,7 @@ async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, requ
         raise _invalid(ctx, id, "public_promise", detail=detail)
     rows = {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
         Tool.desk_id == id, Tool.source == "business").order_by(Tool.tool).with_for_update()))}
-    changes = []
+    written, changes = [], []
     for tool in body.tools:
         definition = BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"}))
         profile = blocks.profile(tool.tool, definition)
@@ -156,6 +164,7 @@ async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, requ
             row.profile_sha256, row.definition_sha256 = profile_hash, profile.definition_sha256
             row.status, row.review_reason = "needs_review", change
             row.pending_definition_text = row.pending_sha256 = None
+        written.append(row)
         changes.append({"tool": tool.tool, "block": definition.config.block,
                         "definition_sha256": row.definition_sha256, "change": change})
     for row in rows.values():
@@ -165,6 +174,14 @@ async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, requ
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=id,
                         event=LedgerEvent(kind="business_tools", origin="kernel", summary={"tools": changes}))
+    return written
+
+
+@router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
+async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, request: Request) -> DeskUpdated:
+    owner = await desks.owner_alone(ctx, request)
+    desk = await desks.held_desk(ctx, request, owner, id)
+    await replace_business_tools(ctx, id, body)
     return DeskUpdated(desk_id=desk.desk_id, updated_at=ctx.clock.now())
 
 
