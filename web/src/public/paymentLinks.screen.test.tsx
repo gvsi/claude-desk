@@ -50,8 +50,8 @@ function visibility(state: 'hidden' | 'visible') {
   document.dispatchEvent(new Event('visibilitychange'));
 }
 
-async function issue(viewport: Viewport) {
-  const view = await renderRoute(CHAT, { viewport, strict: true, pollScale: 100 });
+async function issue(viewport: Viewport, path: string = CHAT) {
+  const view = await renderRoute(path, { viewport, strict: true, pollScale: 100 });
   await expect.element(view.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
   await view.screen.getByRole('textbox').fill('How do I pay the deposit?');
   await view.screen.getByRole('button', { name: 'Send', exact: true }).click();
@@ -291,22 +291,18 @@ describe('the chat a payment link came from', () => {
     expect(record()).toEqual([[token, CHAT]]);
     expect(payChatFor(token)).toBe(CHAT);
 
-    // The same chat drawn again (a reload) records nothing new.
+    // The same chat drawn again (a reload) records nothing new. Its one read of the open link
+    // settles here, so no answer reaches the next test.
     const reload = await renderRoute(CHAT, { strict: true });
     await expect.element(action(reload.screen)).toBeVisible();
+    await settledReads(2);
     expect(record()).toEqual([[token, CHAT]]);
   });
 
   it('an owner’s preview records the chat’s path without its query', async () => {
-    const preview = await renderRoute(`${CHAT}?preview=${RIVERA.deskId}`, { strict: true });
-    await expect.element(preview.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { token } = await issue('desktop', `${CHAT}?preview=${RIVERA.deskId}`);
     expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(true);
-    await preview.screen.getByRole('textbox').fill('How do I pay the deposit?');
-    await preview.screen.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect.element(action(preview.screen)).toBeVisible();
-    const token = (action(preview.screen).element().getAttribute('href') ?? '').slice('/pay/'.length);
     // The chat the preview's cookie names is the one `/d/<slug>` opens, so its path alone leads back.
     expect(record()).toEqual([[token, CHAT]]);
-    await settledReads(1);
   });
 });
