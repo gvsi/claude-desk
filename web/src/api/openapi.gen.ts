@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
+import type { BusinessToolDef, Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -772,7 +772,7 @@ export interface RulesView {
  */
 export interface ToolRow {
   tool: string;
-  source: "native" | "mcp";
+  source: "native" | "mcp" | "business";
   effects: string[];
   reversible: boolean;
   status: "enabled" | "needs_review" | "disabled";
@@ -781,6 +781,7 @@ export interface ToolRow {
   pending_definition_text: string | null;
   pending_sha256: string | null;
   cards: CoveringCard[];
+  business?: BusinessToolDef | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
@@ -1095,52 +1096,9 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 14
+   * @maxItems 22
    */
-  tools:
-    | [ToolPin]
-    | [ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin
-      ]
-    | [
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin
-      ];
+  tools: [ToolPin, ...ToolPin[]];
   enable: boolean;
 }
 /**

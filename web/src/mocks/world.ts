@@ -1353,7 +1353,7 @@ export class MockWorld {
     if (entries.length === 0) return 'not_found';
     if (!enable) {
       if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
-      const off = new Set(entries.map((entry) => entry.tool));
+      const off = new Set<string>(entries.map((entry) => entry.tool));
       // Off no longer waits for review, so it gives no reason; a changed definition stays to review later.
       desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled', review_reason: null } : tool));
       for (const entry of entries) {

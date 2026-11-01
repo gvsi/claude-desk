@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import AwareDatetime, BaseModel, Field, StrictInt, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
 
 # Identity and sessions: built by the kernel from its own tables; never accepted over HTTP.
 ActorKind = Literal["visitor", "agent", "owner"]
@@ -168,8 +168,8 @@ MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects
 MCP_TOOLS: frozenset[str] = frozenset({"payments.list_charges", "payments.create_refund"})   # pinned by definition hash
 
 class ToolProfile(BaseModel):
-    tool: ToolName
-    source: Literal["native", "mcp"]
+    tool: "AnyToolName"
+    source: Literal["native", "mcp", "business"]
     effects: list[Effect]
     reversible: bool
     adapter: str                          # trusted code that normalizes args and resolves resources; no adapter, no tool
@@ -185,6 +185,7 @@ class ToolProfile(BaseModel):
     status: Literal["enabled", "needs_review", "disabled"]
     review_reason: Literal["new", "changed", "delisted"] | None = None   # set only while needs_review: a connect not yet
                                           # confirmed, a changed definition (pending_sha256 set), a tool its server stopped listing
+    business: "BusinessToolDef | None" = None
 
 class ToolCall(BaseModel):                # what Claude proposed (untrusted)
     call_id: str
@@ -202,7 +203,7 @@ class NormalizedAction(BaseModel):        # immutable; decisions, approvals and 
     desk_id: str
     session_id: str
     generation: int
-    tool: ToolName
+    tool: "AnyToolName"
     effects: list[Effect]
     args_sha256: str                      # sha256 of canonical_json(adapter-normalized args)
     profile_sha256: str
@@ -272,7 +273,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
 
     @model_validator(mode="after")
     def _limits_only_on_auto(self) -> Self:
-        if self.applies_to not in _RULE_TARGETS:
+        if self.applies_to not in _RULE_TARGETS and not is_business_tool(self.applies_to):
             raise ValueError('applies_to names a tool or an effect ("effect:charge")')
         limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
         if self.mode != "auto" and (self.review or limited):
@@ -525,7 +526,7 @@ class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third
 class LedgerEvent(BaseModel):
     kind: Literal["session", "auth", "verify", "decide", "review", "breaker", "approval", "execute",
                   "payment", "document_link", "reply", "policy", "tool_pin", "takeover", "whisper",
-                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search"]
+                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search", "business_tools"]
     origin: Literal["kernel", "api"]      # "api" events are recorded as reported, not as verified
     session_id: str | None = None
     ref_id: str | None = None
@@ -549,3 +550,57 @@ class LedgerPage(BaseModel):
     first_bad_seq: int | None
     public_key_hex: str
     key_id: str
+
+# Business tools: configurations of kernel-owned blocks, never executable owner input.
+BusinessToolName = Annotated[str, StringConstraints(pattern=r"^desk\.[a-z][a-z0-9-]{0,39}$")]
+AnyToolName = ToolName | BusinessToolName
+
+
+def is_business_tool(tool: str) -> bool:
+    import re
+    return re.fullmatch(r"desk\.[a-z][a-z0-9-]{0,39}", tool) is not None
+
+
+class IntakeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["intake"]
+    questions: list[Annotated[str, Field(max_length=120)]] = Field(min_length=1, max_length=5)
+
+
+class TypedBookingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["typed_booking"]
+    appointment_type: str = Field(max_length=60)
+    minutes: StrictInt = Field(ge=15, le=60)
+
+
+class PurposePaymentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["purpose_payment"]
+    purpose: str = Field(max_length=60)
+    amount_cents: StrictInt = Field(ge=0, le=1_000_000)
+
+
+class UrgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["urgent"]
+    urgent_when: str = Field(max_length=300)
+
+
+BlockConfig = Annotated[IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig,
+                        Field(discriminator="block")]
+
+
+class BusinessToolDef(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    title: str = Field(max_length=60)
+    description: str = Field(max_length=300)
+    config: BlockConfig
+
+
+class BusinessTool(BusinessToolDef):
+    tool: BusinessToolName
+
+
+ToolProfile.model_rebuild()
+NormalizedAction.model_rebuild()

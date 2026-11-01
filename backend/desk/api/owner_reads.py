@@ -307,6 +307,7 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
     "evaluation_error": "rules_unchecked",
 }
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
+    "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -345,6 +346,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
+      answer_count                                   incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)

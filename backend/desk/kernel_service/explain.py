@@ -13,7 +13,7 @@ asked for (`asked`).
 from collections.abc import Mapping
 from typing import Any
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, ProofReport
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, BusinessToolDef, ProofReport, is_business_tool
 
 # What each tool lets someone do: the phrase alone, and with the request's amount where the
 # action has one.
@@ -32,6 +32,13 @@ PHRASES: dict[str, tuple[str, str | None]] = {
     "native.fetch_website": ("read a website", None),
     "native.read_memory": ("read your memory", None),
     "native.web_search": ("search the web", None),
+}
+
+BUSINESS_PHRASES: dict[str, tuple[str, str | None]] = {
+    "intake": ("leave their details through {title}", None),
+    "typed_booking": ("book {title}", None),
+    "purpose_payment": ("pay for {title}", "pay {amount} for {title}"),
+    "urgent": ("report something urgent through {title}", None),
 }
 
 # Why what the counterexample does is wrong, by the check that found it.
@@ -135,19 +142,25 @@ def percent(bp: int) -> str:
     return f"{bp // 100}%" if bp % 100 == 0 else f"{bp / 100:g}%"
 
 
-def asked(subject: str, verb: str, tool: str, amount_cents: int | None, discount_bp: int | None) -> str:
+def asked(subject: str, verb: str, tool: str, amount_cents: int | None, discount_bp: int | None, *,
+          business: BusinessToolDef | None = None) -> str:
     """"<subject> <verb> to <what>." in the owner's words, `verb` being "asked" for a decision and
     "asks" for a setup probe: what the tool lets someone do, with the amount the kernel worked out
     where the tool has one (shown only from $0 to `AUTO_MONEY_HARD_CAP_CENTS`) and the discount
-    asked for. A name that is no tool is never repeated."""
-    phrases = PHRASES.get(tool)
+    asked for. Business definitions come from this Desk's resolved adapter, never call args.
+    Their titles stay quoted data. A name that is no tool is never repeated."""
+    from desk.kernel_service.adapters.base import quoted
+
+    phrases = (BUSINESS_PHRASES.get(business.config.block) if is_business_tool(tool) and business is not None
+               else PHRASES.get(tool))
     if phrases is None:
         return f"{subject} {verb} for something this Desk can't do."
     plain, with_amount = phrases
+    fields = {"title": quoted(business.title)} if business is not None else {}
     if with_amount is not None and amount_cents is not None and 0 <= amount_cents <= AUTO_MONEY_HARD_CAP_CENTS:
-        what = with_amount.format(amount=money(amount_cents))
+        what = with_amount.format(amount=money(amount_cents), **fields)
     else:
-        what = plain
+        what = plain.format(**fields)
     if discount_bp:
         what += f" with {percent(discount_bp)} off"
     return f"{subject} {verb} to {what}."

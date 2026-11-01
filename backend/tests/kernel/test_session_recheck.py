@@ -199,6 +199,7 @@ NO_SESSION_ROUTES: dict[str, str] = {
     **dict.fromkeys(["POST /desks", "PUT /desks/{id}/business", "PUT /desks/{id}/charter", "PUT /desks/{id}/hours",
                      "PUT /desks/{id}/prices", "PUT /desks/{id}/calendar", "PUT /desks/{id}/people",
                      "PUT /desks/{id}/notifications", "PUT /desks/{id}/answering", "PUT /desks/{id}/memory",
+                     "PUT /desks/{id}/business_tools",
                      "DELETE /desks/{id}",
                      "POST /documents", "POST /sessions/{id}/mode", "GET /demo_inbox",
                      "POST /approvals/{decision_id}/answer", "POST /owner/messages", "POST /policy/draft",
