@@ -151,9 +151,9 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
  * Whether the stored item at `index` is a decide-time receipt or hold, rather than an owner's
  * later approval or a resolved outcome, that comes before Claude's reply with no one's words
  * between them: it belongs to that reply's turn, which Claude may have started on its own.
- * `items` are in their `n` order.
+ * `items` are in their `n` order: the visitor's transcript or the owner's, whose items have kinds of their own.
  */
-export function opensAReply(items: readonly TranscriptItem[], index: number): boolean {
+export function opensAReply(items: readonly (Pick<TranscriptItem, 'event'> & { kind: string })[], index: number): boolean {
   const event = items[index]?.event;
   if (event?.type !== 'receipt' && event?.type !== 'held') return false;
   if (event.type === 'receipt' && event.state === 'approved') return false;

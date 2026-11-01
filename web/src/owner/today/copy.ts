@@ -64,6 +64,8 @@ export const TODAY_COPY = {
   createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
   handledTitle: 'Handled by Claude, or by you',
   turnedDownEmpty: 'Nothing turned down in the last 7 days.',
+  /** The link to the Desk's Safety page, under Turned down here and under Rules' always-on rules. */
+  openSafety: 'Open Safety',
   vision: 'Vision: where a Desk could go next',
 } as const;
 

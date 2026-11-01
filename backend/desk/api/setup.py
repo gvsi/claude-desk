@@ -35,9 +35,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
-  their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
-  skips both. `_after_consent` appends the consultant opening and first fact question; the labels and reply are saved together.
-  No memory or website read ever runs after no, and a website the owner names later is kept as text.
+  their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
+  keyword web searches (`native.web_search`) on yes. Decisions finish sequentially before concurrent executions;
+  both phases share `HOMEWORK_BUDGET_S`. On no it skips every
+  read. `_after_consent` appends the consultant
+  opening and first fact question; the labels and reply are saved together. Web search content reaches only that
+  opening's understanding call. A website the owner names later after no is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -70,7 +73,8 @@ the final commit ends the task without rollback. Removing a pending answer immed
 after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
 `TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
 
-Each setup tool call is an owner call on the new Desk (`run_setup_tool`): the tool must be in the owner's `/context`,
+Each setup tool call is an owner call on the new Desk (`decide_setup_tool`, `execute_setup_tool`, composed by
+`run_setup_tool`): the tool must be in the owner's `/context`,
 then `/decide`, and `/execute` only on an allow. A read that is held, refused or fails doesn't stop setup: its inline
 label says it couldn't. What a read returned is kept in the transcript (for later turns, as untrusted text), never
 shown to the owner beyond its label, and reaches the model only inside a wrapper (`prompts.wrap`).
@@ -174,6 +178,7 @@ from desk.api.prompts import (
     SETUP_CARD_ANSWER_SYSTEM,
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
+    SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_TAG,
     SETUP_RETRY,
     SETUP_START_SYSTEM,
@@ -188,6 +193,7 @@ from desk.api.prompts import (
     SITUATION_PRICE_REQUIRED,
     SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
+    WEB_SEARCH_TAG,
     BlockConfig,
     BusinessType,
     Choice,
@@ -259,6 +265,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk.calendar import WEEK, calendar_slots, minute_of_day
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
@@ -266,6 +273,7 @@ from desk.contracts import (
     BusinessSeed,
     CalendarSlot,
     Claim,
+    Decision,
     DeskSeed,
     Effect,
     ExecResult,
@@ -294,6 +302,7 @@ from desk.kernel_api import (
     MemoryItem,
     PolicyConfirmRequest,
     PolicyProbeRequest,
+    SessionContext,
 )
 from desk.presets import PRESETS
 
@@ -308,6 +317,8 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 UNDERSTAND_TIMEOUT_S = 60.0
 UNDERSTAND_MAX_TOKENS = 8192
+HOMEWORK_BUDGET_S = 25       # all consent reads share this budget, leaving time for understanding and commit
+WEB_SEARCH_EXECUTE_TIMEOUT_S = 22  # the kernel's 20 s search deadline plus transport slack
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
@@ -342,6 +353,8 @@ MEMORY_FAILED_LABEL = "Couldn't search your Claude memory"
 WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"
+WEB_SEARCH_LABEL = "Searched the web: {query}"
+WEB_SEARCH_FAILED_LABEL = "Couldn't search the web just now"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
@@ -425,9 +438,10 @@ class Entry(BaseModel):
     role: Literal["claude", "owner", "tool_label"]
     text: str
     question: Literal["consent"] | QuestionKey | None = None
-    read: Literal["memory", "website"] | None = None
+    read: Literal["memory", "website", "web_search"] | None = None
     content: str | None = None
     website: str | None = None
+    search_queries: list[str] | None = None
     choices: list[Choice] = []
     card: ProposalCard | None = None
     covered: list[QuestionKey] = []
@@ -824,25 +838,53 @@ async def _ask_drafts(model: ModelClient, record: Record, system: str, messages:
 # Setup tools -------------------------------------------------------------------------------------------------------
 
 
-async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> ExecResult | None:
+async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *,
+                         timeout_s: float | None = None) -> ExecResult | None:
     """Run an owner setup tool on `desk_id` as the owner: only a tool in the owner's `/context` for the Desk, then
     `/decide`, and `/execute` on an allow. None when it isn't given, is held or refused, or the kernel refuses or
-    can't be reached: nothing ran that the kernel didn't allow, and setup goes on."""
+    can't be reached: nothing ran that the kernel didn't allow, and setup goes on. `timeout_s` overrides only
+    execution's transport deadline; context and decision calls retain the client's default."""
+    decision = await decide_setup_tool(owner, desk_id, tool, args)
+    if decision is None or decision == "not_given":
+        return None
+    return await execute_setup_tool(owner, tool, decision, timeout_s=timeout_s)
+
+
+async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *,
+                            context: SessionContext | None = None) -> Decision | Literal["not_given"] | None:
+    """Obtain an allow without executing; distinguish a tool not given from a failed or refused read."""
     session_id, generation = owner.owner_session_id, owner.owner_generation
     try:
-        context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
-                                          query={"desk_id": desk_id})
+        if context is None:
+            context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
+                                              query={"desk_id": desk_id})
         if tool not in {profile.tool for profile in context.tools}:
             logger.info("the setup tool %s isn't given on this Desk", tool)
-            return None
+            return "not_given"
         call = ToolCall(call_id="setup-" + secrets.token_hex(12), tool=tool, args=args)
         decision = await owner.kernel.call("POST /decide", DecideRequest(session_id=session_id, generation=generation,
                                                                          call=call, desk_id=desk_id))
         if decision.outcome != "allow":
             logger.info("the setup tool %s was decided %s", tool, decision.outcome)
             return None
+        return decision
+    except KernelFailed as failure:
+        logger.warning("the setup tool %s was refused (%s)", tool, failure.code)
+    except KernelUnavailable:
+        logger.warning("the setup tool %s couldn't reach the kernel", tool)
+    return None
+
+
+async def execute_setup_tool(owner: OwnerCtx, tool: str, decision: Decision, *,
+                             timeout_s: float | None = None) -> ExecResult | None:
+    """Execute an allowed setup decision; the kernel rechecks the baseline at execution as usual."""
+    if decision.outcome != "allow":
+        return None
+    try:
         return await owner.kernel.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id,
-                                                                       session_id=session_id, generation=generation))
+                                                                       session_id=owner.owner_session_id,
+                                                                       generation=owner.owner_generation),
+                                       timeout_s=timeout_s)
     except KernelFailed as failure:
         logger.warning("the setup tool %s was refused (%s)", tool, failure.code)
     except KernelUnavailable:
@@ -857,8 +899,7 @@ def _memory_text(view: dict) -> str:
     return "\n".join(lines)[:READ_TEXT_MAX]
 
 
-async def _read_memory(owner: OwnerCtx, desk_id: str) -> Entry:
-    result = await run_setup_tool(owner, desk_id, "native.read_memory", {"query": MEMORY_QUERY})
+def _memory_entry(result: ExecResult | None) -> Entry:
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=MEMORY_FAILED_LABEL, read="memory")
     return Entry(role="tool_label", text=MEMORY_LABEL, read="memory", content=_memory_text(result.model_view))
@@ -866,6 +907,10 @@ async def _read_memory(owner: OwnerCtx, desk_id: str) -> Entry:
 
 async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> Entry:
     result = await run_setup_tool(owner, desk_id, "native.fetch_website", {"url": url})
+    return _website_entry(result, url=url, host=host)
+
+
+def _website_entry(result: ExecResult | None, *, url: str, host: str) -> Entry:
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=WEBSITE_FAILED_LABEL.format(host=host), read="website", website=url)
     view = result.model_view
@@ -874,6 +919,73 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
     label = (WEBSITE_PAGES_LABEL.format(host=host, pages=pages)
              if type(pages) is int and pages > 1 else WEBSITE_LABEL.format(host=host))
     return Entry(role="tool_label", text=label, read="website", content=content[:READ_TEXT_MAX], website=url)
+
+
+def _web_search_entry(result: ExecResult | None, *, query: str) -> Entry:
+    """Keep the search's plain result lines as untrusted homework for the understanding call alone."""
+    if result is None or result.state != "succeeded":
+        return Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search")
+    results = result.model_view.get("results")
+    lines = [item[key] for item in (results if isinstance(results, list) else []) if isinstance(item, dict)
+             for key in ("title", "url", "snippet") if isinstance(item.get(key), str)]
+    return Entry(role="tool_label", text=WEB_SEARCH_LABEL.format(query=query[:80]), read="web_search",
+                 content="\n".join(lines)[:READ_TEXT_MAX])
+
+
+async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
+    """Decide all reads before executing together; both phases share one budget and keep display order."""
+    desk_id = interview.desk_id
+    reads: list[tuple[str, dict, Callable[[ExecResult | None], Entry], float | None]] = [
+        ("native.read_memory", {"query": MEMORY_QUERY}, _memory_entry, None)]
+    site = website_url(interview.transcript[0].website)
+    if site is not None:
+        url, host = site
+        reads.append(("native.fetch_website", {"url": url}, partial(_website_entry, url=url, host=host), None))
+    reads.extend(("native.web_search", {"query": query}, partial(_web_search_entry, query=query),
+                  WEB_SEARCH_EXECUTE_TIMEOUT_S)
+                 for query in (interview.transcript[0].search_queries or [])[:3])
+    tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
+    not_given: set[int] = set()
+    try:
+        async with asyncio.timeout(HOMEWORK_BUDGET_S):
+            context = await owner.kernel.call("GET /context/{session_id}?desk_id=",
+                                              path={"session_id": owner.owner_session_id}, query={"desk_id": desk_id})
+            given = {profile.tool for profile in context.tools}
+            not_given = {index for index, (tool, _, _, _) in enumerate(reads) if tool not in given}
+            allowed = []
+            for index, (tool, args, _, timeout_s) in enumerate(reads):
+                decision = await decide_setup_tool(owner, desk_id, tool, args, context=context)
+                if decision == "not_given":
+                    not_given.add(index)
+                elif decision is not None:
+                    allowed.append((index, tool, decision, timeout_s))
+            # /decide takes an exclusive session lock; /execute holds a shared lock through the read.
+            # Finish every decision first so a long search cannot block a later decision's short timeout.
+            for index, tool, decision, timeout_s in allowed:
+                tasks[index] = asyncio.create_task(execute_setup_tool(owner, tool, decision, timeout_s=timeout_s))
+            if tasks:
+                await asyncio.gather(*tasks.values())
+    except TimeoutError:
+        pass
+    except (KernelFailed, KernelUnavailable):
+        logger.warning("the setup homework couldn't read the owner's context")
+    finally:
+        for task in tasks.values():
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+    entries = []
+    search_failed = False
+    for index, (tool, _, entry, _) in enumerate(reads):
+        if tool == "native.web_search" and index in not_given:
+            continue
+        result = entry(tasks[index].result() if index in tasks and not tasks[index].cancelled() else None)
+        if result.read == "web_search" and result.text == WEB_SEARCH_FAILED_LABEL:
+            if search_failed:
+                continue
+            search_failed = True
+        entries.append(result)
+    return entries
 
 
 # The interview -----------------------------------------------------------------------------------------------------
@@ -955,7 +1067,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
                              owner_display_name=(reduce_name(body.owner_display_name)
                                                  or reduce_name(described.owner_display_name) or None)),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
-                          connected_apps=described.connected_apps),
+                          connected_apps=described.connected_apps,
+                          search_queries=described.search_queries or None),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
 
@@ -1283,6 +1396,8 @@ def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
+        elif entry.read == "web_search" and entry.content:
+            parts.append(wrap(WEB_SEARCH_TAG, entry.content))
     return _user("\n\n".join(parts))
 
 
@@ -1297,6 +1412,32 @@ def _normalize_choices(choices: list[Choice]) -> list[Choice]:
     if recommended is not None:
         normalized.insert(0, normalized.pop(recommended))
     return normalized
+
+
+def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> SuggestedFacts:
+    """Search may inform the plan, but suggested facts need evidence from the owner's sources.
+
+    Only explicitly supported fields survive. Construct from that allowlist so a future field is omitted
+    until it has its own provenance check, including when the model supplies a subclass with extra fields.
+    """
+    folded = text.casefold()
+    kept = {
+        "service_area": suggested.service_area if suggested.service_area.casefold() in folded else "",
+        "hours": suggested.hours if owner_supports("hours", suggested.hours, text) else [],
+        "public_contact": suggested.public_contact if owner_supports(
+            "public_contact", suggested.public_contact, text) else "",
+        "price_items": [item for item in suggested.price_items if owner_supports("price_items", [item], text)],
+        "after_hours": "",
+    }
+    filtered = SuggestedFacts.model_construct(**kept)
+    # model_construct fills schema defaults too; unreviewed future defaults must not become facts.
+    for name in filtered.__dict__.keys() - kept.keys():
+        delattr(filtered, name)
+    filtered_values = filtered.model_dump()
+    for name, value in suggested.model_dump().items():
+        if name not in kept or value != filtered_values[name]:
+            logger.info("dropped setup suggestion: %s", name)
+    return filtered
 
 
 async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
@@ -1320,6 +1461,12 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         logger.warning("the setup understanding was unavailable; asking the first question")
         interview.transcript.append(_ask(interview, "what_you_do"))
         return
+    # Match exactly the sources included in the understanding message, excluding this run's staged entries.
+    sources = [entry for entry in entries if entry.pending is None or entry.pending != _run_id(interview)]
+    if any(entry.read == "web_search" and entry.content for entry in sources):
+        owner_text = "\n".join([_history(interview)[0].text, *[
+            entry.content for entry in sources if entry.read in {"memory", "website"} and entry.content]])
+        answer.suggested = _owner_sourced_suggestions(answer.suggested, owner_text)
     opening = Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested)
     interview.transcript.append(opening)
     opening.planned = [card for draft in answer.jobs if (card := _planned_job(interview, draft)) is not None]
@@ -1342,6 +1489,9 @@ def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
     shown = {entry.card.proposal_id: entry.card for entry in transcript if entry.card}
     planned = [shown.get(card.proposal_id, card) for entry in transcript for card in entry.planned]
     dropped = {proposal_id for entry in transcript for proposal_id in entry.dropped}
+    # The one real Stripe attempt runs after Claude's reply; once it's claimed, an accepted Stripe card still not
+    # connected failed, so Claude must not call it connected.
+    attempted = any(entry.connector_connect_attempted for entry in interview.transcript)
     items = []
     for card in planned:
         status = (card.state if card.state != "proposed" else
@@ -1349,6 +1499,9 @@ def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
                   "shown" if card.proposal_id in shown else "planned")
         if card.state == "changed":
             status = f"changed (replaced by {card.superseded_by})"
+        if (attempted and card.state == "accepted" and card.connector is not None
+                and card.connector.app == "stripe" and not card.connector.connected):
+            status = SETUP_PLAN_NOT_CONNECTED
         payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
                    card.connector.model_dump(include={"app", "label", "why"}))
         items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})
@@ -1409,12 +1562,13 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 
     async def run() -> SetupState:
         nonlocal pending
+        interview.turn_deadline = asyncio.get_running_loop().time() + TURN_RUN_TIMEOUT_S
         run_id = secrets.token_hex(8)
         busy = None
         committed = False
         try:
             async with contextlib.AsyncExitStack() as stack:
-                async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
+                async with asyncio.timeout_at(interview.turn_deadline):
                     ctx = await stack.enter_async_context(detached(owner, engine, ro_schema))
                     slug = await _slug(ctx, desk_id)
                     staged = stage(interview)
@@ -1501,12 +1655,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         return [Entry(role="owner", text=CONSENT_ANSWERS[allow], cards=cards)]
 
     async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
-        entries = []
-        if allow:
-            entries.append(await _read_memory(ctx, interview.desk_id))
-            site = website_url(interview.transcript[0].website)
-            if site is not None:
-                entries.append(await _read_website(ctx, interview.desk_id, *site))
+        entries = await _homework(ctx, interview) if allow else []
         interview.transcript += entries
         interview.business_tools_enabled = business_tools_enabled
         await _after_consent(ctx, engine, model, interview, entries)
@@ -2515,10 +2664,7 @@ STEP_ORDER: tuple[SetupStep, ...] = ("questions", "tools", "rules", "situations"
 CARD_DRAFT_ROUTE, SITUATIONS_ROUTE = "card_draft", "situations"
 CARD_DRAFT_MAX_TOKENS = 4096
 SITUATIONS_MAX_TOKENS = 4096
-CALENDAR_DAYS = 14
-SLOT_MINUTES = 60
 ITEM_ID_MAX = 40
-WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # The Ask me first preset's utility cards: in every setup draft, so slots, leads, callbacks, verification and the
 # setup reads never fall to a default ask. Setup drafts no card of its own on these tools.
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
@@ -2616,29 +2762,6 @@ def price_items(prices: list[PriceAnswer]) -> list[PriceItem]:
         taken.add(item_id)
         items.append(PriceItem(item_id=item_id, title=price.title, unit_cents=price.unit_cents))
     return items
-
-
-def _minute(moment: time) -> int:
-    return moment.hour * 60 + moment.minute
-
-
-def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list[CalendarSlot]:
-    """60-minute slots inside the opening hours on the 14 days after `today`, each named `S-<yyyymmdd>-<hhmm>` by its
-    start in the business's time zone (a window's end is exclusive; 00:00 is midnight)."""
-    zone = ZoneInfo(timezone)
-    slots: dict[str, CalendarSlot] = {}
-    for offset in range(1, CALENDAR_DAYS + 1):
-        day = today + timedelta(days=offset)
-        for window in hours:
-            if WEEK[day.weekday()] not in window.days:
-                continue
-            end = _minute(window.end) or 24 * 60
-            for start in range(_minute(window.start), end - SLOT_MINUTES + 1, SLOT_MINUTES):
-                local = time(start // 60, start % 60)
-                slot_id = f"S-{day:%Y%m%d}-{local:%H%M}"
-                slots.setdefault(slot_id, CalendarSlot(slot_id=slot_id, starts_at=datetime.combine(day, local, zone),
-                                                       minutes=SLOT_MINUTES))
-    return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
 PUBLIC_LINE_KEYS = {
@@ -3266,9 +3389,10 @@ def _local(moment: datetime, zone: ZoneInfo) -> datetime:
 
 def _open_at(moment: datetime, hours: list[HoursWindow]) -> HoursWindow | None:
     """The window `moment` (local) falls in, if any (a window's end is exclusive; 00:00 is midnight)."""
-    minute = _minute(moment.time())
+    minute = minute_of_day(moment.time())
     for window in hours:
-        if WEEK[moment.weekday()] in window.days and _minute(window.start) <= minute < (_minute(window.end) or 1440):
+        if (WEEK[moment.weekday()] in window.days
+                and minute_of_day(window.start) <= minute < (minute_of_day(window.end) or 1440)):
             return window
     return None
 
@@ -3291,13 +3415,13 @@ def after_hours_start(hours: list[HoursWindow], timezone: str, now: datetime) ->
     if day is None:
         sunday = today + timedelta(days=(6 - today.weekday()) % 7 or 7)
         return datetime.combine(sunday, time(22), zone)
-    ends = [_minute(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
+    ends = [minute_of_day(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
     moment = datetime.combine(day, time(0), zone) + timedelta(minutes=max(ends))
     for _ in range(len(hours) * 7):                      # a window that continues past it moves it on
         window = _open_at(moment, hours)
         if window is None:
             break
-        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=_minute(window.end) or 1440)
+        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=minute_of_day(window.end) or 1440)
     return moment
 
 
@@ -3308,7 +3432,7 @@ def next_opening(hours: list[HoursWindow], timezone: str, now: datetime) -> date
     day = _next_day_with_hours(hours, _local(now, zone).date())
     if day is None:
         return None
-    start = min(_minute(window.start) for window in hours if WEEK[day.weekday()] in window.days)
+    start = min(minute_of_day(window.start) for window in hours if WEEK[day.weekday()] in window.days)
     return datetime.combine(day, time(start // 60, start % 60), zone)
 
 

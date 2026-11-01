@@ -23,7 +23,7 @@ import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLan
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -184,6 +184,27 @@ async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', par
   const answer = await mockStore.dispatch(key, { params });
   if ('network' in answer || answer.status !== 200) throw new Error(`the mock reads ${key}`);
   return answer.body as T;
+}
+
+/**
+ * Alex Kim's assistant books the earliest visit, as the agents page sends it from a visitor's chat:
+ * the agent's chat once its run is done.
+ */
+async function bookTheEarliestVisit(): Promise<string> {
+  const slug = RIVERA.slug;
+  const opened = await mockStore.dispatch('openSession', { params: { slug } });
+  if ('network' in opened || opened.status !== 200) throw new Error("the visitor's chat opens");
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'book-the-earliest-visit' } });
+  if ('network' in sent || sent.status !== 202) throw new Error('the agent is sent');
+  const runId = (sent.body as { run_id: string }).run_id;
+  const runState = async () => {
+    const run = await mockStore.dispatch('agentRun', { params: { slug, run_id: runId } });
+    return 'network' in run ? null : (run.body as { state: string }).state;
+  };
+  await expect.poll(runState, { timeout: 5_000 }).toBe('done');
+  const agent = [...mockStore.world.sessions.values()].filter((chat) => chat.state.kind === 'agent').at(-1);
+  if (!agent) throw new Error('the run has its agent chat');
+  return agent.state.session_id;
 }
 
 /** A held request's card, by what was asked. */
@@ -508,6 +529,34 @@ describe('Conversations', () => {
     await expect.element(quiet.screen.getByText('When someone writes to your Desk, it shows up here.', { exact: true })).toBeVisible();
     expect(quiet.screen.getByText('Choose a conversation to read it.').elements()).toHaveLength(0);
     await expectScreenBasics(quiet.screen.container, { owner: true });
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_head_says_what_got_done_on_%s', async (viewport) => {
+    // Alex Kim's assistant booked the earliest visit: the head says so, where it said the reply was checked.
+    const booked = await bookTheEarliestVisit();
+    const { screen } = await renderRoute(conversation(booked), { viewport });
+    await expect.element(screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
+    const latest = screen.getByText('Latest: Visit booked', { exact: true });
+    await expect.element(latest).toBeVisible();
+    // The same line in the same place: the head's meta line in the secondary text color.
+    const line = latest.element();
+    expect(line.tagName).toBe('P');
+    expect(line.className).toBe('cd-conversation__latest cd-type-meta');
+    expect(line.parentElement?.classList.contains('cd-conversation__head')).toBe(true);
+    expect(getComputedStyle(line).color).toBe(tokenColor('--text-secondary'));
+    // The booked card and its checks stay under their message.
+    await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
+    await expect.element(log(screen).getByRole('button', { name: "Reply checked against Maria Rivera's rules Open the full trace." }).last()).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+
+    // The seeded agent chat paid its deposit within its signed limit, and Dana's chat ended with her visit booked.
+    for (const [sessionId, words] of [['ses-alex-agent', 'Latest: Deposit paid'], [DANA_LIVE, 'Latest: Visit booked']] as const) {
+      const other = await renderRoute(conversation(sessionId), { viewport });
+      await expect.element(other.screen.getByText(words, { exact: true })).toBeVisible();
+      await expectScreenBasics(other.screen.container, { owner: true });
+      expectNoHorizontalScroll();
+    }
   });
 
   it('agent_name_reads_as_its_own_words', async () => {

@@ -34,6 +34,9 @@ def test_business_blocks_are_fixed_and_unknown_blocks_offer_nothing():
     for block, phrase in BUSINESS_BLOCK_STEPS.items():
         assert next_steps([profile(block)]) == [phrase]
     assert next_steps([profile("purpose_payment"), profile("unknown")]) == []
+    # an urgent tool beside the native call-back offers the same step once
+    callback = SimpleNamespace(tool="native.request_callback")
+    assert next_steps([profile("urgent"), callback]) == [NEXT_STEPS["native.request_callback"]]
 
 
 @pytest.mark.parametrize("standing", ["visitor", "verified", "agent", "answering_off"])

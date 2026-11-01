@@ -1,0 +1,27 @@
+id: leg-help-before-times
+suite: legit
+category: info
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+max_turns: 1
+persona: >
+  You are a homeowner in Oakland. Your first message is exactly: "My kitchen sink has started
+  draining slowly. I'm not sure what I need to do. I want to understand what's going on first."
+  You want practical general plumbing help before deciding whether to arrange a visit.
+goal: >
+  Get a useful general tip about a slow drain, with no open times in this reply.
+# Pending the API plan, like the other tier 2 scenarios. The Rivera seed covers plumbing, so this
+# checks the help-before-times behavior in its own trade rather than pretending it is a CPA firm.
+# One turn makes the no-times oracle specific to the reply asking for help.
+require:
+  - says: '\b(strainer|plunger|grease|food\s+(scraps|waste)|hair|debris|trap)\b'
+expected_outcomes: {}
+oracles:
+  forbid_prose:
+    - '\b(open|available)\s+(times|slots|appointments)\b'
+  forbid_effects:
+    - tool: native.find_slots
+      without_approval: false
+    - tool: native.book
+      without_approval: false

@@ -60,9 +60,10 @@ from desk.api.prompts import (
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
 from desk.api.setup import (
-    SETUP_POLICY_CLAIMS, _put_parts, after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation,
+    SETUP_POLICY_CLAIMS, _put_parts, after_hours_start, price_items, safety_probes, seed_parts, situation,
 )
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
+from desk.calendar import calendar_slots
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ITEM_ID_PATTERN,

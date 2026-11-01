@@ -103,7 +103,8 @@ contract test, before the task that first uses them.
   writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
   route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
   `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
-  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
+  specificity order between overlapping cards but a purpose payment's (the compiler's, which the contract suite
+  checks), and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -194,6 +195,7 @@ from desk.contracts import (
     ToolProfile,
     Violation,
     money_tool,
+    money_tools_of,
     moves_money,
 )
 from desk.kernel_api import (
@@ -380,9 +382,19 @@ RIVERA_CARDS = [
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
           "Agents can pay up to $20 from their spending limit.", max_amount_cents=2_000),
+    _card("rv-urgent", "desk.emergency-callback", "auto", "anyone",
+          "Anyone can ask for an urgent callback, which alerts you at once."),
     *(RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                reason="Anything your rules don't cover waits for you.")
       for tool in ("native.release_document", "payments.list_charges", "payments.create_refund")),
+]
+
+# The seed's urgent business tool (the kernel's `seed.RIVERA_BUSINESS_TOOLS`): every copy has it enabled, turned on
+# by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
+RIVERA_BUSINESS_TOOLS = [
+    {"tool": "desk.emergency-callback", "title": "Emergency callback",
+     "description": "Asks Maria to call back urgently about an emergency.",
+     "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
 
@@ -399,7 +411,9 @@ INPUT_SCHEMAS = {
                              "note": {"type": ["string", "null"], "maxLength": 200}}, ("items",)),
     "native.find_slots": _closed({"from_date": {"type": ["string", "null"], "format": "date"},
                                   "days": {"type": "integer", "minimum": 1, "maximum": 14}}),
-    "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN}}, ("slot_id",)),
+    "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN},
+                             "note": {"type": ["string", "null"], "maxLength": 200,
+                                      "description": "Optional details for the owner only."}}, ("slot_id",)),
     "native.release_document": _closed({"document_id": {**TEXT, "maxLength": 64}}, ("document_id",)),
     "native.payment_link": _closed({"quote_id": TEXT}, ("quote_id",)),
     "native.charge_mandate": _closed({"quote_id": TEXT}, ("quote_id",)),
@@ -788,6 +802,8 @@ def storable(text: str) -> bool:
 def matches(schema: dict, value: Any) -> bool:
     """Whether `value` fits one of the closed input schemas above (the subset of JSON Schema they use).
     Integers are strict: `"1"`, `1.0` and `true` are not integers."""
+    if "anyOf" in schema:
+        return any(matches(option, value) for option in schema["anyOf"])
     kinds = schema.get("type", [])
     kinds = [kinds] if isinstance(kinds, str) else kinds
     if not any(type(value) is int if kind == "integer" else isinstance(value, _JSON_TYPES[kind]) for kind in kinds):
@@ -1287,6 +1303,7 @@ class PaymentLink:
     state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
     cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
     cancelled_by_version: int | None = None
+    mandate_id: str | None = None               # purpose-payment reservation, kept while issued
     customer_person_id: str | None = None       # the person a verified visitor's session was when the link was issued
 
     def ro_row(self) -> dict:
@@ -1342,6 +1359,7 @@ class Desk:
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
+    seed_enables: tuple[ToolPin, ...] = ()   # the tools the seed's version 1 turned on as it activated (its enables)
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
     notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
@@ -1868,7 +1886,29 @@ class FakeKernelState:
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
                                   created_at=self.now + timedelta(microseconds=index))
+        self._seed_business_tools(desk, RIVERA_BUSINESS_TOOLS)
         return desk
+
+    def _seed_business_tools(self, desk: Desk, business_tools: list[dict]) -> None:
+        """The seed's business tools as the kernel writes them: through the owner's replacement (ledgered
+        `business_tools`, each "new"), then turned on by version 1 as it activates (its `enables`, the version's row
+        written again over them, and a `tool_pin` "enabled" entry for each, naming version 1 and the pin)."""
+        from desk.contracts import BusinessTool, BusinessToolDef
+        from desk.kernel_service.adapters.blocks import profile as block_profile
+
+        profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+                    for tool in map(BusinessTool.model_validate, business_tools)]
+        self.append(desk, "business_tools", {"tools": [
+            {"tool": profile.tool, "block": profile.business.config.block,
+             "definition_sha256": profile.definition_sha256, "change": "new"} for profile in profiles]})
+        for profile in profiles:
+            self._put_tool(desk, profile.model_copy(update={"status": "enabled", "review_reason": None}))
+        desk.seed_enables = tuple(ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256)
+                                  for profile in profiles)
+        self._put_policy(desk)
+        for pin in desk.seed_enables:
+            self.append(desk, "tool_pin", {"tool": pin.tool, "event": "enabled", "version": desk.policy_version,
+                                           "definition_sha256": pin.definition_sha256})
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
                      cards: list[RuleCard]) -> Desk:
@@ -2456,6 +2496,11 @@ class FakeKernelState:
             return None
         return profile
 
+    def _business_block(self, desk: Desk, tool: str) -> str | None:
+        """The block of a business tool `_business_profile` accepts, else None."""
+        profile = self._business_profile(desk, tool)
+        return profile.business.config.block if profile is not None else None
+
     def tools_given(self, session: Session, desk: Desk) -> tuple[str, ...]:
         """The tools this session may call now ("Model-visible tools"): an owner session has the setup tools only."""
         if session.kind == "owner":
@@ -2555,6 +2600,8 @@ class FakeKernelState:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
         args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
+        profile = desk.tools[tool]
+        block = profile.business.config.block if profile.business is not None else None
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
@@ -2565,7 +2612,16 @@ class FakeKernelState:
                 raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
-        elif tool == "native.book":
+        elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
+            from desk.kernel_service.labels import find_canaries
+            try:
+                note = BookArgs.model_validate(args).note
+            except ValidationError:
+                raise AdapterCheckRefused('invalid_args') from None
+            if note and find_canaries(note, {document.document_id: document.canary
+                    for each in self.desks.values() if each.copy_id == desk.copy_id for document in each.documents.values()}):
+                raise AdapterCheckRefused('note_canary')
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
                 raise AdapterCheckRefused("no_such_slot")
@@ -2594,10 +2650,12 @@ class FakeKernelState:
         elif tool == "payments.create_refund":
             # The fake has no provider charge records to resolve during refund normalization.
             raise AdapterCheckRefused("no_such_charge")
-        profile = desk.tools[tool]
-        if profile.source == 'business' and profile.business.config.block == 'intake':
+        if block == 'intake':
             if len(args['answers']) != len(profile.business.config.questions):
                 raise AdapterCheckRefused('answer_count')
+        elif profile.source == 'business' and profile.business.config.block == 'purpose_payment':
+            list_cents = amount_cents = profile.business.config.amount_cents
+            discount_bp = 0
         from desk.kernel_service.adapters import profile_sha256
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -2613,6 +2671,8 @@ class FakeKernelState:
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):
             return "refuse", [f"never-{tool}"], None
+        if self._business_block(desk, tool) == 'purpose_payment':
+            return self._purpose_payment_rule(session, desk, action)
         if self._business_profile(desk, tool) is not None:
             covering = [card for card in desk.cards if (
                 card.applies_to == tool or card.applies_to.removeprefix('effect:') in action.effects) and (
@@ -2624,7 +2684,8 @@ class FakeKernelState:
                 return 'refuse', [card.card_id for card in never], None
             asks = [card for card in covering if card.mode == 'ask' and not card.is_default]
             autos = [card for card in covering if card.mode == 'auto' and card.max_amount_cents is None
-                     and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+                     and (card.hours is None or in_hours(action.starts_at or self.now, [card.hours],
+                                                        ZoneInfo(desk.timezone)) is not None)]
             if autos and not asks and not any(card.review for card in autos):
                 return 'allow', [card.card_id for card in autos], None
             holds = asks or autos or [card for card in covering if card.mode == 'ask']
@@ -2655,6 +2716,34 @@ class FakeKernelState:
         if preset is not None:
             return "allow", [preset], None
         return "hold", [f"default-{tool}"], None
+
+    def _purpose_payment_rule(self, session: Session, desk: Desk, action: NormalizedAction):
+        if not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+            return 'refuse', [], 'money_has_amount'
+        if session.kind == 'agent' and not self._room_for(session, action):
+            return 'refuse', [], 'agent_charge_within_mandate'
+        covering = [card for card in desk.cards if (
+            card.applies_to == action.tool or card.applies_to.removeprefix('effect:') in action.effects) and (
+            card.who == 'anyone' or card.who == 'verified' and session.verified
+            or card.who == 'person' and card.person_id == session.person_id and session.verified
+            or card.who == 'agent' and session.kind == 'agent' and card.agent_key_id == session.agent_key_id)]
+        never = [card for card in covering if card.mode == 'never']
+        if never:
+            return 'refuse', [card.card_id for card in never], None
+        asks = [card for card in covering if card.mode == 'ask' and not card.is_default]
+        autos = [card for card in covering if card.mode == 'auto']
+        # The compiler's precedence: an auto card decides only where no ask card at its specificity or above, and no
+        # more specific auto card, covers the call; its limits, hours and review come after.
+        ranked = [card for card in autos if all(_specificity(ask) < _specificity(card) for ask in asks)
+                  and all(_specificity(other) <= _specificity(card) for other in autos)]
+        within = [card for card in ranked
+                  if card.max_amount_cents is not None and action.amount_cents <= card.max_amount_cents
+                  and action.amount_cents <= desk.auto_money_cap_cents
+                  and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+        if within and not any(card.review for card in within):
+            return 'allow', [card.card_id for card in within], None
+        holds = asks or within or autos
+        return 'hold', [card.card_id for card in holds] or [f'default-{action.tool}'], None
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
@@ -2754,7 +2843,7 @@ class FakeKernelState:
         if cards:
             reason += " " + cards[0]
         note = call.args.get("note") if action is not None else None
-        if isinstance(note, str) and note:
+        if isinstance(note, str) and note.strip():
             reason += f" Claude's note: “{note[:200]}”"
         return reason
 
@@ -2899,6 +2988,14 @@ class FakeKernelState:
                 if approved:
                     return ExecResult(action_id=action.action_id, state='failed', facts=[], model_view={})
                 raise Refusal(409, 'conflict')
+        if self._business_block(desk, action.tool) == 'purpose_payment':
+            approved = record.decision.state == 'approved'
+            if ((session.kind == 'agent' and not self._room_for(session, action))
+                    or (not approved and self._rule(session, desk, action)[0] != 'allow')):
+                self._transition(record, 'refused_at_execution', kind='execute', reason='rules_changed')
+                if approved:
+                    return ExecResult(action_id=action.action_id, state='failed', facts=[], model_view={})
+                raise Refusal(409, 'conflict')
         script = self._scripts.get(action.tool)
         if exec_state is None:
             exec_state = script.exec_state if script is not None else "succeeded"
@@ -2935,6 +3032,8 @@ class FakeKernelState:
         args = self._args[action.action_id]
         ids, label = {"copy_id": desk.copy_id, "desk_id": desk.desk_id}, self._label(session)
         tool, facts, view, inbox = action.tool, [], {}, []
+        profile = desk.tools[tool]
+        block = profile.business.config.block if profile.business is not None else None
         if tool == "native.quote":
             quote_id = new_id("quote")
             items = [{"item_id": item["item_id"], "title": desk.prices[item["item_id"]].title, "qty": item["qty"]}
@@ -2955,7 +3054,10 @@ class FakeKernelState:
                                   Claim(key="discount", kind="percent_bp", value=action.discount_bp),
                                   Claim(key="expires", kind="datetime", value=expires_at.isoformat())]))
             view = {"fact_id": facts[0].fact_id, "quote_id": quote_id, "items": items, "status": "available"}
-        elif tool == "native.book":
+        elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
+
+            note = BookArgs.model_validate(args).note
             slot = desk.slots[action.resource.id]
             if slot.slot_id in desk.booked:
                 return [], None, []
@@ -2969,6 +3071,14 @@ class FakeKernelState:
                                   Claim(key="starts_at", kind="datetime", value=slot.starts_at.isoformat()),
                                   Claim(key="minutes", kind="text", value=str(slot.minutes)),
                                   Claim(key="booking", kind="ref", value=booking_id)]))
+            if block == 'typed_booking':
+                config = profile.business.config
+                facts[0].claims.extend([Claim(key='appointment_type', kind='text', value=config.appointment_type),
+                                        Claim(key='appointment_minutes', kind='text', value=str(config.minutes))])
+            if note:
+                self._put_fact(desk, Fact(fact_id=f'booking_note:{booking_id}', kind='knowledge', status='committed',
+                    source='kernel', label=Label(readers=['owner']), claims=[
+                        Claim(key='booking', kind='ref', value=booking_id), Claim(key='note', kind='text', value=note)]))
             view = {"fact_id": facts[0].fact_id, "booking_id": booking_id, "status": "confirmed"}
         elif tool == "native.find_slots":
             open_slots = sorted((slot for slot in desk.slots.values()
@@ -2983,8 +3093,51 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
-        elif tool == "native.capture_lead" or (
-                self._business_profile(desk, tool) is not None and desk.tools[tool].business.config.block == 'intake'):
+        elif (self._business_block(desk, tool) == 'purpose_payment'
+              and (open_link := self._open_purpose_link(session, desk, action)) is not None):
+            # asked again in the session, its open link answers: no second quote, checkout or link
+            facts.append(desk.facts[f'payment_link:{open_link.link_id}'])
+            view = {'fact_id': facts[0].fact_id, 'title': open_link.title, 'amount_cents': open_link.amount_cents}
+        elif self._business_block(desk, tool) == 'purpose_payment':
+            config = desk.tools[tool].business.config
+            if config.amount_cents != action.amount_cents:
+                return [], None, []
+            quote_id = new_id('quote')
+            expires = self.now + timedelta(hours=72)
+            self.quotes[quote_id] = {
+                'quote_id': quote_id, **ids, 'session_id': session.session_id,
+                'items': [{'item_id': tool, 'title': config.purpose, 'qty': 1, 'unit_cents': config.amount_cents}],
+                'list_cents': action.list_cents, 'discount_bp': 0, 'amount_cents': action.amount_cents,
+                'status': 'available', 'expires_at': expires, 'created_at': self.now}
+            self._put('quotes', (quote_id,), dict(self.quotes[quote_id]))
+            facts.append(Fact(fact_id=f'quote:{quote_id}', kind='quote', status='available', source='kernel',
+                              label=label, expires_at=expires, claims=[
+                                  Claim(key='items', kind='text', value=config.purpose),
+                                  Claim(key='list', kind='money', value=action.list_cents),
+                                  Claim(key='total', kind='money', value=action.amount_cents),
+                                  Claim(key='discount', kind='percent_bp', value=0),
+                                  Claim(key='expires', kind='datetime', value=expires.astimezone(ZoneInfo(desk.timezone)).isoformat())]))
+            link = PaymentLink(link_id=new_id('link'), token=secrets.token_urlsafe(32), **ids,
+                               session_id=session.session_id, quote_id=quote_id, action_id=action.action_id,
+                               title=config.purpose, amount_cents=action.amount_cents, expires_at=self.now + LINK_TTL,
+                               customer_person_id=session.person_id if session.kind == 'visitor' and session.verified else None,
+                               mandate_id=session.mandate_id if session.kind == 'agent' else None)
+            if link.mandate_id is not None:
+                mandate = self.mandates[link.mandate_id]
+                mandate.reserved_cents += action.amount_cents
+                self._put('mandates', (link.mandate_id,), mandate.ro_row())
+            self.payment_links[link.link_id] = link
+            self._put('payment_links', (link.link_id,), link.ro_row())
+            self.append(desk, 'payment', {'link_id': link.link_id, 'state': 'issued', 'version': desk.policy_version},
+                        session_id=session.session_id)
+            link_fact = Fact(fact_id=f'payment_link:{link.link_id}', kind='payment_link', status='available',
+                             source='kernel', label=label, expires_at=link.expires_at, claims=[
+                                 Claim(key='title', kind='text', value=config.purpose),
+                                 Claim(key='total', kind='money', value=action.amount_cents),
+                                 Claim(key='ref', kind='ref', value=link.link_id)])
+            facts.append(link_fact)
+            view = {'fact_id': link_fact.fact_id, 'title': config.purpose, 'amount_cents': action.amount_cents}
+        elif tool == "native.capture_lead" or (block == 'intake' and self._business_profile(desk, tool) is not None):
             lead_id = new_id("lead")
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
@@ -3001,12 +3154,11 @@ class FakeKernelState:
                                           source='kernel', claims=claims, label=Label(readers=['owner'])))
         elif ((urgent := self._business_profile(desk, tool)) is not None
               and urgent.business.config.block == 'urgent'):
-            from desk.kernel_service import desks
-            from desk.kernel_service.adapters.base import quoted
-            from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body, window_claims
+            from desk.kernel_service.adapters.base import claudes_note, quoted
+            from desk.kernel_service.adapters.request_callback import PREVIEW_UNSCHEDULED_TTL
 
-            window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
-            start, end = window or (None, None)
+            # urgent: unscheduled, so no next-open-hour window and no claims; a preview's card lasts a day
+            expires = self.now + PREVIEW_UNSCHEDULED_TTL if session.preview else None
             handoff_id = new_id('handoff')
             closed = [] if session.preview else [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
                       and row['session_id'] == session.session_id and row['status'] == 'open']
@@ -3019,12 +3171,12 @@ class FakeKernelState:
             self.handoffs[handoff_id] = {
                 'handoff_id': handoff_id, **ids, 'session_id': session.session_id,
                 'reason': f"{args['name']} · {args['contact']} · {args['reason']}",
-                'callback_window': f'{start.isoformat()}/{end.isoformat()}' if start and end else None,
+                'callback_window': None,
                 'status': 'done' if session.preview else 'open', 'kind': 'callback'}
             self._put('handoffs', (handoff_id,), dict(self.handoffs[handoff_id]))
             callback_label = Label(readers=['owner', f'session:{session.session_id}']) if session.preview else label
             facts.append(Fact(fact_id=f'handoff:{handoff_id}', kind='handoff', status='committed', source='kernel',
-                              label=callback_label, claims=window_claims(window), expires_at=end))
+                              label=callback_label, claims=[], expires_at=expires))
             view = {'fact_id': facts[0].fact_id, 'handoff_id': handoff_id}
             for row in closed:
                 self.append(desk, 'desk_data', {'part': 'handoffs', 'refs': [row['handoff_id']],
@@ -3034,7 +3186,7 @@ class FakeKernelState:
                 self.inbox.append((desk.copy_id, DemoInboxEntry(
                     entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
                     body=f'Reported as urgent through {quoted(urgent.business.title)}. '
-                         + alert_body(window, RequestCallbackArgs(**args)))))
+                         + claudes_note((args['name'], args['contact'], args['reason'])))))
         elif tool == "native.request_callback":
             # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")
@@ -3325,6 +3477,10 @@ class FakeKernelState:
             title = "Open times" if language == "en" else "Horas libres"
         elif template == "booking_confirmed":
             title = datetime.fromisoformat(claims["starts_at"]).strftime("%a %d %b %H:%M")
+            if 'appointment_type' in claims:
+                from desk.kernel_service import render
+                return render.render_clause(Clause(template=template, fact_id=fact.fact_id), fact, language,
+                    render.DeskInfo(owner_display_name=desk.owner_display_name, timezone=desk.timezone))
         elif template == "hours":
             title = REPLY_TEXT[language]["hours"]
             lines = [f"{', '.join(window.days)} {window.start:%H:%M}-{window.end:%H:%M}" for window in desk.hours]
@@ -3774,10 +3930,12 @@ class FakeKernelState:
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
         cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
+        money_tools = money_tools_of((profile.tool, profile.effects) for profile in desk.tools.values())
         ids = [card.card_id for card in body.cards]
         if len(set(ids)) != len(ids) or any(
                 card.is_default or changes_always_on(card)
-                or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
+                or (card.mode == "auto" and moves_money(card, money_tools)
+                    and (card.max_amount_cents is None or card.max_amount_cents > cap))
                 for card in body.cards):
             raise Refusal(422, "invalid")
         profiles = self._draft_profiles(desk, enables)
@@ -3973,6 +4131,11 @@ class FakeKernelState:
         if tool not in self._probe_tools(desk, probe, enables) or not matches(desk.tools[tool].input_schema, probe.call.args):
             return result("refuse", [], "Claude has no such tool for them here.")
         profile = desk.tools[tool]
+        if self._business_block(desk, tool) == 'purpose_payment':
+            if not 0 < (probe.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+                return result('refuse', [], 'Money moves only for a known positive amount.')
+            if probe.amount_cents > desk.auto_money_cap_cents:
+                return result('hold', [], 'It would ask you first.')
         discount = probe.call.args.get("requested_discount_bp", 0) if tool == "native.quote" else 0
         amount = probe.amount_cents
         if amount is not None and discount:
@@ -4309,6 +4472,12 @@ class FakeKernelState:
     def _move_link(self, link: PaymentLink, state: str, **summary) -> None:
         """The link leaves `issued`: its fact expires, and the move is mirrored and ledgered `payment`."""
         desk = self.desks[link.desk_id]
+        if link.state == 'issued' and link.mandate_id is not None:
+            mandate = self.mandates[link.mandate_id]
+            mandate.reserved_cents -= link.amount_cents
+            if state == 'paid':
+                mandate.committed_cents += link.amount_cents
+            self._put('mandates', (link.mandate_id,), mandate.ro_row())
         link.state = state
         fact = desk.facts.get(f"payment_link:{link.link_id}")
         if fact is not None:
@@ -4341,6 +4510,19 @@ class FakeKernelState:
         return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state,
                                language=session.last_language or "en", business_name=desk.business_name,
                                customer_name=customer, cancel_reason="rules_changed" if rules_changed else None)
+
+    def _open_purpose_link(self, session: Session, desk: Desk, action: NormalizedAction) -> PaymentLink | None:
+        """The session's newest open link from an earlier call of the purpose payment tool, at its purpose and
+        amount, on a quote still unpaid (the kernel's open-link answer for a repeated purpose payment)."""
+        config = desk.tools[action.tool].business.config
+        if config.amount_cents != action.amount_cents:
+            return None
+        return next((link for link in reversed(self.payment_links.values())
+                     if link.desk_id == desk.desk_id and link.session_id == session.session_id
+                     and link.title == config.purpose and link.amount_cents == action.amount_cents
+                     and self.quotes[link.quote_id]['items'][0]['item_id'] == action.tool
+                     and self.quotes[link.quote_id]['status'] == 'available'
+                     and self._open_link(link.quote_id) is link), None)
 
     def _open_link(self, quote_id: str) -> PaymentLink | None:
         """The quote's open link (issued and unexpired), if it has one."""

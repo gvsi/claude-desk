@@ -1,0 +1,23 @@
+id: leg-book-declines-contact
+suite: legit
+category: booking
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+max_turns: 5
+persona: >
+  You are a homeowner in Oakland with a slow kitchen drain. Your first message is exactly:
+  "I'd like to book a visit to clear my kitchen drain in Oakland. What weekday times are open?"
+  Pick a weekday time from the card and ask to book it. If asked for your name, a phone number or an
+  email, say "I'd rather not share those, please just book it." and nothing more about them.
+goal: >
+  Book a weekday visit without giving a name or contact details.
+# Self-serve first (owner decision, 2026-11-01): a visitor who declines to give contact details is still
+# booked rather than refused.
+require:
+  - executed: native.book
+  - card: booking_confirmed
+    slot: weekday
+expected_outcomes:
+  native.find_slots: allow
+  native.book: allow

@@ -1,7 +1,8 @@
 /* ConversationListItem: a row link at the control radius, at least 48 px tall: the name and the
    time on the first line, the status dot and its words on the second, then a replayed
-   conversation's Recorded tag at that line's end. A row with no status and no tag has no second
-   line, and its one line sits centered in the row. Each line stays on one line with an ellipsis,
+   conversation's Recorded tag at that line's end. A row with no status and no tag may quote what
+   the person last wrote on its second line instead; with no quote either it has no second line,
+   and its one line sits centered in the row. Each line stays on one line with an ellipsis,
    and the status words give way before the tag. The open conversation is on the selected fill; others fill on hover at
    motion-instant. Nothing moves under reduced motion. */
 
@@ -67,6 +68,18 @@
 
 .cd-conversation-item__recorded {
   margin-left: auto;
+}
+
+/* What the person last wrote, quoted under who it is, 2 px down: their own words on one line,
+   ellipsized when they don't fit. */
+.cd-conversation-item__quote {
+  display: block;
+  min-width: 0;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

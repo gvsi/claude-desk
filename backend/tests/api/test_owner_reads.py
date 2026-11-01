@@ -9,6 +9,7 @@ America/Los_Angeles.
 
 import asyncio
 import itertools
+import json
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -48,15 +49,22 @@ from desk.api.store import (
     start_fresh_context,
 )
 from desk.api.tools import Caller
-from desk.contracts import Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, ToolCall
+from desk.contracts import (
+    BusinessTool, Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, RuleCard, ToolCall,
+)
 from desk.kernel_api import (
     AnswerRequest,
+    BusinessToolsRequest,
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
     CreateSessionRequest,
     DecideRequest,
     ExecuteRequest,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel, response, tool_use, unavailable
@@ -608,7 +616,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
                     "display_name": None, "verified": False, "assurance": "none"},
-        "from_the_visitor": None}
+        "from_the_visitor": None, "claude_summary": None}
     assert first["decision"]["answers"] == ["allow_once", "deny_once"]        # a limit hold: no "Deny always"
     assert second["decision"]["decision_id"] == dana_hold.decision_id and second["handoff"] is None
     assert second["decision"]["answers"] == ["allow_once", "allow_person", "deny_once"]
@@ -622,13 +630,57 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                     "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
                     "verified": False, "assurance": "none"},
-        "from_the_visitor": "It's the heater in the garage"}
+        "from_the_visitor": "Water everywhere, please call me · It's the heater in the garage",   # the last two
+        "claude_summary": None}
     # each held request was read from the kernel, with the owner's credential, which applies expiry
     reads = fake.called("GET /decisions/{id}")
     assert sorted(call.path for call in reads) == sorted(f"/decisions/{decision_id}"
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(app, browser, fake, kernel_http,
+                                                                               engine, db):
+    """A handoff's context for the owner: the visitor's previous and last lines, each a one-line glimpse joined with
+    " · ", and the conversation's newest AI-written triage summary, labelled as Claude's on the owner's screen. A
+    triage row that doesn't parse is skipped rather than shown. A held request, which asks the owner for a decision,
+    never carries the summary, nor does a handoff in a chat whose request still awaits the owner (master plan:
+    AI-written triage is never in approval cards)."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    handed = await guest(kernel_http, fake, owner)
+    await write(engine, db, handed.ids, "visitor_text", text="Personal. I started freelancing and I'm not sure what I need.")
+    await write(engine, db, handed.ids, "visitor_text", text="  Monday,\n November 2, 9:00 am  ")
+    await write(engine, db, handed.ids, "triage", text=json.dumps({"summary": "Asked about tax filing.", "category": "other"}))
+    await write(engine, db, handed.ids, "triage", text=json.dumps({"summary": "Freelancer asked what to file; "
+                                                                             "a booking reply was stopped.",
+                                                                  "category": "wording"}))
+    garbled = await guest(kernel_http, fake, owner)
+    await write(engine, db, garbled.ids, "visitor_text", text="x" * 250)
+    await write(engine, db, garbled.ids, "triage", text="not json")
+    for who in (handed, garbled):
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok
+    held = await guest(kernel_http, fake, owner)
+    await write(engine, db, held.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
+    await held.decide("native.quote", discounted_quote(fake, owner))
+    # the same chat asks for a call back while its request waits: that handoff waits for its note too
+    await held.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                               "reason": "About the discount"})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is None}
+    held_items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is not None}
+    assert items[handed.session_id]["from_the_visitor"] == (
+        "Personal. I started freelancing and I'm not sure what I need. · Monday, November 2, 9:00 am")
+    assert items[handed.session_id]["claude_summary"] == "Freelancer asked what to file; a booking reply was stopped."
+    assert items[garbled.session_id]["from_the_visitor"] == "x" * 199 + "…"
+    assert items[garbled.session_id]["claude_summary"] is None
+    assert held_items[held.session_id]["claude_summary"] is None
+    assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
@@ -663,7 +715,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
                     "kind": "card"},
         "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
                     "assurance": "none"},
-        "from_the_visitor": "How much is a new water heater?"}
+        "from_the_visitor": "How much is a new water heater?", "claude_summary": None}
     assert handoffs[caller.session_id]["handoff"] == {
         "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
         "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None, "status": "open",
@@ -747,7 +799,7 @@ async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_h
     owner = scene.owner
 
     brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
-    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == 0
+    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == brief["answers"] == 0
     assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
     safety = (await owner.get(f"desks/{owner.desk_id}/safety")).json()
     assert ("reply_blocked", str(seq)) in [(item["kind"], item["ref_id"]) for item in safety]
@@ -878,8 +930,8 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"
-    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "turned_down", "total")} == {
-        "conversations": 6, "bookings": 1, "leads": 1, "turned_down": 1, "total": 5}
+    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "turned_down", "answers", "total")} == {
+        "conversations": 6, "bookings": 1, "leads": 1, "turned_down": 1, "answers": 2, "total": 5}
     assert brief["newest"] == {
         "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
                         "session_id": refused_chat.session_id, "display_name": None,
@@ -899,6 +951,42 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
                                   "line": "Call after 5, the side gate", "cause": None}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
+
+
+async def test_typed_booking_and_its_note_reach_today_with_default_notifications(scene, clock, api_conn, ro_schema):
+    owner = scene.owner
+    desk = scene.fake.desks[owner.desk_id]
+    prefs = await KernelRO(api_conn, owner.copy_id, ro_schema).one('notification_prefs', desk_id=owner.desk_id)
+    assert prefs['now'] == ['approval', 'callback', 'breaker', 'lockout', 'handoff']
+    assert prefs['briefing'] == ['lead', 'booking']
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool='desk.consult', title='Book a consult', description='Book an introduction.',
+                        config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20})
+    await kernel.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': owner.desk_id})
+    profile = desk.tools[tool.tool]
+    confirmed = await kernel.call('POST /tools/confirm', ToolsConfirmRequest(desk_id=owner.desk_id,
+        tools=[ToolPin(tool=tool.tool, definition_sha256=profile.definition_sha256)], enable=True))
+    active = await kernel.call('POST /policy/confirm', PolicyConfirmRequest(
+        desk_id=owner.desk_id, version=confirmed.draft.version))
+    draft = await kernel.call('POST /policy/draft', PolicyDraftRequest(desk_id=owner.desk_id,
+        expected_parent=active.version, cards=[RuleCard(card_id='consult-auto', applies_to=tool.tool,
+            mode='auto', who='anyone', reason='Book consultations.')]))
+    await kernel.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    when = local(2026, 10, 29, 20)
+    visitor = await scene.visitor(when)
+    await scene.text(visitor, when, 'Book a consult, using the side entrance.')
+    slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
+    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.'})
+    assert result.state == 'succeeded'
+    await scene.reply(visitor, when + timedelta(seconds=30))
+    clock.now = local(2026, 10, 30, 9)
+    today = (await owner.get(f'desks/{owner.desk_id}/today')).json()
+    assert today['briefing']['bookings'] == today['this_week']['bookings'] == 1
+    assert today['briefing']['total'] == 1
+    assert today['briefing']['newest']['lead_or_answer'] is None
+    [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
+    assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
+    assert 'Claude\'s note: “Use the side entrance.”' in item['line']
 
 
 
@@ -1049,6 +1137,44 @@ async def test_this_week_handled_versus_stepped_in(app, browser, fake, kernel_ht
     quiet_week = (await quiet.owner.get(f"desks/{quiet.owner.desk_id}/today")).json()["this_week"]
     assert {key: quiet_week[key] for key in ("conversations", "stepped_in", "handled")} == {
         "conversations": 0, "stepped_in": 0, "handled": 0}
+
+
+async def test_conversations_carry_the_visitors_latest_words(scene, clock):
+    at = local(2026, 10, 30, 8, 57)                                    # every chat is live at 9:00
+    chat = await scene.visitor(at)
+    await scene.text(chat, at, "Do you fix leaks?")
+    await scene.text(chat, at + timedelta(minutes=1), "  My water\n\theater   is leaking,\r\n can someone come today?  ")
+    await scene.reply(chat, at + timedelta(minutes=2))                 # Claude's reply, newer, is never the line
+    long = await scene.visitor(at)
+    await scene.text(long, at, "Leak " + "x" * 245)                    # 250 characters
+    exact = await scene.visitor(at)
+    await scene.text(exact, at, "y" * 200)
+    spaced = await scene.visitor(at)                                    # the cut falls on a space
+    await scene.text(spaced, at, "x" * 198 + " " + "y" * 51)
+    preview = await scene.visitor(at, preview=True)                     # the owner's own preview
+    await scene.text(preview, at, "Testing my own Desk")
+    quiet = await scene.visitor(at)                                     # only Claude has written
+    await scene.reply(quiet, at)
+    scene.fake.now = at                                                 # another person's agent
+    agent, _ = scene.fake._new_session(scene.owner.copy_id, scene.owner.desk_id, "agent")
+    scene.fake.flush()
+    agent_ids = Ids(copy_id=scene.owner.copy_id, desk_id=scene.owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", at, text="Book the earliest visit for Alex Kim.")
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = {summary["session_id"]: summary
+              for summary in (await owner.get(f"desks/{owner.desk_id}/conversations")).json()}
+    live = {summary["session_id"]: summary
+            for summary in (await owner.get(f"desks/{owner.desk_id}/today")).json()["live"]}
+
+    expected = {chat.session_id: "My water heater is leaking, can someone come today?",
+                long.session_id: ("Leak " + "x" * 245)[:199] + "…", exact.session_id: "y" * 200,
+                spaced.session_id: "x" * 198 + "…",
+                preview.session_id: None, quiet.session_id: None, agent.session_id: None}
+    assert {session_id: listed[session_id]["latest_visitor_text"] for session_id in expected} == expected
+    assert len(listed[long.session_id]["latest_visitor_text"]) == 200
+    assert {session_id: live[session_id]["latest_visitor_text"] for session_id in expected} == expected
 
 
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):

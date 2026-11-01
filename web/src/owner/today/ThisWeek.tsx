@@ -125,7 +125,7 @@ function TurnedDown({ week, deskId }: { week: ThisWeekFigures; deskId: string })
         </p>
       )}
       <p className="cd-week__line cd-type-meta">
-        <TextLink href={`/app/${encodeURIComponent(deskId)}/safety`}>Open Safety</TextLink>
+        <TextLink href={`/app/${encodeURIComponent(deskId)}/safety`}>{TODAY_COPY.openSafety}</TextLink>
       </p>
     </div>
   );
