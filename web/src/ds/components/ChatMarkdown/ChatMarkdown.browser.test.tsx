@@ -138,7 +138,19 @@ it('inert_links_show_their_text_then_their_url_and_link_nowhere', () => {
   const text = 'Pay at [this page](https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not [this](javascript:alert(1)).';
   const md = reply(mount(<ChatMarkdown text={text} links="inert" />));
   expect(md.querySelectorAll('a')).toHaveLength(0);
-  expect(md.textContent).toBe('Pay at this page (https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not this.');
+  // Every target shows as written, one that could never be a link included: it is only text.
+  expect(md.textContent).toBe('Pay at this page (https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not this (javascript:alert(1)).');
+});
+
+it('inert_links_show_their_address_as_written', () => {
+  // Not as a URL parser rewrites it: no added slash, no percent-encoding, no xn-- domain, and a
+  // target that isn't http, https or mailto shows too.
+  const text = '[Pay](https://pay.example.net), [la señal](https://example.com/señal), [el sitio](https://bücher.example/a), [Call Maria](tel:+15550100) and https://example.com.';
+  const md = reply(mount(<ChatMarkdown text={text} links="inert" />));
+  expect(md.querySelectorAll('a')).toHaveLength(0);
+  expect(md.textContent).toBe(
+    'Pay (https://pay.example.net), la señal (https://example.com/señal), el sitio (https://bücher.example/a), Call Maria (tel:+15550100) and https://example.com.',
+  );
 });
 
 it('an_inert_bare_address_shows_once_with_or_without_a_path', () => {

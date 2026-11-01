@@ -5,6 +5,7 @@ import { type Components, defaultRemarkPlugins, type ExtraProps, parseMarkdownIn
 
 import { everyTableCell } from './everyTableCell.ts';
 import { footnotesAsText } from './footnotesAsText.ts';
+import { linksAsText } from './linksAsText.ts';
 import { taskItemsAsText } from './taskItemsAsText.ts';
 import { useReducedMotion } from './useReducedMotion.ts';
 import { useReveal } from './useReveal.ts';
@@ -35,12 +36,13 @@ const REHYPE_PLUGINS: StreamdownProps['rehypePlugins'] = [
  * Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes and task items
  * back to their words, and every table cell kept.
  */
-const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [
-  ...Object.values(defaultRemarkPlugins),
-  footnotesAsText,
-  taskItemsAsText,
-  everyTableCell,
-];
+const SHARED_REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), footnotesAsText, taskItemsAsText, everyTableCell];
+
+/** Each `links` setting's Markdown steps: inert links become their words and address as written. */
+const REMARK_PLUGINS: Record<NonNullable<ChatMarkdownProps['links']>, StreamdownProps['remarkPlugins']> = {
+  open: SHARED_REMARK_PLUGINS,
+  inert: [...SHARED_REMARK_PLUGINS, linksAsText],
+};
 
 /** A reference definition, `[1]: https://…`, which may sit in its own paragraph. */
 const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
@@ -160,30 +162,11 @@ function Link({ node, href, children }: ElementProps<'a'>) {
 }
 
 /**
- * Whether two addresses are the same once written out in full, so `https://example.com` matches
- * the `https://example.com/` hardening makes of it. Text that isn't an address matches nothing.
+ * With inert links, `linksAsText` has already turned every link into its words and its address as
+ * written, so no link reaches the page. Should one ever arrive, it is its words, unlinked.
  */
-function sameAddress(url: string, written: string): boolean {
-  try {
-    return new URL(url).href === new URL(written).href;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * For a stopped draft: the link text, then the URL in plain text, and nothing to click. A link
- * whose text is already its address (a bare URL, `www.` address or email) shows once.
- */
-function InertLink({ node, href, children }: ElementProps<'a'>) {
-  const label = textOf(node);
-  const url = linkTarget(href, label);
-  if (url === null || [label, `mailto:${label}`, `https://${label}`].some((written) => sameAddress(url, written))) return <>{children}</>;
-  return (
-    <>
-      {children} ({url})
-    </>
-  );
+function Unlinked({ children }: ElementProps<'a'>) {
+  return <>{children}</>;
 }
 
 /**
@@ -228,7 +211,7 @@ const BLOCKS: Components = {
 /** Each `links` setting's elements, made once so Streamdown keeps its rendered blocks between renders. */
 const COMPONENTS: Record<NonNullable<ChatMarkdownProps['links']>, Components> = {
   open: { ...BLOCKS, a: Link },
-  inert: { ...BLOCKS, a: InertLink },
+  inert: { ...BLOCKS, a: Unlinked },
 };
 
 /**
@@ -274,7 +257,7 @@ export function ChatMarkdown({ text, streaming = false, reveal = false, onReveal
       key={links}
       className="cd-md cd-type-reply"
       components={COMPONENTS[links]}
-      remarkPlugins={REMARK_PLUGINS}
+      remarkPlugins={REMARK_PLUGINS[links]}
       parseMarkdownIntoBlocksFn={blocksOf}
       remarkRehypeOptions={TO_HTML}
       rehypePlugins={REHYPE_PLUGINS}
