@@ -52,7 +52,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.9"
+PROMPT_VERSION = "2026-10-31.10"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -478,7 +478,7 @@ Jobs (reference)
 - Kinds: answer, intake, schedule, price, documents, status, payment, urgent. Plan "answer" only when answering \
 questions is itself a main job, titled by what it answers.
 - Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters, with no amounts, numbers or promise words \
-("free" is fine: "Book a free intro call", never "Free 20-minute intro call"), since the kernel refuses the \
+("free" is fine, as in "Book a free intro call", but never "Free 20-minute intro call", and never "free" in a payment job's title), since the kernel refuses the \
 whole set of business tools when one title has them; who, who it's \
 for in a few words ("New clients", "Tenants"), empty when it's for everyone, at most 60; why, the value in the \
 owner's terms, at most 200; how: one plain line on what happens, in the third person with no "you" or "your", and with no \
