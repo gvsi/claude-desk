@@ -6,7 +6,7 @@ import type { StatusTone } from '../StatusDot/StatusDot.tsx';
  */
 export function chainLine(chainOk: boolean | null, firstBadSeq: number | null): { tone: StatusTone; line: string } {
   if (chainOk === null) return { tone: 'info', line: 'Not checked yet' };
-  if (chainOk === true) return { tone: 'handled', line: 'Every entry checks out' };
+  if (chainOk === true) return { tone: 'handled', line: 'Every entry matches the chain' };
   if (!Number.isInteger(firstBadSeq)) return { tone: 'refused', line: "An entry doesn't match the chain" };
   return { tone: 'refused', line: `Entry ${firstBadSeq} doesn't match the chain` };
 }

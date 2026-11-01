@@ -58,7 +58,10 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
-  after its retry gets the fixed transition line instead.
+  after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
+  question, setup first asks once, with code's two choices, whether to add them as a test client
+  (`TEST_CLIENT_OFFER`), and code alone reads the answer, with no model turn: only a yes puts them on record as a
+  client with that contact (`PUT /desks/{id}/people`), and any answer moves on to step `tools`.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
@@ -244,12 +247,14 @@ from desk.api.schemas import (
     SetupPublicLineError,
     SetupPublicLines,
     SetupPublicPrices,
+    SetupQuestion,
     SetupStartIn,
     SetupState,
     SetupStep,
     SetupTools,
     Situation,
     SituationResult,
+    TestClientQuestion,
     ToolRow,
     WentLive,
 )
@@ -297,9 +302,11 @@ from desk.kernel_api import (
     DeskHoursRequest,
     DeskMemoryRequest,
     DeskNotificationsRequest,
+    DeskPeopleRequest,
     DeskPricesRequest,
     ExecuteRequest,
     MemoryItem,
+    PersonUpsert,
     PolicyConfirmRequest,
     PolicyProbeRequest,
     SessionContext,
@@ -359,6 +366,26 @@ QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
+# The test-client offer, asked once at the plan's end (`_offer_test_client`), its two choices, and Claude's line after
+# a yes. Owner-facing words, kept together for copy review.
+TEST_CLIENT_OFFER = ("Want to try your Desk the way a client would? I can add you as a test client, with your own "
+                     "contact, so you can check verification and private answers yourself.")
+TEST_CLIENT_YES = "Add me as a test client"
+TEST_CLIENT_NO = "Not now"
+TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me."
+TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks and reads
+TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
+# The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
+# a "no" one wins over any "yes" one, and an answer with neither gets the same offer again.
+TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
+                         "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
+TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
+# A typed answer that asks something, or gives a yes only on a condition, which is never a yes or a no: a question mark,
+# a question's opening word, or "if" ("si" in Spanish, unless it stands alone as a yes, "Si" or "Si, …").
+TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)\b"
+                                 r"|^\W*do\s+(?:you|i|we|they|he|she|this|that)\b|\bif\b", re.IGNORECASE)
+TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
+TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -437,7 +464,7 @@ class Entry(BaseModel):
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
-    question: Literal["consent"] | QuestionKey | None = None
+    question: Literal["consent"] | SetupQuestion | None = None
     read: Literal["memory", "website", "web_search"] | None = None
     content: str | None = None
     website: str | None = None
@@ -455,6 +482,8 @@ class Entry(BaseModel):
     owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
     owner_decided: bool = False
     connector_connect_attempted: bool = False
+    # On the owner's answer to the test-client offer: "yes" once their yes is saved, "added" once they're on record.
+    test_client: Literal["yes", "added"] | None = None
 
 
 class ConnectedApp(BaseModel):
@@ -515,12 +544,19 @@ class Interview:
         return self.transcript[0].connected_apps or []
 
     @property
-    def question(self) -> QuestionKey | None:
-        """The question waiting for an answer: the last one asked, from consent until the questions step ends."""
+    def question(self) -> SetupQuestion | None:
+        """The question waiting for an answer: the last one asked, from consent until the questions step ends. The
+        test-client offer (`TEST_CLIENT`) is the last, once the plan is closed."""
         if self.step != "questions" or self.consent is None or self.busy:
             return None
         asked = self.latest_ask
-        return asked.question if asked is not None and asked.question in QUESTION_KEYS else None
+        return asked.question if asked is not None and asked.question in (*QUESTION_KEYS, TEST_CLIENT) else None
+
+    @property
+    def offering(self) -> bool:
+        """Whether the plan is closed and only the test-client offer waits (`_offer_test_client`)."""
+        asked = self.latest_ask
+        return self.step == "questions" and asked is not None and asked.question == TEST_CLIENT
 
     @property
     def latest_ask(self) -> Entry | None:
@@ -2159,8 +2195,8 @@ class _TurnReplies:
 async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview, *,
                              since: int, replies: _TurnReplies, key: QuestionKey | None = None,
                              follow_up=None) -> None:
-    """Before saving, leave a fresh question, a waiting card, or a closed interview."""
-    if interview.step != "questions" or interview.pending_card is not None:
+    """Before saving, leave a fresh question, a waiting card, or a closed interview (the test-client offer may wait)."""
+    if interview.step != "questions" or interview.pending_card is not None or interview.offering:
         return
     if any(entry.role == "claude" and entry.question in QUESTION_KEYS and entry.text.strip()
            for entry in interview.transcript[since:]):
@@ -2345,7 +2381,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     await _advance(owner, engine, model, interview, following, reply)
 
 
-async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey | None,
+async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: SetupQuestion | None,
                  text: str, *, runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                  card: str | None = None, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """Run a question or typed card answer through the shared turn runner; busy repeats do no work."""
@@ -2373,6 +2409,11 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 _clear_configs(interview)
             await card_turn(ctx, engine, model, interview, card, text=text)
             connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
+            return
+        if question == TEST_CLIENT:
+            _answer_test_client(interview, staged[0])
+            if interview.step == "tools":
+                connect = _claim_connector_connect(interview)
             return
         since = len(interview.transcript)
         key = question
@@ -2437,6 +2478,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if question == TEST_CLIENT:
+            await _put_test_client(ctx, engine, interview)
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
@@ -2475,10 +2518,15 @@ def settle_plan(interview: Interview) -> None:
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
-    """Settle cards, end with the closing plan (or a fixed line without one), then finish.
+    """Settle cards, end with the closing plan (or a fixed line without one), then finish, and offer to add the owner as
+    a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
 
-    The caller owns persistence and after_finish.
+    While the offer waits, the plan is closed already: closing again ("Use your suggestions") moves on to the Tools
+    step without another plan and writes nothing. The caller owns persistence and after_finish.
     """
+    if interview.offering:
+        interview.step = "tools"
+        return
     settle_plan(interview)
     plan = ""
     for attempt in range(2):
@@ -2495,6 +2543,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
+    _offer_test_client(interview)
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
@@ -2555,6 +2604,250 @@ def finish(interview: Interview) -> None:
         logger.warning("setup skipped %d job descriptions", skipped)
     interview.answers.how_we_help = "\n".join(included) or None
     interview.step = "tools"
+
+
+# The test client -------------------------------------------------------------------------------------------------
+
+# A phone number as the kernel keeps one on record: digits, brackets, dots, dashes and a leading "+", with single spaces
+# only before a digit or a bracket, so a number never runs on into the words or hours after it.
+_TYPED_PHONE = re.compile(r"(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)")
+# A phone's last group of one or two digits after a longer group, which is the start of something else ("… 0142 9").
+_TRAILING_GROUP = re.compile(r"(.*\d{3})[\s(]+\d{1,2}")
+# Hours and times, which are never part of a phone: a range ("9-5", "9 to 5", "8.00-17.00", "9am-5pm", "9 a 5"), a
+# time ("9am", "17:00") and "24/7".
+_HOUR = r"(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?"
+_TIMES = re.compile(rf"(?<![\w.+-])(?:{_HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*{_HOUR}"
+                    r"|24\s*/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)"
+                    r"(?![\w-]|[.:]\d)", re.IGNORECASE)
+CONTACT_ON_RECORD_MAX = 120        # the most characters the kernel keeps for a contact on record
+# A contact answer's sentences end at ".", ";", "!", "?" or a new line (a dot inside an address doesn't end one).
+_SENTENCE_END = re.compile(r"[;!?\n]|\.(?=\s|$)")
+# The words just before a contact, in its clause, that tell whose it is: one the owner rejects, one they mark as their
+# own, and one of another person's (by role; a name is checked against the owner's own, `_contact_names`).
+_REJECTED = re.compile(r"\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b")
+_OWNERS = re.compile(r"\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|"
+                     r"mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|"
+                     r"mi celular|el mío|el mio)\b")
+_SOMEONE_ELSE = re.compile(r"\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|"
+                           r"daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|"
+                           r"recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b")
+# A name just before a contact ("Ana at …", "Maria: …"), a possessive name ("Ana's email is …"), and the capitalized
+# words that are never a person's name.
+_NAMED = re.compile(r"([^\W\d_][^\W\d_'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$")
+_POSSESSIVE = re.compile(r"([^\W\d_][^\W\d_-]*)'s\b")
+_NOT_NAMES = _CONTACT_LABEL_WORDS | frozenset({
+    "my", "me", "contact", "contacts", "customers", "clients", "reach", "use", "write", "message", "us", "our", "the",
+    "for", "please", "bookings", "booking", "sales", "orders", "support", "info", "hello", "emergencies", "emergency",
+    "urgent", "after", "hours", "business", "ask", "just", "then", "otherwise", "also", "contacto", "clientes",
+    "cliente", "escríbeme", "llámame", "llama", "escribe", "reservas", "urgencias", "para", "por", "favor", "mi",
+})
+
+
+@dataclass
+class _Contact:
+    """A contact the owner typed, with what its clauses said about it across their answers."""
+
+    value: str
+    email: bool
+    rejected: bool = False
+    someone_elses: bool = False
+    marked: bool = False
+
+
+def _contact_names(interview: Interview) -> tuple[frozenset[str], frozenset[str]]:
+    """The owner's name's words, and the words that are no other person's name: labels and the business's name."""
+    def words(text: str | None) -> frozenset[str]:
+        return frozenset(re.findall(r"[^\W\d_]+", (text or "").casefold()))
+    return words(interview.answers.owner_display_name), _NOT_NAMES | words(interview.answers.business_name)
+
+
+def _contacts_in(text: str) -> list[tuple[int, int, str, bool]]:
+    """Each email address and phone number in `text`, in order: (start, end, as written, whether an email). A phone is
+    one number of 7 to 15 digits, outside any web address and without the hours or times beside it."""
+    found = []
+    for match in _CONTACT_ADDRESS.finditer(text):
+        address = match.group().rstrip(".,;:!?)]}")
+        if "@" in address and "/" not in address and len(address) <= CONTACT_ON_RECORD_MAX:
+            found.append((match.start(), match.start() + len(address), address, True))
+
+    def blank(match: re.Match[str]) -> str:
+        return " " * len(match.group())
+
+    rest = _TIMES.sub(blank, _CONTACT_DOMAIN.sub(blank, _CONTACT_ADDRESS.sub(blank, text)))
+    for match in _TYPED_PHONE.finditer(rest):
+        phone = match.group()
+        if (shorter := _TRAILING_GROUP.fullmatch(phone)) is not None:
+            phone = shorter.group(1)
+        phone = phone.rstrip(" (.-")
+        if 7 <= len(re.sub(r"\D", "", phone)) <= 15:
+            found.append((match.start(), match.start() + len(phone), phone, False))
+    return sorted(found)
+
+
+def _whose(words: str, owner_words: frozenset[str], not_names: frozenset[str]) -> str | None:
+    """What the words before a contact say about whose it is, by the marker closest to it: "owner" for the owner's own
+    ("my email", "reach me", "mi correo", their own name in front or as a possessive …), "rejected" for one they reject
+    ("not", "no longer", "old", "instead of", "ya no" …), "other" for another person's (a role such as "my assistant",
+    or another name in front, "Ana at …", "Ana: …", or as a possessive, "Ana's email is …"); None when they say
+    nothing of it."""
+    folded = words.casefold()
+    closest: dict[str, int] = {}
+
+    def note(kind: str, at: int) -> None:
+        closest[kind] = max(closest.get(kind, -1), at)
+
+    for pattern, kind in ((_REJECTED, "rejected"), (_OWNERS, "owner"), (_SOMEONE_ELSE, "other")):
+        for match in pattern.finditer(folded):
+            note(kind, match.end())
+    names = [(match.group(1), match.end()) for match in _POSSESSIVE.finditer(words)]
+    if (named := _NAMED.search(words)) is not None:
+        names.append((named.group(1), named.end()))
+    for name, at in names:
+        if not name[0].isupper():
+            continue
+        if name.casefold() in owner_words:
+            note("owner", at)
+        elif name.casefold() not in not_names:
+            note("other", at)
+    return max(closest, key=lambda kind: closest[kind]) if closest else None
+
+
+def _owner_contact(interview: Interview) -> str | None:
+    """The contact the owner gave as theirs, from their own answers to the contact question
+    (`contact_and_after_hours`): never the public contact the turn's model wrote, which the website or memory may have
+    suggested, and never one typed on another question. Of every email and phone they typed there (`_contacts_in`),
+    one they reject or give as another person's (`_whose`) never counts, and that carries on to every contact after it
+    in its sentence ("Do not use a@… or b@…", "my assistant Ana at 510-… or ana@…") until the owner marks one as their
+    own. Of the rest, those they mark as their own come first: the one email among them, else the one phone. Two
+    emails, or two phones with no email, that nothing tells apart make no contact, so no offer."""
+    owner_words, not_names = _contact_names(interview)
+    contacts: dict[str, _Contact] = {}
+    asked: str | None = None
+    for entry in interview.transcript:
+        if entry.role == "claude" and (entry.question is not None or entry.card is not None):
+            asked = entry.question
+            continue
+        if entry.role != "owner" or asked != "contact_and_after_hours":
+            continue
+        text = entry.text.replace("\u2019", "'")
+        sentence_ends = [match.end() for match in _SENTENCE_END.finditer(text)]
+        sentence, carried, previous = -1, None, 0
+        for start, end, value, email in _contacts_in(text):
+            begins = max([0, *(stop for stop in sentence_ends if stop <= start)])
+            if begins != sentence:
+                sentence, carried, previous = begins, None, begins
+            said = _whose(text[previous:start], owner_words, not_names)
+            previous = end
+            if said is not None:
+                carried = None if said == "owner" else said
+            key = value.casefold() if email else re.sub(r"\D", "", value)
+            contact = contacts.setdefault(key, _Contact(value=value, email=email))
+            contact.value = value
+            if carried == "rejected":
+                contact.rejected = True
+            elif carried == "other":
+                contact.someone_elses = True
+            elif said == "owner":
+                contact.marked = True
+    kept = [contact for contact in contacts.values() if not contact.rejected and not contact.someone_elses]
+    pool = [contact for contact in kept if contact.marked] or kept
+    emails = [contact.value for contact in pool if contact.email]
+    phones = [contact.value for contact in pool if not contact.email]
+    if emails:
+        return emails[0] if len(emails) == 1 else None
+    return phones[0] if len(phones) == 1 else None
+
+
+def _ask_test_client(interview: Interview) -> None:
+    """The test-client offer, with code's two choices, as the question setup waits on."""
+    interview.transcript.append(Entry(role="claude", text=TEST_CLIENT_OFFER, question=TEST_CLIENT, choices=[
+        Choice(text=TEST_CLIENT_YES, recommended=True), Choice(text=TEST_CLIENT_NO, recommended=False)]))
+    interview.step = "questions"
+
+
+def _offer_test_client(interview: Interview) -> None:
+    """Once the plan is closed, offer once to put the owner on record as a test client, only when they typed their own
+    contact (`_owner_contact`). Setup then waits on the answer (`_answer_test_client`) before its Tools step."""
+    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
+        return
+    _ask_test_client(interview)
+
+
+def _reads_yes(text: str) -> bool | None:
+    """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
+    says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
+    if I say yes?" are neither); else False when it has a "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and
+    "don't add me" are no); else True when it has a "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client"
+    and "Sure, go ahead" are yes); else None."""
+    if TEST_CLIENT_UNCLEAR.search(text) or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text)):
+        return None
+    said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
+        return False
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_YES):
+        return True
+    return None
+
+
+def _answer_test_client(interview: Interview, said: Entry) -> None:
+    """The owner's answer to the test-client offer (`said`), read by code with no model call (`_reads_yes`). An answer
+    that is neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. A yes,
+    with a contact the owner typed (`_owner_contact`), is marked on their answer, which the turn saves before anyone
+    is put on record (`_put_test_client`, after the save); a no writes nothing and adds no line."""
+    answer = _reads_yes(said.text)
+    if answer is None:
+        _ask_test_client(interview)
+        return
+    if answer and _owner_contact(interview) is not None:
+        said.test_client = "yes"
+    interview.step = "tools"
+
+
+def _record_test_client(interview: Interview) -> bool:
+    """Mark the owner's saved yes as done, with `TEST_CLIENT_ADDED` right after it; False when no yes waits on it."""
+    entries = interview.transcript
+    index = next((index for index in range(len(entries) - 1, -1, -1) if entries[index].test_client == "yes"), None)
+    if index is None:
+        return False
+    entries[index].test_client = "added"
+    entries.insert(index + 1, Entry(role="claude", text=TEST_CLIENT_ADDED))
+    return True
+
+
+async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """After the owner's yes to the test-client offer is saved, put them on record as a client
+    (`PUT /desks/{id}/people`, ref `TEST_CLIENT_REF`, which makes a repeat the same person), in their display name and
+    with the contact they typed (`_owner_contact`), then save `TEST_CLIENT_ADDED` (`_record_test_client`), retrying
+    once on a conflict. It is a person on record and nothing else: no limit, rule, fact, document or public line.
+    Nothing runs once the yes is marked done, and a failure never stops setup: it is logged by type, never with the
+    contact, and Claude says nothing."""
+    contact = _owner_contact(interview)
+    if contact is None or not any(entry.test_client == "yes" for entry in interview.transcript):
+        return
+    try:
+        desk_id = owner.desk(interview.desk_id)
+        business = await _business(owner, desk_id)
+        await owner.kernel.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=[PersonUpsert(
+            ref=TEST_CLIENT_REF, display_name=business["owner_display_name"], contact=contact)]),
+            path={"id": desk_id})
+    except Exception as failed:
+        logger.warning("setup couldn't add the owner as a test client (%s)", type(failed).__name__)
+        return
+    for attempt in range(2):
+        try:
+            current = await _read(engine, owner, interview.interview_id)
+            seen = _stored(current)
+            current.business_tools_enabled = interview.business_tools_enabled
+            if not _record_test_client(current):
+                return
+            await _commit(engine, owner, current, seen)
+        except Exception as failed:
+            if isinstance(failed, ApiProblem) and failed.status == 409 and failed.error == "conflict" and attempt == 0:
+                continue
+            logger.warning("setup couldn't save that the owner is a test client (%s)", type(failed).__name__)
+            return
+        _record_test_client(interview)
+        return
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
@@ -2644,12 +2937,15 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if not business_tools_enabled:
             _clear_configs(interview)
         await close_setup(ctx, engine, model, interview)
-        connect = _claim_connector_connect(interview)
+        # With the test-client offer waiting, the Tools step and its post-finish work wait for its answer (`answer`).
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
-        await after_finish(ctx, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],

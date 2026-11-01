@@ -104,7 +104,6 @@ export interface SessionRecord {
   /** The last turn's language; a follow-up after an answer uses it. */
   language: Language;
   lastActivity: number;
-  lastVisitorText: string | null;
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
@@ -210,7 +209,6 @@ export interface DecisionRecord {
   approved?: Decision | null;
   deskId: string;
   createdAt: number;
-  fromTheVisitor: string | null;
 }
 
 /** An open or done handoff. What its visitor wrote is read from its chat on every read, as the API does. */
@@ -408,7 +406,6 @@ export class MockWorld {
       displayName: opts.agent ?? null,
       language: 'en',
       lastActivity: this.now(),
-      lastVisitorText: null,
       items: [],
       events: [],
       listeners: new Set(),
@@ -454,7 +451,6 @@ export class MockWorld {
   /** The visitor's message: it takes the place of their typing, and their next keystroke counts at once. */
   visitorText(session: SessionRecord, text: string): void {
     this.addItem(session, 'visitor_text', text, null);
-    session.lastVisitorText = text;
     session.language = turnLanguage(text);
     session.lastActivity = this.now();
     session.typingUntil = null;
@@ -467,7 +463,6 @@ export class MockWorld {
    */
   agentText(session: SessionRecord, text: string): void {
     this.addItem(session, 'agent_text', text, null);
-    session.lastVisitorText = text;
     session.lastActivity = this.now();
   }
 
@@ -645,7 +640,6 @@ export class MockWorld {
       decision,
       deskId: desk.summary.desk_id,
       createdAt: this.now(),
-      fromTheVisitor: session.lastVisitorText,
     });
     return decision;
   }
