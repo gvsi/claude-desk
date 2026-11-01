@@ -4,10 +4,9 @@ A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent thi
 tasks on the Desk (`DEMO_TASKS`): book, pay up front within its spending limit, or ask for a charge above that limit.
 Each task is a fixed line from the Desk's set (plan 09, C2): code picks it by the business type setup stored for the
 Desk, or Rivera's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
-landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. Its system
-prompt (`VISITING_AGENT_SYSTEM`) holds fixed answers to what a Desk asks before it books: a reserved example email for
-Alex Kim and, for the town, the first place the Desk itself says it serves. The kernel mints the agent for the
-visitor's session (`POST /agents/demo`): an Ed25519 key and a spending limit (a mandate) its demo wallet signs.
+landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. The kernel
+mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key and a spending limit (a mandate) its
+demo wallet signs.
 
 The agent talks to the Desk as another person's agent would: as a separate client of the public A2A endpoint
 (`settings.a2a_loopback`), signing each request with its key, so the kernel checks every signature, binds every
