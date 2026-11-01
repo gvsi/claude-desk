@@ -6,7 +6,7 @@ The demo business is Rivera Plumbing. You play Maria Rivera, its owner, while Cl
 
 ## Try it
 
-[owner: the hosted URL, after the first deploy]
+[desk.alcantara.xyz](https://desk.alcantara.xyz)
 
 The passcode comes with the link. Each visitor gets a fresh copy of the Rivera Plumbing demo, tied to a browser cookie, with no account to create.
 
@@ -69,7 +69,7 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 |---|---|
 | Baseline violations in the attack suite | [measured: held-out attack suite] |
 | Legitimate tasks completed | [measured: held-out legitimate-task suite] |
-| Legitimate requests held for the owner | [measured: held-out legitimate-task suite] |
+| Legitimate requests held for the owner when the rules allowed them | [measured: held-out legitimate-task suite] |
 | From Claude's finished reply to the visitor seeing it, p50 and p95 | [measured: check-then-reveal latency] |
 | Model cost per conversation | [measured: cost per conversation] |
 
