@@ -119,7 +119,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = ['setupPublicLines', 'setupPublicLine', 'setupPublicLinesConfirm'] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
@@ -129,10 +129,7 @@ export const NOT_YET_SERVED = ['setupPublicLines', 'setupPublicLine', 'setupPubl
  * forever. Each entry must be served and called by no route.
  */
 export const NEVER_CALLED = [
-  // Called by board 14's setup web (plan 09), which adds these routes.
-  'GET /api/owner/setup/{id}/public_lines',
-  'PUT /api/owner/setup/{id}/public_lines',
-  'POST /api/owner/setup/{id}/public_lines/confirm',
+  // Called by the suggested group on board 14's setup web (plan 09), which adds these routes.
   'DELETE /api/owner/setup/{id}/public_lines/{key}',
   'DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}',
   // Served for other callers: the document link a visitor opens, and a visiting agent's turn.
