@@ -251,7 +251,7 @@ async def test_the_opening_shows_no_cards_and_keeps_the_plan_hidden(
     from desk.api.prompts import SETUP_UNDERSTAND_SYSTEM
     request = model.requests[-1]
     assert request.system == [{"type": "text", "text": SETUP_UNDERSTAND_SYSTEM}]
-    assert request.effort == "medium" and request.max_tokens == 4096 and request.timeout_s == 90.0
+    assert request.effort == "medium" and request.max_tokens == 8192 and request.timeout_s == 60.0
     text = turn_text(model)
     assert f"<owner_description>{html.escape(DESCRIPTION, quote=False)}</owner_description>" in text
     record = await stored(engine, state["interview_id"])
@@ -286,7 +286,7 @@ async def test_a_job_card_carries_who_it_is_for(app, browser, kernel_http, model
     if len(who) > 60:
         errors = model.requests[-1].messages[-1]["content"][0]["text"]
         assert "jobs.0.who" in errors and "max_length=60" in errors and who not in errors
-        assert [card.job.job for card in interview.planned] == ["schedule"]
+        assert [card.job.job for card in interview.planned if card.job] == ["schedule"]
         return
     proposal_id = interview.planned[0].proposal_id
     assert interview.planned[0].job.who == who
@@ -460,6 +460,9 @@ async def test_a_turn_can_add_a_job_to_the_plan(
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "hours_and_area"  # available only from the next turn
     row = await stored(engine, interview_id)
+    if not business_tools_enabled:
+        assert not any(entry.get("planned") for entry in row["transcript"])
+        return
     card = next(card for entry in row["transcript"] for card in entry.get("planned", []))
     assert card["proposal_id"] == proposal_id and card["job"]["can_do_today"] is True
     assert card["job"]["who"] == draft["who"]
@@ -476,6 +479,7 @@ async def test_a_turn_can_add_a_job_to_the_plan(
 async def test_a_dropped_draft_gets_one_retry_with_its_errors(
     app, browser, kernel_http, model, engine, where, retry,
 ):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
@@ -796,7 +800,7 @@ async def test_cards_take_capabilities_and_never_an_amount(
     cards = [card for entry in (await stored(engine, state["interview_id"]))["transcript"]
              for card in entry.get("planned", [])]
     jobs = [card["job"] for card in cards if card["job"]]
-    assert [job["can_do_today"] for job in jobs] == [False, True, True]
+    assert [job["can_do_today"] for job in jobs] == ([False, True, True] if business_tools_enabled else [False, True])
     if business_tools_enabled:
         assert jobs[-1]["config"] == {"block": "purpose_payment", "purpose": "Retainer", "amount_cents": None}
     else:
@@ -3430,3 +3434,156 @@ async def test_a_card_reply_is_dropped_when_added_work_leads_to_a_limit(
     assert row["transcript"][-1]["text"] == question_text("money_limit", "trade")
     assert next(entry["card"] for entry in row["transcript"]
                 if entry.get("card", {}).get("proposal_id") == proposal_id)["state"] == "accepted"
+
+
+def runtime_interview():
+    return desk_setup.Interview(
+        interview_id="test", copy_id="copy", desk_id="desk", business_type="trade",
+        step="questions", consent=False, answers=SetupAnswers(summary="Plumbing"),
+        transcript=[desk_setup.Entry(role="owner", text=DESCRIPTION)])
+
+
+async def test_the_understanding_retry_is_skipped_near_the_deadline(monkeypatch):
+    interview = runtime_interview()
+    interview.turn_deadline = asyncio.get_running_loop().time() + 14
+    bad = {**understanding()["jobs"][0], "title": "x" * 61}
+    model = ScriptedModel([unparsed(understanding(jobs=[bad, understanding()["jobs"][1]]))])
+
+    async def record(response):
+        pass
+
+    monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+    await desk_setup._after_consent(None, None, model, interview, [])
+    assert len(model.requests) == 1
+    assert [card.job.job for card in interview.planned if card.job] == ["schedule"]
+    assert interview.question == "hours_and_area"
+
+
+@pytest.mark.parametrize("remaining", [35, 100])
+@pytest.mark.parametrize("retry_remaining", [18, 28])
+async def test_each_understanding_attempt_fits_the_time_left(monkeypatch, remaining, retry_remaining):
+    interview = runtime_interview()
+    loop = asyncio.get_running_loop()
+    interview.turn_deadline = loop.time() + remaining
+    bad = {**understanding()["jobs"][0], "title": "x" * 61}
+
+    def first(request):
+        assert 0 < request.timeout_s <= min(60, remaining - 10)
+        interview.turn_deadline = loop.time() + retry_remaining
+        return unparsed(understanding(jobs=[bad]))
+
+    model = ScriptedModel([first, unparsed(understanding())])
+
+    async def record(response):
+        pass
+
+    monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+    await desk_setup._after_consent(None, None, model, interview, [])
+    assert len(model.requests) == 2
+    assert retry_remaining - 11 < model.requests[-1].timeout_s <= retry_remaining - 10
+    assert all(request.max_tokens == 8192 for request in model.requests)
+    assert "turn_deadline" not in desk_setup._stored(interview)
+
+
+async def test_no_deadline_uses_the_fixed_bound(monkeypatch):
+    interview = runtime_interview()
+    model = ScriptedModel([unparsed({}), unparsed(understanding())])
+
+    async def record(response):
+        pass
+
+    monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+    await desk_setup._after_consent(None, None, model, interview, [])
+    assert [request.timeout_s for request in model.requests] == [60, 60]
+
+
+@pytest.mark.parametrize("where", ["understanding", "add_jobs", "revision"])
+async def test_no_payment_job_is_planned_while_business_tools_are_off(
+    monkeypatch, where, caplog,
+):
+    from desk.api.prompts import SetupNextStep
+    interview = runtime_interview()
+    draft = {**understanding()["jobs"][0], "job": "payment", "title": "Private deposit",
+             "config": {"block": "purpose_payment", "purpose": "Private purpose"}}
+    if where == "understanding":
+        model = ScriptedModel([unparsed(understanding(jobs=[draft]))])
+
+        async def record(response):
+            pass
+
+        monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+        await desk_setup._after_consent(None, None, model, interview, [])
+    elif where == "add_jobs":
+        source = SetupNextStep(reply="", next=next_ask("done"), question="", choices=[],
+                               skip=[], drop=[], add_jobs=[draft], plan="")
+        entry = desk_setup.Entry(role="claude", text="")
+        interview.transcript.append(entry)
+        desk_setup._record_plan(interview, source, entry)
+    else:
+        from desk.api.prompts import JobDraft, SetupCardAnswer
+        card = desk_setup._planned_job(interview, JobDraft(**understanding()["jobs"][0]))
+        interview.transcript.append(desk_setup.Entry(role="claude", text="", card=card))
+        following = SetupCardAnswer(reply="Change it.", decision="change", revised=[draft],
+                                    next=next_ask("done"), question="Payments?", choices=[],
+                                    skip=[], drop=[], add_jobs=[], plan="")
+
+        async def next_step(*args, **kwargs):
+            return following
+
+        monkeypatch.setattr(desk_setup, "_next_step", next_step)
+        await desk_setup.card_turn(None, None, None, interview, card.proposal_id, text="Change it.")
+        assert interview.pending_card == card.proposal_id
+        assert card.state == "proposed"
+    assert not any(card.job and card.job.job == "payment" for card in interview.planned)
+    assert "payment" in caplog.text
+    assert "Private deposit" not in caplog.text and "Private purpose" not in caplog.text
+
+
+def test_payment_jobs_are_planned_once_business_tools_are_on():
+    from desk.api.prompts import JobDraft
+    interview = runtime_interview()
+    interview.business_tools_enabled = True
+    card = desk_setup._planned_job(interview, JobDraft(
+        **{**understanding()["jobs"][0], "job": "payment",
+           "config": {"block": "purpose_payment", "purpose": "Deposit"}}))
+    assert card.job.job == "payment"
+    assert card.job.config.purpose == "Deposit" and card.job.config.amount_cents is None
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("kind", ["question", "card"])
+async def test_a_turn_reads_the_setting_from_the_route(
+    app, browser, kernel_http, model, engine, monkeypatch, enabled, kind,
+):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
+    original = desk_setup.run_turn
+    seen = []
+
+    async def run_turn(*args, turn, **kwargs):
+        async def fresh(ctx, interview, staged):
+            # Simulate the runner handing the callback a fresh runtime setting.
+            interview.business_tools_enabled = not enabled
+            await turn(ctx, interview, staged)
+            seen.append(interview.business_tools_enabled)
+        return await original(*args, turn=fresh, **kwargs)
+
+    monkeypatch.setattr(desk_setup, "run_turn", run_turn)
+    draft = {**understanding()["jobs"][0], "job": "payment",
+             "config": {"block": "purpose_payment", "purpose": "Deposit"}}
+    if kind == "card":
+        model.add(card_answer("change", revised=[draft], question="Deposit?"))
+        body = {"card": proposal_id, "text": "Make it a deposit."}
+    else:
+        async with engine.begin() as conn:
+            interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+            interview.transcript.append(desk_setup._ask(interview, "what_you_do"))
+            await desk_setup._save(conn, interview)
+        model.add(turn(step_done=False, add_jobs=[draft]))
+        body = {"question": "what_you_do", "text": "Deposits."}
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1", json=body)
+    assert response.status_code == 200, response.text
+    assert seen == [enabled]
+    row = await stored(engine, interview_id)
+    planned = [card for entry in row["transcript"] for card in entry.get("planned", [])]
+    assert any(card["job"] and card["job"]["job"] == "payment" for card in planned) is enabled
