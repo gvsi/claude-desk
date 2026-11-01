@@ -95,6 +95,34 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
+  it('takes_typing_while_the_answer_streams_and_sends_it_once_the_answer_ends', async () => {
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+    const { panel } = await ask(viewport);
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    // The panel's composer has focus as the answer streams, and keeps it: typing works, Send waits.
+    const box = panel.getByRole('textbox', { name: 'Ask Claude' });
+    const send = panel.getByRole('button', { name: 'Send', exact: true });
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toBeEnabled();
+    await userEvent.keyboard('And on holidays?');
+    await expect.element(box).toHaveValue('And on holidays?');
+    await expect.element(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('And on holidays?');
+    expect(requests('ruleChat')).toHaveLength(1);
+
+    held.release();
+    await finalAnswer(panel, 'Nothing changes until you confirm it.');
+    // The answer has come in: the words typed meanwhile are still there, with focus, and they send.
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('And on holidays?');
+    await expect.element(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('ruleChat')).toHaveLength(2);
+    await expect.element(box).toHaveValue('');
+  });
+
   it('keeps_the_writing_dots_until_a_word_is_whole', async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 1, until: held.until });
