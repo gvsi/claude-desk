@@ -11,7 +11,7 @@ Every command here that creates or changes anything in AWS runs only with the ow
 **Sign-off:** the owner's go for the deploy, CI green on the commit, and a clean preflight. `deploy.sh` runs `infra/scripts/preflight.py` first, which stops the deploy before any change unless:
 
 - the working tree is clean and `HEAD` is on `origin/main` (`--allow-branch` skips only the second check);
-- `make evals-results-check` passes against the repository's first commit, so `HEAD`'s own tier 2 results file must exist and pass. Until the API's tier 2 scenarios are marked landed (`evals/tier1/landed.toml`), that file holds no runs: a deploy is then gated by tier 1 in CI and the run-free file;
+- `make evals-results-check` passes against the first commit: while every tier 2 scenario is pending, no results file is needed; once any can run, `HEAD`'s own results file must exist and pass;
 - both owner secrets are set (below);
 - the web app builds and checks at `HEAD` (`npm ci`, `npm run build`, `npm run check:build` in `web/`).
 
@@ -100,7 +100,7 @@ A deploy migrates the database before any new task starts, and during the deploy
 
 Express rolls a failed deployment back to the running tasks by itself.
 
-To go back to an earlier release, redeploying its commit works only when no migration has shipped since. Check with `git log --oneline <commit>..origin/main -- backend/alembic/versions/`, which prints nothing in that case. Then check out that commit from `main` (it must have its own passing tier 2 results file) and run `deploy.sh` again.
+To go back to an earlier release, redeploying its commit works only when no migration has shipped since. Check with `git log --oneline <commit>..origin/main -- backend/alembic/versions/`, which prints nothing in that case. Then check out that commit from `main` (its preflight runs that commit's tier 2 results check: once any scenario can run, it needs its own passing results file) and run `deploy.sh` again.
 
 If it prints a commit, roll forward instead, since that migration may already have run. Migrations are never reversed, and every deploy runs the admin task, which migrates the database to the code's latest revision. When the database is at a revision the earlier commit doesn't have, the admin task stops that deploy before `DeskApp` with `Can't locate revision identified by '<revision>'`. Make a commit on `main` that reverts the code but keeps every migration file, and deploy it through the usual preflight and `deploy.sh`. The rule under Migrations (each one works with the previous release's code) is what lets the reverted code run on the migrated database, so it covers going back to the release just before the migration, no further.
 

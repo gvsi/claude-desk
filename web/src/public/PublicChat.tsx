@@ -23,8 +23,10 @@ import {
   PUBLIC_SHELL_SCROLLER_EVENT,
   PersonMessage,
   PublicShell,
+  PublicShellSkeleton,
   RATE_LIMITED_COPY,
   SystemLine,
+  SkeletonScreen,
   Transcript,
   TranscriptRow,
   UNREACHABLE_COPY,
@@ -455,9 +457,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const [language] = useState(browserLanguage);
   const copy = PUBLIC_COPY[language];
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
+  // The first session/history read shapes the opening view too. Keep the shell's first header
+  // (including the served hours) together with that view rather than landing it in stages.
+  const opening =
+    (desk === null || (chat.session === null && chat.status === 'loading')) &&
+    chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const newest = useNewestInView(endRef, composerRef, desk !== null, conversationStarted(chat.state, chat.status));
+  const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.
@@ -490,7 +497,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
 
   // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
   // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
-  const drawn = chat.status !== 'not_found' && desk !== null;
+  const drawn = !opening && chat.status !== 'not_found' && desk !== null;
   const { shown } = chat;
   useEffect(() => {
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
@@ -519,32 +526,44 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     fillComposer(box, words.text, { focus: words.focus === 'always' || free });
   }, [ready]);
 
+  const present = (children?: ReactNode) => (
+    <>
+      {opening && !embedded ? (
+        <main className="cd-sr-only"><h1>Claude Desk</h1></main>
+      ) : null}
+      <SkeletonScreen
+        loading={opening}
+        status={copy.opening}
+        lang={language}
+        skeleton={<PublicShellSkeleton language={language} footer={!embedded} />}
+        className={`cd-public-chat-screen${embedded ? ' cd-public-chat-screen--embedded' : ''}`}
+      >
+        {children}
+      </SkeletonScreen>
+    </>
+  );
+
   if (chat.status === 'not_found') {
-    return (
+    return present(
       <PublicState embedded={embedded} language={language}>
         <EmptyState title={copy.deskUnavailableTitle} body={copy.deskUnavailableBody} />
       </PublicState>
     );
   }
+  if (opening) return present();
   if (desk === null) {
-    return (
+    return present(
       <PublicState embedded={embedded} language={language}>
-        {chat.status === 'unavailable' ? (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" onClick={chat.retry}>
-                {copy.tryAgain}
-              </Button>
-            }
-          >
-            {UNREACHABLE_COPY[language]}
-          </Notice>
-        ) : (
-          <p className="cd-public-state__opening cd-type-meta" role="status">
-            {copy.opening}
-          </p>
-        )}
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" onClick={chat.retry}>
+              {copy.tryAgain}
+            </Button>
+          }
+        >
+          {UNREACHABLE_COPY[language]}
+        </Notice>
       </PublicState>
     );
   }
@@ -656,7 +675,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // The code the chat asked for hasn't been confirmed yet: the inbox is where it arrives.
   const awaitingCode = verifyRow !== null && !verified;
   const inboxColumn = inboxPlacement === 'column' && inboxShown(inbox, awaitingCode);
-  return (
+  return present(
     // One wrapper whatever the inbox does, so the shell (and what is typed in it) never remounts.
     <div className={`cd-public-chat-page${inboxColumn ? ' cd-public-chat-page--with-inbox' : ''}`}>
       <PublicShell

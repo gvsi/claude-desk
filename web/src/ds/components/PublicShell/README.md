@@ -159,3 +159,28 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
 `PublicBrand`, `PublicOpenStatus`, `PUBLIC_SHELL_SCROLLER_EVENT` and `PublicShellScrollerDetail` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.
+
+## While the page opens
+
+`PublicShellSkeleton({ language, footer })` and `PublicBrandHeaderSkeleton({ hours })` are exported
+alongside the shell. Put them in a `SkeletonScreen`, which owns the 200 ms wait, one synced sweep,
+hidden status and 120 ms fade. They draw no content or controls; the real `ConceptFooter poweredBy`
+is the shell skeleton's only text when `footer` is true. The consumer keeps a hidden heading and
+main landmark outside the layer on a standalone loading page.
+
+The brand shape uses `bg-panel` until the business's colours arrive, its real monogram size and
+name/tagline line boxes, and one open-hours line when `hours` is true. It follows the header's own
+container rules: the status wraps below the name under 640 px. A fresh copy's open header matches;
+at 390 px, closed and no-hours headers change height once (19 px taller and 16 px shorter).
+The agents page passes `hours={false}` because its real header has no hours.
+
+The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
+windows and embedded panels. It draws the real fresh copy's five charter cards and two agents
+links: beside the chat from 900 px, and opening the conversation's scroll region below that,
+as the current page does. Greeting and starter chips are left out until those ship. In setup's
+fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn. Text that
+depends on other Desk data can change size once when it arrives.
+
+The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
+at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
+(`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.

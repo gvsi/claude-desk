@@ -6,7 +6,7 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type KnowledgeItem, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -35,14 +35,28 @@ import {
   needsYou,
   ownerTranscript,
   paymentLinkOut,
+  knowledgeList,
   peopleOut,
   publicDesk,
+  REPORT_DAYS,
   reports,
   rulesView,
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { EVENT_GAP_MS, afterAnswer, afterVerify, allows, cardDiffFor, ruleChatReply, scriptedTurn, turnEnd, type Language, type Step } from './script.ts';
+import {
+  EVENT_GAP_MS,
+  PAUSED_TURN,
+  afterAnswer,
+  afterVerify,
+  allows,
+  cardDiffFor,
+  ruleChatReply,
+  scriptedTurn,
+  turnEnd,
+  type Language,
+  type Step,
+} from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
 import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
@@ -57,6 +71,21 @@ const DEMO_CODE_SHAPE = /^\d{6}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import']);
+
+/** A `KnowledgeItem` as the contracts have it: an id, a known source, a title, a text and readers. */
+function isKnowledgeItem(value: unknown): value is KnowledgeItem {
+  if (!isRecord(value) || !isRecord(value.label)) return false;
+  const { readers } = value.label;
+  return (
+    typeof value.item_id === 'string' &&
+    KNOWLEDGE_SOURCES.has(value.source) &&
+    typeof value.title === 'string' &&
+    typeof value.text === 'string' &&
+    (readers === undefined || (Array.isArray(readers) && readers.every((reader) => typeof reader === 'string')))
+  );
+}
 
 /**
  * The cookies a request carries, as the API reads who is asking from them, and the ones its answer
@@ -457,7 +486,12 @@ const SERVED: ServedRoutes = {
   },
   reports(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(reports(sv.world, desk));
+    if (isFailure(desk)) return desk;
+    // `days`: whole local dates, 1 to 365, as the API takes them; anything else is refused.
+    const asked = req.query.get('days');
+    const days = asked === null ? REPORT_DAYS.default : /^\d+$/.test(asked) ? Number(asked) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > REPORT_DAYS.max) return INVALID;
+    return ok(reports(sv.world, desk, days));
   },
   answer(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
@@ -641,6 +675,38 @@ const SERVED: ServedRoutes = {
     const record = /^\d{1,9}$/.test(version) ? desk.drafts.get(Number(version)) : undefined;
     return record ? ok(record.draft) : NOT_FOUND;
   },
+  addKnowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const item = isRecord(req.body) ? req.body.item : undefined;
+    if (req.malformed || !isKnowledgeItem(item)) return INVALID;
+    if (item.item_id.length === 0 || item.item_id.length > 64 || /[^A-Za-z0-9_-]/.test(item.item_id)) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([item.title, item.text].some((text) => /\p{Surrogate}/u.test(text))) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.title.includes('\0') || item.text.includes('\0')) return failWith(422, 'kernel', { code: 'invalid' });
+    if (new TextEncoder().encode(item.text).length > 100 * 1024) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([...item.title].length > 200) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.label.record_owner != null) return failWith(422, 'kernel', { code: 'invalid' });
+    const readersAsked = item.label.readers ?? ['owner'];
+    if (readersAsked.length !== 1 || !['owner', 'public'].includes(readersAsked[0]!)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Match the kernel's knowledge label, storable text, sizes, ref and per-Desk cap.
+    // Posted again under its id, it replaces the item. The label is the one the kernel keeps, with
+    // every field, as the API's models send them (readers default to the owner's).
+    const forced = sv.world.keepsKnowledgeOwnerOnly(item);
+    const readers = forced ? ['owner'] : [...(item.label.readers ?? ['owner'])];
+    const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
+    const key = `${desk.summary.desk_id}:${item.item_id}`;
+    const previous = sv.world.knowledge.get(key);
+    if (previous === undefined && [...sv.world.knowledge.values()].filter((row) => row.deskId === desk.summary.desk_id).length >= 200) {
+      return failWith(422, 'kernel', { code: 'invalid' });
+    }
+    const createdAt = previous === undefined ? sv.world.now() : previous.createdAt;
+    sv.world.knowledge.set(key, { deskId: desk.summary.desk_id, item: stored, createdAt, forced });
+    return ok(stored);
+  },
+  knowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(knowledgeList(sv.world, desk.summary.desk_id));
+  },
   people(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(peopleOut(sv.world, desk));
@@ -697,6 +763,8 @@ const SERVED: ServedRoutes = {
     sv.world.visitorText(session, text);
     // The turn's tools are read when it starts, which may be after a turn in progress ends.
     if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
+    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {

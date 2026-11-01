@@ -4,7 +4,9 @@ import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { CAPS_BADGE } from '../../test/copy.ts';
+import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { SidebarSkeleton as SidebarShapes } from './SidebarSkeleton.tsx';
 import { Sidebar, type NavKey, type SidebarProps } from './Sidebar.tsx';
 
 const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskName };
@@ -431,4 +433,36 @@ export const AboutCurrent: Story = {
     // One current page: the main nav marks none while a document is open.
     await expect(navRows(canvasElement).filter((row) => row.link.hasAttribute('aria-current'))).toEqual([]);
   },
+};
+
+/** Compare the fresh copy's column with its shapes, using each column's own origin. */
+export const SidebarSkeleton: Story = {
+  beforeEach: loadWebFonts,
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'P12-01, UXC-P1201-After (#artboard-dec46cf506e4): the frame follows the real sidebar where the board differs.' },
+  render: (args) => (
+    <div style={{ width: '100%' }}>
+      <div data-real-sidebar style={{ display: 'flex', height: 820 }}>
+        <Sidebar {...args} desks={[MAIN_LINE]} hrefs={{ ...hrefs, connectors: undefined }} about={{ title: 'About this prototype', links: [{ id: 'proposal', label: 'Product proposal', href: '#proposal' }, { id: 'prediction', label: 'Capability prediction', href: '#prediction' }] }} />
+      </div>
+      <div data-shaped-sidebar aria-hidden="true" style={{ display: 'flex', height: 820 }}><SidebarShapes rows={7} about={2} /></div>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const real = canvasElement.querySelector<HTMLElement>('[data-real-sidebar]')!;
+    const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-sidebar]')!;
+    for (const selector of ['.cd-sidebar__brand', '.cd-sidebar__business', '.cd-sidebar__nav', '.cd-sidebar__about', '.cd-sidebar__footer', '.cd-sidebar__owner']) {
+      const a = real.querySelector(selector)!.getBoundingClientRect();
+      const b = shapes.querySelector(selector)!.getBoundingClientRect();
+      for (const [edge, delta] of [['top', real.getBoundingClientRect().top - shapes.getBoundingClientRect().top], ['left', 0], ['width', 0], ['height', 0]] as const) {
+        await expect(Math.abs(a[edge] - b[edge] - delta), `${selector} ${edge}`).toBeLessThanOrEqual(2);
+      }
+    }
+  },
+};
+
+export const SidebarSkeletonPhone: Story = {
+  ...SidebarSkeleton,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'P12-01 phone, UXC-P1201-After-Phone (#artboard-1a93c5a1f31f): the same column opens behind Menu.' },
 };

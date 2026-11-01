@@ -55,3 +55,7 @@
 | `about` | `SidebarAbout` | `{ title: string; links: { id: string; label: string; href: string; current?: boolean }[] }`. Left out, no group. |
 
 `NavKey`, `NavCount`, `SidebarHrefs`, `SidebarLinkProps`, `SidebarAbout` and `SidebarAboutLink` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share. `NAV_LABELS` holds each row's label by key (people's row is `peopleLabel`), so a page can name itself, such as its tab's title, in the sidebar's words.
+
+## Loading shapes
+
+`SidebarSkeleton({ rows, about })` draws the fresh copy's lockup, business row, page rows, About group and footer from the sidebar's own classes. The app passes seven page rows until Connectors is built and its actual About link count. It draws no words or controls; put it inside `SkeletonScreen`'s hidden, inert layer. A business with two Desks lands its picker in one accepted move. The companion stories compare the real column and shapes within 2 px at 1512 and 390.

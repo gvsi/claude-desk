@@ -122,6 +122,7 @@ async def test_a_session_closed_after_the_answers_intent_releases_nothing(app, c
 
     assert (result.decision.state, result.decision.visitor_plain) == (
         "refused_at_execution", RULES_CHANGED)
+    assert result.approved is None                    # nothing ran, so the visitor isn't shown it approved
     assert (result.execution.state, result.execution.facts, result.execution.model_view) == ("failed", [], {})
     await nothing_released(app, copy)
     [execution] = await rows_of(app, copy.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))

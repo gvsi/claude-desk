@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from datetime import date as LocalDate
 from functools import cache
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 from zoneinfo import available_timezones
 
 from fastapi.routing import APIRoute
@@ -28,6 +28,8 @@ from desk.api.prompts import (
     CARD_ID_MAX_LENGTH,
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
+    Choice,
+    ProposalCard,
     PlannedOutcome,
     DemoTask,
     QuestionKey,
@@ -59,7 +61,7 @@ from desk.contracts import (
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
-from desk.kernel_api import Health
+from desk.kernel_api import Health, ToolPin, ToolsConfirmRequest, each_tool_once
 from desk.presets import PresetName
 
 
@@ -611,27 +613,38 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
-    (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+    Naming the ask prevents a repeated answer from answering the next one."""
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey
+    question: QuestionKey | None = None
+    card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+    @model_validator(mode="after")
+    def one_ask(self) -> "SetupAnswerIn":
+        if (self.question is None) == (self.card is None):
+            raise ValueError("exactly one of question and card is required")
+        return self
 
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`)."""
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+    only to a card message, with role `claude` and empty text."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
+    choices: list[Choice] = []
+    card: ProposalCard | None = None
 
 
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
-    before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+    before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
+    conversation so far. Its messages start at Claude's consent
     question: the owner's opening description isn't shown back to them."""
 
     interview_id: str
@@ -640,6 +653,8 @@ class SetupState(BaseModel):
     step: SetupStep
     consent: bool | None
     question: QuestionKey | None
+    pending_card: str | None = None
+    busy: bool = False
     messages: list[SetupMessage]
 
 
@@ -888,6 +903,20 @@ class DraftAddIn(BaseModel):
     add: list[OwnerCard] = Field(min_length=1, max_length=OWNER_CARDS_MAX)
 
 
+class ToolsConfirmIn(BaseModel):
+    """The shared batch review body; the checked Desk ID comes from the route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: Annotated[list[ToolPin], ToolsConfirmRequest.model_fields["tools"]]
+    enable: bool
+
+    @model_validator(mode="after")
+    def _each_tool_once(self) -> Self:
+        each_tool_once(self.tools)
+        return self
+
+
 class ConfirmRulesIn(BaseModel):
     """`POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms."""
 
@@ -967,6 +996,19 @@ class SimulateChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool: ToolName
+
+
+class KnowledgeRow(BaseModel):
+    """An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+    masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+    without a timestamp. Every field is always sent."""
+
+    item_id: str
+    title: str | None
+    text: str | None
+    readers: list[str]
+    source: Literal["website", "upload", "setup", "memory_import"]
+    created_at: AwareDatetime | None
 
 
 class KnowledgeIn(BaseModel):

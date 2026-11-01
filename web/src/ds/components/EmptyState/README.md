@@ -17,7 +17,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `title` | `ReactNode` | Required; `.cd-type-section` in `text-primary`. Not a heading: the section around it has one. |
+| `title` | `ReactNode` | `.cd-type-section` in `text-primary`. Not a heading: the section around it has one. Leave it out only when a line right above already says what isn't here (Safety's empty week); then nothing holds its place. |
 | `body` | `ReactNode` | Required; `.cd-type-meta` in `text-secondary`. |
 | `action` | `ReactNode` | The next step, under the body. |
 

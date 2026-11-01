@@ -465,8 +465,11 @@ export interface TurnContext {
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
-  /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
-  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
+  /**
+   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
+   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   */
+  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
    * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
    * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
@@ -543,6 +546,12 @@ export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact
 
 /** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
 const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+
+/**
+ * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
+ * the kernel's handoff, which its check stops as paused.
+ */
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
@@ -693,7 +702,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
  * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
- * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ * Safety shows; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),

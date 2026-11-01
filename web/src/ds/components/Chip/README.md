@@ -30,3 +30,7 @@
 | `onClick` | `(event) => void` | Required. |
 
 28 px tall with a 1 px `line-control` outline, `line-control-hover` and a `fill-hover` fill on hover. The outline is decorative: the chip's words identify it.
+
+On a coarse pointer, an unseen, centred hit area reaches `size-touch` (44 px) wherever there is room. Safety's filter rows and their design boards cap both axes at half their 8 px gaps, giving one-line chips a 36 px tall target without overlapping adjacent chips or rows. Layout containment on those flex-row chips prevents added scroll; standalone inline chips keep their text baseline. Nothing visible changes.
+
+Custom layouts with closer neighbours must set `--cd-touch-reach-block` and `--cd-touch-reach-inline` to half their gaps, like `Button`. `SuggestionChips` keeps its existing row-specific hit area and scroll containment.

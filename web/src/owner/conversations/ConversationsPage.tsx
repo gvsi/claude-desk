@@ -18,6 +18,7 @@ import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
+import { useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
@@ -73,6 +74,10 @@ export function ConversationsPage() {
     queryFn: () => request('conversations', { params: { desk_id: deskId } }),
     refetchInterval: pollMs('list'),
   });
+  const needsYou = useNeedsYou(deskId);
+  // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
+  // them open, and with none yet, the rows keep their usual status.
+  const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
   const failure = useReadFailure(list);
   const now = new Date();
   const items = list.data ?? [];
@@ -109,7 +114,7 @@ export function ConversationsPage() {
               <ConversationListItem
                 name={whoLabel(s)}
                 time={formatListTime(s.last_activity, business.timezone, now)}
-                status={conversationStatus(s, s.outcome_counts.held ?? 0) ?? undefined}
+                status={conversationStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id)) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}

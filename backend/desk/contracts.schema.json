@@ -249,6 +249,17 @@
             }
           ],
           "title": "Card Diff"
+        },
+        "approved": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -456,6 +467,49 @@
         "template"
       ],
       "title": "Clause",
+      "type": "object"
+    },
+    "ContextClock": {
+      "properties": {
+        "as_of_utc": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "title": "As Of Utc",
+          "type": "string"
+        },
+        "local_now": {
+          "title": "Local Now",
+          "type": "string"
+        },
+        "local_date": {
+          "title": "Local Date",
+          "type": "string"
+        },
+        "weekday": {
+          "enum": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "title": "Weekday",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of_utc",
+        "local_now",
+        "local_date",
+        "weekday",
+        "timezone"
+      ],
+      "title": "ContextClock",
       "type": "object"
     },
     "CopyCreated": {
@@ -704,6 +758,18 @@
         "reason_plain": {
           "title": "Reason Plain",
           "type": "string"
+        },
+        "owner_plain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Plain"
         },
         "visitor_plain": {
           "title": "Visitor Plain",
@@ -3706,6 +3772,9 @@
     },
     "SessionContext": {
       "properties": {
+        "clock": {
+          "$ref": "#/$defs/ContextClock"
+        },
         "tools": {
           "items": {
             "$ref": "#/$defs/ToolProfile"
@@ -3736,6 +3805,7 @@
         }
       },
       "required": [
+        "clock",
         "tools",
         "tools_declared",
         "facts",

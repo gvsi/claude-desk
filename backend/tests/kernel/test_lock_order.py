@@ -52,6 +52,7 @@ from .test_payment_links import confirm, delay, landed, link_for, quoted, view
 from .test_payments_adapters import LIST, REFUND, person_of, provider_charges
 from .test_private_release import verified_fake_desk
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
+from .test_owner_messages import sent
 from .test_reply_check import checked
 from .test_verification import check, code_in, entry_of, started
 
@@ -562,6 +563,20 @@ async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
     # the handoff (an adapter's own row), its fact, and the close, ledgered
     assert log.transactions == [["desks", "handoffs", "facts", "ledger_heads"]]
     assert all(in_lock_order(tables[1:]) for tables in log.transactions)
+
+
+@pytest.mark.parametrize("how", ["takeover", "owner_message"])
+async def test_the_owner_handling_a_conversation_closes_its_card_handoff_in_the_lock_order(app, client, how):
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card's handoff opens
+    with lock_log(app) as log:
+        if how == "takeover":
+            await set_mode(client, copy, visitor.session_id, "owner", 0)
+        else:
+            await sent(client, copy, visitor.session_id, "Hi, this is Maria.")
+    # the session row the route holds, then the card's handoff and its fact (none), then the ledger head
+    assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
 
 
 async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):

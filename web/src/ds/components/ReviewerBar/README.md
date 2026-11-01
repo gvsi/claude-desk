@@ -20,3 +20,7 @@
 | `onStartOver` | `() => void` | Required. The ghost "Start over" button. |
 
 The bar is a `role="note"` on `bg-muted` with a `line-hairline` under it, in `meta` type: 36 px tall on one line, and taller when the words wrap on a phone.
+
+## Loading shapes
+
+`ReviewerBarSkeleton()` keeps this bar's ground, hairline, meta line boxes and control-sized Start over shape. It reserves two lines on a phone, following the fresh copy's real bar, and draws no words or controls. Render it in `SkeletonScreen`'s hidden layer. Companion stories compare the real bar and its action with the shapes within 2 px at 1512 and 390.

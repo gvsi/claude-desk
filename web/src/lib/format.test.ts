@@ -17,6 +17,7 @@ import {
   formatMoneyExact,
   formatStarted,
   formatWhen,
+  formatDate,
   greetingFor,
   hoursParts,
   localDate,
@@ -132,6 +133,13 @@ describe('format', () => {
     // And the business's next day is not today, though it is the same UTC date as now.
     expect(formatWhen('2026-10-30T18:00:00Z', 'Pacific/Kiritimati', new Date('2026-10-30T09:00:00Z'))).toBe('Oct 31, 8:00 am');
     expect(formatWhen('soon', LA, now)).toBe('');
+  });
+
+  it('date_on_the_business_clock', () => {
+    expect(formatDate('2026-10-27T17:00:00Z', LA)).toBe('Oct 27');
+    // The day before in Los Angeles, though the same UTC date.
+    expect(formatDate('2026-10-30T06:30:00Z', LA)).toBe('Oct 29');
+    expect(formatDate('soon', LA)).toBe('');
   });
 
   it('week_day_names', () => {
