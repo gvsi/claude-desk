@@ -14,6 +14,8 @@ from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
 
+PAYMENT_HOW = "Sends a retainer payment link"
+
 
 def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
     """Build stored cards, including legacy payment states, for decision and settlement tests."""
@@ -252,7 +254,7 @@ async def proposals(app, browser, kernel_http, model, engine, monkeypatch):
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     await consent(owner, interview_id, False, model, cards=True)
-    payment = job("payment", title="Pay a retainer", config={
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 999_999})
     entries = proposal_entries([job(), payment], [stripe()], business_tools_enabled=True)
     transcript = (await stored(engine, interview_id))["transcript"] + [
@@ -1290,7 +1292,8 @@ async def test_suggestions_keep_owner_facts_given_on_another_topic(proposals, mo
 
 @pytest.mark.parametrize("kind", ["documents", "status"])
 def test_how_we_help_omits_jobs_unavailable_today(kind):
-    entries = proposal_entries([job(kind, title="Unavailable job", config=None), job()], [])
+    unavailable_how = {"documents": "Retrieves customer documents", "status": "Checks a customer request"}[kind]
+    entries = proposal_entries([job(kind, title="Unavailable job", how=unavailable_how, config=None), job()], [])
     entries[0].card.state = "accepted"
     state = plan_state(entries)
     setup.settle_plan(state)
@@ -1299,7 +1302,7 @@ def test_how_we_help_omits_jobs_unavailable_today(kind):
 
 
 def test_finish_declines_an_unpriced_purpose_payment():
-    payment = job("payment", title="Pay a retainer", config={
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 5000})
     entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
     assert entries[0].card.job.config.amount_cents is None
@@ -1821,7 +1824,7 @@ async def test_disabling_tools_declines_an_already_accepted_payment(proposals, a
     assert not any(job.job == "payment" for job in setup.accepted_jobs(interview))
     assert not any(job["job"] == "payment" for job in setup.owner_job_answers(interview))
     setup.finish(interview)
-    assert "Pay a retainer" not in (interview.answers.how_we_help or "")
+    assert PAYMENT_HOW not in (interview.answers.how_we_help or "")
 
 
 async def test_payment_accepts_an_amount_after_tools_turn_off_then_on(proposals, app, engine):
@@ -2003,7 +2006,7 @@ async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_ru
     finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
     assert finished.status_code == 200, finished.text
     assert next(card for card in shown(finished) if card["proposal_id"] == ids[1])["state"] == "declined"
-    assert "Pay a retainer" not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
+    assert PAYMENT_HOW not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
     reloaded = await owner.browser.get(path + "?cards=1")
     assert next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])["state"] == "declined"
     model.add(unparseable(), unparseable())
@@ -2291,7 +2294,7 @@ async def test_suggestions_clear_stored_configs_before_settling_when_tools_are_o
     saved = await stored(engine, interview_id)
     assert all(card["job"] is None or card["job"]["config"] is None for entry in saved["transcript"]
                for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])])
-    assert "Pay a retainer" not in saved["answers"]["how_we_help"]
+    assert PAYMENT_HOW not in saved["answers"]["how_we_help"]
 
 
 @pytest.mark.parametrize("enabled", [False, True])
