@@ -27,7 +27,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    digits). Since the owner's decisions of 2026-10-30, a booking claim passes beside the booking's
    card, which says the same, a policy's words are left to the soft-promise check, which reads the
    prose with the cards, and Claude may write links and email addresses, which its prompt keeps to
-   the business's own.
+   the business's own. A free word passes inside a repeat of the title or appointment type of one
+   of the Desk's enabled business tools that resolve (`context.business_free_names`; the owner's
+   decision of 2026-10-31).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
