@@ -15,7 +15,7 @@ CI holds no secrets and no model key, and it can only read the repository:
 
 The workflow has nine jobs. Their names are the check names, in this order:
 
-1. `backend tests`: the backend's tests pass against a real Postgres 16. First the migrations apply to an empty database and the service roles get their passwords. The job fails before migrating if the migration chain has more than one head.
+1. `backend tests`: the backend's tests pass against a real Postgres 16. First the migrations apply to an empty database and the service roles get their passwords. The job fails before migrating if the migration chain has more than one head. Then the database stops making commits durable (`make db-throwaway`: no WAL flush at commit, no fsync, no full-page writes), since it is thrown away with the job and the tests spend much of their time committing. The target refuses to run where `CI` isn't set, so it never touches a developer's persistent database. `tier 1 evals` sets up its database the same way.
 2. `kernel tests`: the Rust kernel's tests pass (`cargo test --locked`), with cvc5 available to the proof binary's tests.
 3. `proofs`: two things pass. The proof binary's self-test runs against cvc5 (`desk-prove --selftest`). Then every shipped rule set is proved again and has to match its committed proof report (`make check-presets`). A report that is missing, out of date or failing fails the check.
 4. `tier 1 evals`: two suites pass against the real kernel and database. Both need no network and no model key:
