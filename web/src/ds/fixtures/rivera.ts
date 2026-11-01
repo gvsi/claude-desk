@@ -1607,11 +1607,12 @@ const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
 };
 
 /**
- * Sample copies of plan 01a's `desk.presets.PRESETS`, in its words. Both presets let Claude show
- * open times, take leads and callbacks, start verifications and read the owner's material on its
- * own (`utilityCards`); Recommended rules adds quotes at list price, weekday bookings, customers'
- * own documents and an ask before money moves. Sample data for the reviews: the description check
- * reads the presets' own cards from their export.
+ * Sample copies of plan 01a's presets as Rivera's Desk drafts them (`desk.presets.preset_cards`), in
+ * their words. Both let Claude show open times, take leads and callbacks, start verifications and
+ * read the owner's material on its own (`utilityCards`); Recommended rules adds quotes at list price,
+ * weekday bookings in her weekday hours (8:00 am to 6:00 pm), customers' own documents and an ask
+ * before money moves. Sample data for the reviews: the description check reads the presets' own
+ * cards from their export.
  */
 const utilityCards = [
   rule({ card_id: 'preset-find-slots', applies_to: 'native.find_slots', mode: 'auto', who: 'anyone', reason: 'Anyone can see the times you have open.' }),
@@ -1636,7 +1637,7 @@ const recommendedCards = [
     applies_to: 'native.book',
     mode: 'auto',
     who: 'anyone',
-    hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' },
+    hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
     review: true,
     reason: 'Weekday bookings in working hours, checked by the reviewer.',
   }),
@@ -1676,7 +1677,7 @@ const presetViews: Record<string, { title: string; connector?: ConnectorView; ap
     title: 'Book a visit',
     connector: connectorViews.bookings,
     appliesTo: 'Book a visit',
-    words: [word('who', 'Anyone'), word('hours', 'Weekdays, 9:00 am to 5:00 pm'), word('review', 'Checked by the reviewer')],
+    words: [word('who', 'Anyone'), word('hours', 'Weekdays, 8:00 am to 6:00 pm'), word('review', 'Checked by the reviewer')],
   },
   'preset-documents': { title: 'Share a document', connector: connectorViews.documents, appliesTo: 'Share a document', words: [word('who', "The record's owner, verified")] },
   'preset-charge-ask': { title: 'Every tool that charges money', appliesTo: 'Every tool that charges money', words: [word('who', 'Anyone')] },
@@ -1752,12 +1753,11 @@ const sharedChargeReviewRow: ChangeRowView = {
 
 /**
  * Choosing "Recommended rules": the payment link, the signed-limit charge and Refund go to the
- * preset's rules for every tool that charges money or sends it out, which ask. The bookings and
- * See charges fall to the default ask, since no card of the preset covers their whole scope:
- * weekday bookings from 8:00 am to 6:00 pm reach outside its 9-to-5 rule, Saturdays and Dana's
- * any-time rule lie outside it, and nothing governs seeing charges. That weekday rule, which no
- * dropped rule goes to, is an added row. Quotes and documents have no row: the preset's rules for
- * them enforce what Rivera's already do.
+ * preset's rules for every tool that charges money or sends it out, which ask. Weekday bookings
+ * from 8:00 am to 6:00 pm go to the preset's booking rule in the same hours and stay automatic,
+ * only the reason changing. Saturdays, Dana's any-time rule and See charges fall to the default
+ * ask, since no card of the preset covers their whole scope. Nothing is added. Quotes and
+ * documents have no row: the preset's rules for them enforce what Rivera's already do.
  */
 const recommendedReview = presetReview(presetSamples.auto);
 
