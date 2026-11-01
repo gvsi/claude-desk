@@ -267,7 +267,8 @@ async def test_after_timeout_or_shutdown_preserves_the_landed_state(
     monkeypatch.setattr(setup, "consent", custom)
     monkeypatch.setattr(setup, "_rollback_turn", track_rollback)
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2)
+    # Only the after callback should time out here; let the real database commit finish first.
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 2)
     monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 0.4, raising=False)
     reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
     assert reply.status_code == (202 if slow else 200), reply.text

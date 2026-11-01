@@ -455,16 +455,17 @@ async def test_a_turn_can_add_a_job_to_the_plan(
     draft = {"job": "payment", "title": "Take a deposit", "who": "Clients you've priced",
              "why": "Reserve work", "how": "Send a link",
              "autonomy": "ask", "config": {"block": "purpose_payment", "purpose": "Deposit", "amount_cents": 99999}}
+    if not business_tools_enabled:
+        draft = {**draft, "job": "intake", "title": "Take a request",
+                 "config": {"block": "intake", "questions": ["What needs fixing?"]}}
     response = await answer(owner, model, interview_id, "We take deposits.",
                             turn(next={"kind": "job", "job": proposal_id}, add_jobs=[draft]))
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "hours_and_area"  # available only from the next turn
     row = await stored(engine, interview_id)
-    if not business_tools_enabled:
-        assert not any(entry.get("planned") for entry in row["transcript"])
-        return
     card = next(card for entry in row["transcript"] for card in entry.get("planned", []))
     assert card["proposal_id"] == proposal_id and card["job"]["can_do_today"] is True
+    assert card["job"]["job"] == draft["job"]
     assert card["job"]["who"] == draft["who"]
     assert card["job"]["config"] == ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}
                                        if business_tools_enabled else None)
@@ -685,7 +686,7 @@ async def test_one_planned_connector_is_an_ask_with_no_topic_choices(app, browse
     state = (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json()
     assert state["question"] is None and state["pending_card"] is not None
     assert state["messages"][-2]["card"]["connector"]["app"] == "stripe"
-    assert state["messages"][-1]["choices"] == []
+    assert state["messages"][-2]["choices"] == []
     assert state["messages"][-3]["text"] == (line.strip() or "Got it.")
 
 
@@ -3490,6 +3491,22 @@ def test_fact_turns_report_payment_availability_while_limit_turns_stay_identical
     else:
         assert off.split("\n\n")[1] == desk_setup.SETUP_PAYMENT_UNAVAILABLE_LINE
         assert "A code-built line may say payment jobs are unavailable; offer Stripe instead when it appears." in SETUP_TURN_SYSTEM
+
+
+async def test_the_understanding_call_is_skipped_with_under_ten_seconds_left(monkeypatch):
+    interview = runtime_interview()
+    interview.turn_deadline = asyncio.get_running_loop().time() + 9
+    model = ScriptedModel([])
+
+    async def record(response):
+        pass
+
+    monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+    await desk_setup._after_consent(None, None, model, interview, [])
+    assert model.requests == []
+    assert interview.question == "what_you_do"
+    assert interview.transcript[-1].text == question_text("what_you_do", "trade")
+    assert interview.planned == []
 
 
 async def test_the_understanding_retry_is_skipped_near_the_deadline(monkeypatch):
