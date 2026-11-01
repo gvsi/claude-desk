@@ -291,6 +291,16 @@ evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
 
+# Both arms share MAX_USD (the remaining allowance), plus a durable $1.70 experiment cap.
+.PHONY: evals-soft-promise-experiment
+CASES ?= evals/calibration/soft_promise.yaml
+ARMS ?= old,new
+RESULTS ?= evals/out/soft-promise/next-steps-experiment.json
+evals-soft-promise-experiment:
+	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise-experiment spends money: give the remaining MAX_USD=<dollars>))
+	$(if $(BASELINE_SHA),,$(error evals-soft-promise-experiment needs a frozen BASELINE_SHA))
+	$(EVALS) python -m evals.calibration.soft_promise_experiment --cases "$(CASES)" --arms "$(ARMS)" --baseline-sha "$(BASELINE_SHA)" --samples $(SAMPLES) --max-usd $(MAX_USD) --output "$(RESULTS)"
+
 # A finished pass, by its id under evals/out/passes (PASS=<id>). evals-gate judges it with no model call
 # (FINAL=1 for the final gate: no pending scenario, no skipped check, three runs and a recorded rate).
 # evals-latency makes TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this

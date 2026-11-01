@@ -11,6 +11,8 @@ file, and each answer counted against what the case expects.
 against the case file as it is now (each case's expectation, and whether the code check blocks it, in
 this tree) and prints the table; a case the run never asked about is not run, and a case whose input
 (its language, prose and cards) isn't the one the run recorded is stale, its answers never scored.
+`python -m evals.calibration.soft_promise_experiment` runs a frozen old/new experiment
+with one shared allowance and records both input shapes; `not_ai` measures only the AI flag.
 It spends money: each call is one Haiku 5.5 call on the Claude API, estimated at $0.0005
 (`PER_CALL_USD`, over four times the master plan's $0.00011 for one check, so an estimate errs high).
 
@@ -93,10 +95,11 @@ from typing import Annotated, Any, Literal
 
 import anthropic
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field, field_validator
 
 from desk.kernel_service import decisions, reply_check
 from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput, SoftPromiseVerdict
+from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS
 from evals import results
 from evals.tier2.passes import (
     CALIBRATION_PREFIX,
@@ -126,13 +129,15 @@ PRICES: dict[str, dict[str, float]] = {
 VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
 # A sample meets `flag` when promises_beyond_cards is set and `flag_ai` when denies_being_ai is,
 # whatever the other flag says: either one blocks the reply, so `flag_both` meets both.
-MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"}}
+MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"},
+         "not_ai": {"pass", "flag"}}
 # The header every results file opens with (`RunResult.about`).
 RESULTS_ABOUT = (
     "One run of the soft-promise check: its answers to each case. Each case's expected, code_blocked and outcome "
     "are as of the run, from the case file and the code check as they were then. `python -m "
     "evals.calibration.soft_promise --rescore <this file>` scores the answers against the case file as it is now "
-    "and is the authority; a case whose input_sha256 (of the language, prose and cards its calls sent) the case "
+    "and is the authority; a case whose input_sha256 (of its arm's language, prose, cards and, in the new shape, "
+    "next_steps) the case "
     "file no longer matches is stale there, and its answers aren't scored.")
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key
@@ -154,7 +159,16 @@ class Case(BaseModel):
     language: Literal["en", "es"]
     prose: str = Field(min_length=1)
     cards: list[str]
-    expected: Literal["pass", "flag", "flag_ai", "code"]
+    expected: Literal["pass", "flag", "flag_ai", "code", "not_ai"]
+    next_steps: list[str] = Field(default_factory=list)
+    note: str = ""
+
+    @field_validator("next_steps")
+    @classmethod
+    def fixed_steps(cls, steps: list[str]) -> list[str]:
+        if set(steps) - (set(NEXT_STEPS.values()) | set(BUSINESS_BLOCK_STEPS.values())):
+            raise ValueError("next_steps contains a phrase outside the fixed mapping")
+        return steps
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -293,24 +307,33 @@ def priced(usage: CallUsage | None) -> float | None:
             + usage.cache_write_tokens * rates["cache_write"] + usage.output_tokens * rates["output"]) / 1_000_000
 
 
-def call_input(case: Case) -> SoftPromiseInput:
+class OldSoftPromiseInput(BaseModel):
+    """The baseline wire shape, intentionally omitting next_steps."""
+    language: Literal["en", "es"]
+    prose: str
+    cards: list[str]
+
+
+def call_input(case: Case, shape: Literal["old", "new"] = "new") -> SoftPromiseInput | OldSoftPromiseInput:
     """What the kernel's check reads for the case: its language, its prose as the scan reads it, and
     its cards' texts."""
-    return SoftPromiseInput(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+    data = dict(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+    return (OldSoftPromiseInput(**data) if shape == "old"
+            else SoftPromiseInput(**data, next_steps=list(case.next_steps)))
 
 
-def request_message(data: SoftPromiseInput) -> str:
+def request_message(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     """The request's one message, as the kernel sends it: `data` as JSON with its keys sorted."""
     return json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
 
 
-def input_sha256(data: SoftPromiseInput) -> str:
+def input_sha256(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     """The sha256 of the input a call sends: the request's one message, which holds the reply's
     language, its prose and its cards' texts."""
     return hashlib.sha256(request_message(data).encode()).hexdigest()
 
 
-def call_bound(system: str, data: SoftPromiseInput) -> float:
+def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput) -> float:
     """An upper bound on one call's cost, in dollars: at most one input token for every
     `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
     the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
@@ -437,6 +460,7 @@ class RunResult(BaseModel):
     over_cap: bool              # the spend went past --max-usd: a call cost more than its bound
     spend_row: str
     cases: list[CaseResult]
+    input_shape: Literal["old", "new"] = "old"
 
 
 class Config(BaseModel):
@@ -449,6 +473,7 @@ class Config(BaseModel):
     prompt_file: Path | None = None
     label: str | None = None
     concurrency: int = Field(4, ge=1)
+    input_shape: Literal["old", "new"] = "new"
 
 
 @dataclass
@@ -521,7 +546,7 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
 
     now = deps.now()
     stamp = now.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
-    inputs = {case.id: call_input(case) for case in cases}
+    inputs = {case.id: call_input(case, config.input_shape) for case in cases}
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
                                    code_blocked=code_blocked(case), requested=config.samples) for case in cases}
@@ -566,6 +591,7 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
         calls=meter.calls, estimated_calls=meter.estimated, stopped_by_cap=meter.calls < len(jobs),
         over_cap=meter.over, spend_row=row_id + ("-estimated" if meter.estimated else ""),
         cases=list(tallies.values()),
+        input_shape=config.input_shape,
     )
     deps.out_dir.mkdir(parents=True, exist_ok=True)
     path = deps.out_dir / f"{label}-{stamp}.json"
@@ -682,6 +708,7 @@ class _SavedRun(BaseModel):
     calls: int = Field(ge=0)
     prompt: PromptRecord
     cases: list[_SavedCase]
+    input_shape: Literal["old", "new"] = "old"
 
 
 def rescore(saved: Path, cases_file: Path) -> list[str]:
@@ -703,7 +730,7 @@ def rescore(saved: Path, cases_file: Path) -> list[str]:
     case_results = []
     for case in cases:
         result = CaseResult(id=case.id, group=case.group, language=case.language,
-                            input_sha256=input_sha256(call_input(case)), expected=case.expected,
+                            input_sha256=input_sha256(call_input(case, run_.input_shape)), expected=case.expected,
                             code_blocked=code_blocked(case), requested=run_.samples)
         if (answers := answered.get(case.id)) is not None:
             if answers.input_sha256 != result.input_sha256:

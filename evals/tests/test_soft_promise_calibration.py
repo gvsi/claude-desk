@@ -135,8 +135,49 @@ def results_file(deps: Deps) -> dict[str, Any]:
 
 # The case file
 
-def test_the_case_file_holds_every_group():
+def test_old_and_new_arms_send_and_rescore_their_own_input_shapes(deps, tmp_path, capsys):
+    from evals.calibration.soft_promise import Config, input_sha256, run
+    phrase = "taking a message"
+    deps.cases = write_cases(tmp_path / "arms.yaml", {
+        **case("offer", "May I take a message?"), "next_steps": [phrase]})
+    old, old_path = asyncio.run(run(Config(samples=1, max_usd=1, input_shape="old"), deps))
+    new, new_path = asyncio.run(run(Config(samples=1, max_usd=1, input_shape="new"), deps))
+    old_wire, new_wire = [json.loads(r["messages"][0]["content"]) for r in deps.client.client.requests]
+    assert "next_steps" not in old_wire
+    assert new_wire["next_steps"] == [phrase]
+    assert old.cases[0].input_sha256 != new.cases[0].input_sha256
+    for path in (old_path, new_path):
+        assert main(["--rescore", str(path)], deps) == 0
+        assert ": stale, " not in capsys.readouterr().out
+    deps.cases = write_cases(deps.cases, {**case("offer", "May I take a message?"), "next_steps": []})
+    assert main(["--rescore", str(old_path)], deps) == 0
+    assert ": stale, " not in capsys.readouterr().out
+    assert main(["--rescore", str(new_path)], deps) == 0
+    assert ": stale, " in capsys.readouterr().out
+
+
+def test_session_step_cases_cover_each_tool_and_voice_labels_are_explained():
+    from desk.next_steps import NEXT_STEPS
     cases = load_cases(CASES_FILE)
+    for group, expected in {"available_steps": "pass", "unavailable_steps": "flag", "added_promises": "flag",
+                            "completed_steps": "flag", "underway_steps": "flag"}.items():
+        selected = [case for case in cases if case.group == group]
+        assert len(selected) == 20
+        assert {case.language for case in selected} == {"en", "es"}
+        assert {case.expected for case in selected} == {expected}
+        assert all(case.cards for case in selected if group in {"completed_steps", "underway_steps"})
+        if group != "unavailable_steps":
+            assert {step for case in selected for step in case.next_steps} == set(NEXT_STEPS.values())
+    assert len([case for case in cases if case.group == "refund_rules"]) == 18
+    voice = [case for case in cases if case.group in {"voice", "voice_ai"}]
+    assert len(voice) == 23
+    assert all(case.note and case.next_steps for case in voice)
+    assert len([case for case in voice if case.group == "voice_ai"]) == 2
+
+def test_the_case_file_holds_every_group():
+    cases = [case for case in load_cases(CASES_FILE) if case.group not in {
+        "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
+        "refund_rules", "voice", "voice_ai"}]
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
@@ -219,7 +260,8 @@ def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")
 
 
 def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_alone_decides():
-    cases = load_cases(CASES_FILE)
+    # Voice drafts are the exact original English replies; synthetic step cases cover both languages.
+    cases = [case for case in load_cases(CASES_FILE) if case.group not in {"voice", "voice_ai"}]
     assert uncovered(cases) == set()
     assert uncovered(cases, ("pass",)) == set()
     # Spanish past-tense claims would be uncovered without the one with no date word: the code
@@ -236,9 +278,12 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
     assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
-    # nor any other case but the Spanish booking claimed with "primera hora": every case added since,
-    # such as an offer of Maria's call back or a Spanish follow-up beside its card, reaches the model
-    assert blocked == {c.id for c in cases if c.expected == "code"} | {"claim-es-booked"}
+    # The original corpus still has only these five code-blocked cases. Voice drafts
+    # retain their exact words even when the code check would block those too.
+    original = [c for c in cases if c.group not in {
+        "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
+        "refund_rules", "voice", "voice_ai"}]
+    assert blocked & {c.id for c in original} == {c.id for c in original if c.expected == "code"} | {"claim-es-booked"}
     # a case can't state it, nor anything else the runner doesn't read
     with pytest.raises(Refused, match="code_blocked"):
         load_cases(write_cases(tmp_path / "c.yaml", {**case("a", "Hello."), "code_blocked": False}))
