@@ -78,6 +78,7 @@ REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
     "soft.jev": "a second check flagged a promise the business's records don't back",
     # Proposed wording awaiting the owner's sign-off.
+    "policy_combined": "it cited a policy line the checkpoint now withholds",
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
 }

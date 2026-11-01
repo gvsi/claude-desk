@@ -56,7 +56,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskMemoryRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments
+from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments, reply_check
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
@@ -323,6 +323,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     await refuse_public_canaries(ctx, "desk", shown)
     validate_business(business)
     validate_desk(desk)
+    await refuse_public_promises(ctx, "desk", policy_values(desk.charter))
     if existing is not None:
         business_id = existing.business_id
     else:
@@ -420,6 +421,37 @@ async def refuse_public_canaries(ctx: KernelCtx, part: str, values: Mapping[str,
         _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
 
 
+def policy_values(charter: Sequence[Claim]) -> dict[str, str]:
+    """Only free-text policies render verbatim; contact and structured claims have other checks."""
+    return {claim.key: claim.value for claim in charter if claim.key.startswith("policy:") and claim.kind == "text"}
+
+
+async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
+                                desk_id: str | None = None, *,
+                                allow_words: Mapping[str, frozenset[str]] = {}) -> None:
+    """Refuse public prose the reply check would reject, before writing any of it.
+
+    Detail and the post-rollback ledger entry name only refused keys and sorted rule IDs.
+    A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
+    order, so the owner can audit the attempt without creating a row for refused input.
+    """
+    limit = None
+    if len(values) > reply_check.PUBLIC_POLICY_MAX_COUNT:
+        limit = "policy_count_limit"
+    elif sum(map(len, values.values())) > reply_check.PUBLIC_POLICY_MAX_CHARS:
+        limit = "policy_text_limit"
+    if limit is not None:
+        raise KernelFailure(422, "invalid", limit, detail={"charter": [limit]})
+    fields = reply_check.scan_public_policies(values, allow_words=allow_words)
+    if not fields:
+        return
+    desk_ids = [desk_id] if desk_id is not None else list(await ctx.db.scalars(ctx.repo.scoped(
+        select(Desk.desk_id).order_by(Desk.desk_id))))
+    summary = {"part": part, "refused": "promise", "fields": fields}
+    raise KernelFailure(422, "invalid", "public_promise", detail=fields, persist=partial(
+        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
+
+
 async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[str], summary: dict[str, Any]) -> None:
     """A refused owner write's `desk_data` entry on each of `desk_ids`, in ID order, in the fresh
     transaction `KernelFailure.persist` runs in."""
@@ -458,9 +490,13 @@ def prices_shown(price_items: Sequence[PriceItemSeed]) -> list[tuple[str, str]]:
 async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) -> list[str]:
     """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours.
     The public page shows them, so a document's canary in a key or a value is refused first
-    (`refuse_public_canaries`)."""
+    (`refuse_public_canaries`). Text policies render verbatim, so their values must also pass
+    the reply check's public prose scan (`refuse_public_promises`). Contact and structured
+    claims keep their own checks.
+    """
     await refuse_public_canaries(ctx, "charter", {"charter": charter_shown(body.charter)}, desk_row.desk_id)
     check_charter(body.charter)
+    await refuse_public_promises(ctx, "charter", policy_values(body.charter), desk_row.desk_id)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT)))}

@@ -49,6 +49,23 @@ VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
 ROUTE = "POST /check_reply"
 
 
+@pytest.mark.parametrize(("prose", "detected"), [
+    ("In Des Moines.", "en"),
+    ("Nos vemos.", "none"),
+    ("No des vueltas.", "none"),
+    ("Une ambos tubos.", "none"),
+    ("Vos estás cerca.", "es"),
+])
+async def test_honest_english_spanish_language_and_real_reply(app, client, prose, detected):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    verify_verdict(app.state.kernel.signer.public_key_hex(), visitor.session_id, verdict)
+    assert verdict.ok and verdict.violations == []
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert lang.detect(prose) == detected
+    assert not lang.positive_other_language(prose)
+
+
 def clause(template: str, fact_id: str | None = None) -> dict:
     return {"template": template, "fact_id": fact_id}
 
@@ -773,6 +790,7 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
     "Don't pour grease down the drain.",            # "pour" and "et" mark no other language
     "Don't pour it.",
     "We fix sinks, tubs, et cetera.",
+    "We serve Des Moines.",
 ])
 async def test_plumbing_english_with_a_dropped_word_reads_as_english(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -2291,3 +2309,385 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
         desk.deleted_at = frozen_clock.now()
     deleted = await client.get(f"/public/{copy.slug}")
     assert (deleted.status_code, deleted.json()) == (404, {"code": "not_found"})
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("$50 deposit", ["currency", "digit"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("we guarantee", ["lex.en.promise"]),
+    ("refund within 30 days", ["digit", "lex.en.promise"]),
+    ("within two hours", ["lex.en.date", "lex.en.number"]),
+    ("after 6 pm", ["digit", "lex.en.date"]),
+    ("Monday to Friday", ["lex.en.date"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("garantizamos", ["lex.es.promise"]),
+    ("reembolso", ["lex.es.promise"]),
+    ("You're booked.", ["lex.en.booking"]),
+    ("Tu cita está confirmada.", ["lex.es.booking"]),
+    ("$50, $50, twenty dollars and veinte pesos", ["currency", "digit", "lex.en.money", "lex.en.number",
+                                                "lex.es.money", "lex.es.number"]),
+    ("We work with small businesses and families.", []),
+    ("Tell us what you need and we'll suggest next steps.", []),
+    ("Ask about our services.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
+    ("Pregunte por nuestros servicios aquí.", []),
+    ("Se requiere un garante.", []),
+])
+def test_scan_public_text(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles of Oakland.", "Within 25 mi of Oakland.", "Within 25 km of Oakland.",
+    "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
+    "We drive a few miles past Oakland.", "The East Bay, seven days a week.",
+    "Serving the East Bay since 1998.", "We do evenings and weekends.", "Trabajamos fines de semana.",
+    # A distance with a hyphen or a space before a singular or plural unit.
+    "Within a 25-mile radius of Oakland.", "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.", "A 50-km radius.", "Dentro de 1 kilómetro.",
+    "Within 25 kms of Oakland.", "Within 25 kilometres of Oakland.", "Hasta 40 kilometros de Madrid.",
+    # Cardinal number words before a distance unit or "days a week", and the days and parts of the
+    # day the business works.
+    "Within twenty-five miles of Oakland.", "Within a ten-mile radius.", "Dentro de treinta y cinco kilómetros.",
+    "Trabajamos siete días a la semana.", "Monday to Friday, mornings and afternoons.",
+    "De lunes a viernes, mañanas y tardes.", "Sábados y domingos.",
+    # Any cardinal number word, and half or a hundred before a distance unit
+    "We cover three counties: Alameda, Contra Costa and Marin.", "We serve all nine Bay Area counties.",
+    "Two locations: Oakland and Berkeley.", "Serving the five boroughs.",
+    "Atendemos tres condados: Alameda, Contra Costa y Marin.", "Dos sucursales: Oakland y Berkeley.",
+    "Serving the East Bay for over twenty years.", "Within half a mile of Lake Merritt.",
+    "Within a hundred miles of Oakland.", "Within one hundred miles of Oakland.", "Dentro de cien kilómetros.",
+    # Digits before "days a week", and a range of digits before a distance unit
+    "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
+    "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # Years need an immediately preceding year marker.
+    "Serving the East Bay desde 1998.",
+    "In 1998.",
+    "From 1998.",
+    "Est. 1998.",
+    "Established 1998.",
+    "Founded 1998.",
+    "Desde 1998.",
+    "En 1998.",
+    "Since 1900.",
+    "Since 2099.",
+    # ZIP codes, road numbers and literal round-the-clock availability.
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
+    # "mañana" as the morning, after "por la", "en la" or "de la"
+    "Trabajamos por la mañana.", "Abrimos de la mañana a la noche.", "En la mañana y en la tarde.",
+    # A known limit: a fee written in words passes, since any cardinal number word does.
+    "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
+    "Seven days to finish any job in Oakland.",
+])
+def test_public_service_area_allowance_stays_with_its_key(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
+    assert reply_check.scan_public_policies({"policy:pricing": text})
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles, $50 trip fee.", "Within 25 miles, 10% off.",
+    "Guaranteed same-day service across the East Bay.", "Within 25 miles, free consultation.",
+    "Within 25 miles, fifty dollars.", "Within 25 miles, ten percent off.",
+    "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
+    "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
+    "Trip fee: 50.",
+    "24/7, $50 trip fee.",
+    "24/7, 10% off.",
+    "24/7, discounts.",
+    "24/7, guaranteed service.",
+    "24/7, free consultation.",
+    "24/7, your appointment is confirmed.",
+    "ZIP 9460.",
+    "ZIP 946012.",
+    "CA 9460.",
+    "Trip fee 94601.",
+    "Highway 101, trip fee 50.",
+    "24/7, fifty dollars.",
+    # An unmarked number of years in business remains outside the allowance.
+    "Serving Oakland for 25 years.",
+])
+def test_public_service_area_keeps_price_promise_and_language_refusals(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text})
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    # Fractions and discounts
+    ("Outside Oakland, half off.", ["lex.en.number"]),
+    ("Half price outside Oakland.", ["lex.en.number"]),
+    ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
+    ("Fuera de Oakland, cobramos la mitad.", ["lex.es.number"]),
+    # Amounts with no currency word
+    ("Trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 2000.", ["digit"]),
+    ("Cargo de viaje: 2000.", ["digit"]),
+    ("Oakland 1998.", ["digit"]),
+    ("For 1998 years.", ["digit"]),
+    ("Since 1899.", ["digit"]),
+    ("Since 2100.", ["digit"]),
+    ("Begin 1998.", ["digit"]),
+    ("Since 1998, trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 1500.", ["digit"]),
+    ("Within 25 miles, 1000 off.", ["digit"]),
+    ("Oakland: 1500 minimum.", ["digit"]),
+    ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    ("Trip fee 20 to 30.", ["digit"]),
+    ("Llegamos mañana.", ["lex.es.date"]),
+    ("Mañana por la mañana en Oakland.", ["lex.es.date"]),
+    ("Seven days a week, 2 to 3 hours each.", ["digit"]),
+    # Response times and dates
+    ("Service in Oakland within two hours.", ["lex.en.date"]),
+    ("Same-day service in Oakland.", ["lex.en.date"]),
+    ("We can be there tomorrow.", ["lex.en.date"]),
+    ("Servicio el mismo día en Oakland.", ["lex.es.date"]),
+    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date"]),
+    ("Oakland, until 6 pm.", ["digit", "lex.en.date"]),
+])
+def test_public_service_area_allows_only_distances_years_and_day_words(text, rules):
+    """Under the service area, these rules refuse what they refuse under any other key."""
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {"policy:service_area": rules}
+    assert set(rules) <= set(reply_check.scan_public_policies({"policy:pricing": text})["policy:pricing"])
+
+
+def test_public_service_area_allowance_cannot_cross_into_other_policies_or_prose():
+    assert reply_check.scan_public_policies({"policy:service_area": "Within 25", "policy:z": "miles."}) == {
+        "policy:service_area": ["digit"], "policy:z": ["lex.es.number"]}
+    cards = [RenderedBlock(kind="card", template="policy", fact_id="charter:policy:service_area",
+                           text="Within 25 miles.")]
+    assert reply_check.policy_card_violations("", cards) == []
+    assert reply_check.policy_card_violations("No charge for consultations.", cards) == []
+
+
+@pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
+                                     "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
+                                     "\u00ad", "\ufeff", "\U000e0001"])
+@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios aquí."])
+def test_public_text_refuses_format_controls(control, honest):
+    assert reply_check.scan_public_text(honest) == []
+    assert reply_check.scan_public_text(honest + control) == ["format_control"]
+
+
+@pytest.mark.parametrize(("values", "fields"), [
+    ({"policy:c": "charge.", "policy:a": "No", "policy:b": "extra"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b", "policy:c")}),
+    ({"policy:a": "Your appointment is" + " " * 100, "policy:b": "confirmed."},
+     {key: ["lex.en.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Oﬃce.", "policy:b": "No", "policy:c": "charge.", "policy:d": "Ask about our services."},
+     {key: ["lex.en.promise"] for key in ("policy:b", "policy:c")}),
+    ({"policy:a": "Once your appointment is", "policy:b": "confirmed."}, {}),
+    ({"policy:a": "Tu cita está", "policy:b": "pendiente."}, {}),
+    ({"policy:a": "quedó hecha", "policy:b": "la reserva", "policy:c": "Pregunte aquí."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "libres", "policy:b": "para todos"},
+     {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "You are free to", "policy:b": "all clients"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+    # Call claims split across two policies, and a claim-group lookahead reading into the next one
+    ({"policy:a": "Your callback is", "policy:b": "scheduled."},
+     {key: ["lex.en.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Tu llamada está", "policy:b": "confirmada."},
+     {key: ["lex.es.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "tu cita."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "la tarea."}, {}),
+])
+def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
+    assert reply_check.scan_public_policies(values) == fields
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("We work with small businesses and families.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", []),
+    ("Cash, card, Venmo accepted", []),
+    ("Emergency service available", []),
+    ("Emergency service available weekends", ["lex.en.date"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("Привет мир.", ["language"]),
+    ("OK", []),
+    ("No", []),
+    ("", []),
+])
+def test_public_policy_language_requires_positive_evidence(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
+    ("Pour-over coffee available", []),
+    ("Open 9-5 EST", ["digit"]),
+    ("Les ofrecemos envío a domicilio", []),
+])
+def test_public_policy_language_recognizes_short_french_promises(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+def test_public_policy_language_checks_the_combined_rendering():
+    parts = {"policy:a": "nous the", "policy:b": "vous la y"}
+    assert all(reply_check.scan_public_text(value) == [] for value in parts.values())
+    assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
+
+
+PUBLIC_ALLOW_WORD_CASES = [
+    ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "ƒree"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frꬲꬲ"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
+    ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
+    ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
+    ({"a:title": "Free", "b:type": "to all new clients"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    *[({"a:title": title, "b:type": audience},
+       {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]})
+      for title, audience in [
+          ("Free to", "all clients"), ("Free", "-to all clients"),
+          ("Frée to", "all clients"), ("Frée", "-to all clients"),
+          ("Ｆｒｅｅ ｔｏ", "ａｌｌ ｃｌｉｅｎｔｓ"), ("Ｆｒｅｅ", "－ｔｏ ａｌｌ ｃｌｉｅｎｔｓ"),
+      ]],
+    ({"a:title": "Intro consult no", "b:type": "charge"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "lex.en.promise", "mixed_script"]}),
+    ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
+    ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
+    ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
+]
+
+
+@pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
+def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, fields):
+    allowed = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_policies(values, allow_words={"a:title": allowed}) == fields
+    if len(values) == 1 and "a:title" in values:
+        assert reply_check.scan_public_text(values["a:title"], allow_words=allowed) == fields.get("a:title", [])
+
+
+@pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
+                                  "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
+def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent_normalization(word):
+    assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_policies({"title": word}, allow_words={"title": reply_check.FREE_WORDS}) == {}
+    assert reply_check.scan_public_text(word)  # default callers remain strict
+
+
+
+@pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
+def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
+
+    # Forty policies totaling exactly 8,000 characters, with many ordinary lexical hits.
+    values = {f"policy:{index:02d}": (phrase * 8)[:200] for index in range(40)}
+    scanned_lengths = []
+    scan = reply_check._prose_hits
+
+    def counted(text, *args, **kwargs):
+        scanned_lengths.append(len(text))
+        return scan(text, *args, **kwargs)
+
+    monkeypatch.setattr(reply_check, "_prose_hits", counted)
+    start = process_time()
+    assert reply_check.scan_public_policies(values) == {key: ["lex.en.promise"] for key in values}
+    elapsed = process_time() - start
+    assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
+    assert elapsed < 1.5   # the quadratic or backtracking scans this guards against take many seconds
+
+
+@pytest.mark.parametrize("text", [
+    "Nos prestations : la visite, la pose, la réparation sont offertes.",
+    "Une garantie pour la pose et la réparation.",
+    "Consultas sem custo para todos os clientes.",
+    "La consegna e la posa sono senza costi.",
+    "Beratung kostenlos für alle Kunden.",
+    "GRATUIT", "gratuites", "offerts", "sans frais", "remise", "rabais",
+    "garantis", "garanties", "remboursées", "remboursements",
+    "GRÁTIS", "gra\u0301tis", "sem custos", "sem taxa", "sem taxas",
+    "descontos", "garantidos", "garantidas", "senza costo", "sconti", "omaggi",
+    "garantiti", "garantite", "rimborsi", "umsonst", "Rabatte", "garantiert", "Erstattungen",
+    "ｇｒａｔｕｉｔ", "grátuit", "оffеrtеs", "sеm custo",
+])
+def test_public_policy_other_commitment_terms_ignore_language_vote(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize(("left", "right"), [
+    ("sans", "frais"), ("sem", "custo"), ("sem", "taxas"), ("senza", "costi"),
+])
+def test_public_policy_other_commitment_split_attribution(left, right, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    values = {"policy:a": left, "policy:b": right, "policy:z": "Ask about our services."}
+    assert reply_check.scan_public_text(left) == reply_check.scan_public_text(right) == []
+    assert reply_check.scan_public_policies(values) == {
+        "policy:a": ["language"], "policy:b": ["language"]}
+
+
+def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert reply_check.scan_public_text("gratuitous remiseness garage offerings") == []
+    assert "language" not in reply_check.scan_public_text("gratis")
+    assert "language" not in reply_check.scan_public_text("reembolso")
+    assert reply_check.scan_prose("Is it gratuit?") == []
+    assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
+        kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "garanto", "garantimos", "garantem", "garantia",
+    "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
+])
+def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    prose_rules = {v.rule_id for v in reply_check.scan_prose(text)}
+    assert reply_check.scan_public_text(text) == sorted(prose_rules | {"language"})
+    assert reply_check.scan_public_text("x" + text.replace(" ", "x") + "x") == []
+    assert "language" not in prose_rules  # policy-only vocabulary
+
+
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía",
+                                  # Spanish for guarantor, a Portuguese verb form too
+                                  "Se requiere un garante.", "El garante firma el contrato."])
+def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" not in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
+    "Contact: https://example.com/contact",
+    "Contact: www.example.com",
+    "Contact: info+help@example.com",
+    "Contact: EXAMPLE.COM",
+    "Non‐emergency plumbing",
+])
+def test_public_policy_language_ignores_addresses_and_english_non_compounds(text):
+    assert not lang.positive_other_language(text)
+    assert reply_check.scan_public_text(text) == []
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": text}) == {}
+    # Policy evidence changes independently of the conservative reply language detector.
+    assert lang.detect(text) == ("en" if "+help@" in text else "other")
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("com carinho info@example.com", ["language"]),
+    ("non merci", ["language"]),
+    ("Contact: info@example.com free", ["lex.en.promise"]),
+    ("Non-free plumbing", ["lex.en.promise"]),
+    ("Garantimos o serviço. https://example.com", ["language"]),
+])
+def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
+    assert reply_check.scan_public_text(text) == rules

@@ -28,6 +28,10 @@ or disguised (`labels.canary_fields`), is withheld: the page shows the field's f
 name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
 defaults, at most once an hour per Desk.
 
+A stored policy line that fails the public-text scan is withheld individually. The remaining
+policies are rescanned in display order after each removal. The owner isn't alerted (the owner's
+decision of 2026-11-01): the line is simply left out.
+
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
 Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
 but that alert, so it has no ledger entry.
@@ -140,8 +144,9 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
         Business, Business.business_id == Desk.business_id).where(Desk.slug == slug)))).one()
     if desk.deleted_at is not None:
         raise KernelFailure(404, "not_found", "deleted_desk")
+    # Match the policy write scan's order regardless of the database's default collation.
     rows = await ctx.db.scalars(copy.scoped(select(FactRow).where(
-        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id.collate("C"))))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
@@ -161,6 +166,15 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                 continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)
+    # Scan only the policies that survived visibility, currentness and canary filtering,
+    # in the order the visitor receives them. Remove only contributing lines, then rescan:
+    # removing one line can bring formerly separated promise fragments together.
+    # Remove individual failures first, so their language evidence cannot withhold honest neighbors.
+    # The owner isn't alerted (the owner's decision of 2026-11-01).
+    failing = {fact_id for block in charter for fact_id in reply_check.policy_card_rules("", [block])}
+    charter = [block for block in charter if block.fact_id not in failing]
+    while refused := reply_check.policy_card_rules("", charter):
+        charter = [block for block in charter if block.fact_id not in refused]
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS
