@@ -774,8 +774,8 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    // The turn's tools are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session)), session.language, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
