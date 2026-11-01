@@ -650,6 +650,7 @@ async def stored_brand(app: FastAPI, copy: Rivera) -> dict[str, str]:
 
 async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app, client):
     copy = await rivera(app, client)
+    assert await stored_brand(app, copy) == picked("teal")              # the seed's pick
     [business] = await rows_of(app, copy.copy_id, select(Business))
     for key in ("navy", "teal", "slate"):
         before = len(await entries_of(app, copy))

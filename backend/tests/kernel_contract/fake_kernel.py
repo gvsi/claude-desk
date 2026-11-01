@@ -145,6 +145,7 @@ from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    BRAND_PALETTE,
     ITEM_ID_PATTERN,
     MCP_TOOLS,
     MONEY_TOOLS,
@@ -1866,7 +1867,7 @@ class FakeKernelState:
 
     def _seed_rivera(self, copy_id: str) -> Desk:
         business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
-                                brand={"primary": "#1F4E4A", "accent": "#B87333"})
+                                brand={"palette": "teal", **BRAND_PALETTE["teal"]})
         seed = DeskSeed(
             name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
             calendar_slots=rivera_slots(self.now),

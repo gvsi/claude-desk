@@ -2333,7 +2333,7 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
     assert response.status_code == 200, response.text
     public = PublicDesk.model_validate(response.json())
     assert (public.business_name, public.desk_name, public.owner_display_name, public.brand) == (
-        "Rivera Plumbing", "Main line", "Maria Rivera", {"primary": "#1F4E4A", "accent": "#B87333"})
+        "Rivera Plumbing", "Main line", "Maria Rivera", {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"})
     # the Agent Card is kernel prose (tests/kernel/test_agent_auth.py), read by the same checks below
     assert public.agent_card and {(block.kind, block.template, block.fact_id) for block in public.agent_card} == {
         ("prose", None, None)}

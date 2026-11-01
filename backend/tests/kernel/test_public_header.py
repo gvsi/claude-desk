@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, PriceItem, RenderedBlock
+from desk.contracts import BRAND_PALETTE, Claim, PriceItem, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -33,7 +33,7 @@ from .test_adapters import Rivera, rivera
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, put_part, updated
 from .test_labels_hardening import assert_no_canary_on_record, disguises, documents, full_width
 
-RIVERA_BRAND = {"primary": "#1F4E4A", "accent": "#B87333"}
+RIVERA_BRAND = {"palette": "teal", **BRAND_PALETTE["teal"]}   # as the seed stores it
 RIVERA_BUSINESS = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
                    "timezone": "America/Los_Angeles", "brand": RIVERA_BRAND}
 
@@ -453,3 +453,18 @@ async def test_ordinary_names_pass(app, client):
     after_hours = LOPEZ_DESK.model_copy(update={"name": "Line 2, after hours"})
     response = await post_desk(client, copy, new_desk(desk=after_hours))
     assert response.status_code == 200, response.text
+
+
+async def test_a_palette_pick_shows_on_the_public_page_until_cleared(app, client):
+    copy = await rivera(app, client)
+    # the header's brand is the pick as stored: its key and the table's colours
+    for key in ("plum", "teal"):
+        await updated(client, copy, "business", business(brand={}, brand_palette=key))
+        assert (await public_page(client, copy)).brand == {"palette": key, **BRAND_PALETTE[key]}, key
+    # a brand passed back with a pick shows the table's colours, never the colours it sent
+    await updated(client, copy, "business", business(brand={"palette": "navy", "primary": "#000000"}))
+    assert (await public_page(client, copy)).brand == {"palette": "navy", **BRAND_PALETTE["navy"]}
+    # cleared, the page has no brand, so the web draws its own fallback
+    await updated(client, copy, "business", business(brand={}, brand_palette=None))
+    assert (await public_page(client, copy)).brand == {}
+    assert await withheld_alerts(app, copy) == []

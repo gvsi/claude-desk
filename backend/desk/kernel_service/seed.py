@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from desk.contracts import (
+    BRAND_PALETTE,
     BusinessSeed,
     BusinessTool,
     CalendarSlot,
@@ -157,7 +158,7 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
         name="Rivera Plumbing",
         owner_display_name="Maria Rivera",
         timezone=TIMEZONE,
-        brand={"primary": "#1F4E4A", "accent": "#B87333"},
+        brand={"palette": "teal", **BRAND_PALETTE["teal"]},   # picked, so the owner's Settings show teal as chosen
     )
     desk = DeskSeed(
         name="Main line",

@@ -96,7 +96,7 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     [business] = await rows_of(app, copy_id, select(Business))
     assert (business.business_id, business.name, business.owner_display_name, business.timezone, business.brand) == (
         desk.business_id, "Rivera Plumbing", "Maria Rivera", "America/Los_Angeles",
-        {"primary": "#1F4E4A", "accent": "#B87333"})
+        {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"})   # teal picked, so Settings shows it
     [owner] = await rows_of(app, copy_id, select(ActorSession).where(ActorSession.kind == "owner"))
     assert (owner.session_id, owner.kind, owner.desk_id, owner.assurance) == (
         created["owner_session"]["session_id"], "owner", None, "owner_session")
