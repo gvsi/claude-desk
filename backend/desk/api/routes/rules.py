@@ -184,7 +184,8 @@ async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *
 
 @policy_router.post("/chat", response_model=RuleChatOut, responses=DRAFTING_RESPONSES)
 async def rule_chat(desk_id: DeskId, body: RuleChatIn, request: Request,
-                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+                    # Its connection closes when the route returns, so an open stream holds none.
+                    ctx: Annotated[OwnerCtx, Depends(owner_ctx, scope="function")]) -> Any:
     """Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes
     back as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes
     until `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget

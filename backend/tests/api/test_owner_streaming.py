@@ -901,3 +901,41 @@ async def test_a_streamed_reply_hidden_before_a_limit_question_is_reset_before_d
         if live is not None:
             await live.close()
         await app.state.runtime.turn_runs.wait(interview_id)
+
+
+@pytest.mark.parametrize("chat", ["setup", "rules"])
+async def test_a_subscriber_holds_no_database_connection(app, browser, fake, kernel_http, model, monkeypatch, chat):
+    from desk.api import proving
+    from desk.api.prompts import RuleChat
+    from tests.api.test_owner_desks import new_owner as rules_owner
+
+    gate, entered = asyncio.Event(), asyncio.Event()
+    if chat == "setup":
+        owner, initial, path = await question_ready(app, browser, kernel_http, model)
+        raw = answer_turn(setup.SETUP_TURNS["what_you_do"], "Got it: repairs.", step_done=False).model_dump_json()
+        monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+        start, body, events = (path + "/answer", {"question": "what_you_do", "text": "Repairs"}), None, path + "/events"
+    else:
+        owner = await rules_owner(app, browser, fake, kernel_http)
+        path = f"/api/owner/policy/{owner.desk_id}/chat"
+        raw = RuleChat(answer="Got it: repairs.", change=None).model_dump_json()
+        monkeypatch.setattr(proving, "PROVING_WAIT_S", 0)
+        body = {"text": "Explain my rules"}
+        start, events = (path, body), path
+    model.add(streaming(raw, [raw], [gate], entered))
+    started = await owner.browser.post(start[0], json=start[1])
+    pool = app.state.runtime.engine.pool
+    live = None
+    try:
+        assert started.status_code == 202
+        await asyncio.wait_for(entered.wait(), 5)
+        working = pool.checkedout()                # the running work's own connection, and nothing for requests
+        live = LiveEvents(app, browser, owner).open(events, body=body)
+        assert (await live.next())[0] == "delta"
+        assert pool.checkedout() == working        # an open stream holds no connection of its own
+    finally:
+        gate.set()
+        if live is not None:
+            await live.close()
+        if chat == "setup":
+            await app.state.runtime.turn_runs.wait(initial["interview_id"])

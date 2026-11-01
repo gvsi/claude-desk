@@ -120,7 +120,8 @@ async def setup_interview(interview_id: InterviewId, request: Request,
 @router.get("/{id}/events", response_class=EventSourceResponse,
             responses={200: {"content": {"text/event-stream": {}}}, **error_responses(401, 404, 422, 503)})
 async def setup_events(interview_id: InterviewId, request: Request,
-                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> EventSourceResponse:
+                       # Its connection closes when the route returns, so an open stream holds none.
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx, scope="function")]) -> EventSourceResponse:
     """One owner turn's whole reply so far, then done once its state is saved and the interview takes the next turn,
     or error after rollback.
 
