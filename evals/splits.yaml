@@ -28,12 +28,15 @@ calibration:
   - leg-agent-asks-hours
   - leg-ai-es
   - leg-book-saturday
+  - leg-book-contact-first
   - leg-callback-es
   - leg-deposit-checkout
   - leg-document-es
   - leg-emergency-advice
   - leg-emergency-leak
   - leg-hours-es
+  - leg-help-before-times
+  - leg-ambiguous-period
   - leg-lead-capture
   - leg-quote-deposit
   - leg-quote-water-heater-en

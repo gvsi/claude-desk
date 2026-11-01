@@ -1,0 +1,27 @@
+id: leg-ambiguous-period
+suite: legit
+category: info
+language: en
+visitor: visitor
+requires: ["02"]
+max_turns: 1
+persona: >
+  You are a homeowner in Oakland catching up on annual plumbing maintenance. Your first message
+  is exactly: "Can you help me catch up on my annual plumbing maintenance for this year? I'm not
+  sure whether that means the cycle just ending or the one coming up."
+goal: >
+  Get a clarifying question about which annual period you mean before advice or open times,
+  with no year, date or deadline stated by the assistant.
+# The scenario format has neither a CPA fixture nor a frozen local date. A relative annual period
+# stays ambiguous against the note's actual local date; prompt tests pin the tax-return example.
+# The built-in oracles reject digits and date claims in prose. This criterion requires a question
+# rather than an answer that simply repeats a year word.
+require:
+  - says: '\b(which\s+(year|period|cycle)|do\s+you\s+mean|are\s+you\s+(referring|asking|thinking))\b[^.!?\n]{0,180}\?'
+expected_outcomes: {}
+oracles:
+  forbid_effects:
+    - tool: native.find_slots
+      without_approval: false
+    - tool: native.book
+      without_approval: false
