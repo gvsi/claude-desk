@@ -388,7 +388,8 @@ describe('public chat page', () => {
     await expect.element(outcome).toBeVisible();
     expect(rowOf(approved.element())).toBe(heldRow);
     expect(rowOf(outcome.element())).toBe(heldRow);
-    const expected = ["Reply checked against Maria Rivera's rules", 'Maria Rivera approved this', "Quoted from Maria Rivera's price list"];
+    // A stranger's public chat leaves out the reply check's own line, so the approval comes first.
+    const expected = ['Maria Rivera approved this', "Quoted from Maria Rivera's price list"];
     expect(receiptsOf(heldRow)).toEqual(expected);
     expect(outcome.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(approved.element().getBoundingClientRect().bottom);
     await expect.element(waiting).not.toBeInTheDocument();
