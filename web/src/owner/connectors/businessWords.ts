@@ -13,19 +13,28 @@ export const BUSINESS_WORDS = {
 export interface BusinessSetupRow { label: string; value: string }
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-const text = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+// Pydantic's string bounds count Unicode code points, including empty and whitespace-only strings.
+const boundedText = (value: unknown, maximum: number): value is string => typeof value === 'string' && [...value].length <= maximum;
+const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
+const integerInRange = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum;
 
 /** Validate API text and configuration before drawing any part of a job. Unknown blocks stay out. */
 export function isBusinessDef(value: unknown): value is BusinessToolDef {
-  return record(value) && text(value.title) && text(value.description) && isBusinessConfig(value.config);
+  return record(value) && onlyKeys(value, ['title', 'description', 'config'])
+    && boundedText(value.title, 60) && boundedText(value.description, 300) && isBusinessConfig(value.config);
 }
 
 function isBusinessConfig(config: unknown): config is BusinessToolDef['config'] {
   if (!record(config)) return false;
-  if (config.block === 'intake') return Array.isArray(config.questions) && config.questions.length > 0 && config.questions.every(text);
-  if (config.block === 'purpose_payment') return text(config.purpose) && Number.isSafeInteger(config.amount_cents) && (config.amount_cents as number) > 0;
-  if (config.block === 'urgent') return text(config.urgent_when);
-  return config.block === 'typed_booking' && text(config.appointment_type) && Number.isSafeInteger(config.minutes) && (config.minutes as number) > 0;
+  if (config.block === 'intake') return onlyKeys(config, ['block', 'questions'])
+    && Array.isArray(config.questions) && config.questions.length >= 1 && config.questions.length <= 5
+    && config.questions.every((question) => boundedText(question, 120));
+  if (config.block === 'purpose_payment') return onlyKeys(config, ['block', 'purpose', 'amount_cents'])
+    && boundedText(config.purpose, 60) && integerInRange(config.amount_cents, 0, 1_000_000);
+  if (config.block === 'urgent') return onlyKeys(config, ['block', 'urgent_when']) && boundedText(config.urgent_when, 300);
+  return config.block === 'typed_booking' && onlyKeys(config, ['block', 'appointment_type', 'minutes'])
+    && boundedText(config.appointment_type, 60) && integerInRange(config.minutes, 15, 60);
 }
 
 export function businessLine(def: BusinessToolDef): string | null {

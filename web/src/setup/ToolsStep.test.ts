@@ -14,10 +14,10 @@ it('reviews a business tool by its title and confirmed description', () => {
   }
   const intro = chenBusinessTools[0];
   if (!intro?.business) throw new Error('Chen has an intro call tool');
-  for (const business of [null, { ...intro.business, title: '  ' }]) {
+  for (const business of [null, { ...intro.business, title: '' }, { ...intro.business, title: '  ', description: '' }]) {
     expect(reviewTool({ ...intro, business }, [])).toMatchObject({
       name: 'A connected tool',
-      description: `A connected tool ${describeEffects(intro.effects, intro.reversible)}`,
+      description: `${business === null ? 'A connected tool' : intro.description_confirmed} ${describeEffects(intro.effects, intro.reversible)}`,
     });
   }
 });

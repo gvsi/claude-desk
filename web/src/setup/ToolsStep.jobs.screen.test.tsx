@@ -3,7 +3,7 @@ import { page, userEvent } from 'vitest/browser';
 
 import { newIdempotencyKey } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
-import { chenBusinessTools, seedBusinessTools } from '../mocks/businessTools.ts';
+import { businessToolRows, chenBusinessTools, seedBusinessTools } from '../mocks/businessTools.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
@@ -80,7 +80,7 @@ it('omits unknown and malformed business rows and keeps the Tools step usable', 
   const intro = chenBusinessTools[0];
   if (!intro) throw new Error('The fixture has an intro call');
   mockStore.inject({ route: 'setupTools', status: 200, body: { tools: [
-    null, { ...intro, business: null }, { ...intro, business: { ...intro.business, title: ' ' } },
+    null, { ...intro, business: null }, { ...intro, business: { ...intro.business, title: null } },
     { ...intro, business: { ...intro.business, config: { block: 'unknown' } } },
     { ...intro, effects: [null] }, { ...intro, definition_sha256: null }, { ...intro, status: 'disabled' },
     { ...intro, tool: { toString: 'not a function' } },
@@ -118,4 +118,59 @@ it('lists only on and not-on jobs, excluding changed definitions, delisted jobs 
     expect(jobs.getByText(title, { exact: true }).elements()).toHaveLength(0);
     expect(jobs.getByRole('button', { name: `Review ${title}` }).elements()).toHaveLength(0);
   }
+});
+
+it('keeps jobs with empty descriptions and zero-dollar payments through mock building, review and turn-on', async () => {
+  const { state, desk } = await interviewAtTools();
+  const rows = businessToolRows([
+    { title: 'Book a free intro call', how: '', config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 } },
+    { title: 'Take a deposit', how: 'Sends a deposit link.', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
+  ]);
+  expect(rows).toHaveLength(2);
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+  seedBusinessTools(desk, rows);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+  await expect.element(jobs).toBeVisible();
+  await expect.element(jobs.getByText('Consultation, $0', { exact: true })).toBeVisible();
+  for (const [index, row] of rows.entries()) {
+    if (!row.business) throw new Error('The mock row carries its business definition');
+    const title = row.business.title;
+    await jobs.getByRole('button', { name: `Review ${title}` }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Tools', exact: true }).getByText(row.description_confirmed, { exact: false })).toBeVisible();
+    expect(screen.getByText('A connected tool', { exact: true }).elements()).toHaveLength(0);
+    if (row.business.config.block === 'purpose_payment') {
+      await expect.element(screen.getByRole('region', { name: 'How it’s set up' }).getByText('$0', { exact: true })).toBeVisible();
+    }
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Turn it on', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: `Turn on ${title}`, exact: true })).toBeVisible();
+    expect(mockStore.requests.slice(mark).filter((request) => request.key === 'confirmTool').map((request) => request.body)).toEqual([
+      { tools: [{ tool: row.tool, definition_sha256: row.definition_sha256 }], enable: true },
+    ]);
+    expect(desk.tools.find((tool) => tool.tool === row.tool)?.status).toBe('needs_review');
+    await screen.getByRole('button', { name: 'Confirm and turn on', exact: true }).click();
+    await expect.poll(() => jobs.getByText('On', { exact: true }).elements()).toHaveLength(index + 1);
+    expect(desk.tools.find((tool) => tool.tool === row.tool)?.status).toBe('enabled');
+  }
+});
+
+it('keeps an empty kernel-valid title accessible with the existing tool-name fallback', async () => {
+  const { state, desk } = await interviewAtTools();
+  const rows = businessToolRows([{ title: '', how: '', config: { block: 'typed_booking', appointment_type: '', minutes: 15 } }]);
+  expect(rows).toHaveLength(1);
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+  seedBusinessTools(desk, rows);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+  await expect.element(jobs).toBeVisible();
+  expect(jobs.element().querySelector('.cd-connector-summary__name')?.textContent).toBe('A connected tool');
+  await jobs.getByRole('button', { name: 'Review A connected tool' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'A connected tool', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tools', exact: true }).getByText(rows[0]?.description_confirmed ?? '', { exact: false })).toBeVisible();
+  expect(screen.getByRole('region', { name: 'How it’s set up' }).getByText('Appointment', { exact: true }).elements()).toHaveLength(0);
+  await expectScreenBasics(screen.container, { owner: true });
+  await screen.getByRole('button', { name: 'Turn it on', exact: true }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Turn on A connected tool', exact: true })).toBeVisible();
 });

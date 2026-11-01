@@ -40,6 +40,53 @@ it('describes a booking and follows its starting outcome without a Who row', () 
   expect(businessRows(booking, 'ask').at(-1)).toEqual({ label: 'Next for you', value: 'You approve each request in Needs you' });
 });
 
+it('accepts empty descriptions and formats a zero-dollar purpose payment', () => {
+  const emptyDescription = { ...booking, description: '' };
+  expect(isBusinessDef(emptyDescription)).toBe(true);
+  expect(businessLine(emptyDescription)).toBe('Free intro call, 20 minutes, in your opening hours');
+  expect(businessRows(emptyDescription, 'ask')).toEqual(businessRows(booking, 'ask'));
+  const payment: BusinessToolDef = {
+    title: 'Take a deposit', description: '',
+    config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 },
+  };
+  expect(isBusinessDef(payment)).toBe(true);
+  expect(businessLine(payment)).toBe('Consultation, $0');
+  expect(businessRows(payment, 'ask')).toContainEqual({ label: 'Amount', value: '$0' });
+});
+
+it('matches the kernel business-definition bounds and strict field rules', () => {
+  const def = (config: unknown) => ({ ...booking, config });
+  const valid: unknown[] = [
+    { ...booking, title: '', description: '' },
+    { ...booking, title: ' '.repeat(60), description: ' '.repeat(300) },
+    { ...booking, title: '🎉'.repeat(60), description: '🎉'.repeat(300) },
+    def({ block: 'typed_booking', appointment_type: '', minutes: 15 }),
+    def({ block: 'typed_booking', appointment_type: '🎉'.repeat(60), minutes: 60 }),
+    def({ block: 'intake', questions: [''] }),
+    def({ block: 'intake', questions: Array(5).fill('🎉'.repeat(120)) }),
+    def({ block: 'purpose_payment', purpose: '', amount_cents: 0 }),
+    def({ block: 'purpose_payment', purpose: '🎉'.repeat(60), amount_cents: 1_000_000 }),
+    def({ block: 'urgent', urgent_when: '' }),
+    def({ block: 'urgent', urgent_when: '🎉'.repeat(300) }),
+  ];
+  for (const value of valid) expect(isBusinessDef(value), JSON.stringify(value)).toBe(true);
+  const invalid: unknown[] = [
+    { ...booking, title: 'a'.repeat(61) }, { ...booking, description: 'a'.repeat(301) },
+    { ...booking, title: null }, { ...booking, description: null }, { ...booking, extra: true },
+    def({ block: 'typed_booking', appointment_type: 'a'.repeat(61), minutes: 20 }),
+    ...[14, 61, 15.5, '20', true].map((minutes) => def({ block: 'typed_booking', appointment_type: '', minutes })),
+    def({ block: 'typed_booking', appointment_type: '', minutes: 20, extra: true }),
+    ...[[], Array(6).fill(''), ['a'.repeat(121)], [42], 'Question'].map((questions) => def({ block: 'intake', questions })),
+    def({ block: 'intake', questions: [''], extra: true }),
+    def({ block: 'purpose_payment', purpose: 'a'.repeat(61), amount_cents: 0 }),
+    ...[-1, 1_000_001, 0.5, '0', false].map((amount_cents) => def({ block: 'purpose_payment', purpose: '', amount_cents })),
+    def({ block: 'purpose_payment', purpose: '', amount_cents: 0, extra: true }),
+    def({ block: 'urgent', urgent_when: 'a'.repeat(301) }),
+    def({ block: 'urgent', urgent_when: undefined }), def({ block: 'urgent', urgent_when: '', extra: true }),
+  ];
+  for (const value of invalid) expect(isBusinessDef(value), JSON.stringify(value)).toBe(false);
+});
+
 it('omits Next for you for every block when the starting outcome is never', () => {
   const definitions: BusinessToolDef[] = [
     booking,
@@ -53,13 +100,13 @@ it('omits Next for you for every block when the starting outcome is never', () =
 });
 
 it('leaves unknown blocks and malformed definitions out rather than drawing partial jobs', () => {
-  for (const value of [null, {}, { ...booking, title: ' ' }, { ...booking, description: 12 },
+  for (const value of [null, {}, { ...booking, title: 'a'.repeat(61) }, { ...booking, description: 12 },
     { ...booking, config: null }, { ...booking, config: { block: 'unknown' } },
-    { ...booking, config: { block: 'typed_booking', appointment_type: '', minutes: 20 } },
+    { ...booking, config: { block: 'typed_booking', appointment_type: 'a'.repeat(61), minutes: 20 } },
     { ...booking, config: { block: 'typed_booking', appointment_type: 'Call', minutes: NaN } },
     { ...booking, config: { block: 'intake', questions: ['Question', null] } },
     { ...booking, config: { block: 'purpose_payment', purpose: 'Deposit', amount_cents: -1 } },
-    { ...booking, config: { block: 'urgent', urgent_when: ' ' } },
+    { ...booking, config: { block: 'urgent', urgent_when: 'a'.repeat(301) } },
   ]) {
     expect(isBusinessDef(value)).toBe(false);
     expect(businessLine(value as BusinessToolDef)).toBeNull();

@@ -39,6 +39,21 @@ it('turns accepted jobs into business rows in order with the kernel block profil
   ]);
 });
 
+it('retains empty descriptions and zero-dollar payments with their fixed block profiles', () => {
+  const rows = businessToolRows([
+    { ...booking, how: '' },
+    { title: 'Take a deposit', how: '', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
+  ]);
+  expect(rows).toHaveLength(2);
+  expect(rows[0]?.business?.description).toBe('');
+  expect(rows[0]?.description_confirmed).toBe('Books one open calendar slot for the configured appointment type.');
+  expect(rows[1]).toMatchObject({
+    business: { description: '', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
+    effects: ['charge'], reversible: false,
+    description_confirmed: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+  });
+});
+
 it('deduplicates against taken names and earlier jobs while keeping suffixes within 40 characters', () => {
   const taken = new Set(['desk.book-a-free-intro-call', 'desk.book-a-free-intro-call-2']);
   expect(businessToolRows([booking, booking], taken).map((row) => row.tool)).toEqual([
@@ -77,14 +92,14 @@ it('omits jobs without config without reserving their names or changing the acce
 
 it('fails closed for unknown blocks and malformed jobs without consuming a valid job name', () => {
   const malformed: unknown[] = [
-    null, undefined, {}, { ...booking, title: null }, { ...booking, title: ' ' },
-    { ...booking, how: null }, { ...booking, how: ' ' },
+    null, undefined, {}, { ...booking, title: null }, { ...booking, title: 'a'.repeat(61) },
+    { ...booking, how: null }, { ...booking, how: 'a'.repeat(301) },
     { ...booking, config: undefined }, { ...booking, config: {} },
     { ...booking, config: { block: 'unknown' } }, { ...booking, config: { block: '__proto__' } },
     { ...booking, config: { block: 'intake', questions: 'Not an array' } },
     { ...booking, config: { block: 'intake', questions: [] } },
     { ...booking, config: { block: 'intake', questions: [null] } },
-    { ...booking, config: { ...booking.config, appointment_type: '' } },
+    { ...booking, config: { ...booking.config, appointment_type: 'a'.repeat(61) } },
     { ...booking, config: { ...booking.config, minutes: NaN } },
     { ...booking, config: { block: 'purpose_payment', purpose: 'Deposit', amount_cents: '500' } },
     { ...booking, config: { block: 'urgent', urgent_when: null } },

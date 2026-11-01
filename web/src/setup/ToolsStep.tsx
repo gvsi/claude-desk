@@ -72,7 +72,8 @@ function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
 export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
   const business = businessTools([row]);
   const name = toolDisplayName(row.tool, business) ?? 'A connected tool';
-  const line = business.has(row.tool) ? row.description_confirmed : (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
+  const line = row.source === 'business' && isBusinessToolName(row.tool) && isBusinessDef(row.business)
+    ? row.description_confirmed : (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
   const covering = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.is_default !== true);
   return {
     key: row.tool,
@@ -195,7 +196,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
 
   if (view.kind === 'confirm') {
     const connector = connectorByKey(view.key);
-    const name = toolDisplayName(view.key, businessTools(view.rows)) ?? connector?.view.name ?? '';
+    const name = toolDisplayName(view.key, businessTools(view.rows)) ?? connector?.view.name ?? 'A connected tool';
     // The change applies with `confirmRules`; when the rules changed since it was drafted, the
     // tools are asked for once more, and the new draft is shown to confirm.
     const confirm = async () => {
@@ -252,7 +253,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       if (glyph === null) return null;
       return (
         <ConnectorReview
-          job={{ title: job.business.title, glyph, rows: businessRows(job.business, tool.mode) }}
+          job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
           tools={[tool]}
           onTurnOn={() => void turnOn(view.key, [job])}
           onCancel={() => setView({ kind: 'list' })}
@@ -298,7 +299,8 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const line = businessLine(row.business);
       const glyph = businessGlyph(row.business.config);
       if (line === null || glyph === null) return [];
-      const job = { key: row.tool, title: row.business.title, line, glyph };
+      const title = toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool';
+      const job = { key: row.tool, title, line, glyph };
       return [toolState(row) === 'on' ? { ...job, state: 'on' } : {
         ...job, state: 'needs_review', onReview: () => {
           setReviewError(undefined);
