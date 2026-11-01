@@ -4,9 +4,10 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 
+import type { LedgerPage } from '../api/contracts.ts';
 import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
-import type { ConversationSummary, SetupState } from '../api/views.ts';
+import type { ConversationSummary, SetupState, Suggestion } from '../api/views.ts';
 import { retryDelayMs } from '../app/poll.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { Button, Greeting, Skeleton, SkeletonScreen } from '../ds/index.ts';
@@ -21,6 +22,8 @@ import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
+import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
+import { settled } from '../ds/test/settled.ts';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
 beforeAll(loadWebFonts);
@@ -936,7 +939,8 @@ async function withRecordedHistory(): Promise<void> {
     route: 'conversations',
     status: 200,
     times: 10_000,
-    body: list.map((s) => (s.session_id === SEEDED_HOLD ? { ...s, replayed: true } : s)),
+    // Keep all three rows on Today even around midnight, preserving the seed's order.
+    body: list.map((s, i) => ({ ...s, last_activity: new Date(Date.now() - i * 1_000).toISOString(), ...(s.session_id === SEEDED_HOLD ? { replayed: true } : {}) })),
   });
 }
 
@@ -987,12 +991,12 @@ const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PAR
  * arrive with the chat and the transcript settles at its end, and nothing moves from its shape by
  * more than 2 px on its top, bottom, left or height. `expectStill` checks every frame it saw.
  */
-function watchPaneLanding(anchors: readonly SkeletonAnchor[]) {
+function watchPaneLanding(anchors: readonly SkeletonAnchor[], layerSelector = '.cd-conversation-pane .cd-skeleton-screen__layer') {
   let shapes: DOMRect[] | null = null;
   const worst = anchors.map(() => ({ top: 0, left: 0, height: 0, bottom: 0 }));
   let frames = 0;
   const look = () => {
-    const layer = document.querySelector<HTMLElement>('.cd-conversation-pane .cd-skeleton-screen__layer');
+    const layer = document.querySelector<HTMLElement>(layerSelector);
     if (shapes === null) {
       if (layer?.dataset.state !== 'leaving') return;
       shapes = anchors.map(({ name }) => {
@@ -1327,4 +1331,307 @@ it.each([620, 700])('customers_reload_draws_the_subtitles_own_lines at %i px', a
   const real = landedElement('.cd-people__head .cd-section-header__heading')!.getBoundingClientRect();
   const page = landedElement('.cd-people')!.getBoundingClientRect();
   expect(Math.abs(real.top - page.top - (head!.top - shapePage.top)), 'the list starts where its shapes did').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+});
+
+
+const RULES = `/app/${RIVERA.deskId}/rules`;
+const RULES_READ = ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId);
+/** The fresh copy's approval suggestion; as with recorded conversations, the mock adds it explicitly. */
+const FRESH_SUGGESTION: Suggestion = {
+  tool: 'payments.create_refund', count: 3,
+  text: 'You approved 3 refunds for Dana Whitfield under $50 this month. Let these go through without asking?',
+  card: { ...rivera.ruleCards['rv-refund'], card_id: 'card-dana-refunds', mode: 'auto', who: 'person', person_id: rivera.people.dana.personId, max_amount_cents: 5_000 },
+};
+function withFreshRules() {
+  mockStore.world.desks[0]!.suggestions = [FRESH_SUGGESTION];
+}
+
+const RULES_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'rules-suggestion-0', page: '.cd-rules__suggestions > .cd-card', size: true, dimensions: ['bottom'] },
+  ...rivera.connectors.sections.flatMap(({ tools }, i) => [
+    { name: `rules-connector-${i}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__header`, dimensions: ['bottom', 'height'] as const },
+    ...tools.map((_, j) => ({ name: `rules-tool-${i}-${j}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__tool:nth-child(${j + 1})`, size: true, dimensions: ['bottom'] as const })),
+  ]),
+  { name: 'rules-all', page: '.cd-rules__all', dimensions: ['bottom', 'height'] },
+  { name: 'rules-always', page: '.cd-always-on .cd-section-header__heading', dimensions: ['bottom', 'height'] },
+];
+
+it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewport) => {
+  withFreshRules();
+  const { router } = await openToday(viewport);
+  const read = holdReads(RULES_READ);
+  const landing = watchPaneLanding(RULES_ANCHORS, '.cd-rules__region .cd-skeleton-screen__layer');
+  const headings = watchTopHeadings();
+  await expectSkeletonLoad({
+    status: 'Reading your rules', anchors: RULES_ANCHORS,
+    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    open: async () => { await router.navigate(RULES); }, release: read.release,
+  });
+  await landing.expectStill();
+  expect(headings()).toEqual([1]);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+const SAFETY = `/app/${RIVERA.deskId}/safety`;
+const LEDGER_READ = ROUTES.ledger.path.replace('{desk_id}', RIVERA.deskId);
+/** The fresh copy replays the record; the bare mock seed has no replay markers. */
+async function withFreshRecord() {
+  const answer = await mockStore.dispatch('ledger', { params: { desk_id: RIVERA.deskId }, query: { verify: 'true' } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the record');
+  const page = answer.body as LedgerPage;
+  mockStore.inject({ route: 'ledger', status: 200, times: 10_000, body: {
+    ...page, entries: page.entries.map(entry => ({ ...entry, event: { ...entry.event, summary: { ...entry.event.summary, replayed: { at: entry.created_at } } } })),
+  } });
+}
+
+const SAFETY_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'safety-headline', page: '.cd-safety__headline', dimensions: ['bottom', 'height'] },
+  { name: 'safety-chain', page: '.cd-chain-status', size: true, dimensions: ['bottom'] },
+  { name: 'safety-view', page: '.cd-safety__bar .cd-segmented', size: true, dimensions: ['bottom'] },
+  { name: 'safety-filters', page: '.cd-attempts__filters', size: true, dimensions: ['bottom'] },
+  { name: 'safety-row-0', page: '.cd-attempt-row', size: true, dimensions: ['bottom'] },
+  { name: 'safety-detail', page: '.cd-safety__opened > .cd-card', size: true, dimensions: ['bottom'] },
+  ...[
+    ['safety-detail-status', '.cd-attempt__status'], ['safety-detail-title', '.cd-attempt__reason'],
+    ['safety-claim', '.cd-attempt__claim'], ['safety-origin', '.cd-attempt__origin'],
+    ['safety-replayed', '.cd-attempt__what .cd-attempt__origin:last-child'],
+    ['safety-summary-label', '.cd-attempt__label'], ['safety-summary', '.cd-attempt__summary'],
+    ['safety-toggle-0', '.cd-attempt__toggle:first-child'], ['safety-toggle-1', '.cd-attempt__toggle:nth-of-type(2)'],
+    ['safety-conversation', '.cd-attempt__conversation'],
+  ].map(([name, page]) => ({ name: name!, page: page!, dimensions: ['bottom', 'height'] as const })),
+];
+
+it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (viewport) => {
+  await withFreshRecord();
+  const { screen, router } = await renderRoute(PEOPLE, { viewport, pollScale: 100 });
+  await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const ledger = holdReads(LEDGER_READ);
+  const landing = watchPaneLanding(SAFETY_ANCHORS, '.cd-safety__region .cd-skeleton-screen__layer');
+  const headings = watchTopHeadings();
+  await expectSkeletonLoad({
+    status: 'Reading the attempts',
+    anchors: SAFETY_ANCHORS,
+    stays: ['.cd-safety > .cd-page-header', '.cd-owner-layout__footer'],
+    open: async () => { await router.navigate(SAFETY); }, release: ledger.release,
+  });
+  await landing.expectStill();
+  expect(headings()).toEqual([1]);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each([
+  { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__all' },
+  { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading the attempts', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
+].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', async ({ path, read, region, status, anchors, until, viewport }) => {
+  if (path === RULES) withFreshRules();
+  else await withFreshRecord();
+  const desks = holdReads(ROUTES.desks.path);
+  const pageRead = holdReads(read);
+  const gaps = watchSkeletonGaps(until);
+  const { screen } = await renderRoute(path, { viewport, pollScale: 100 });
+  const headings = watchTopHeadings();
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  const names = anchors.map(({ name }) => name);
+  const before = fullPageShapes(names);
+  const [footer] = fullPageShapes(['owner-footer']);
+  await expectSkeletonLoad({
+    status, anchors, continues: true,
+    open: async () => {
+      desks.release();
+      await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      expectSameShapes(region, names, before);
+      const realFooter = landedElement('.cd-owner-layout__footer')!.getBoundingClientRect();
+      for (const edge of ['top', 'bottom', 'left', 'width', 'height'] as const) {
+        expect(Math.abs(footer![edge] - realFooter[edge]), `footer ${edge} across the hand-off`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      }
+    },
+    release: pageRead.release,
+  });
+  expect(gaps()).toBe(0);
+  expect(headings()).toEqual([1]);
+  await expectScreenBasics(screen.container, { owner: true });
+});
+
+it('safety_view_switch_keeps_focus', async () => {
+  const { screen, router } = await renderRoute(SAFETY, { pollScale: 100 });
+  const stopped = screen.getByRole('radio', { name: 'Stopped', exact: true });
+  const entries = screen.getByRole('radio', { name: 'Every entry', exact: true });
+  await expect.element(stopped).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const layers = watchLayers();
+  (stopped.element() as HTMLElement).focus();
+  const { userEvent } = await import('vitest/browser');
+  await userEvent.keyboard('{ArrowRight}');
+  await expect.element(entries).toHaveFocus();
+  expect(router.state.location.search).toBe('?view=entries');
+  await userEvent.keyboard('{ArrowLeft}');
+  await expect.element(stopped).toHaveFocus();
+  await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  await nextFrames();
+  expect(layers()).toBe(0);
+});
+
+/** Customers reads none of Safety's first view, so no prefetch races the held request. */
+async function beforeSafety(viewport: 'desktop' | 'phone' = 'phone', retryScale = 1) {
+  const rendered = await renderRoute(PEOPLE, { viewport, pollScale: 100, retryScale });
+  await expect.element(rendered.screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  return rendered;
+}
+
+it.each(['ledger', 'health', 'today', 'safety'] as const)('safety_waits_for_the_record_and_health: %s alone', async (key) => {
+  await withFreshRecord();
+  // The frame reads Today too: hold before mounting it, so no cached read can win the delay.
+  const held = holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId));
+  const { screen, router } = await beforeSafety();
+  const others = ['ledger', 'health', 'today', 'safety'].filter(route => route !== key);
+  await expectSkeletonLoad({
+    status: 'Reading the attempts', anchors: SAFETY_ANCHORS,
+    open: async () => {
+      await router.navigate(SAFETY);
+      await vi.waitFor(() => expect(held.held()).toBe(1));
+      await vi.waitFor(() => expect(others.every(route => mockStore.requests.some(r => r.key === route))).toBe(true));
+      await vi.waitFor(() => expect(document.querySelector('.cd-safety__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      expect(landedElement('.cd-safety__headline')).toBeNull();
+      expect(landedElement('.cd-safety__bar')).toBeNull();
+    },
+    release: held.release,
+  });
+  await expect.element(screen.getByText('Signed with a development key', { exact: true })).toBeVisible();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each(['ledger', 'health'] as const)('safety_waits_for_the_record_and_health: %s fails', async (key) => {
+  const held = holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId));
+  const { screen, router } = await beforeSafety('phone', 0);
+  mockStore.inject({ route: key, status: 503, times: 2 });
+  await router.navigate(SAFETY);
+  await vi.waitFor(() => expect(document.querySelector('.cd-safety__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  held.release();
+  const error = screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true });
+  await expect.element(error).toBeVisible();
+  expect(error.element().closest('.cd-safety__chain')).not.toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each([
+  { path: RULES, read: RULES_READ, status: 'Reading your rules', anchors: RULES_ANCHORS },
+  { path: SAFETY, read: LEDGER_READ, status: 'Reading the attempts', anchors: SAFETY_ANCHORS },
+])('$status stays still under reduced motion', async ({ path, read, status, anchors }) => {
+  if (path === RULES) withFreshRules();
+  else await withFreshRecord();
+  const { router } = await beforeSafety('desktop');
+  const held = holdReads(read);
+  await expectSkeletonStill({ status, anchors, open: async () => { await router.navigate(path); }, release: held.release });
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('safety_entries_reload_keeps_its_existing_loader', async () => {
+  const desks = holdReads(ROUTES.desks.path);
+  const ledger = holdReads(LEDGER_READ);
+  const { screen } = await renderRoute(`${SAFETY}?view=entries`, { pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  expect(document.querySelector(`${FULL_LAYER} [data-skeleton-anchor^="safety-"]`)).toBeNull();
+  const headings = watchTopHeadings();
+  desks.release();
+  await expect.element(screen.getByRole('radio', { name: 'Every entry', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const checking = screen.getByRole('status').filter({ hasText: 'Checking the record' });
+  await expect.element(checking).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  ledger.release();
+  await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+  expect(headings()).toEqual([1]);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+
+it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i', async (width) => {
+  const { screen } = await renderRoute(RULES, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
+  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  if (width >= 1280) {
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Why was this quote held?');
+    const { userEvent } = await import('vitest/browser');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
+    await settled(document.body);
+  }
+  const page = landedElement('.cd-rules')!.getBoundingClientRect();
+  // The reload's page, measured at the real column's width, including beside Ask Claude.
+  const host = document.createElement('div');
+  Object.assign(host.style, { position: 'fixed', top: `${page.top}px`, left: `${page.left}px`, width: `${page.width}px`, visibility: 'hidden' });
+  document.body.append(host);
+  const root = createRoot(host);
+  onTestFinished(() => { root.unmount(); host.remove(); });
+  flushSync(() => root.render(<RulesSkeleton withHeader />));
+  await nextFrames();
+  const parts = [
+    ['rules-title', '.cd-rules__header h1'],
+    ['rules-header-all', '.cd-rules__header .cd-text-link'],
+    ['rules-preset', '.cd-rules__header .cd-preset-menu > .cd-button'],
+    ['rules-composer', '.cd-rules__ask .cd-composer__box'],
+  ] as const;
+  if (width > 390) {
+    const drawn = host.querySelector('[data-skeleton-anchor="rules-subtitle"]')!.getBoundingClientRect();
+    const words = landedElement('.cd-rules__header .cd-page-header__subtitle')!.getBoundingClientRect();
+    expect(Math.abs(drawn.top - words.top)).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(drawn.bottom - words.bottom)).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  }
+  for (const [name, selector] of parts) {
+    const shape = host.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
+    const real = landedElement(selector)!.getBoundingClientRect();
+    for (const edge of name === 'rules-title' ? ['top', 'bottom'] as const : ['top', 'bottom', 'left', 'width', 'height'] as const) {
+      expect(Math.abs(shape[edge] - real[edge]), `${name} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+});
+
+it.each(['desktop', 'phone'] as const)('rules_after_a_suggestion_is_taken_moves_once at %s', async (viewport) => {
+  // A fresh copy has one suggestion. Once taken, the zero-card response moves the groups up once.
+  const { screen, router } = await openToday(viewport);
+  const read = holdReads(RULES_READ);
+  await router.navigate(RULES);
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const card = document.querySelector('[data-skeleton-anchor="rules-suggestion-0"]')!.getBoundingClientRect();
+  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region .cd-rules')!).rowGap);
+  const tops = watchTop(() => {
+    const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
+    return layer && layer.getAttribute('data-state') !== 'leaving'
+      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
+      : landedElement('.cd-connector-section__header');
+  });
+  read.release();
+  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
+  expect(tops()).toHaveLength(2);
+  expect(tops()[0]! - tops()[1]!).toBe(Math.round(card.height + gap));
+  const landed = landedElement('.cd-connector-section__header')!.getBoundingClientRect();
+  for (let frame = 0; frame < 10; frame += 1) await nextFrames();
+  expect(landedElement('.cd-connector-section__header')!.getBoundingClientRect().top).toBe(landed.top);
+  expect(tops()).toHaveLength(2);
+});
+
+it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alone', async (key) => {
+  withFreshRules();
+  const held = holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId));
+  const { router } = await openToday();
+  await expectSkeletonLoad({
+    status: 'Reading your rules', anchors: RULES_ANCHORS,
+    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    open: async () => {
+      await router.navigate(RULES);
+      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+      expect(landedElement('.cd-connector-list')).toBeNull();
+    },
+    release: held.release,
+  });
 });

@@ -12,7 +12,7 @@ import {
   Composer,
   ConnectorList,
   ConnectorSection,
-  LoadingLine,
+  SkeletonScreen,
   MoneyLimit,
   Notice,
   PRESET_WORDS,
@@ -35,6 +35,8 @@ import { holdQuestion, hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
+
+import { RulesSkeleton } from './RulesSkeleton.tsx';
 
 import './RulesPage.css';
 
@@ -111,6 +113,8 @@ export function RulesPage() {
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
   const failure = useReadFailure(rules);
+  const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
+  const suggestionsFailure = useReadFailure(suggestions, { pausedRoute: 'suggestions' });
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
   const [limit, setLimit] = useState<LimitField | null>(null);
@@ -162,6 +166,10 @@ export function RulesPage() {
     }
   };
 
+  const settled = [rules, people, suggestions].every((read) => read.isFetched || read.isPaused);
+  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
+  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
+  const loading = (!settled && !firstReadsEnded) || waitingForNeedsYou;
   let body;
   if (rules.data === undefined && rules.isError) {
     body = (
@@ -177,7 +185,7 @@ export function RulesPage() {
       </Notice>
     );
   } else if (rules.data === undefined || active === undefined || waitingForNeedsYou) {
-    body = <LoadingLine>Reading your rules</LoadingLine>;
+    body = null;
   } else {
     const cap = capOf(active);
     const sections = hubSections(rules.data, people.data ?? null);
@@ -258,9 +266,14 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
-      {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
-      {body}
-      <AlwaysOnList />
+      <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
+        {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+        {[peopleFailure, suggestionsFailure].map((failed, i) => failed === null ? null : (
+          <Notice key={i} tone="error" action={<Button variant="secondary" busy={failed.retrying} onClick={failed.retry}>Try again</Button>}>{failed.line}</Notice>
+        ))}
+        {body}
+        <AlwaysOnList />
+      </SkeletonScreen>
     </div>
   );
 }

@@ -976,7 +976,7 @@ describe("Ask Claude's question about a hold", () => {
     }));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport });
     await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
@@ -1007,7 +1007,7 @@ describe("Ask Claude's question about a hold", () => {
     const reads = holdNeedsYou();
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     reads.release();
     await expect.poll(() => failures.failed()).toBe(2);
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
@@ -1063,7 +1063,7 @@ describe("Ask Claude's question about a hold", () => {
     });
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     onTestFinished(() => { vi.useRealTimers(); });
     await vi.advanceTimersByTimeAsync(3_000);
