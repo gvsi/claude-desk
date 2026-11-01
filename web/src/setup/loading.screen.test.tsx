@@ -6,30 +6,34 @@
 import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
+import { page } from 'vitest/browser';
 
 import { newIdempotencyKey } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { SetupPublicLines, SetupState } from '../api/views.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { worker } from '../mocks/browser.ts';
+import { storePublicState } from '../mocks/publicLineStore.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
+import { START_EXAMPLES } from './copy.ts';
 
 beforeAll(loadWebFonts);
 
 const DESCRIPTION =
   "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
 
-type Step = 'tools' | 'rules' | 'situations' | 'safety_check';
+/** Setup's steps that load, and What customers will read, which opens from Real situations. */
+type Step = 'tools' | 'rules' | 'situations' | 'safety_check' | 'public_lines';
 
 /** A new interview in the mock, its questions answered (the money limit as $500), moved on to `step`. */
-async function interviewAt(step: Step): Promise<SetupState> {
+async function interviewAt(step: Step, description = DESCRIPTION): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', {
-    body: { description: DESCRIPTION, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
+    body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
   });
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;
@@ -40,11 +44,36 @@ async function interviewAt(step: Step): Promise<SetupState> {
     await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text } });
   }
   if (step !== 'tools') await mockStore.dispatch('setupRules', { params });
-  if (step === 'situations' || step === 'safety_check') await mockStore.dispatch('setupSituations', { params });
+  if (step === 'situations' || step === 'safety_check' || step === 'public_lines') await mockStore.dispatch('setupSituations', { params });
   if (step === 'safety_check') await mockStore.dispatch('setupSafetyCheck', { params });
   const current = await mockStore.dispatch('setup', { params });
   if ('network' in current || current.status !== 200) throw new Error('the mock reads the current setup');
   return current.body as SetupState;
+}
+
+/**
+ * A fresh CPA copy at Real situations, whose lines are the ones What customers will read's shapes
+ * draw: its six lines, under Claude's suggested contact, hours and prices, or on their own when
+ * `suggestions` is false, as for a business Claude found nothing more about.
+ */
+async function linesInterview(suggestions: boolean): Promise<SetupState> {
+  const state = await interviewAt('public_lines', START_EXAMPLES.en.examples[3]!.description);
+  if (!suggestions) {
+    const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the public lines');
+    const lines = (read.body as SetupPublicLines).lines.filter((line) => line.source === 'owner');
+    storePublicState(mockStore.world, state.interview_id, { lines, hours: null, prices: null });
+  }
+  return state;
+}
+
+/**
+ * Opens What customers will read as the owner does, with Real situations' "Looks right", clicked
+ * where it is: the page stays at its top, as the step's boards draw it.
+ */
+async function openLines(): Promise<void> {
+  const looksRight = await vi.waitFor(() => page.getByRole('button', { name: 'Looks right', exact: true }).element() as HTMLButtonElement);
+  looksRight.click();
 }
 
 /** Start from the loaded setup entry page, with this interview cached before its step mounts. */
@@ -76,7 +105,7 @@ function holdPosts(path: string): { held: () => number; release: () => void } {
   return { held: () => waiting, release };
 }
 
-const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' | 'setupSafetyCheck', state: SetupState) =>
+const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' | 'setupSafetyCheck' | 'setupPublicLines', state: SetupState) =>
   ROUTES[route].path.replace('{id}', state.interview_id);
 
 /** The step's real title and, for the tools, "Continue": they stay real over the region and must not move. */
@@ -93,6 +122,10 @@ interface StepLoad {
   status: string;
   /** The step's read the test holds, and how. */
   hold: (state: SetupState) => { held: () => number; release: () => void };
+  /** The interview the step opens on, when it isn't the plumber's at the step itself. */
+  interview?: () => Promise<SetupState>;
+  /** How the owner gets to the step once setup shows the interview's own step, when it isn't that one. */
+  reach?: () => Promise<void>;
   /** Parts whose words are known: they land where their shapes were, within 2 px. */
   anchors: readonly SkeletonAnchor[];
   stays: readonly string[];
@@ -113,6 +146,12 @@ const RESULT_ROW = (row: number) => `.cd-setup-step__rows > li:nth-child(${row})
 const MAIN_BUTTON_PART: Part = { name: 'main-button', page: MAIN_BUTTON };
 /** The rows of a card of situations or tricks, as `prefix-0` and on. */
 const resultRows = (prefix: string, rows: number): Part[] => Array.from({ length: rows }, (_, i) => ({ name: `${prefix}-${i}`, page: RESULT_ROW(i + 1) }));
+/** What customers will read's first card: Claude's suggestions when there are any, else the owner's lines. */
+const FIRST_CARD = '.cd-setup-step__region .cd-card';
+/** One of the owner's lines in their card. */
+const LINES_ROW = (row: number) => `.cd-public-lines--owned > .cd-public-lines__row:nth-child(${row})`;
+/** A fresh copy's six lines, as `public-lines-row-0` and on. */
+const linesRows: Part[] = Array.from({ length: 6 }, (_, i) => ({ name: `public-lines-row-${i}`, page: LINES_ROW(i + 1) }));
 
 /**
  * The most an estimated part may differ from its shape: one line of the words it holds (body and
@@ -191,6 +230,27 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
     estimated: resultRows('trick-row', 6),
     // The last row in view: the sixth at 1440, the fourth at 390.
     moved: (viewport) => [{ name: `trick-row-${viewport === 'desktop' ? 5 : 3}`, page: RESULT_ROW(viewport === 'desktop' ? 6 : 4) }, MAIN_BUTTON_PART],
+  },
+  // Opened from Real situations on a fresh CPA copy, whose six lines the shapes draw. Here Claude
+  // has no suggestions, so the lines land where their shapes were; with suggestions, which the
+  // shapes don't draw, the lines move down once.
+  public_lines: {
+    status: 'Opening your setup',
+    hold: (state) => holdReads(path('setupPublicLines', state)),
+    interview: () => linesInterview(false),
+    reach: openLines,
+    anchors: [
+      { name: 'public-lines-card', page: FIRST_CARD, dimensions: ['width'] },
+      // The first line's words come with the read: its height is an estimate, checked below.
+      { name: 'public-lines-row-0', page: LINES_ROW(1), dimensions: ['width'] },
+      // Its label's words and Edit are the app's own.
+      { name: 'public-lines-label-0', page: `${LINES_ROW(1)} > .cd-public-lines__label`, size: true },
+      { name: 'public-lines-edit-0', page: `${LINES_ROW(1)} .cd-button`, size: true },
+    ],
+    stays: [TITLE],
+    estimated: linesRows,
+    // The last row in view: How we help, at both widths.
+    moved: () => [linesRows[5]!, MAIN_BUTTON_PART],
   },
 };
 
@@ -347,7 +407,7 @@ it('accepted_moves_reject_a_10_px_spacing_error_in_an_earlier_estimated_row', ()
 for (const viewport of ['desktop', 'phone'] as const) {
   for (const [step, load] of Object.entries(STEPS) as [Step, StepLoad][]) {
     it(`setup_steps_load_in_place: ${step} at ${viewport}`, async () => {
-      const state = await interviewAt(step);
+      const state = await (load.interview?.() ?? interviewAt(step));
       const read = load.hold(state);
       const open = await loadedSetup(state, viewport);
       let watched!: ReturnType<typeof watchPlaces>;
@@ -357,6 +417,7 @@ for (const viewport of ['desktop', 'phone'] as const) {
         stays: load.stays,
         open: async () => {
           await open();
+          await load.reach?.();
           await vi.waitFor(() => expect(read.held()).toBe(1));
           // Watch this step, after the entry page's own main button has left.
           watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
