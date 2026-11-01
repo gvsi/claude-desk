@@ -6,6 +6,7 @@ import type { SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
+import { storePublicLines } from '../mocks/publicLineStore.ts';
 import { worker } from '../mocks/browser.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
@@ -336,4 +337,33 @@ it('keeps a signed refusal visible while an unknown claim also holds confirmatio
   await expect.element(field).toHaveValue('My draft stays here.');
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+});
+
+
+it('reviews Contact after About, saves within its 200-character limit and confirms', async () => {
+  const state = await atSituations();
+  const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in read) throw new Error('read failed');
+  storePublicLines(mockStore.world, state.interview_id, [...(read.body as SetupPublicLines).lines, {
+    key: 'contact', text: 'office@example.com', source: 'owner', editable: true,
+  }]);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+  const labels = [...screen.container.querySelectorAll('.cd-public-lines__label')].map((label) => label.textContent);
+  expect(labels).toEqual(['About us', 'Contact', 'Pricing', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help']);
+  expect(screen.getByRole('alert').elements()).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
+  const field = screen.getByRole('textbox', { name: 'Contact', exact: true });
+  expect((field.element() as HTMLTextAreaElement).maxLength).toBe(200);
+  await field.fill('c'.repeat(201));
+  await expect.element(field).toHaveValue('c'.repeat(200));
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(field).not.toBeInTheDocument();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine').at(-1)?.body).toEqual({ key: 'contact', text: 'c'.repeat(200) });
+  await expect.element(screen.getByText('c'.repeat(200), { exact: true })).toBeVisible();
+  expectNoHorizontalScroll();
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
 });

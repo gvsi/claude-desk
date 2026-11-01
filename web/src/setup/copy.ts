@@ -131,7 +131,7 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;
 
 /** The public About panel's charter claims, in setup's signed order. Labels come from cardChrome. */
-export const PUBLIC_LINE_KEYS = ['policy:about', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+export const PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
 
 /** Where each interview step sits in the bar. */
 export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {

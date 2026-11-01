@@ -369,14 +369,14 @@ it('scans the whole candidate owner charter on PUT and refuses atomically with t
   expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:after_hours', text: 'After hours, we respond by email.' } })).toMatchObject({ status: 200 });
 });
 
-it('enforces the API limit for About, other lines and the upcoming contact claim', async () => {
+it('enforces the API limit for About, other lines and the contact claim', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   storePublicLines(mockStore.world, params.id, [...(read.body as SetupPublicLines).lines, {
-    key: 'policy:contact', text: 'Contact the office.', source: 'owner', editable: true,
+    key: 'contact', text: 'Contact the office.', source: 'owner', editable: true,
   }]);
-  for (const [key, limit] of [['policy:about', 1500], ['policy:pricing', 500], ['policy:contact', 200]] as const) {
+  for (const [key, limit] of [['policy:about', 1500], ['policy:pricing', 500], ['contact', 200]] as const) {
     const text = 'x'.repeat(limit);
     expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text } })).toMatchObject({ status: 200 });
     expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text: text + 'x' } })).toMatchObject({

@@ -147,7 +147,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
               {shown.map((line) => (
                 <div className={`cd-public-lines__row${canEdit(line) ? '' : ' cd-public-lines__row--readonly'}`} key={line.key}>
                   <label id={`${fieldId}-${line.key}`} htmlFor={editingKey === line.key ? fieldId : undefined} className="cd-public-lines__label cd-type-meta">
-                    {cardChrome('policy', 'en', `charter:${line.key}`)?.label}
+                    {cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label}
                   </label>
                   {editingKey === line.key ? (
                     <div className="cd-public-lines__editor">
