@@ -371,8 +371,12 @@ class Handoff(BaseModel):
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
-    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
-    thing they wrote (untrusted)."""
+    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
+    wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
+    characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
+    AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
+    labelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so
+    it never carries AI-written text: a visitor could steer a summary to sway an approval."""
 
     decision: Decision | None
     held_by: str | None
@@ -380,6 +384,7 @@ class NeedsYouItem(BaseModel):
     handoff: Handoff | None
     session: NeedsYouSession
     from_the_visitor: str | None
+    claude_summary: str | None
 
     @model_validator(mode="after")
     def _one_of(self) -> "NeedsYouItem":

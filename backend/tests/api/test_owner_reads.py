@@ -9,6 +9,7 @@ America/Los_Angeles.
 
 import asyncio
 import itertools
+import json
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -587,7 +588,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
                     "display_name": None, "verified": False, "assurance": "none"},
-        "from_the_visitor": None}
+        "from_the_visitor": None, "claude_summary": None}
     assert first["decision"]["answers"] == ["allow_once", "deny_once"]        # a limit hold: no "Deny always"
     assert second["decision"]["decision_id"] == dana_hold.decision_id and second["handoff"] is None
     assert second["decision"]["answers"] == ["allow_once", "allow_person", "deny_once"]
@@ -601,13 +602,51 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                     "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
                     "verified": False, "assurance": "none"},
-        "from_the_visitor": "It's the heater in the garage"}
+        "from_the_visitor": "Water everywhere, please call me · It's the heater in the garage",   # the last two
+        "claude_summary": None}
     # each held request was read from the kernel, with the owner's credential, which applies expiry
     reads = fake.called("GET /decisions/{id}")
     assert sorted(call.path for call in reads) == sorted(f"/decisions/{decision_id}"
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(app, browser, fake, kernel_http,
+                                                                               engine, db):
+    """A handoff's context for the owner: the visitor's previous and last lines, each a one-line glimpse joined with
+    " · ", and the conversation's newest AI-written triage summary, labelled as Claude's on the owner's screen. A
+    triage row that doesn't parse is skipped rather than shown. A held request, which asks the owner for a decision,
+    never carries the summary (master plan: AI-written triage is never in approval cards)."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    handed = await guest(kernel_http, fake, owner)
+    await write(engine, db, handed.ids, "visitor_text", text="Personal. I started freelancing and I'm not sure what I need.")
+    await write(engine, db, handed.ids, "visitor_text", text="  Monday,\n November 2, 9:00 am  ")
+    await write(engine, db, handed.ids, "triage", text=json.dumps({"summary": "Asked about tax filing.", "category": "other"}))
+    await write(engine, db, handed.ids, "triage", text=json.dumps({"summary": "Freelancer asked what to file; "
+                                                                             "a booking reply was stopped.",
+                                                                  "category": "wording"}))
+    garbled = await guest(kernel_http, fake, owner)
+    await write(engine, db, garbled.ids, "visitor_text", text="x" * 250)
+    await write(engine, db, garbled.ids, "triage", text="not json")
+    for who in (handed, garbled):
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok
+    held = await guest(kernel_http, fake, owner)
+    await write(engine, db, held.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
+    await held.decide("native.quote", discounted_quote(fake, owner))
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    items = {item["session"]["session_id"]: item for item in listed.json()}
+    assert items[handed.session_id]["from_the_visitor"] == (
+        "Personal. I started freelancing and I'm not sure what I need. · Monday, November 2, 9:00 am")
+    assert items[handed.session_id]["claude_summary"] == "Freelancer asked what to file; a booking reply was stopped."
+    assert items[garbled.session_id]["from_the_visitor"] == "x" * 199 + "…"
+    assert items[garbled.session_id]["claude_summary"] is None
+    assert items[held.session_id]["decision"] is not None and items[held.session_id]["claude_summary"] is None
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
@@ -642,7 +681,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
                     "kind": "card"},
         "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
                     "assurance": "none"},
-        "from_the_visitor": "How much is a new water heater?"}
+        "from_the_visitor": "How much is a new water heater?", "claude_summary": None}
     assert handoffs[caller.session_id]["handoff"] == {
         "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
         "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None, "status": "open",

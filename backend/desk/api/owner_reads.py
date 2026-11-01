@@ -58,7 +58,7 @@ from desk.api.schemas import (
     WeekDay,
 )
 from desk.api.setup import INTERVIEWS
-from desk.api.store import MESSAGES, triaged
+from desk.api.store import MESSAGES, newest_triage, triaged
 from desk.contracts import Decision, DecisionState
 
 
@@ -153,6 +153,33 @@ async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str],
     return dict(rows.all())
 
 
+async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], count: int = 2,
+                       kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str]]:
+    """What each session's visitor (or visiting agent) wrote most recently: its newest `count` rows of `kinds`, oldest
+    first, read for every session in one query."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    ranked = (select(MESSAGES.c.session_id, MESSAGES.c.text, MESSAGES.c.n,
+                     func.row_number().over(partition_by=MESSAGES.c.session_id,
+                                            order_by=MESSAGES.c.n.desc()).label("newest"))
+              .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                     MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(kinds))
+              .subquery())
+    rows = await ctx.ro.conn.execute(select(ranked.c.session_id, ranked.c.text)
+                                     .where(ranked.c.newest <= count).order_by(ranked.c.session_id, ranked.c.n))
+    found: dict[str, list[str]] = {}
+    for session_id, text in rows:
+        found.setdefault(session_id, []).append(text)
+    return found
+
+
+def visitor_lines(texts: Iterable[str | None]) -> str | None:
+    """Several of a visitor's messages as one owner-facing line: each a glimpse (`visitor_line`), oldest first, joined
+    with " · ", the separator a call-back note uses. None when nothing is left."""
+    return " · ".join(line for text in texts if (line := visitor_line(text)) is not None) or None
+
+
 def visitor_line(text: str | None) -> str | None:
     """A visitor's message as the owner's one-line glimpse of it: whitespace runs collapsed to single spaces and
     trimmed, and past `VISITOR_LINE_MAX` characters cut to the first 199, trimmed again, and "…". Nothing else is
@@ -226,21 +253,26 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
             if decision.state == "held" and decision.decision_id == row["decision_id"]]
     handoffs = [row for row in await ctx.ro.rows("handoffs", desk_id=desk_id, status="open", order_by=("handoff_id",))
                 if row["session_id"] in who.sessions]
-    texts = await last_texts(ctx, desk_id, [decision.session_id for _, decision in held]
-                             + [row["session_id"] for row in handoffs])
+    asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
+    texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
+    # AI-written triage never sits on an approval card: only a handoff, which asks the owner for no decision, gets one.
+    handed = [row["session_id"] for row in handoffs]
+    summaries = {session_id: triage.summary
+                 for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
     items = []
     for row, decision in held:
         if (session := who.brief(decision.session_id)) is not None:
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
-                                      from_the_visitor=texts.get(decision.session_id)))
+                                      from_the_visitor=texts.get(decision.session_id), claude_summary=None))
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
                               callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
-                                      from_the_visitor=texts.get(row["session_id"])))
+                                      from_the_visitor=texts.get(row["session_id"]),
+                                      claude_summary=summaries.get(row["session_id"])))
     return items
 
 
