@@ -120,8 +120,7 @@ def withheld_policy_alert(policies: Mapping[str, Iterable[str]]) -> str:
         causes.discard("number")                          # a price names its number already
     plural = len(keys) > 1
     because = _and([POLICY_CAUSES[cause][plural] for cause in POLICY_CAUSES if cause in causes])
-    return (f"Your public page is hiding {_and(labels)}, because {'they' if plural else 'it'} {because}. "
-            f"Edit {'them' if plural else 'it'} in Settings.")
+    return f"Your public page is hiding {_and(labels)}, because {'they' if plural else 'it'} {because}."
 
 
 def withheld_alert(fields: Sequence[str]) -> str:
