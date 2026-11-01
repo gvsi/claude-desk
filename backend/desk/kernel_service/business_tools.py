@@ -17,6 +17,8 @@ from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, storable
 
 router = APIRouter()
 FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+# Owner decision (2026-10-31): payment titles may say neither free nor complimentary.
+PAYMENT_TITLE_REFUSED_WORDS = frozenset({"free", "complimentary"})
 
 # Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
 CURRENCY_CODE = re.compile(r"\b(?:USD|EUR|GBP|CAD|AUD|MXN|JPY|INR|CHF|CNY|HKD|NZD|SGD|BRL|ZAR|AED|SAR|KRW)\b")
@@ -52,9 +54,21 @@ def public_fields(tool: BusinessTool) -> dict[str, str]:
 
 
 def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
+    if tool.config.block == "purpose_payment":
+        return {}
     return {f"{tool.tool}.{index}-{field}": FREE_WORDS
             for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])
             if field in {"title", "appointment_type"}}
+
+
+def payment_title_refused_fields(tool: BusinessTool) -> list[str]:
+    from desk.kernel_service import reply_check
+
+    if tool.config.block == "purpose_payment" and any(
+            set(re.findall(r"\w+", reading.casefold())) & PAYMENT_TITLE_REFUSED_WORDS
+            for reading in reply_check._readings(reply_check.shown(tool.title))):
+        return [key for key in public_fields(tool) if key.endswith("-title")]
+    return []
 
 
 def unindexed_detail(detail: Mapping[str, list[str]]) -> dict[str, list[str]]:
@@ -124,6 +138,10 @@ async def check_public_fields(ctx, desk_id: str, tool: BusinessTool) -> None:
     try:
         await refuse_public_promises(ctx, "business_tools", public_fields(tool), desk_id,
                                      allow_words=free_allow_words(tool))
+        if fields := payment_title_refused_fields(tool):
+            failure = _invalid(ctx, desk_id, "public_promise")
+            failure.detail = {field: ["public_promise"] for field in fields}
+            raise failure
     except KernelFailure as failure:
         if failure.detail is not None:
             failure.detail = unindexed_detail(failure.detail)

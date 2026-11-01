@@ -69,7 +69,7 @@ async def test_indexed_card_keys_preserve_render_order_and_return_unindexed_deta
     fields = business_tools.public_fields(tool)
     assert list(fields) == ['desk.retainer.0-title', 'desk.retainer.1-purpose']
     assert sorted(fields) == list(fields)
-    assert business_tools.free_allow_words(tool) == {'desk.retainer.0-title': business_tools.FREE_WORDS}
+    assert business_tools.free_allow_words(tool) == {}
     assert business_tools.public_promise_fields(fields) == list(fields)
     with pytest.raises(KernelFailure) as refused:
         await business_tools.check_public_fields(SimpleNamespace(copy_id='copy'), 'desk', tool)
@@ -494,6 +494,39 @@ async def test_public_receipt_title_refuses_promises_money_and_percent(app, clie
     assert response.status_code == 200, response.text
 
 
+@pytest.mark.parametrize('title', ['Free consultation', 'Complimentary review'])
+@pytest.mark.parametrize('without_shared_lexicon', [False, True])
+async def test_payment_titles_refuse_free_and_complimentary_without_changing_intake(
+        app, client, monkeypatch, title, without_shared_lexicon):
+    from desk.contracts import BusinessTool
+    from desk.kernel_service import business_tools, reply_check
+
+    if without_shared_lexicon:
+        monkeypatch.setattr(reply_check, 'scan_prose', lambda text: [])
+    copy = await rivera(app, client)
+    payment = intake(tool='desk.deposit', title=title, config={
+        'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000})
+    response = await put(client, copy, [payment])
+    assert response.status_code == 422, response.text
+    assert response.json()['detail']['desk.deposit.title'] == ['public_promise']
+    assert await business_rows(app, copy) == {}
+    assert business_tools.free_allow_words(BusinessTool.model_validate(payment)) == {}
+    assert (await put(client, copy, [intake(title='Free consultation')])).status_code == 200
+
+
+@pytest.mark.parametrize('title,refused', [
+    ('FRÉE consultation', True), ('COMPLIMENTARY review', True),
+    ('Carefree consultation', False), ('Uncomplimentary review', False),
+])
+def test_payment_title_rule_matches_folded_whole_words(title, refused):
+    from desk.contracts import BusinessTool
+    from desk.kernel_service.business_tools import payment_title_refused_fields
+
+    tool = BusinessTool.model_validate(intake(title=title, config={
+        'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}))
+    assert bool(payment_title_refused_fields(tool)) is refused
+
+
 async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client):
     copy = await rivera(app, client)
     for title in ('Classes for all ages', 'Try a class', 'Coffee cup orders',
@@ -572,7 +605,7 @@ async def test_card_text_has_one_combined_scan_per_tool_in_render_order(app, cli
     assert scanned == ['Free consult\nConsultas gratuitas', 'Retainer\nInitial retainer']
     assert checks == [(['desk.consult.0-title', 'desk.consult.1-appointment_type'],
                        {'desk.consult.0-title', 'desk.consult.1-appointment_type'}),
-                      (['desk.retainer.0-title', 'desk.retainer.1-purpose'], {'desk.retainer.0-title'})]
+                      (['desk.retainer.0-title', 'desk.retainer.1-purpose'], set())]
 
 
 async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the_scan(app, client, monkeypatch):
@@ -599,7 +632,7 @@ async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the
                       ([('desk.consult.0-title', 'Consult'), ('desk.consult.1-appointment_type', 'Free consult')],
                        {'desk.consult.0-title', 'desk.consult.1-appointment_type'}),
                       ([('desk.retainer.0-title', 'Retainer'), ('desk.retainer.1-purpose', 'Initial retainer')],
-                       {'desk.retainer.0-title'}),
+                       set()),
                       ([('desk.urgent.0-title', 'Urgent support')], {'desk.urgent.0-title'})]
     before = {name: row.definition_sha256 for name, row in (await business_rows(app, copy)).items()}
     for purpose in ('Free retainer', 'Pay $50'):

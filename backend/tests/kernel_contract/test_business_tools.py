@@ -20,6 +20,8 @@ from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_
     ('Book a $0 intro consult', {'block': 'intake', 'questions': ['What?']}, False),
     ('Free consult, 50% off', {'block': 'intake', 'questions': ['What?']}, False),
     ('Retainer', {'block': 'purpose_payment', 'purpose': 'Free retainer', 'amount_cents': 5000}, False),
+    ('Free consultation', {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}, False),
+    ('Complimentary review', {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}, False),
     ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}, False),
     ('Half-price check', {'block': 'intake', 'questions': ['What?']}, False),
     ('Tuesday 5pm drop-in', {'block': 'intake', 'questions': ['What?']}, False),

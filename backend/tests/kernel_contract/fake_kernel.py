@@ -4006,7 +4006,8 @@ class FakeKernelState:
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
         from desk.kernel_service.business_tools import (config_texts, free_allow_words, public_fields,
-                                                        public_promise_fields, unindexed_detail)
+                                                        payment_title_refused_fields, public_promise_fields,
+                                                        unindexed_detail)
         from desk.kernel_service.repo import storable
 
         desk = self._owners_desk(request, request.path_params["id"])
@@ -4028,7 +4029,8 @@ class FakeKernelState:
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
         for tool in batch.tools:
-            if fields := public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool)):
+            if fields := (public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool))
+                          or payment_title_refused_fields(tool)):
                 refuse("public_promise", detail=unindexed_detail({field: ["public_promise"] for field in fields}))
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
