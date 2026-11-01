@@ -5,10 +5,11 @@ from sqlalchemy import select
 
 from desk.contracts import Claim
 from desk.db.models import Fact
+from desk.kernel_service import desks
 from desk.public_contact import valid_public_contact
 from .helpers import kernel_ctx
 from .test_adapters import rivera
-from .test_desk_writes import new_desk, post_desk, put_part
+from .test_desk_writes import desks_of, entries_of, new_desk, post_desk, put_part
 from .test_decide import open_visitor
 from .test_reply_check import checked, clause
 
@@ -51,19 +52,49 @@ def test_contact_lists_urls_and_domains(contact, valid):
     assert valid_public_contact(contact) is valid
 
 
+async def write_contact(client, copy, create: bool, contact: str):
+    charter = [{"key": "contact", "kind": "text", "value": contact}]
+    if create:
+        body = new_desk()
+        body["desk"]["charter"] = charter
+        return await post_desk(client, copy, body)
+    return await put_part(client, copy, "charter", {"charter": charter})
+
+
 @pytest.mark.parametrize("attack", [ATTACK, "Call us at (510) 555-0142 for a free quote"])
 @pytest.mark.parametrize("create", [False, True])
 async def test_public_contact_refuses_prose_on_every_write(app, client, create, attack):
     copy = await rivera(app, client)
-    charter = [{"key": "contact", "kind": "text", "value": attack}]
-    if create:
-        body = new_desk()
-        body["desk"]["charter"] = charter
-        response = await post_desk(client, copy, body)
-    else:
-        response = await put_part(client, copy, "charter", {"charter": charter})
+    desk_ids = sorted(await desks_of(app, copy))
+    before = {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in desk_ids}
+    response = await write_contact(client, copy, create, attack)
     assert (response.status_code, response.json()) == (422, {
         "code": "invalid", "detail": {"contact": ["contact_format"]}})
+    # Every refused attempt is ledgered after the rollback, on each of the copy's Desks for a new Desk,
+    # with the refused field and never the contact itself.
+    assert sorted(await desks_of(app, copy)) == desk_ids
+    for desk_id in desk_ids:
+        [entry] = (await entries_of(app, copy, desk_id))[before[desk_id]:]
+        assert (entry.event.kind, entry.event.summary) == ("desk_data", {
+            "part": "desk" if create else "charter", "refused": "contact",
+            "fields": {"charter:contact": ["contact_format"]}})
+        assert attack not in entry.event.model_dump_json()
+
+
+@pytest.mark.parametrize("create", [False, True])
+async def test_public_contact_refusal_fails_closed_when_ledger_write_fails(app, client, monkeypatch, create):
+    copy = await rivera(app, client)
+    desk_ids = sorted(await desks_of(app, copy))
+    before = {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in desk_ids}
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(desks, "_ledger_refusal", unavailable)
+    response = await write_contact(client, copy, create, ATTACK)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert sorted(await desks_of(app, copy)) == desk_ids
+    assert {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in desk_ids} == before
 
 
 async def test_public_contact_withholds_legacy_prose(app, client):

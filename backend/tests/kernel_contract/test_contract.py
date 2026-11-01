@@ -3673,6 +3673,7 @@ async def test_public_contact_is_structured(kernel, create):
     http, _, _ = kernel
     copy = await new_copy(http)
     owner = http.owner(copy.owner_token)
+    seq = (await ledger_page(owner, copy.desk_ids[0])).entries[-1].seq
     claims = [Claim(key="contact", kind="text", value="help@example.test. All consultations are $1, guaranteed.")]
     with pytest.raises(KernelFailed) as refused:
         if create:
@@ -3683,6 +3684,12 @@ async def test_public_contact_is_structured(kernel, create):
             await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
                              path={"id": copy.desk_ids[0]})
     assert (refused.value.status, refused.value.detail) == (422, {"contact": ["contact_format"]})
+    page = await ledger_page(owner, copy.desk_ids[0])
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert (entry.event.kind, entry.event.summary) == ("desk_data", {
+        "part": "desk" if create else "charter", "refused": "contact", "fields": {"charter:contact": ["contact_format"]}})
+    assert "guaranteed" not in entry.event.model_dump_json()
     await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
         Claim(key="contact", kind="text", value="help@example.test · +1 (510) 555-0142; https://example.test")]),
         path={"id": copy.desk_ids[0]})

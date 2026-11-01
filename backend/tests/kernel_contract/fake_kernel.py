@@ -3278,8 +3278,13 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        targets = [desk] if desk is not None else sorted(
+            (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
         if any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
                for claim in charter):
+            for target in targets:
+                self.append(target, "desk_data", {"part": part, "refused": "contact",
+                                                  "fields": {"charter:contact": ["contact_format"]}})
             raise Refusal(422, "invalid", {"contact": ["contact_format"]})
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
@@ -3287,8 +3292,6 @@ class FakeKernelState:
         limit = "policy_count_limit" if count > 40 else "policy_text_limit" if total_characters > 8_000 else None
         fields = {"charter": [limit]} if limit else public_policy_fields(sorted(values.items()))
         if fields:
-            targets = [desk] if desk is not None else sorted(
-                (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
             summary = {"part": part, "refused": "promise", "fields": fields}
             if limit:
                 summary.update(keys=[safe_ref(key) for key in sorted(values)], policy_count=count,

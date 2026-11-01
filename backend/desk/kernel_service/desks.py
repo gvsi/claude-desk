@@ -144,9 +144,6 @@ def check_charter(charter: Sequence[Claim]) -> None:
     if any(claim.key == "hours" for claim in charter):
         raise InvalidSeed("hours_claim")
     unique(claim.key for claim in charter)
-    if any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
-           for claim in charter):
-        raise KernelFailure(422, "invalid", "contact_format", detail={"contact": ["contact_format"]})
 
 
 def unique(ids: Iterable[str]) -> None:
@@ -327,6 +324,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     await refuse_public_canaries(ctx, "desk", shown)
     validate_business(business)
     validate_desk(desk)
+    await refuse_public_contact(ctx, "desk", desk.charter)
     await refuse_public_promises(ctx, "desk", policy_values(desk.charter))
     if existing is not None:
         business_id = existing.business_id
@@ -430,6 +428,28 @@ def policy_values(charter: Sequence[Claim]) -> dict[str, str]:
     return {claim.key: claim.value for claim in charter if claim.key.startswith("policy:") and claim.kind == "text"}
 
 
+async def _refusal_desk_ids(ctx: KernelCtx, desk_id: str | None) -> list[str]:
+    """Where a refused write is ledgered: its Desk, or for a Desk not yet created, the copy's Desks in ID order."""
+    if desk_id is not None:
+        return [desk_id]
+    return list(await ctx.db.scalars(ctx.repo.scoped(select(Desk.desk_id).order_by(Desk.desk_id))))
+
+
+async def refuse_public_contact(ctx: KernelCtx, part: str, charter: Sequence[Claim],
+                                desk_id: str | None = None) -> None:
+    """The public contact is a list of contact endpoints (`valid_public_contact`), never free text: 422
+    `invalid` with detail `{"contact": ["contact_format"]}`, ledgered `desk_data` `{part, refused: "contact",
+    fields: {"charter:contact": ["contact_format"]}}` after the request's transaction has rolled back, on the
+    Desks `refuse_public_promises` would record. The field is named by its fact ID, since a ledger summary
+    never carries a key named `contact` (`ledger.check_summary`), and the contact itself is never recorded."""
+    if all(claim.key != "contact" or (claim.kind == "text" and valid_public_contact(claim.value))
+           for claim in charter):
+        return
+    summary = {"part": part, "refused": "contact", "fields": {"charter:contact": ["contact_format"]}}
+    raise KernelFailure(422, "invalid", "contact_format", detail={"contact": ["contact_format"]}, persist=partial(
+        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=await _refusal_desk_ids(ctx, desk_id), summary=summary))
+
+
 async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
                                 desk_id: str | None = None, *,
                                 allow_words: Mapping[str, frozenset[str]] = {}) -> None:
@@ -449,8 +469,7 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
     fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(values, allow_words=allow_words)
     if not fields:
         return
-    desk_ids = [desk_id] if desk_id is not None else list(await ctx.db.scalars(ctx.repo.scoped(
-        select(Desk.desk_id).order_by(Desk.desk_id))))
+    desk_ids = await _refusal_desk_ids(ctx, desk_id)
     summary = {"part": part, "refused": "promise", "fields": fields}
     if limit is not None:
         summary.update(keys=[ledger.safe_ref(key) for key in sorted(values)], policy_count=count,
@@ -503,6 +522,7 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
     """
     await refuse_public_canaries(ctx, "charter", {"charter": charter_shown(body.charter)}, desk_row.desk_id)
     check_charter(body.charter)
+    await refuse_public_contact(ctx, "charter", body.charter, desk_row.desk_id)
     await refuse_public_promises(ctx, "charter", policy_values(body.charter), desk_row.desk_id)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
