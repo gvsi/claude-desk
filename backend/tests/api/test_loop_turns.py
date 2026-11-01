@@ -167,8 +167,14 @@ async def test_the_desks_catalog_reaches_claude_in_the_desk_context(api_conn, ca
 
 
 @pytest.mark.parametrize("kind", ["visitor", "agent"])
-async def test_kernel_local_time_is_a_model_only_note(api_conn, caller, fake, kind):
-    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)  # Saturday in the business's zone, Sunday in UTC
+@pytest.mark.parametrize("zone, weekday, date, at, offset", [
+    ("America/Los_Angeles", "Saturday", "2026-10-31", "17:40", "-07:00"),
+    ("Asia/Kolkata", "Sunday", "2026-11-01", "06:10", "+05:30"),
+    ("UTC", "Sunday", "2026-11-01", "00:40", "+00:00"),
+])
+async def test_kernel_local_time_is_a_model_only_note(api_conn, caller, fake, kind, zone, weekday, date, at, offset):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)  # Saturday in Los Angeles, Sunday in UTC
+    fake.desks[caller.desk_id].timezone = zone
     caller = replace(caller, kind=kind)
     await append_message(api_conn, caller.ids, f"{kind}_text", text="Can you help?")
     await api_conn.commit()
@@ -176,7 +182,7 @@ async def test_kernel_local_time_is_a_model_only_note(api_conn, caller, fake, ki
 
     assert await run_turn(api_conn, caller, model) == "done"
 
-    note = "The business's local time is Saturday, 2026-10-31, 17:40 (America/Los_Angeles)."
+    note = f"The business's local time is {weekday}, {date}, {at} ({zone}, UTC{offset})."
     texts = [block.get("text", "") for message in model.requests[0].messages for block in message["content"]]
     assert [value for value in texts if value.startswith("<note>")] == [f"<note>{note}</note>"]
     assert await rows(api_conn, caller.session_id, "note", "text", "visibility", "wake") == [
@@ -204,7 +210,7 @@ async def test_time_notes_refresh_after_ten_minutes_from_the_last_note(api_conn,
         # Time is separate from the facts: it never changes the desk_context row or its hash.
         assert len(await rows(api_conn, caller.session_id, "desk_context", "text")) == 1
     assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
-        (f"The business's local time is Saturday, 2026-10-31, {at} (America/Los_Angeles).",
+        (f"The business's local time is Saturday, 2026-10-31, {at} (America/Los_Angeles, UTC-07:00).",
          f"business_local_time:America/Los_Angeles|2026-10-31T{at}-07:00") for at in ("17:40", "17:50", "18:00")]
 
 
@@ -216,7 +222,7 @@ async def test_time_notes_refresh_when_the_business_timezone_changes(api_conn, c
         await said(api_conn, caller, "Can you help?")
         assert await run_turn(api_conn, caller, model) == "done"
     assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
-        (f"The business's local time is Saturday, 2026-10-31, 17:40 ({zone}).",
+        (f"The business's local time is Saturday, 2026-10-31, 17:40 ({zone}, UTC-07:00).",
          f"business_local_time:{zone}|2026-10-31T17:40-07:00")
         for zone in ("America/Los_Angeles", "America/Vancouver")]
 
@@ -228,7 +234,7 @@ async def test_time_notes_refresh_when_the_clock_moves_back_on_the_same_date(api
         await said(api_conn, caller, "Can you help?")
         assert await run_turn(api_conn, caller, model) == "done"
     assert await rows(api_conn, caller.session_id, "note", "text") == [
-        (f"The business's local time is Saturday, 2026-10-31, 17:{minute} (America/Los_Angeles).",)
+        (f"The business's local time is Saturday, 2026-10-31, 17:{minute} (America/Los_Angeles, UTC-07:00).",)
         for minute in (40, 39)]
 
 
@@ -240,7 +246,7 @@ async def test_time_notes_refresh_after_ten_elapsed_minutes_across_dst_fall_back
         assert await run_turn(api_conn, caller, model) == "done"
         assert len(await rows(api_conn, caller.session_id, "note", "text")) == count
     assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
-        (f"The business's local time is Sunday, 2026-11-01, {at} (America/Los_Angeles).",
+        (f"The business's local time is Sunday, 2026-11-01, {at} (America/Los_Angeles, UTC{offset}).",
          f"business_local_time:America/Los_Angeles|2026-11-01T{at}{offset}")
         for at, offset in (("01:55", "-07:00"), ("01:05", "-08:00"))]
 
@@ -267,7 +273,7 @@ async def test_time_notes_refresh_at_local_midnight_before_ten_minutes(api_conn,
         assert await run_turn(api_conn, caller, model) == "done"
         fake.now += timedelta(minutes=1)
     assert await rows(api_conn, caller.session_id, "note", "text") == [
-        (f"The business's local time is {weekday}, {date}, {at} (America/Los_Angeles).",)
+        (f"The business's local time is {weekday}, {date}, {at} (America/Los_Angeles, UTC-07:00).",)
         for weekday, date, at in (("Saturday", "2026-10-31", "23:59"), ("Sunday", "2026-11-01", "00:00"))]
 
 
@@ -285,7 +291,7 @@ async def test_a_fresh_context_keeps_only_the_latest_time_note(api_conn, caller,
     assert await run_turn(api_conn, caller, model) == "done"
     texts = json.dumps(model.requests[-1].messages)
     assert texts.count("The business's local time is") == 1
-    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles)" in texts
+    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles, UTC-07:00)" in texts
     assert "17:40" not in texts
     assert len(await rows(api_conn, caller.session_id, "note", "text")) == 2
 
@@ -304,7 +310,7 @@ async def test_a_fresh_context_on_a_new_time_note_omits_the_older_time(api_conn,
     texts = json.dumps(model.requests[-1].messages)
     assert "<conversation_so_far>" in texts
     assert texts.count("The business's local time is") == 1
-    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles)" in texts
+    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles, UTC-07:00)" in texts
     assert "17:40" not in texts
     assert len(await rows(api_conn, caller.session_id, "context_start", "model_context")) == 2
     assert len(await rows(api_conn, caller.session_id, "note", "text")) == 2

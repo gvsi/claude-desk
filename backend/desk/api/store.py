@@ -411,9 +411,11 @@ async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock)
             elapsed = local.astimezone(UTC) - last.astimezone(UTC)
             if local.date() == last.date() and timedelta(0) <= elapsed < timedelta(minutes=10):
                 return None
+    offset = local.strftime("%z")
     return await append_message(conn, ids, "note", ref_id=f"{TIME_NOTE_REF}{clock.timezone}|{clock.local_now}",
                                 text=TIME_NOTE.format(weekday=WEEKDAYS[clock.weekday], date=local.date().isoformat(),
-                                                      time=local.strftime("%H:%M"), timezone=clock.timezone))
+                                                      time=local.strftime("%H:%M"), timezone=clock.timezone,
+                                                      offset=f"UTC{offset[:3]}:{offset[3:5]}"))
 
 
 async def append_tool_change(conn: AsyncConnection, ids: Ids, change: str, tool_name: str) -> int:

@@ -54,7 +54,7 @@ from desk.events import A2AResponse
 
 PROMPT_VERSION = "2026-10-31.8"
 
-TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone})."
+TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
                     ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"), strict=True))
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
