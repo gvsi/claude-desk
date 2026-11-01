@@ -1501,8 +1501,8 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     assert seed["name"] == "Main line"
     assert all(seed[part] == [] for part in ("charter", "hours", "price_items", "calendar_slots", "people",
                                              "documents", "connections"))
-    assert seed["notifications"] == {"now": ["approval", "breaker", "lockout", "handoff", "emergency"],
-                                     "briefing": ["lead", "callback", "booking"]}
+    assert seed["notifications"] == {"now": ["approval", "breaker", "lockout", "handoff", "callback"],
+                                     "briefing": ["lead", "booking"]}
     desk = fake.desks[state["desk_id"]]
     assert desk.slug == state["slug"] and not desk.answering          # Answering stays off through setup
     assert not any(call.route in SETUP_TOOL_ROUTES for call in fake.calls)   # nothing is read before consent
@@ -2230,8 +2230,11 @@ def test_a_conversation_handed_to_the_owner_alerts_at_once():
     for business_type in ("trade", "office", "landlord", "other"):
         defaults = default_notifications(business_type)
         assert "handoff" in defaults.now and "handoff" not in defaults.briefing, business_type
-        assert defaults.briefing == ["lead", "callback", "booking"]
-    assert default_notifications("trade").now == ["approval", "breaker", "lockout", "handoff", "emergency"]
+        if business_type != "trade":
+            assert defaults.briefing == ["lead", "callback", "booking"]
+    # a trade Desk's call-back request is how an emergency reaches it, so it alerts at once (#519)
+    assert default_notifications("trade").now == ["approval", "breaker", "lockout", "handoff", "callback"]
+    assert default_notifications("trade").briefing == ["lead", "booking"]
     assert default_notifications("office").now == ["approval", "breaker", "lockout", "handoff"]
 
 

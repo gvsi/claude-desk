@@ -365,8 +365,10 @@ def default_notifications(business_type: BusinessType) -> NotificationDefaults:
     """What alerts the owner at once and what waits for the briefing: a held request, a paused chat, a paused
     verification and a conversation the Desk handed to the owner (the handoff card's) alert at once, and a trade is
     also alerted to emergencies."""
-    now = ["approval", "breaker", "lockout", "handoff"] + (["emergency"] if business_type == "trade" else [])
-    return NotificationDefaults(now=now, briefing=["lead", "callback", "booking"])
+    # A trade Desk alerts its owner at once for a call-back request (an emergency is asked for as one).
+    trade = business_type == "trade"
+    now = ["approval", "breaker", "lockout", "handoff"] + (["callback"] if trade else [])
+    return NotificationDefaults(now=now, briefing=["lead", "booking"] if trade else ["lead", "callback", "booking"])
 
 
 def website_url(text: str | None) -> tuple[str, str] | None:
