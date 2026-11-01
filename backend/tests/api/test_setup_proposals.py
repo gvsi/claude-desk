@@ -43,6 +43,26 @@ def test_owner_supports_structured_facts(field, value, owner_text, supported):
     assert setup.owner_supports(field, value, owner_text) is supported
 
 
+@pytest.mark.parametrize("contact,owner_text,supported", [
+    ("415-555-0118 or hello@bobsplumbing.com",
+     "Customers can call 415-555-0118 or email hello@bobsplumbing.com.", True),
+    ("Call (415) 555-0118", "Call 415-555-0118", True),
+    ("info@acme.co", "Email info@acme.com", False),
+    ("HELLO@EXAMPLE.TEST or https://Example.test/contact",
+     "Email hello@example.test or visit https://example.test/CONTACT.", True),
+    ("https://example.test/contact", "Visit https://example.test/contact-extra", False),
+    ("www.example.test", "Visit www.example.test.evil", False),
+    ("415-555-0118 or hello@bobsplumbing.com", "Call 415-555-0118", False),
+    ("415-555-0118 or hello@bobsplumbing.com", "Email hello@bobsplumbing.com", False),
+    ("415-555-0118 or 510-555-0199", "Call (415) 555-0118 or 510.555.0199", True),
+    ("415-555-0118 or 510-555-0199", "Call 415-555-0118", False),
+    ("Front desk", "Ask at the FRONT DESK", True),
+    ("Front desk", "Ask the manager", False),
+])
+def test_owner_supports_each_contact_part(contact, owner_text, supported):
+    assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
 def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
     """Build stored cards, including legacy payment states, for decision and settlement tests."""
     cards = []

@@ -1590,11 +1590,17 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
         return True
     folded = owner_text.casefold()
     if field == "public_contact":
-        contact = cast(str, value)
-        digits = re.sub(r"\D", "", contact)
-        return contact.casefold() in folded or bool(
-            len(digits) >= 7 and re.fullmatch(r"[+\d\s().-]+", contact)
-            and digits in re.sub(r"\D", "", owner_text))
+        contact = cast(str, value).casefold()
+        addresses = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+        named_addresses = {match.group().rstrip(".,;:!?)]}") for match in addresses.finditer(contact)}
+        owner_addresses = {match.group().rstrip(".,;:!?)]}") for match in addresses.finditer(folded)}
+        phones = [re.sub(r"\D", "", match.group()) for match in
+                  re.finditer(r"(?<!\w)\+?\d[\d\s().-]*\d(?!\w)", addresses.sub(" ", contact))]
+        phones = [digits for digits in phones if len(digits) >= 7]
+        if named_addresses or phones:
+            return named_addresses <= owner_addresses and all(
+                digits in re.sub(r"\D", "", owner_text) for digits in phones)
+        return contact in folded
     if field == "price_items":
         amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "")) * 100)
                    for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)",
