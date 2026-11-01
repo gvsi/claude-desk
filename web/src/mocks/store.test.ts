@@ -252,6 +252,13 @@ describe('the scripted Desk', () => {
       ['Who is Mariana?', 'other'],
       ['¿Cuánto?', 'price'],
       ['Llámame.', 'callback'],
+      // The two demo commands for a kept-card reply pick their rule only as the whole message.
+      ['cards-only', 'cards-only'],
+      [' Cards-Kept-Handoff ', 'cards-kept-handoff'],
+      ['Are you cards-only, or can I pay cash?', 'deposit'],
+      ['Is it cards-kept-handoff?', 'other'],
+      ['solo-tarjetas', 'cards-only'],
+      ['¿Aceptan solo-tarjetas?', 'other'],
     ];
     for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
 

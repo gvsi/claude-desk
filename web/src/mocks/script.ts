@@ -36,7 +36,7 @@ export type Language = 'en' | 'es';
 /** How far apart a turn's events arrive. */
 export const EVENT_GAP_MS = 150;
 
-const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola'] as const;
+const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola', 'tarjetas'] as const;
 
 /** A turn is in Spanish when the visitor's text has one of the markers, else in English. */
 export function turnLanguage(text: string): Language {
@@ -514,6 +514,8 @@ export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** A demo command: one of `words` picks the rule only as the whole message, never inside a question. */
+  command?: true;
   /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
   tools: readonly ToolName[];
   steps: readonly Step[];
@@ -560,14 +562,16 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     // A final prose-only failure: the checked card stays, and none of the draft's prose is shown.
     name: 'cards-only',
-    words: ['cards-only'],
+    words: ['cards-only', 'solo-tarjetas'],
+    command: true,
     tools: ['native.quote'],
     steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true })],
   },
   {
     // The same failure with Claude's drafted handoff kept after the checked card.
     name: 'cards-kept-handoff',
-    words: ['cards-kept-handoff'],
+    words: ['cards-kept-handoff', 'tarjetas-con-traspaso'],
+    command: true,
     tools: ['native.quote'],
     steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true })],
   },
@@ -756,7 +760,7 @@ function ruleNamed(name: RuleName): ScriptRule {
  */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   if (rule.name !== 'discount') return rule;
   const asked = askedDiscountBp(text);

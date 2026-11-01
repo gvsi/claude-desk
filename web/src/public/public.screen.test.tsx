@@ -3581,8 +3581,8 @@ function expectReceiptsUnderTheirMessages(screen: RenderResult): void {
 
 /** A message for each row of the script, in English and, where the row reads it, Spanish. */
 const SCRIPT_SAMPLES: Record<RuleName, string[]> = {
-  'cards-only': ['cards-only', 'cards-only hola'],
-  'cards-kept-handoff': ['cards-kept-handoff', 'cards-kept-handoff hola'],
+  'cards-only': ['cards-only', 'solo-tarjetas'],
+  'cards-kept-handoff': ['cards-kept-handoff', 'tarjetas-con-traspaso'],
   discount: ['Can I get 15% off if I pay cash?', '¿Me hacen un descuento?'],
   invoice: ['Can you send my invoice?', 'Necesito mi factura'],
   deposit: ['How do I pay the deposit?', 'Quiero pagar'],
