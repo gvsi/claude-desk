@@ -210,7 +210,7 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
       const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
       const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
-      const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.handoffName)]).map(copyBlock));
+      const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.owner)]).map(copyBlock));
       world.emit(agent, reply);
       const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts };
       return allowed ? { turn } : { turn, last: true };

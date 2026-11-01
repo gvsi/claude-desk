@@ -1287,20 +1287,42 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
   });
 
-  it('with_no_owner_name_the_handoff_names_the_business', async () => {
-    // Setup's fallback, "Owner", is no one's name, and the page never shows it: what "Ask for a
-    // person" sends is handed to the business, with one stop after a name that ends in one.
+  it('with_no_owner_name_the_lines_name_the_business_owner', async () => {
+    // Setup's fallback, "Owner", is no one's name, and the page never shows it. The lines that would
+    // name the owner say "the business owner" instead, the words the page's "Ask for a person" uses,
+    // and a visitor can ask for a person in their own words.
     const fenster = await liveDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
-    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Fenster & Fenster.', lines: ['Fenster & Fenster will reply here.'] }),
+    const toTheOwner = {
+      en: cardBlock('handoff', { fact_id: null, title: 'Let me check with the business owner.', lines: ['The business owner will reply here.'] }),
+      es: cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con el dueño del negocio.', lines: ['El dueño del negocio te responderá aquí.'] }),
+    };
+    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, PUBLIC_COPY.es.askForOwner(null))).toEqual([toTheOwner.es]);
+    expect(await repliesTo(fenster, 'Can I speak with a person?')).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, '¿Puedo ver a una persona?')).toEqual([toTheOwner.es]);
+
+    expect(linesOf(await turnOn(fenster, 'How much is it?'))).toEqual(["Quoted from the business owner's price list", "Reply checked against the business owner's rules"]);
+    expect(linesOf(await turnOn(fenster, '¿Cuánto cuesta?'))).toEqual([
+      'Cotizado con la lista de precios del dueño del negocio',
+      'Respuesta revisada con las reglas del dueño del negocio',
     ]);
-    const chen = await liveDesk('Chen & Co. is a two-person CPA firm in San Jose.');
-    expect(await repliesTo(chen, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Chen & Co.', lines: ['Chen & Co. will reply here.'] }),
+    expect(proseOf(await turnOn(fenster, 'Should we go with oak or walnut?'))).toEqual([
+      'The business owner can tell you after taking a look. You can ask for a person here anytime.',
     ]);
-    expect(await repliesTo(chen, PUBLIC_COPY.es.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Chen & Co.', lines: ['Chen & Co. te responderá aquí.'] }),
+    expect(proseOf(await turnOn(fenster, 'Hola'))).toEqual([
+      'El dueño del negocio te lo puede decir cuando lo vea. Puedes pedir hablar con una persona aquí cuando quieras.',
     ]);
+    expect(await repliesTo(fenster, 'Call me tonight')).toEqual([
+      cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'The business owner will call you back' }),
+    ]);
+
+    const asked = await turnOn(fenster, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for the business owner to approve', "Reply checked against the business owner's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for the business owner to decide, so I've asked. The answer will show up here."]);
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(fenster, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)[0]).toBe('The business owner approved this');
   });
 
   it('an_agent_at_a_desk_not_yet_live_is_handed_to_its_owner', async () => {

@@ -302,6 +302,21 @@ const PRONOUN_FREE_PROSE: Record<Language, OwnerProse> = {
  */
 export const NAMED_OWNER_PROSE: Record<Language, OwnerProse> = PRONOUN_FREE_PROSE;
 
+/** Whom a visitor can ask for when the owner gave no name, as the public page's "Ask for a person" has it. */
+const A_PERSON: Record<Language, string> = { en: 'a person', es: 'una persona' };
+
+/** The same words for an owner who gave no name, `NO_NAME_OWNER`'s words for them, with a person to ask for. */
+const NO_NAME_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: `{Owner} can tell you after taking a look. You can ask for ${A_PERSON.en} here anytime.`,
+    held: PRONOUN_FREE_PROSE.en.held,
+  },
+  es: {
+    help: `{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con ${A_PERSON.es} aquí cuando quieras.`,
+    held: PRONOUN_FREE_PROSE.es.held,
+  },
+};
+
 /** An owner's first name, the one Claude's words call them by: "Maria" for Maria Rivera. */
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
@@ -310,10 +325,10 @@ function firstName(name: string): string {
 /**
  * Claude's words `line` on a Desk whose owner is `owner`, in `language`: Rivera's signed words on
  * her Desk (setup names an owner by one word, so no Desk it makes has her name), else
- * `NAMED_OWNER_PROSE` by first name.
+ * `NAMED_OWNER_PROSE` by first name, else `NO_NAME_PROSE`.
  */
 function ownerProse(language: Language, owner: DeskOwner, line: keyof OwnerProse): string {
-  if (owner.name === null) return naming(PRONOUN_FREE_PROSE[language][line], ownerIn(language, owner), language);
+  if (owner.name === null) return naming(NO_NAME_PROSE[language][line], ownerIn(language, owner), language);
   const prose = owner.name === RIVERA_OWNER.name ? RIVERA_PROSE : NAMED_OWNER_PROSE;
   return naming(prose[language][line], firstName(owner.name), language);
 }
@@ -586,11 +601,9 @@ export interface TurnContext {
   /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
   readonly person: { personId: string; name: string } | null;
   /**
-   * Whom the Desk's handoff card names (`handoffBlock`): its owner, by their display name, or the
-   * business when its owner gave no name (`MockWorld.handoffNameOf`).
+   * Whom the Desk's lines name, its handoff card's among them (`MockWorld.ownerOf`): read only when
+   * a step names them, so making a context never reads the Desk.
    */
-  readonly handoffName: string;
-  /** Whom the Desk's lines name (`MockWorld.ownerOf`), read only when a step names them. */
   readonly owner: DeskOwner;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
@@ -680,20 +693,24 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118'
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
+/** The kernel's `handoff` template: its title, then its line. */
+const HANDOFF: Record<Language, { title: string; line: string }> = {
+  en: { title: 'Let me check with {owner}.', line: '{Owner} will reply here.' },
+  es: { title: 'Déjame consultarlo con {owner}.', line: '{Owner} te responderá aquí.' },
+};
+
 /**
- * The kernel's handoff card (its `handoff` template), in `language`, naming `name`: whom the Desk
- * hands the visitor to (`TurnContext.handoffName`), with one stop after a name that ends in one
- * ("Chen & Co."). For Maria Rivera it is the fixtures' own card.
+ * The kernel's handoff card in `language`, handing the visitor to the Desk's owner (`owner`). For
+ * Maria Rivera it is the fixtures' own card.
  */
-export function handoffBlock(language: Language, name: string): CardBlock {
-  const stop = afterName(name, '.');
-  return language === 'es'
-    ? cardBlock('handoff', { fact_id: null, title: `Déjame consultarlo con ${name}${stop}`, lines: [`${name} te responderá aquí.`] })
-    : cardBlock('handoff', { fact_id: null, title: `Let me check with ${name}${stop}`, lines: [`${name} will reply here.`] });
+export function handoffBlock(language: Language, owner: DeskOwner): CardBlock {
+  const { title, line } = HANDOFF[language];
+  const who = ownerIn(language, owner);
+  return cardBlock('handoff', { fact_id: null, title: naming(title, who, language), lines: [naming(line, who, language)] });
 }
 
 /** The turn's handoff card: the Desk's own, in the turn's language. */
-const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.handoffName);
+const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.owner);
 
 /** Claude hands the visitor to the Desk's owner: the kernel's handoff card, as asking for them gets. */
 const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([handoff(ctx)])];
@@ -908,9 +925,12 @@ function ruleNamed(name: RuleName): ScriptRule {
   return rule;
 }
 
-/** Whom a visitor asks for on a Desk whose owner is `owner`, as lowercase words: the owner's first name. */
+/**
+ * Whom a visitor asks for on a Desk whose owner is `owner`, as lowercase words: the owner's first
+ * name, or a person, in either language, when they gave none.
+ */
 function askWords(owner: DeskOwner): string[] {
-  return owner.name === null ? [] : [firstName(owner.name).toLowerCase()];
+  return owner.name === null ? [A_PERSON.en, A_PERSON.es] : [firstName(owner.name).toLowerCase()];
 }
 
 /**

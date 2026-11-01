@@ -343,19 +343,9 @@ export class MockWorld {
     return ownerNameOfDesk(this.deskOf(session));
   }
 
-  /** Whom the visitor's lines on the session's Desk name (`deskOwner`). */
+  /** Whom the visitor's lines on the session's Desk name, its handoff card's among them (`deskOwner`). */
   ownerOf(session: SessionRecord): DeskOwner {
     return deskOwner(this.deskOf(session));
-  }
-
-  /**
-   * Whom the session's Desk hands a visitor to on its handoff card: its owner, by display name, or
-   * the business when the owner gave no name and the Desk carries setup's fallback, "Owner", which
-   * is no one's name and which the public page never shows (`brandFrom`).
-   */
-  handoffNameOf(session: SessionRecord): string {
-    const owner = this.ownerNameOf(session);
-    return owner === OWNER_NAME_FALLBACK ? this.deskOf(session).summary.business_name : owner;
   }
 
   sessionsOf(deskId: string): SessionRecord[] {
@@ -891,17 +881,13 @@ export class MockWorld {
 
   /** The step context for one turn of `session`, in `language`. */
   context(session: SessionRecord, language: Language, text: string): TurnContext {
-    // Looked up only when a step hands off, so making a context still never reads the Desk.
-    const handoffName = () => this.handoffNameOf(session);
+    // Looked up only when a step names the owner, so making a context still never reads the Desk.
     const owner = () => this.ownerOf(session);
     return {
       language,
       text,
       get person() {
         return session.person;
-      },
-      get handoffName() {
-        return handoffName();
       },
       get owner() {
         return owner();
