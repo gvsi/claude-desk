@@ -1195,6 +1195,25 @@ describe('a Desk setup made, speaking for its own owner', () => {
     return events.flatMap((ev) => (ev.type === 'message' ? ev.blocks.filter((b) => b.kind === 'prose').map((b) => b.text) : []));
   }
 
+  it('the_callback_and_booking_cards_name_that_owner', async () => {
+    // The kernel's cards, of the same kinds, facts and shapes, name the Desk's own owner.
+    const slug = await liveDesk(CPA);
+    const callback = (title: string) => cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title });
+    expect(await repliesTo(slug, 'Can you call me back?')).toEqual([callback('Linda will call you back on Monday, between 8:00 am and 9:00 am')]);
+    expect(await repliesTo(slug, 'Please call me tonight')).toEqual([callback('Linda will call you back')]);
+    expect(await repliesTo(slug, 'Llámame, por favor')).toEqual([callback('Linda te llamará el lunes, entre las 8:00 y las 9:00')]);
+
+    expect((await repliesTo(slug, 'Book the first one')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Linda'] }),
+    );
+    expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con Linda'] }),
+    );
+    // Rivera's Desk books with the fixtures' own card.
+    expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);
+    expect((await repliesTo(RIVERA.slug, '¿Me reservas la primera?')).at(-1)).toEqual(rivera.blocks.booking_confirmed.es);
+  });
+
   it('what_only_the_owner_can_answer_names_that_owner', async () => {
     // Claude's plain answer when nothing more specific fits: Linda can tell, and the visitor can ask
     // for her by name, as the page's "Ask for Linda" does.

@@ -220,23 +220,22 @@ function discountedQuote(language: Language, quote: { listCents: number; discoun
 /** The callback window the script offers: Monday 8 to 9 am in the business's time zone. */
 export const CALLBACK_WINDOW = '2026-11-02T08:00:00-08:00/2026-11-02T09:00:00-08:00';
 
-/** The callback card's title, rendered from the handoff fact as Plan 01b does. */
-const callbackCards: Record<'window' | 'open', Record<Language, CardBlock>> = {
+/** The callback card's title, rendered from the handoff fact as Plan 01b does: with the script's window, or with none. */
+const CALLBACK_TITLES: Record<'window' | 'open', Record<Language, string>> = {
   window: {
-    en: cardBlock('callback_confirmed', {
-      fact_id: 'handoff:callback',
-      title: 'Maria Rivera will call you back on Monday, between 8:00 am and 9:00 am',
-    }),
-    es: cardBlock('callback_confirmed', {
-      fact_id: 'handoff:callback',
-      title: 'Maria Rivera te llamará el lunes, entre las 8:00 y las 9:00',
-    }),
+    en: '{Owner} will call you back on Monday, between 8:00 am and 9:00 am',
+    es: '{Owner} te llamará el lunes, entre las 8:00 y las 9:00',
   },
   open: {
-    en: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera will call you back' }),
-    es: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera te llamará' }),
+    en: '{Owner} will call you back',
+    es: '{Owner} te llamará',
   },
 };
+
+/** The kernel's callback card on a Desk whose owner is `owner`, in `language`. */
+function callbackCard(when: 'window' | 'open', language: Language, owner: DeskOwner): CardBlock {
+  return cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: naming(CALLBACK_TITLES[when][language], ownerIn(language, owner), language) });
+}
 
 /**
  * Booking the first time offered: Claude's checked words carry no price or date and promise
@@ -248,14 +247,18 @@ const bookedProse: Record<Language, RenderedBlock> = {
   es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
-const bookedCard: Record<Language, CardBlock> = {
-  en: cardBlock('booking_confirmed', {
-    fact_id: 'booking:B-77',
-    title: 'Tuesday, November 3',
-    lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
-  }),
-  es: blocks.booking_confirmed.es,
+/** The booked card's words, as the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner}. */
+const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
+  en: { title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With {owner}'] },
+  es: { title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con {owner}'] },
 };
+
+/** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Rivera's Desk, the fixtures' card. */
+function bookedCard(language: Language, owner: DeskOwner): CardBlock {
+  const { title, lines } = BOOKED[language];
+  const who = ownerIn(language, owner);
+  return cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title, lines: lines.map((line) => naming(line, who, language)) });
+}
 
 /**
  * Claude's checked words that name the Desk's owner: `help` when nothing more specific fits, a
@@ -778,7 +781,7 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
-      (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard[ctx.language]]),
+      (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard(ctx.language, ctx.owner)]),
     ],
   },
   {
@@ -821,7 +824,7 @@ export const SCRIPT: readonly ScriptRule[] = [
       },
       (ctx) => {
         const tonight = ctx.text.toLowerCase().includes('tonight');
-        return ctx.reply([callbackCards[tonight ? 'open' : 'window'][ctx.language]]);
+        return ctx.reply([callbackCard(tonight ? 'open' : 'window', ctx.language, ctx.owner)]);
       },
     ],
   },
