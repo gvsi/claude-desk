@@ -1,12 +1,22 @@
 import { expect, it } from 'vitest';
 
 import type { BusinessToolDef } from '../../api/views.ts';
-import { businessGlyph, businessLine, businessRows, isBusinessDef } from './businessWords.ts';
+import { businessGlyph, businessLine, businessRows, businessRulesDescription, isBusinessDef } from './businessWords.ts';
 
 const booking: BusinessToolDef = {
   title: 'Book a free intro call', description: 'Books an intro call.',
   config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
 };
+
+it('describes Rules intake by its questions and other jobs by their configuration', () => {
+  const intake: BusinessToolDef = {
+    title: 'Intake', description: 'Asks questions.',
+    config: { block: 'intake', questions: ['Which year?', 'For a business?'] },
+  };
+  expect(businessRulesDescription(intake)).toBe('Asks: Which year? For a business?');
+  expect(businessRulesDescription(booking)).toBe(businessLine(booking));
+  expect(businessRulesDescription({ ...intake, config: { block: 'unknown' } } as never)).toBeNull();
+});
 
 it('describes a booking and follows its starting outcome without a Who row', () => {
   expect(businessLine(booking)).toBe('Free intro call, 20 minutes, in your opening hours');

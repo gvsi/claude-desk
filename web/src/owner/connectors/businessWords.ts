@@ -35,6 +35,12 @@ export function businessLine(def: BusinessToolDef): string | null {
   return null;
 }
 
+/** Rules spells out an intake's questions; other jobs keep the shared configuration line. */
+export function businessRulesDescription(def: BusinessToolDef): string | null {
+  if (!isBusinessDef(def)) return null;
+  return def.config.block === 'intake' ? `${BUSINESS_WORDS.asks}: ${def.config.questions.join(' ')}` : businessLine(def);
+}
+
 export function businessRows(def: BusinessToolDef, mode: RuleMode): BusinessSetupRow[] {
   if (!isBusinessDef(def)) return [];
   const config = def.config;
