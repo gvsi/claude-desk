@@ -104,6 +104,9 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
             "DESK_DB_URLS": "KERNEL,MOCKPAY",
             "KERNEL_DB_USER": KERNEL_ROLE,
             "MOCKPAY_DB_USER": MOCKPAY_ROLE,
+            # Each new copy opens on the kernel's sample week of finished conversations, every one of them
+            # marked as sample history in the ledger. The kernel's setting alone; unset, copies start empty.
+            "SAMPLE_WEEK": "1",
             **database,
         },
         secrets=_kernel_secrets(data.secrets),
