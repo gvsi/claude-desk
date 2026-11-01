@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 
-import { SETUP_COPY } from './copy.ts';
+import { COMING_LATER_CHANNELS, SETUP_COPY } from './copy.ts';
 import { aroundBusiness, changeSomethingPath, opensSetupChat, setupPath } from './shared.ts';
 
 it('avoids a second sentence stop after a business name while preserving the name and other copy', () => {
@@ -35,4 +35,13 @@ it('leads "Change something" to the setup chat on the same interview, and back t
   expect(opensSetupChat(new URLSearchParams('chat=1'))).toBe(true);
   expect(opensSetupChat(new URLSearchParams(''))).toBe(false);
   expect(opensSetupChat(new URLSearchParams('chatty'))).toBe(false);
+});
+
+it('lists the channels coming later by unique keys, the website embed in the words Live already uses', () => {
+  const keys = COMING_LATER_CHANNELS.map(({ key }) => key);
+  expect(new Set(keys).size).toBe(keys.length);
+  expect(COMING_LATER_CHANNELS.every(({ name }) => name.trim() !== '')).toBe(true);
+  expect(COMING_LATER_CHANNELS.find(({ key }) => key === 'website_embed')).toEqual({
+    key: 'website_embed', name: SETUP_COPY.live.websiteEmbed, line: SETUP_COPY.live.websiteEmbedLine,
+  });
 });

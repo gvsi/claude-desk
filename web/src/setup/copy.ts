@@ -289,3 +289,23 @@ export const SETUP_COPY = {
     comingLater: 'Coming later',
   },
 } as const;
+
+/**
+ * A way people will reach the Desk that isn't built yet, as Live lists it under "Coming later": its
+ * name and, when it has one, the line under it.
+ */
+export interface ComingLaterChannel {
+  /** Unique in the list, stable across copy changes. */
+  key: string;
+  name: string;
+  line?: string;
+}
+
+/**
+ * The channels Live lists as coming later, in order. The website embed is the one Live already marks
+ * so; the others' names come from the signed Live board. Drawn nowhere yet: Live still draws the
+ * embed on its own, in "Share it".
+ */
+export const COMING_LATER_CHANNELS: readonly ComingLaterChannel[] = [
+  { key: 'website_embed', name: SETUP_COPY.live.websiteEmbed, line: SETUP_COPY.live.websiteEmbedLine },
+];
