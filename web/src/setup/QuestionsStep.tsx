@@ -5,6 +5,7 @@ import type { Choice, SetupAnswerBody, SetupMessage, SetupState } from '../api/v
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { GrowingReply } from '../lib/GrowingReply.tsx';
+import { useTopFade } from '../lib/useTopFade.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
 import { isCard, liveChoices } from './conversation.ts';
@@ -77,6 +78,8 @@ function Line({ message }: { message: SetupMessage }) {
 export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
+  // Messages fade where they scroll under the bar, once the conversation is scrolled from its top.
+  useTopFade(scroll, '.cd-setup-chat__scroll');
   const composer = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
   const returnToTextarea = useRef(false);

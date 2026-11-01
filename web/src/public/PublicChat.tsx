@@ -42,6 +42,7 @@ import { breakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import { useTopFade } from '../lib/useTopFade.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { usePaymentLinks } from './usePaymentLinks.ts';
@@ -768,6 +769,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   useEffect(() => {
     if (sentAt !== null && lastSeq !== sentAt) setSentAt(null);
   }, [sentAt, lastSeq]);
+  // Messages fade where they scroll under the chat's head, once the conversation is scrolled from its top.
+  useTopFade(endRef, '.cd-public-shell__scroll', drawn);
   const { shown } = chat;
   useEffect(() => {
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
