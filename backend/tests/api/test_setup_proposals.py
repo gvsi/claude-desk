@@ -1433,6 +1433,53 @@ async def test_suggested_facts_never_become_owner_rule_answers(model):
     assert [(card.mode, card.reason) for card in posted] == [("ask", "Ask before booking")]
 
 
+@pytest.mark.parametrize("suggested", [True, False])
+async def test_rule_fallback_uses_only_owner_hours(proposals, model, engine, fake, suggested):
+    from desk.api.prompts import DraftedSituations
+    from tests.api.test_setup_rules import SITUATIONS, settled, structured, unparseable
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    hours = [{"days": ["mon"], "start": "00:00", "end": "23:59"}]
+    saved = await stored(engine, interview_id)
+    if suggested:
+        saved["transcript"].append(setup.Entry(role="claude", text="Homework", suggested=setup.SuggestedFacts(
+            service_area="", hours=hours, public_contact="", after_hours="", price_items=[]))
+            .model_dump(mode="json"))
+    else:
+        saved["answers"]["hours"] = hours
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb),"
+                               " answers = CAST(:answers AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(saved["transcript"]),
+                            "answers": json.dumps(saved["answers"]), "id": interview_id})
+    path = f"/api/owner/setup/{interview_id}"
+    finished = await owner.browser.post(path + "/suggestions", json={})
+    assert finished.status_code == 200, finished.text
+    saved = await stored(engine, interview_id)
+    assert saved["answers"]["suggested_fields"] == (["hours"] if suggested else [])
+    assert not any(entry.get("owner_decided") for entry in saved["transcript"])
+    model.add(unparseable(), unparseable())
+    draft = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert draft.status_code == 200, draft.text
+    booking = next(card for card in draft.json()["cards"] if card["card_id"] == "setup-booking")
+    assert booking["mode"] == ("ask" if suggested else "auto")
+    assert booking["hours"] == (None if suggested else {
+        "days": ["mon"], "start": "00:00:00", "end": "23:59:00"})
+    assert fake.called("POST /policy/draft")
+    model.add(structured(DraftedSituations(situations=SITUATIONS)))
+    situations = await settled(owner, f"/api/owner/policy/setup/{interview_id}/situations")
+    assert situations.status_code == 200, situations.text
+    for request in model.requests:
+        if request.route not in (setup.CARD_DRAFT_ROUTE, setup.SITUATIONS_ROUTE):
+            continue
+        message = request.messages[0]["content"][0]["text"]
+        answers = json.loads(html.unescape(message.split("<answers>")[1].split("</answers>")[0]))
+        assert "suggested_fields" not in answers and "how_we_help" not in answers
+        assert "accepted_jobs" not in answers
+        assert ("hours" in answers) is not suggested
+
+
 def test_suggested_field_provenance_is_code_written_and_hidden_from_turns():
     from desk.api.prompts import SETUP_TURNS, SetupCardAnswer, SetupNextStep, SetupPatch, SetupUnderstanding
     from tests.api.test_setup_questions import answer_turn

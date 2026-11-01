@@ -2500,6 +2500,12 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
                     reason=draft.reason.strip())
 
 
+def owner_rule_answers(answers: SetupAnswers) -> SetupAnswers:
+    """One projection for rule inputs: suggested facts are unanswered, and summaries confer no job authority."""
+    return SetupAnswers.model_validate({"summary": "", **answers.model_dump(
+        exclude={"suggested_fields", "how_we_help", *answers.suggested_fields})})
+
+
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,
                       tools: list[dict],
                       post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]], *,
@@ -2512,12 +2518,9 @@ async def draft_cards(model: ModelClient, record: Record, business_type: Busines
     kernel refused the set as invalid, which names no card), gets one retry with what is wrong: the one retry every
     draft gets, whichever found it. The version `post` drafted, or None when the retry can't be used either: the caller
     drafts the template cards."""
+    answers = owner_rule_answers(answers)
     cap = answers.auto_money_cap_cents
     owner_answers = answers.model_dump(mode="json", exclude_defaults=True)
-    owner_answers.pop("how_we_help", None)
-    owner_answers.pop("suggested_fields", None)
-    for name in answers.suggested_fields:
-        owner_answers.pop(name, None)
     if jobs:
         owner_answers["accepted_jobs"] = jobs
     message = _user("\n\n".join([card_draft_head(business_type, cap), wrap(TOOLS_TAG, json.dumps(tools)),
@@ -2610,15 +2613,15 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS)
-    answers, business_type = interview.answers, interview.business_type
+    answers, business_type = owner_rule_answers(interview.answers), interview.business_type
     cards = interview.draft_cards
     template = template_cards(business_type, answers)
     version: PolicyVersion | None
     if not cards:
         timezone = (await _business(owner, desk_id))["timezone"]
         today = now.astimezone(ZoneInfo(timezone)).date()
-        held = await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today,
-                                                         publish_policies=setup_policy_claims_enabled))
+        held = await _put_parts(owner, desk_id, seed_parts(interview.answers, timezone, business_type=business_type,
+                                                         today=today, publish_policies=setup_policy_claims_enabled))
         await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
@@ -2781,6 +2784,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     cards = [card for card in drafted_cards if not card.is_default]
     prices = await _prices(owner, desk_id)
     timezone = (await _business(owner, desk_id))["timezone"]
+    answers = owner_rule_answers(interview.answers)
     enabled = {row["tool"] for row in await owner.ro.rows("tools", desk_id=desk_id, status="enabled")}
     tools = {who: sorted(given & enabled) for who, given in SITUATION_TOOLS_BY_WHO.items()}
     rules_text = json.dumps([card.model_dump(mode="json", exclude={"card_id", "person_id", "agent_key_id",
@@ -2788,8 +2792,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     message = _user("\n\n".join([SITUATIONS_HEAD.format(business_type=interview.business_type),
                                  wrap(RULES_TAG, rules_text), wrap(PRICES_TAG, json.dumps(prices)),
                                  wrap(TOOLS_TAG, json.dumps(tools)),
-                                 wrap(ANSWERS_TAG, interview.answers.model_dump_json(
-                                     exclude_defaults=True, exclude={"suggested_fields"}))]))
+                                 wrap(ANSWERS_TAG, answers.model_dump_json(exclude_defaults=True))]))
 
     def usable(drafted: DraftedSituations) -> str | None:
         if any((draft.tool == "native.quote" or draft.tool in MONEY_TOOLS) and draft.item_id not in prices
@@ -2804,7 +2807,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
                               effort="medium", check=usable)
     if drafted is None:
         raise ApiProblem(503, "model_unavailable")
-    built = [situation(number, draft, prices, interview.answers.hours, timezone, now)
+    built = [situation(number, draft, prices, answers.hours, timezone, now)
              for number, draft in enumerate(drafted.situations, 1)]
     results = await _run_probes(owner, desk_id, version, [each.probe for each in built])
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")))
@@ -2865,7 +2868,7 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
     listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
     prices = {row["item_id"]: row["unit_cents"] for row in listed}
     name = interview.answers.owner_display_name
-    built = safety_probes(interview.answers, prices)
+    built = safety_probes(owner_rule_answers(interview.answers), prices)
     started = monotonic()
     results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
     seconds = round(monotonic() - started, 1)
@@ -2907,7 +2910,7 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
         if refused.code != "conflict":
             raise
         version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
-                                              interview.answers.auto_money_cap_cents))
+                                              owner_rule_answers(interview.answers).auto_money_cap_cents))
         await _drafted(engine, owner, interview_id, version.version, "rules")
         raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
