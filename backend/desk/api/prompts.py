@@ -52,7 +52,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.6"
+PROMPT_VERSION = "2026-10-31.7"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
