@@ -156,6 +156,7 @@ export interface ApprovalResult {
   decision: Decision;
   execution: ExecResult | null;
   card_diff: RuleCard[] | null;
+  approved?: Decision | null;
 }
 export interface Decision {
   decision_id: string;
@@ -180,6 +181,7 @@ export interface Decision {
   card_ids: string[];
   review?: Review | null;
   reason_plain: string;
+  owner_plain?: string | null;
   visitor_plain: string;
   answers?: ("allow_once" | "deny_once" | "allow_person" | "deny_always")[];
   expires_at: string;
@@ -340,6 +342,13 @@ export interface Clause {
     | "payment_confirmed"
     | "link_cancelled";
   fact_id?: string | null;
+}
+export interface ContextClock {
+  as_of_utc: string;
+  local_now: string;
+  local_date: string;
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  timezone: string;
 }
 export interface CopyCreated {
   copy_id: string;
@@ -768,6 +777,7 @@ export interface ReviewThresholds {
   max_manipulation_bp: number;
 }
 export interface SessionContext {
+  clock: ContextClock;
   tools: ToolProfile[];
   tools_declared: ToolProfile[];
   facts: Fact[];

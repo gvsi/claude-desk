@@ -1,0 +1,156 @@
+/* Skeleton: quiet shapes where a page's parts will be while it loads.
+
+   Shapes are fill-hover. A line is as tall as its type style's line box (its cd-type class sets the
+   line height, and 1lh reads it back), with a round pill centred in it, so a line and the words
+   that replace it share their top edge. Blocks and circles take their sizes and corners. A card
+   is the real Card's border, fill, radius and padding, holding shapes.
+
+   The sweep: one band of light, fill-secondary at its centre and transparent at both ends, moves
+   across the whole screen from left to right on the writing loop. Every shape's sweep starts at
+   the document's time 0 (Skeleton sets it as the shape mounts), so every shape is at the same
+   point of the loop. The band is placed in viewport coordinates, not by a fixed background, which
+   iOS Safari ignores: --cd-skeleton-x is the shape's left edge in the viewport, set as it mounts
+   and again by its SkeletonScreen when the region or the window resizes, and the band's offset
+   inside the shape subtracts it, so every shape shows the same band at the same viewport x. Under
+   reduced motion the shapes are still. */
+
+.cd-skeleton {
+  display: block;
+  background-color: var(--fill-hover);
+  background-image: linear-gradient(90deg, transparent 0, var(--fill-secondary) 50%, transparent 100%);
+  background-size: var(--size-skeleton-band) 100%;
+  background-repeat: no-repeat;
+  background-position: calc(-1 * var(--size-skeleton-band) - var(--cd-skeleton-x, 0px)) 0;
+  animation: cd-skeleton-sweep var(--motion-writing) linear infinite;
+}
+
+/* From one band's width left of the viewport to one band's width right of it. Both ends are
+   written out: WebKit takes an implicit start from the shape's style as it is drawn mid-sweep when
+   --cd-skeleton-x changes, which puts the band in the wrong place. */
+@keyframes cd-skeleton-sweep {
+  from {
+    background-position: calc(-1 * var(--size-skeleton-band) - var(--cd-skeleton-x, 0px)) 0;
+  }
+
+  to {
+    background-position: calc(100vw + var(--size-skeleton-band) - var(--cd-skeleton-x, 0px)) 0;
+  }
+}
+
+.cd-skeleton-line {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  height: 1lh;
+}
+
+.cd-skeleton-line__pill {
+  width: 100%;
+  height: var(--cd-skeleton-pill);
+  border-radius: var(--radius-full);
+}
+
+/* The pill in each line box, as the signed boards draw it. */
+.cd-skeleton-line--caption,
+.cd-skeleton-line--meta,
+.cd-skeleton-line--pill {
+  --cd-skeleton-pill: 10px;
+}
+
+.cd-skeleton-line--body,
+.cd-skeleton-line--control,
+.cd-skeleton-line--section,
+.cd-skeleton-line--message,
+.cd-skeleton-line--reply {
+  --cd-skeleton-pill: 12px;
+}
+
+.cd-skeleton-line--brand-name,
+.cd-skeleton-line--summary {
+  --cd-skeleton-pill: 14px;
+}
+
+.cd-skeleton-line--page-title,
+.cd-skeleton-line--figure-small {
+  --cd-skeleton-pill: 24px;
+}
+
+.cd-skeleton-line--figure {
+  --cd-skeleton-pill: 32px;
+}
+
+.cd-skeleton-line--greeting {
+  --cd-skeleton-pill: 36px;
+}
+
+.cd-skeleton--block {
+  max-width: 100%;
+}
+
+.cd-skeleton--radius-control {
+  border-radius: var(--radius-control);
+}
+
+.cd-skeleton--radius-card {
+  border-radius: var(--radius-card);
+}
+
+.cd-skeleton--radius-composer {
+  border-radius: var(--radius-composer);
+}
+
+.cd-skeleton--radius-full {
+  border-radius: var(--radius-full);
+}
+
+.cd-skeleton--circle {
+  flex: none;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  border-radius: var(--radius-full);
+}
+
+/* SkeletonScreen: the region that waits, sweeps, speaks and fades. For its first moments the layer
+   holds the part's space with its shapes laid out but invisible, so nothing under it moves when
+   they show. */
+
+.cd-skeleton-screen__layer[data-state='waiting'] {
+  visibility: hidden;
+}
+
+/* Leaving: the part draws in flow, and the layer lies over it at the same top-left, then fades out
+   on motion-fast. It rests at opacity 0, so a layer whose fade can't run is invisible at once, and
+   clicks pass through it to the part. Only now is the region a containing block. */
+.cd-skeleton-screen--leaving {
+  position: relative;
+}
+
+.cd-skeleton-screen__layer[data-state='leaving'] {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-app);
+  opacity: 0;
+  animation: cd-skeleton-leave var(--motion-fast) var(--motion-ease);
+}
+
+@keyframes cd-skeleton-leave {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: the shapes are still, fill-hover with the band out of view, and nothing fades:
+   the part replaces the layer at once. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-skeleton,
+  .cd-skeleton-screen__layer {
+    animation: none;
+  }
+}

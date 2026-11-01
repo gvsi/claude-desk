@@ -39,9 +39,12 @@ which `final_gate` and `record_rate` share). `record-rate` never lowers the comp
 held-out set unless `--lower-bar` is given, and then marks the entry `lowered` and says so; a miss is
 fixed in the Desk, not by lowering its bar. `key` prints the inputs key
 (`make evals-key`), and `results-check` is the check CI runs (`make evals-results-check`), with no
-database, network or key: exit 0 or 1, the reason on stdout.
+database, network or key: exit 0 when unchanged inputs or complete passing results permit it, or
+every head scenario is pending (no recorded rate); otherwise exit 1, the reason on stdout.
 `merge-ready` checks the head (default HEAD) against origin/main from their merge base, with no
-network or model call: exit 0 when ready, 1 when both sides changed results inputs, 2 on an error.
+network or model call: exit 0 when ready, 1 when both sides changed results inputs and a scenario
+can run under their combined landed plans or in their merge, or a recorded rate prevents the
+unarmed shortcut. A merge conflict also exits 1; other check errors exit 2.
 
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
 calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a

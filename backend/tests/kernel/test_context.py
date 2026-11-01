@@ -8,7 +8,7 @@ scripted adapters (`FakeAdapter`) on a Desk to cover tools this plan has no adap
 
 import logging
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import FastAPI
@@ -34,6 +34,27 @@ from .test_execute import executed
 
 ROUTE = "GET /context/{session_id}"
 SEEDED_PUBLIC_KNOWLEDGE = [("kn-price-list", ["public"]), ("kn-website", ["public"])]
+
+
+async def test_context_clock_is_public_and_fresh_for_every_session_kind(app, client, frozen_clock):
+    frozen_clock.travel(datetime(2026, 11, 1, 0, 4, 5, 123456, tzinfo=UTC))
+    copy, visitor = await visitor_of(app, client)
+    agent = await mint(client, copy.owner, copy.desk_id)
+    created = await open_agent(client, copy.slug, agent, frozen_clock, mandate=False)
+    signed = turn(agent, copy.slug, created.state.session_id, frozen_clock)
+    callers = [(visitor.session_id, visitor.headers, None),
+               (signed.session_id, signed.headers, None),
+               (await owner_session_id(client, copy.owner), copy.owner, copy.desk_id)]
+    expected = {"as_of_utc": "2026-11-01T00:04:05.123456Z", "local_now": "2026-10-31T17:04-07:00",
+                "local_date": "2026-10-31", "weekday": "sat", "timezone": "America/Los_Angeles"}
+    for session_id, headers, desk_id in callers:
+        response = await get_context(client, session_id, headers, desk_id=desk_id)
+        assert response.status_code == 200, response.text
+        assert response.json()["clock"] == expected
+    frozen_clock.advance(60)
+    seen = await context_of(client, visitor.session_id, visitor.headers)
+    assert seen.clock.model_dump() == {**expected, "as_of_utc": "2026-11-01T00:05:05.123456Z",
+                                      "local_now": "2026-10-31T17:05-07:00"}
 
 
 async def get_context(client: httpx.AsyncClient, session_id: str, headers: dict[str, str], *,

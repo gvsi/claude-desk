@@ -1,5 +1,5 @@
-"""preflight.py: nothing deploys unless the tree is clean, HEAD is on origin/main, HEAD has a
-passing tier 2 results file, both owner secrets are set, and the web app builds and checks at
+"""preflight.py: nothing deploys unless the tree is clean, HEAD is on origin/main, HEAD passes
+the tier 2 results check, both owner secrets are set, and the web app builds and checks at
 HEAD. The first failure stops it, named, before any later check runs."""
 
 import os
@@ -191,7 +191,7 @@ def test_fails_without_a_passing_results_check(env, secrets, capsys, monkeypatch
     assert _run(env, secrets) == 1
     err = capsys.readouterr().err
     assert reason in err and output in err
-    # BASE is the first commit, which has no gated paths, so HEAD's own results file decides.
+    # BASE is the first commit, so the head must satisfy the unarmed or strict results rule.
     assert env.calls() == [f"make evals-results-check BASE={env.first} @ {env.repo}"]
 
 
@@ -199,6 +199,18 @@ def test_results_check_runs_even_with_allow_branch(env, secrets, monkeypatch):
     monkeypatch.setenv("MAKE_STATUS", "1")
 
     assert _run(env, secrets, "--allow-branch") == 1
+
+
+@pytest.mark.parametrize("reason", [
+    "every scenario is pending at the head, so no results file is needed",
+    "evals/results/0123456789abcdef.json passes: 12 runs",
+])
+def test_results_check_prints_the_checks_own_reason(env, capsys, monkeypatch, reason):
+    monkeypatch.setenv("MAKE_OUTPUT", f"results-check: {reason}")
+
+    load_script("preflight").check_results(env.repo)
+
+    assert capsys.readouterr().out == f"ok: tier 2 results check: results-check: {reason}\n"
 
 
 @pytest.mark.parametrize("missing", OWNER_SECRETS)
@@ -306,7 +318,7 @@ def test_data_only_skips_the_owner_secrets_and_the_web_build(env, secrets, capsy
     be set yet, and serves no web app; every other check still runs."""
     assert _run(env, secrets, "--data-only") == 0          # no describe_secret: the stub has no response
     out = capsys.readouterr().out
-    assert "ok: HEAD is on origin/main" in out and "ok: HEAD's tier 2 results file passes" in out
+    assert "ok: HEAD is on origin/main" in out and "ok: tier 2 results check:" in out
     assert "skipped: the owner secrets and the web build (--data-only: DeskData alone)" in out
     calls = env.calls()
     assert any(call.startswith("make evals-results-check") for call in calls)

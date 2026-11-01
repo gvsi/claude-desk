@@ -28,6 +28,8 @@ from desk.api.prompts import (
     CARD_ID_MAX_LENGTH,
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
+    Choice,
+    ProposalCard,
     PlannedOutcome,
     DemoTask,
     QuestionKey,
@@ -611,21 +613,31 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
-    (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+    Naming the ask prevents a repeated answer from answering the next one."""
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey
+    question: QuestionKey | None = None
+    card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+    @model_validator(mode="after")
+    def one_ask(self) -> "SetupAnswerIn":
+        if (self.question is None) == (self.card is None):
+            raise ValueError("exactly one of question and card is required")
+        return self
 
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`)."""
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+    only to a card message, with role `claude` and empty text."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
+    choices: list[Choice] = []
+    card: ProposalCard | None = None
 
 
 class SetupState(BaseModel):
@@ -641,6 +653,7 @@ class SetupState(BaseModel):
     step: SetupStep
     consent: bool | None
     question: QuestionKey | None
+    pending_card: str | None = None
     busy: bool = False
     messages: list[SetupMessage]
 

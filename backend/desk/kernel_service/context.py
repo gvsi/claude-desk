@@ -2,6 +2,8 @@
 
 `session_context` answers with:
 
+- `clock`: the kernel's current UTC instant and the business's local date and time, public
+  information for every session kind, separate from labelled facts;
 - `tools`: the profiles of the tools the session may call now (`decide.tools_given` over the
   Desk's enabled tools, followed by `adapters.resolve`), so stale or unresolved profiles
   cannot grant a next-step exemption;
@@ -43,8 +45,9 @@ from desk.contracts import Claim, Fact, KnowledgeItem, Label, Principal, ToolPro
 from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_api import SessionContext
-from desk.kernel_service import adapters, auth, decide, labels
+from desk.kernel_api import ContextClock, SessionContext
+from desk.kernel_service import adapters, auth, clock, decide, labels
+from desk.kernel_service.adapters.base import business_timezone
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
 from desk.kernel_service.sessions import principal_for
@@ -80,7 +83,7 @@ def _profile(row: Tool) -> ToolProfile:
 
 async def session_context(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
                           desk_row: Desk) -> SessionContext:
-    """The tools, facts and knowledge of `desk_row` given to the authenticated session."""
+    """The kernel's local time, tools, facts and knowledge given to the authenticated session."""
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
@@ -91,6 +94,8 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     # the owner reads the business's own text; a conversation is never given a document's canary
     canaries = labels.NO_CANARIES if session_row.kind == "owner" else await labels.copy_canaries(ctx)
     now = ctx.clock.now()
+    tz = await business_timezone(ctx, desk_row)
+    local = now.astimezone(tz)
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.status != "expired",
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
@@ -101,6 +106,10 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     readable = [*([catalog] if catalog is not None and labels.can_read(catalog.label, readers) else []),
                 *(labels.fact_of(row) for row in facts if labels.can_read(row.readers, readers))]
     return SessionContext(
+        clock=ContextClock(as_of_utc=clock.signed_time(now), local_now=local.isoformat(timespec="minutes"),
+                           local_date=local.date().isoformat(),
+                           weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                           timezone=tz.key),
         tools=given,
         tools_declared=[profile for tool, profile in profiles.items() if tool in declared],
         facts=[fact for fact in readable

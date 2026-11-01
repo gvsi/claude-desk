@@ -1,12 +1,13 @@
 /**
  * What a fresh mock copy holds, by seed. `rivera` is the master plan's Rivera seed as far as the
  * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk with its rule cards and
- * open status, and the seeded hold) plus Dana's live chat and Alex Kim's assistant's, a visiting
- * agent's; `rivera_quiet` has no hold and no chats; `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
+ * open status, the public website and price list knowledge, and the seeded hold) plus Dana's live
+ * chat and Alex Kim's assistant's, a visiting agent's; `rivera_quiet` has no hold and no chats;
+ * `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
  * script's own steps, so their ledger entries, receipts and transcript items line up the way the
  * live ones do.
  */
-import type { HoursWindow, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
+import type { HoursWindow, KnowledgeItem, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
 import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { seedAgentChat } from './agents.ts';
@@ -288,6 +289,26 @@ export function seedWorld(world: MockWorld): void {
     hours: RIVERA_HOURS,
     openStatus: RIVERA_OPEN_STATUS,
   });
+  const knowledge: KnowledgeItem[] = [
+    {
+      item_id: 'kn-website',
+      source: 'website',
+      label: { readers: ['public'], record_owner: null },
+      title: 'Your website, rivera-plumbing.example, read during setup',
+      text: "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+    },
+    {
+      item_id: 'kn-price-list',
+      source: 'setup',
+      label: { readers: ['public'], record_owner: null },
+      title: 'Price list, from your answers in setup',
+      text: 'The price list Maria gave in setup covers the service call deposit, drain clearing, a water heater flush and leak repair. Each price is given in a quote from this list.',
+    },
+  ];
+  // The kernel stores these one after another on its live clock: website first, then price list.
+  for (const [i, item] of knowledge.entries()) {
+    world.knowledge.set(`${ids.deskId}:${item.item_id}`, { deskId: ids.deskId, item, createdAt: opened - (knowledge.length - i), forced: false });
+  }
   if (seed === 'rivera_two_desks') {
     world.addDesk({
       desk_id: ids.emergenciesDeskId,

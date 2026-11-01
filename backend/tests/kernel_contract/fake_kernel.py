@@ -83,7 +83,8 @@ contract test, before the task that first uses them.
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
   owner's `/whoami` no longer lists it, and opening a session on it or an owner route naming it answers 409 `closed`;
-  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy. An owner
+  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
+  call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
   `native.read_memory` answers from `MEMORY_ITEMS` (the simulated memory) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
@@ -126,7 +127,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -197,6 +198,7 @@ from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
+    ContextClock,
     CreateCopyRequest,
     CreateDeskRequest,
     CreateSessionRequest,
@@ -439,6 +441,12 @@ STATUS_TEXT = {
            "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
            "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
+}
+# Owner-only refusal lines for the fake's two refusal paths: a changed policy and exhausted mandate.
+# The owner has no language setting yet, so these stay English whatever the session's language.
+OWNER_REFUSAL_TEXT = {
+    "rules_changed": "Your rules changed before this ran, so it wasn't done.",
+    "fallback": "This couldn't run, so it wasn't done.",
 }
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
@@ -2162,7 +2170,15 @@ class FakeKernelState:
                                           request.query_params.get("desk_id"))
         declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
+        try:
+            local = self.now.astimezone(ZoneInfo(desk.timezone))
+        except ZoneInfoNotFoundError:
+            raise Refusal(500, "internal") from None
         return SessionContext(
+            clock=ContextClock(as_of_utc=signed_time(self.now), local_now=local.isoformat(timespec="minutes"),
+                               local_date=local.date().isoformat(),
+                               weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                               timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
             facts=[fact for fact in facts if self._readable(session, fact)],
@@ -2191,7 +2207,7 @@ class FakeKernelState:
             record = self.decisions[known]
             if record.call_sha256 != digest:
                 raise Refusal(409, "conflict")
-            return self._refresh(record)
+            return self._refresh(record).model_copy(update={"owner_plain": None})
         if session.mode == "paused":
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="paused")
         if call.tool not in TOOL_NAMES:
@@ -2427,8 +2443,13 @@ class FakeKernelState:
                             session_id=decision.session_id, ref_id=decision.decision_id)
         line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
                            owner=desk.owner_display_name)
+        owner_plain = None
+        if state == "refused_at_execution":
+            owner_plain = OWNER_REFUSAL_TEXT[
+                "rules_changed" if summary.get("reason") == "rules_changed"
+                and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
         record.decision = self._signed(decision.model_copy(update={
-            "state": state, "visitor_plain": line,
+            "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
         self._put_decision(record)
         return record.decision
@@ -2485,7 +2506,7 @@ class FakeKernelState:
                 raise Refusal(404, "not_found")
             return self._refresh(record)
         _, record = self._own_decision(request, None, decision_id)
-        return self._refresh(record)
+        return self._refresh(record).model_copy(update={"owner_plain": None})
 
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
         session, record = self._own_decision(request, body.session_id, body.decision_id)
@@ -2515,7 +2536,9 @@ class FakeKernelState:
             record.running = True
             raise Refusal(409, "conflict")
         if decision.action.tool == "native.charge_mandate" and not self._room_for(session, decision.action):
-            self._transition(record, "refused_at_execution", kind="execute", reason="mandate_exhausted")
+            desk = self.desks[record.desk_id]
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
+            self._transition(record, "refused_at_execution", kind="execute", reason="rules_changed", check=check)
             raise Refusal(409, "conflict")           # the reservation failed: nothing was charged
         return self._run(record, session)
 
@@ -2621,7 +2644,7 @@ class FakeKernelState:
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
-                "status": "open", "kind": "callback"}
+                "status": "done" if session.preview else "open", "kind": "callback"}
             self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
             facts.append(Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))
@@ -2743,13 +2766,15 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
+        approved = None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
-            # the re-check at execution (step 6): the rules in force no longer let the owner approve it
+            # Step 6: distinguish changed rules from changed inputs under the decision's own rules.
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
-                             approval_id=approval_id, reason="rules changed")
+                             approval_id=approval_id, reason="rules_changed", check=check)
         elif body.answer in ("allow_once", "allow_person"):
-            self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
+            approved = self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
             if body.answer == "allow_person":
                 name = next(person.display_name for person in desk.people.values()
@@ -2764,7 +2789,7 @@ class FakeKernelState:
                 who = {"who": "person", "person_id": session.person_id} if session.person_id else {"who": "anyone"}
                 card_diff = [RuleCard(card_id=f"never-{session.person_id or 'anyone'}-{action.tool}",
                                       applies_to=action.tool, mode="never", reason="You said never for this.", **who)]
-        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
+        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff, approved=approved)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
         """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's
@@ -3869,7 +3894,7 @@ class FakeKernelState:
         known = self._by_call.get((session_id, generation, self._query(request, "call_id")))
         if known is None:
             raise Refusal(404, "not_found")
-        return self._refresh(self.decisions[known])
+        return self._refresh(self.decisions[known]).model_copy(update={"owner_plain": None})
 
 
 def first_bad_seq(entries: list[LedgerEntry]) -> int | None:

@@ -26,11 +26,14 @@ from tests.kernel_contract.test_contract import (
     checkout,
     context,
     decide,
+    demo_agent,
     execute,
     issue_payment_link,
+    open_agent_session,
     quote_args,
     read_decision,
     refused,
+    turn_view,
 )
 
 BY_CALL = "GET /decisions/by_call?session_id=&generation=&call_id="
@@ -90,6 +93,26 @@ async def test_native_tool_review_uses_the_served_pin_and_cannot_disable_verific
             desk_id=desk_id, enable=False, tools=[ToolPin(
                 tool=verification.tool, definition_sha256=verification.definition_sha256)]))) == (422, "invalid")
 
+@pytest.mark.parametrize("preview", [True, False], ids=["owner-preview", "visitor"])
+async def test_callback_mirror_leaves_no_open_item_for_the_owners_preview(fake, ro_read, preview):
+    """The fake mirrors a preview's call-back as already done, keeping its fact for the card."""
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    if preview:
+        visitor = await http.owner(copy.owner_token).call("POST /sessions", CreateSessionRequest(
+            desk_slug=state.desks[copy.desk_ids[0]].slug, kind="visitor", preview=True))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    decision = await decide(view, session_id, 0, "call-1", "native.request_callback", {
+        "name": "Sam Lee", "contact": "sam@example.com", "reason": "Water heater"})
+    result = await execute(view, decision, 0)
+    assert result.state == "succeeded"
+    [fact] = result.facts
+    assert fact.fact_id == f"handoff:{result.model_view['handoff_id']}" and fact.status == "committed"
+    assert ro_read(FAKE_RO_SCHEMA, copy.copy_id,
+                   "SELECT handoff_id, session_id, status FROM {ro}.handoffs WHERE session_id = %s", (session_id,)) == [
+        {"handoff_id": result.model_view["handoff_id"], "session_id": session_id,
+         "status": "done" if preview else "open"}]
+
 
 async def test_failures_answer_before_anything_changes(fake):
     http, state = fake
@@ -137,6 +160,38 @@ async def test_a_dropped_answer_commits_then_times_out(fake):
     assert found.state == "allowed"
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))) == found
     assert [len(state.called(route)) for route in ("/decide", "GET /decisions/by_call")] == [2, 1]
+
+
+@pytest.mark.parametrize("kind", ["visitor", "agent"])
+async def test_only_owner_answers_carry_a_refusal_line(fake, kind):
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    desk_id = copy.desk_ids[0]
+    if kind == "agent":
+        slug = state.desks[desk_id].slug
+        issued = await demo_agent(http, copy)
+        visitor, _ = await open_agent_session(http, issued, slug)
+        view = turn_view(http, issued, slug, visitor.state.session_id, "Please quote with a discount")
+    else:
+        view = http.session(visitor.session_token)
+    session_id = visitor.state.session_id
+    args = quote_args("drain", 1500)
+    held = await decide(view, session_id, 0, "call-1", "native.quote", args)
+    assert (held.state, held.owner_plain) == ("held", None)
+    state.never(desk_id, "native.quote")
+
+    owner = http.owner(copy.owner_token)
+    result = await answer(owner, held.decision_id, "allow_once")
+
+    line = "Your rules changed before this ran, so it wasn't done."
+    assert (result.decision.state, result.decision.owner_plain) == ("refused_at_execution", line)
+    assert await read_decision(owner, held.decision_id) == result.decision
+    reads = [await read_decision(view, held.decision_id),
+             await decide(view, session_id, 0, "call-1", "native.quote", args),
+             await view.call(BY_CALL, query={"session_id": session_id, "generation": 0, "call_id": "call-1"})]
+    for read in reads:
+        assert read.owner_plain is None and line not in read.model_dump_json()
+        assert read.model_copy(update={"owner_plain": line}) == result.decision
 
 
 async def test_scripts_override_outcomes_and_results(fake):

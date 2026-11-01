@@ -419,6 +419,7 @@ const heldConsultation = {
   card_ids: ['cc-consult'],
   review: null,
   reason_plain: 'A visitor not on record asked to book a first consultation on Wednesday, November 4 at 11:00 am.',
+  owner_plain: null,
   visitor_plain: plain.held,
   answers: ['allow_once', 'deny_once', 'deny_always'],
   expires_at: '2026-10-31T18:12:09.774120Z',
