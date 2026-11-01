@@ -83,10 +83,10 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
   };
 }
 
-/** Only complete, known business rows can enter setup's jobs list or its review. */
+/** Setup supports new jobs at their listed hash; changed, delisted and turned-off jobs stay out. */
 function isSetupJob(row: ToolRow): row is ToolRow & { tool: `desk.${string}`; business: BusinessToolDef } {
   return row !== null && typeof row === 'object' && row.source === 'business' && typeof row.tool === 'string' && isBusinessToolName(row.tool)
-    && isBusinessDef(row.business) && (row.status === 'enabled' || row.status === 'needs_review')
+    && isBusinessDef(row.business) && (toolState(row) === 'on' || toolState(row) === 'not_on')
     && typeof row.description_confirmed === 'string' && row.description_confirmed.trim() !== ''
     && typeof row.definition_sha256 === 'string' && /^[a-f0-9]{64}$/.test(row.definition_sha256)
     && typeof row.reversible === 'boolean' && Array.isArray(row.effects)
@@ -299,7 +299,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const glyph = businessGlyph(row.business.config);
       if (line === null || glyph === null) return [];
       const job = { key: row.tool, title: row.business.title, line, glyph };
-      return [row.status === 'enabled' ? { ...job, state: 'on' } : {
+      return [toolState(row) === 'on' ? { ...job, state: 'on' } : {
         ...job, state: 'needs_review', onReview: () => {
           setReviewError(undefined);
           setView({ kind: 'review', key: row.tool });

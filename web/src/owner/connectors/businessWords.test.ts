@@ -17,8 +17,18 @@ it('describes a booking and follows its starting outcome without a Who row', () 
     { label: 'Uses', value: 'Your opening hours' },
     { label: 'Next for you', value: 'The booking shows in Today, with their answers' },
   ]);
-  for (const mode of ['ask', 'never'] as const) {
-    expect(businessRows(booking, mode).at(-1)).toEqual({ label: 'Next for you', value: 'You approve each request in Needs you' });
+  expect(businessRows(booking, 'ask').at(-1)).toEqual({ label: 'Next for you', value: 'You approve each request in Needs you' });
+});
+
+it('omits Next for you for every block when the starting outcome is never', () => {
+  const definitions: BusinessToolDef[] = [
+    booking,
+    { title: 'Intake', description: 'Asks questions.', config: { block: 'intake', questions: ['Which year?'] } },
+    { title: 'Deposit', description: 'Takes a deposit.', config: { block: 'purpose_payment', purpose: 'First appointment', amount_cents: 12550 } },
+    { title: 'Urgent request', description: 'Alerts Linda.', config: { block: 'urgent', urgent_when: 'A filing deadline is today' } },
+  ];
+  for (const def of definitions) {
+    expect(businessRows(def, 'never')).toEqual(businessRows(def, 'ask').filter((row) => row.label !== 'Next for you'));
   }
 });
 

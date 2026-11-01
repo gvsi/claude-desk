@@ -92,3 +92,30 @@ it('omits unknown and malformed business rows and keeps the Tools step usable', 
   expect(screen.getByRole('region', { name: 'Your Desk’s jobs' }).elements()).toHaveLength(0);
   expect(screen.container.querySelector('.cd-app-error')).toBeNull();
 });
+
+it('lists only on and not-on jobs, excluding changed definitions, delisted jobs and turned-off jobs', async () => {
+  const { state, desk } = await interviewAtTools();
+  const intro = chenBusinessTools[0];
+  if (!intro?.business) throw new Error('The fixture has an intro call definition');
+  seedBusinessTools(desk, [
+    {
+      ...intro, tool: 'desk.changed-intro', review_reason: 'changed',
+      pending_sha256: 'c'.repeat(64), pending_definition_text: 'Updated intro call definition.',
+      business: { ...intro.business, title: 'Changed intro call' },
+    },
+    { ...intro, tool: 'desk.delisted-intro', review_reason: 'delisted', business: { ...intro.business, title: 'Delisted intro call' } },
+    { ...intro, tool: 'desk.off-intro', status: 'disabled', review_reason: null, business: { ...intro.business, title: 'Turned-off intro call' } },
+  ]);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+  await expect.element(jobs).toBeVisible();
+  expect([...jobs.element().querySelectorAll('.cd-connector-summary__name')].map((el) => el.textContent)).toEqual([
+    'Book a free intro call', 'New client intake',
+  ]);
+  await expect.element(jobs.getByRole('button', { name: 'Review Book a free intro call' })).toBeVisible();
+  await expect.element(jobs.getByText('On', { exact: true })).toBeVisible();
+  for (const title of ['Changed intro call', 'Delisted intro call', 'Turned-off intro call']) {
+    expect(jobs.getByText(title, { exact: true }).elements()).toHaveLength(0);
+    expect(jobs.getByRole('button', { name: `Review ${title}` }).elements()).toHaveLength(0);
+  }
+});

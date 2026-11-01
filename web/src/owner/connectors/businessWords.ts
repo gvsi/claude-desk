@@ -38,20 +38,21 @@ export function businessLine(def: BusinessToolDef): string | null {
 export function businessRows(def: BusinessToolDef, mode: RuleMode): BusinessSetupRow[] {
   if (!isBusinessDef(def)) return [];
   const config = def.config;
+  const next = (value: string): BusinessSetupRow[] => mode === 'never' ? [] : [{ label: BUSINESS_WORDS.next, value }];
   if (config.block === 'typed_booking') return [
     { label: BUSINESS_WORDS.appointment, value: config.appointment_type },
     { label: BUSINESS_WORDS.length, value: `${config.minutes} minutes` },
     { label: BUSINESS_WORDS.uses, value: 'Your opening hours' },
-    { label: BUSINESS_WORDS.next, value: mode === 'auto' ? 'The booking shows in Today, with their answers' : 'You approve each request in Needs you' },
+    ...next(mode === 'auto' ? 'The booking shows in Today, with their answers' : 'You approve each request in Needs you'),
   ];
   if (config.block === 'intake') return [
     { label: BUSINESS_WORDS.asks, value: config.questions.join(' ') },
-    { label: BUSINESS_WORDS.next, value: 'Their answers show on the booking' },
+    ...next('Their answers show on the booking'),
   ];
   if (config.block === 'purpose_payment') return [
     { label: BUSINESS_WORDS.amount, value: formatCents(config.amount_cents) },
     { label: BUSINESS_WORDS.uses, value: 'Stripe' },
-    { label: BUSINESS_WORDS.next, value: 'Each payment shows in Today' },
+    ...next('Each payment shows in Today'),
   ];
   if (config.block === 'urgent') return [
     { label: BUSINESS_WORDS.urgent, value: config.urgent_when },
