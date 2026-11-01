@@ -13261,16 +13261,16 @@
           "category": {
             "type": "string",
             "enum": [
-              "impersonation",
-              "discount_push",
-              "private_data",
-              "code_redirect",
-              "injection",
-              "over_limit",
+              "prices",
+              "records",
+              "codes",
+              "instructions",
+              "limits",
+              "wording",
               "other"
             ],
             "title": "Category",
-            "description": "What kind of attempt it was."
+            "description": "The subject of the checkpoint event."
           }
         },
         "additionalProperties": false,
@@ -13280,7 +13280,7 @@
           "category"
         ],
         "title": "Triage",
-        "description": "A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a\ncategory for the Safety page's filters. AI-written, for the owner alone."
+        "description": "A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk\ndid, and a category for the Safety page's filters. AI-written, for the owner alone."
       },
       "TypedBookingConfig": {
         "properties": {

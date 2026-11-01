@@ -61,9 +61,10 @@ import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import ConfigDict, ValidationError
+from pydantic_core import from_json
 from sqlalchemy import and_, case, cast, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -77,6 +78,7 @@ from desk.api.prompts import (
     TIME_NOTE,
     WEEKDAYS,
     Triage,
+    TriageCategory,
     conversation_so_far,
     result_line,
     summary_line,
@@ -320,11 +322,26 @@ async def triaged(conn: AsyncConnection, copy_id: str, **where: str) -> dict[str
     return found
 
 
+_LEGACY_TRIAGE_CATEGORIES = {
+    "discount_push": "prices", "private_data": "records", "code_redirect": "codes",
+    "injection": "instructions", "over_limit": "limits", "impersonation": "other",
+}
+
+
 def _read_triage(text: str | None) -> Triage | None:
-    """A triage row's `Triage`; None for one that doesn't read back as one."""
+    """Read stored categories into today's filters without rewriting the owner's summary.
+
+    Compatibility belongs here, never in `Triage`: fresh model output must use the current categories.
+    None for a row whose JSON or remaining fields don't read back as a triage.
+    """
     try:
-        return Triage.model_validate_json(text or "")
-    except ValidationError:
+        stored = from_json(text or "")
+        if isinstance(stored, dict):
+            category = stored.get("category")
+            category = _LEGACY_TRIAGE_CATEGORIES.get(category, category) if isinstance(category, str) else "other"
+            stored["category"] = category if category in get_args(TriageCategory) else "other"
+        return Triage.model_validate(stored)
+    except ValueError:
         return None
 
 

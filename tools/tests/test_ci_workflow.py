@@ -1,6 +1,7 @@
 """The CI workflow and its setup action, read as data: what runs, when, with which pins and rights."""
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -492,8 +493,14 @@ MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
 # The job's database is thrown away with its runner, so it skips durable commits.
 THROWAWAY = "make db-throwaway"
 TIER2_BASE_SETUP = (
+    'if [ "$FORCED" = "true" ]; then\n'
+    '  echo "::error::a force-push to main replaced history that CI can\'t check for rewritten rates or waivers"\n'
+    '  exit 1\n'
+    'fi\n'
+    'HISTORY_SINCE=""\n'
     'if [ -z "$RESULTS_BASE" ]; then\n'
     '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
+    '  HISTORY_SINCE="$RESULTS_BASE"\n'
     'fi'
 )
 
@@ -526,7 +533,7 @@ CHECKS = {
         ],
     ]),
     # The same gate arguments as test_gate, with a base selected for the workflow event.
-    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
+    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE"]],
     "web tests": [
         ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
         [
@@ -574,7 +581,9 @@ def test_gated_jobs_go_through_the_gate():
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
     tier2_gate = CHECKS["tier 2 results"][0]
-    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
+    assert tier2_gate[tier2_gate.index("--") + 1 :] == [
+        "make", "evals-results-check", "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE",
+    ]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
     # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
     # pushes and manual runs check the head against the root commit, even after cancelled runs.
@@ -584,8 +593,10 @@ def test_gated_jobs_go_through_the_gate():
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
     assert results["env"] == {
         "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}",
+        "FORCED": "${{ github.event_name == 'push' && github.event.forced || false }}",
     }
-    assert results["run"].rstrip().endswith('make evals-results-check BASE="$RESULTS_BASE"')
+    assert results["run"].rstrip().endswith(
+        'make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 
@@ -621,6 +632,76 @@ def test_gated_jobs_go_through_the_gate():
             "cache-suffix": "${{ github.job }}",
             "ignore-nothing-to-cache": True,
         }, step
+
+
+def test_tier2_rejects_force_push_before_running_the_gate(tmp_path):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            cwd=tmp_path, env={**os.environ, "FORCED": "true", "RESULTS_BASE": "unused"})
+    assert result.returncode == 1
+    assert result.stdout == ("::error::a force-push to main replaced history that CI can't check "
+                             "for rewritten rates or waivers\n")
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("event, gate_exit", [
+    ("pull_request", 0), ("push", 0), ("workflow_dispatch", 0),
+    ("pull_request", 7), ("push", 7), ("workflow_dispatch", 7),
+])
+def test_tier2_preserves_push_histories_without_changing_the_results_base(tmp_path, event, gate_exit):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "commands.jsonl"
+    # Exercise the workflow's actual shell, with no network or model calls.
+    stub = f"#!{sys.executable}\n" + '''import json, os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+with open(os.environ["COMMAND_LOG"], "a") as log:
+    log.write(json.dumps([name, *sys.argv[1:]]) + "\\n")
+if name == "git":
+    if sys.argv[1:] == ["rev-list", "--max-parents=0", "HEAD"]:
+        print("a" * 40)
+    else:
+        sys.exit(99)
+else:
+    sys.exit(int(os.environ["GATE_EXIT"]))
+'''
+    for name in ("git", "uv"):
+        path = bin_dir / name
+        path.write_text(stub)
+        path.chmod(0o755)
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                                 "RESULTS_BASE": "pr-base" if event == "pull_request" else "",
+                                 "FORCED": "false", "COMMAND_LOG": str(log),
+                                 "GATE_EXIT": str(gate_exit)})
+    assert result.returncode == gate_exit, result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    [gate_call] = [call for call in calls if call[0] == "uv"]
+    assert gate_call[gate_call.index("--") + 1:] == [
+        "make", "evals-results-check", f"BASE={'pr-base' if event == 'pull_request' else 'a' * 40}",
+        f"HISTORY_SINCE={'' if event == 'pull_request' else 'a' * 40}",
+    ]
+    git_calls = [call for call in calls if call[0] == "git"]
+    assert git_calls == ([] if event == "pull_request" else [["git", "rev-list", "--max-parents=0", "HEAD"]])
+
+
+@pytest.mark.parametrize("history", ["", "b" * 40])
+def test_results_make_target_forwards_only_a_supplied_history_since(history):
+    result = subprocess.run(["make", "-n", "evals-results-check", "BASE=root-commit", f"HISTORY_SINCE={history}"],
+                            cwd=ROOT, capture_output=True, text=True, check=True)
+    command = shlex.split(result.stdout.strip())
+    expected = ["results-check", "--base", "root-commit"]
+    if history:
+        expected.extend(["--history-since", history])
+    assert command[command.index("results-check"):] == expected
 
 
 def test_secret_scan_has_no_exceptions():
