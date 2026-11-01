@@ -7,9 +7,17 @@ import pytest
 
 from desk.api import setup
 from desk.api.deps import ApiProblem
+from tests.api.fakes import unavailable
 from tests.api.test_setup_questions import (  # noqa: F401 — fixtures shared with setup's question tests
-    WEBSITE, app, begin, held_limits, model, new_owner,
+    WEBSITE, app, begin as begin_questions, held_limits, model, new_owner,
 )
+
+
+async def begin(owner, model, **fields):
+    state = await begin_questions(owner, model, **fields)
+    # These lifecycle tests use the consultant's fallback to the first question.
+    model.add(unavailable())
+    return state
 
 
 async def test_a_slow_answer_answers_202_busy_and_lands_later(
@@ -21,7 +29,7 @@ async def test_a_slow_answer_answers_202_busy_and_lands_later(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    waiting = await consent(owner, interview_id, False)
+    waiting = await consent(owner, interview_id, False, model)
     before = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
     release = asyncio.Event()
     model.add(gated(turn(summary="Water heater repairs."), release))
@@ -32,7 +40,7 @@ async def test_a_slow_answer_answers_202_busy_and_lands_later(
         assert reply.status_code == 202, reply.text
         busy = reply.json()
         assert busy["busy"] is True and busy["question"] is None
-        assert busy["messages"][-1] == {"role": "owner", "text": "We repair water heaters."}
+        assert busy["messages"][-1] == {"role": "owner", "text": "We repair water heaters.", "choices": [], "card": None}
         current = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s",
                              (interview_id,)).fetchone()
         assert current == before
@@ -55,7 +63,7 @@ async def test_a_failed_answer_turn_rolls_back_to_the_question_waiting(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    waiting = await consent(owner, interview_id, False)
+    waiting = await consent(owner, interview_id, False, model)
     before = db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
                         (interview_id,)).fetchone()
     release = asyncio.Event()
@@ -100,7 +108,7 @@ async def test_an_abandoned_answer_turn_is_rolled_back_on_get(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    waiting = await consent(owner, interview_id, False)
+    waiting = await consent(owner, interview_id, False, model)
     before = db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
                         (interview_id,)).fetchone()
     transcript = before[1] + [{"role": "owner", "text": "An abandoned answer", "pending": "dead-run"}]
@@ -140,6 +148,8 @@ async def test_a_marker_stage_leaves_no_entry_after_commit(
             raise ApiProblem(503, "model_unavailable")
 
     async def marker(ctx, engine, model, interview_id, allow, **kwargs):
+        kwargs.pop("cards", None)
+        kwargs.pop("business_tools_enabled", None)
         return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
                                     check=lambda interview: None,
                                     stage=lambda interview: [setup.Entry(role="owner", text="")],
@@ -185,6 +195,8 @@ async def test_after_runs_after_the_commit_and_its_failure_is_logged(
         return setup.setup_state(interview, slug)
 
     async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        kwargs.pop("cards", None)
+        kwargs.pop("business_tools_enabled", None)
         return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
                                     check=lambda interview: None,
                                     stage=lambda interview: [setup.Entry(role="owner", text="")],
@@ -245,6 +257,8 @@ async def test_after_timeout_or_shutdown_preserves_the_landed_state(
         await asyncio.Event().wait()
 
     async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        kwargs.pop("cards", None)
+        kwargs.pop("business_tools_enabled", None)
         return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
                                     check=lambda interview: None,
                                     stage=lambda interview: [setup.Entry(role="owner", text="")],
@@ -316,7 +330,8 @@ async def test_an_empty_model_reply_never_leaves_the_interview_busy(
                          turn(reply="", step_done=False, summary="Water heater repairs."))
     assert reply.status_code == 200, reply.text
     answered = reply.json()
-    assert answered["messages"][-1] == {"role": "owner", "text": "We repair water heaters."}
+    assert answered["messages"][-1] == {
+        "role": "owner", "text": "We repair water heaters.", "choices": [], "card": None}
     assert answered["busy"] is False
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
                " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, interview_id))
@@ -390,7 +405,8 @@ async def test_a_slow_consent_answers_202_busy_and_lands_later(
         assert reply.status_code == 202, reply.text
         busy = reply.json()
         assert busy["busy"] is True and busy["consent"] is True and busy["question"] is None
-        assert busy["messages"][-1] == {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}
+        assert busy["messages"][-1] == {
+            "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None}
         assert (await owner.browser.get(path)).json() == busy
     finally:
         release.set()
@@ -883,7 +899,8 @@ async def test_a_failed_busy_commit_preserves_another_runs_identical_consent(
     assert consent is True and transcript == other["transcript"]
     current = (await owner.browser.get(path)).json()
     assert current["busy"] is True and current["consent"] is True
-    assert current["messages"][-1] == {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}
+    assert current["messages"][-1] == {
+        "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None}
     assert fake.called("POST /execute") == []
     assert interview_id not in setup._RUNNING and not app.state.runtime.turn_runs.holds(interview_id)
 
@@ -946,7 +963,7 @@ async def test_two_fresh_consents_store_only_one_owner_answer(
     assert reply.status_code == 200
     assert asked.count("setup_turn") == 1 and len(fake.called("POST /execute")) == 1
     assert [message for message in reply.json()["messages"] if message["role"] == "owner"] == [
-        {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}]
+        {"role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None}]
 
 
 async def test_a_competing_consent_cannot_take_the_guard_during_handoff(

@@ -100,8 +100,8 @@ PATCHES: dict[str, dict] = {
     "hours_and_area": {"hours": HOURS, "service_area": "Oakland and Berkeley"},
     "quote_limit": {"quote_auto_max_cents": 50_000, "price_items": PRICES},
     "discounts": {"discount_auto_max_bp": 1_000},
-    "documents_and_payments": {"documents": "verified_owner", "payment_link_auto_max_cents": 100_000},
-    "money_limit": {"auto_money_cap_cents": CAP, "refunds": "ask"},
+    "documents_and_payments": {"documents": "verified_owner"},
+    "money_limit": {"auto_money_cap_cents": CAP, "refunds": "ask", "payment_link_auto_max_cents": 100_000},
     "contact_and_after_hours": {"public_contact": "(510) 555-0142", "after_hours": "Take a message."},
 }
 UTILITY = [card.card_id for card in PRESETS["ask_first"]]
@@ -145,7 +145,7 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     a patched field's value (None leaves it unanswered)."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type=business_type)
-    await consent(owner, state["interview_id"], False)
+    await consent(owner, state["interview_id"], False, model)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
         reply = await answer(owner, model, state["interview_id"], f"About {key}.",

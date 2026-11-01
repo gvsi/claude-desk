@@ -22,7 +22,7 @@ from desk.api.settings import Settings
 from tests.api.fakes import FakeMessagesApi
 
 VARIABLES = ("DESK_ENV", "API_DATABASE_URL", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "KERNEL_URL", "PUBLIC_ORIGIN",
-             "TRUSTED_PROXY_HOPS", "ANTHROPIC_BASE_URL",
+             "TRUSTED_PROXY_HOPS", "ANTHROPIC_BASE_URL", "BUSINESS_TOOLS_ENABLED",
              # the provider's variables, and the SDK's own, which a developer's shell may export
              "MODEL_PROVIDER", "AWS_REGION", "BEDROCK_BEARER_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
              "ANTHROPIC_AWS_API_KEY", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE",
@@ -62,6 +62,15 @@ def test_development_defaults(environ):
     assert settings.anthropic_base_url is None
     assert settings.a2a_loopback == "http://127.0.0.1:8700"
     assert settings.kernel_ro_schema == "kernel_ro"
+
+
+def test_business_tools_require_the_deployment_switch(environ):
+    environ({"API_DATABASE_URL": DATABASE_URL})
+    assert Settings.from_env().business_tools_enabled is False
+    environ({"BUSINESS_TOOLS_ENABLED": "1"})
+    assert Settings.from_env().business_tools_enabled is True
+    environ({"BUSINESS_TOOLS_ENABLED": "0"})
+    assert Settings.from_env().business_tools_enabled is False
 
 
 def test_production_reads_plan_06bs_variables(environ):

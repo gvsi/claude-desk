@@ -20,6 +20,9 @@ hash and an `https://` public origin are required, and the test hook is refused.
 refuses `bedrock` and any Bedrock key in the environment, so the hosted API never holds a Bedrock
 credential or builds a Bedrock client. Errors name the variable, never its value, and `repr`
 leaves the secrets out.
+
+`BUSINESS_TOOLS_ENABLED=1` allows setup's proposal cards to carry configurations once the kernel's
+business-tool blocks are deployed. It is off by default; setup still proposes the jobs in words.
 """
 
 import os
@@ -69,6 +72,7 @@ class Settings:
     a2a_loopback: str = "http://127.0.0.1:8700"
     kernel_ro_schema: str = "kernel_ro"
     replay_night: bool = True               # each new copy asks for the recorded night; never from the environment
+    business_tools_enabled: bool = False   # enable configurations only once the kernel's blocks are deployed
 
     @property
     def production(self) -> bool:
@@ -124,4 +128,5 @@ class Settings:
             model_provider=model_provider,
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
+            business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") == "1",
         )

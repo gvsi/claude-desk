@@ -67,7 +67,7 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
 @router.post("", status_code=201, response_model=SetupState,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
-                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
     Answering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
@@ -95,21 +95,21 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
 async def setup_interview(interview_id: InterviewId, request: Request,
-                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The setup interview as it stands, removing abandoned turn entries and reopening consent if needed."""
     state = runtime(request).started()
-    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs)
+    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
              responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request: Request,
-                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Use the shared turn runner to store consent, then read Claude memory and the named website through the
     kernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the
     busy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.
@@ -121,7 +121,8 @@ async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request
         await _moving_on(request, ctx)
 
     answer = await setup.consent(ctx, state.database(), state.model, interview_id, body.allow,
-                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
@@ -130,7 +131,7 @@ async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request
 @router.post("/{id}/answer", response_model=SetupState,
              responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: Request,
-                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Use the shared turn runner for the owner's answer to the question waiting, which the answer names
     (409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,
     updates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to
@@ -143,8 +144,9 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text,
-                                runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
+                                runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
