@@ -28,7 +28,7 @@ installed in the user's local bin directory; the client adds that directory to P
 the default AWS profile with EC2 discovery, SSM SendCommand/GetCommandInvocation and
 StartSession permissions. The stock macOS openrsync (protocol 29) works; Homebrew rsync is
 optional. An SSH key and authenticated host-key record are kept in the user's cache, outside
-the repository. Connections stay reusable for ten minutes.
+the repository. Connections stay reusable for one hour; warm calls reuse a live authenticated connection without an AWS discovery request.
 
 `tools/testbox/run` preserves argument boundaries. For compound commands use
 `tools/testbox/run sh -c 'cd backend && uv run pytest tests/kernel/test_sessions.py -q'`.
@@ -49,7 +49,9 @@ control group so child servers are stopped when the command finishes. Package do
 and the Cargo registry are shared; compilation outputs are not. Cargo builds use eight
 jobs per lane.
 
-The client incrementally syncs tracked and nonignored untracked source files, including
+The client compares source content hashes under the lane lock and sends only changed files,
+repairing sources edited or removed by a previous remote command. It syncs tracked and
+nonignored untracked source files, including
 uncommitted edits and deletions. It excludes environment files (except `.env.example`),
 private local directories, credential/key files and local build outputs. Do not put
 secrets in source files or command arguments. Git history at HEAD and origin/main travels

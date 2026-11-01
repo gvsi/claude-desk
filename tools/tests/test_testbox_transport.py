@@ -64,3 +64,25 @@ def test_branch_switch_cleans_nested_directories_without_removing_build_state(tm
     assert not (repo / "old").exists()
     assert (repo / "backend/.venv/keep").read_text() == "lane build state"
 
+
+def test_cached_instance_is_reused_only_while_its_authenticated_master_is_alive(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from desk_tools.testbox_client import warm_instance
+
+    calls = []
+    def check(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, 'run', check)
+    cache = tmp_path / 'connection-us-east-1.json'
+    assert warm_instance(tmp_path, 'us-east-1') is None
+    assert calls == []
+    cache.write_text(json.dumps({'instance': 'i-0123456789abcdef0'}))
+    assert warm_instance(tmp_path, 'us-east-1') == 'i-0123456789abcdef0'
+    assert '-O' in calls[0] and 'check' in calls[0]
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=255))
+    assert warm_instance(tmp_path, 'us-east-1') is None
+    cache.write_text(json.dumps({'instance': 'untrusted host -o option'}))
+    assert warm_instance(tmp_path, 'us-east-1') is None

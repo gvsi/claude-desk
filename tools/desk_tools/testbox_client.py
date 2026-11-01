@@ -74,7 +74,12 @@ def source_state(root: Path, files: list[str]) -> dict[str, str]:
         path = root / name
         try:
             mode = path.lstat().st_mode
-            content = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+            if path.is_symlink():
+                # Symlink permissions differ on macOS/Linux and rsync does not preserve them.
+                mode = "symlink"
+                content = os.readlink(path).encode()
+            else:
+                content = path.read_bytes()
         except (FileNotFoundError, IsADirectoryError):
             continue
         state[name] = f"{mode}:{hashlib.sha256(content).hexdigest()}"
@@ -101,6 +106,21 @@ except (ImportError, FileNotFoundError):
 signature = (base / 'git-signature').read_text() if (base / 'git-signature').exists() else ''
 print(json.dumps({'git': signature, 'sources': sources}), flush=True)
 """.replace('BASE', repr(base))
+
+
+def control_path(cache: Path, region: str, instance: str) -> Path:
+    return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
+
+
+def warm_instance(cache: Path, region: str) -> str | None:
+    try:
+        instance = json.loads((cache / f"connection-{region}.json").read_text())["instance"]
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(instance, str) or not re.fullmatch(r"i-[0-9a-f]{8,17}", instance):
+        return None
+    result = subprocess.run(["ssh", "-S", str(control_path(cache, region, instance)), "-O", "check", "ubuntu@" + instance], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return instance if result.returncode == 0 else None
 
 
 def main():
@@ -143,11 +163,13 @@ def run(args, root, lane, cache):
             cmd += ["--" + k.replace("_", "-"), json.dumps(v) if isinstance(v, (list, dict)) else str(v)]
         return json.loads(capture(cmd))
 
-    found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": ["agent-test-box"]}, {"Name": "instance-state-name", "Values": ["running"]}])
-    instances = [i for r in found["Reservations"] for i in r["Instances"]]
-    if len(instances) != 1:
-        raise RuntimeError(f"Expected one running test box in {args.region}, found {len(instances)}")
-    instance = instances[0]["InstanceId"]
+    instance = warm_instance(cache, args.region)
+    if instance is None:
+        found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": ["agent-test-box"]}, {"Name": "instance-state-name", "Values": ["running"]}])
+        instances = [i for r in found["Reservations"] for i in r["Instances"]]
+        if len(instances) != 1:
+            raise RuntimeError(f"Expected one running test box in {args.region}, found {len(instances)}")
+        instance = instances[0]["InstanceId"]
     timing.mark("discovery")
     print(f"testbox: connecting in {args.region}; lane={lane}", flush=True)
     # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
@@ -157,9 +179,9 @@ def run(args, root, lane, cache):
         key = cache / "id_ed25519"
         if not key.exists():
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
-        control = cache / (hashlib.sha256(("v2:" + args.region + instance).encode()).hexdigest()[:20] + ".sock")
+        control = control_path(cache, args.region, instance)
         proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
-        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
+        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
         host = "ubuntu@" + instance
         check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if check.returncode:
@@ -188,6 +210,7 @@ def run(args, root, lane, cache):
         # A separate session prevents one caller's process-group cleanup killing other lanes.
         if check.returncode:
             subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
+        (cache / f"connection-{args.region}.json").write_text(json.dumps({"instance": instance}))
     ssh = ["ssh", *ssh_opts, host]
     timing.mark("connection")
     base = f"/srv/testbox/lanes/{lane}"
