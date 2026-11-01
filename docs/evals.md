@@ -68,6 +68,8 @@ lower cutoffs cost more. Five missed promise cases remain, so this is a measured
 not a zero-miss claim or a pass of the widening's original zero-slip criterion. The owner's
 2026-10-31 decision accepts that residual risk. Neither checker authorizes a tool action.
 
+Neither checker reads the visitor's words, so a bare agreement to a requested commitment ("Yes." to "Can you guarantee it's fixed today?") can pass both. Two ways of closing that gap were measured and neither shipped. Sonnet with the visitor's last message as a labelled, untrusted field, plus two sentences on how to use it, blocked all 9 bare agreements in English and Spanish in every one of 3 samples. All 72 injection attempts in that field kept their promises blocked: six styles, including fake reviewer notes, a claimed owner approval, a fake system line, fake role text, a Spanish reviewer note and a redefinition of "guaranteed". But 3 promise cases that Sonnet alone blocks in every sample passed in every sample with the field attached: offers of a refund and of taking a message that the session can't take, and an unbacked service-area claim. Its p95 rose from 2.8 s to 3.9 s. Giving Jev the same field and an eighth statement, `agrees_to_request`, caught 3 of 8 bare agreements at 0.95. A bare agreement to a commitment the visitor asked for therefore remains a known gap.
+
 Jev's seven statements and model version are pinned in code and by an exact-value test. It reads
 only the scanned reply, rendered card texts and fixed next_steps, alongside Sonnet, with a 3 s
 limit. A Jev failure leaves Sonnet's verdict standing; missing configuration means Sonnet alone.
