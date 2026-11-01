@@ -26,14 +26,14 @@ it('turns accepted jobs into business rows in order with the kernel block profil
       source: 'business', status: 'needs_review', review_reason: 'new',
       business: { title: booking.title, description: booking.how, config: booking.config },
       effects: ['change'], reversible: true,
-      description_confirmed: 'Books one open calendar slot for the configured appointment type.',
+      description_confirmed: 'Books one open time on your calendar for this kind of appointment.',
       pending_definition_text: null, pending_sha256: null, cards: [],
     }),
     expect.objectContaining({
       source: 'business', status: 'needs_review', review_reason: 'new',
       business: { title: intake.title, description: intake.how, config: intake.config },
       effects: ['change'], reversible: true,
-      description_confirmed: "Saves the visitor's name, contact and one answer per configured question for the owner to follow up.",
+      description_confirmed: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
       pending_definition_text: null, pending_sha256: null, cards: [],
     }),
   ]);
@@ -46,7 +46,7 @@ it('retains empty descriptions and zero-dollar payments with their fixed block p
   ]);
   expect(rows).toHaveLength(2);
   expect(rows[0]?.business?.description).toBe('');
-  expect(rows[0]?.description_confirmed).toBe('Books one open calendar slot for the configured appointment type.');
+  expect(rows[0]?.description_confirmed).toBe('Books one open time on your calendar for this kind of appointment.');
   expect(rows[1]).toMatchObject({
     business: { description: '', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
     effects: ['charge'], reversible: false,
