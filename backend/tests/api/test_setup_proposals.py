@@ -1644,6 +1644,49 @@ async def test_minted_configless_payment_accepts_an_owner_amount(proposals, engi
         "block": "purpose_payment", "purpose": "Pay a retainer", "amount_cents": 2500}
 
 
+@pytest.mark.parametrize("amount", [None, 0])
+@pytest.mark.parametrize("tools_enabled", [False, True])
+async def test_refused_typed_payment_replaces_acceptance_reply(
+        proposals, app, model, engine, amount, tools_enabled):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[1])
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.transcript[-1].card.job.config.amount_cents = amount
+        await setup._save(conn, interview)
+    before = await stored(engine, interview_id)
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=tools_enabled)
+    acceptance = "I will set up payment links for retainers."
+    model.add(card_answer("accept", reply=acceptance, next=next_ask("hours_and_area")))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": ids[1], "text": "Yes"})
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == ids[1]
+    assert next(card for card in shown(response) if card["proposal_id"] == ids[1])["state"] == "proposed"
+    saved = await stored(engine, interview_id)
+    tail = saved["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude"] == [
+        "I need the amount first. Add it on the card above."]
+    assert acceptance not in json.dumps(response.json()) and acceptance not in json.dumps(saved)
+    assert saved["step"] == before["step"] and saved["answers"] == before["answers"]
+    assert not any(entry.get("question") or entry.get("card") or entry.get("planned") for entry in tail)
+
+
+async def test_typed_payment_decline_keeps_its_reply_and_advances(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[1])
+    model.add(card_answer("decline", reply="No payments for now.", next=next_ask("hours_and_area"), question="Hours?"))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": ids[1], "text": "No"})
+    assert next(card for card in shown(response) if card["proposal_id"] == ids[1])["state"] == "declined"
+    assert response.json()["question"] == "hours_and_area"
+    texts = [entry["text"] for entry in (await stored(engine, interview_id))["transcript"]]
+    assert texts.count("No payments for now.") == 1
+    assert "I need the amount first. Add it on the card above." not in texts
+
+
 @pytest.mark.parametrize("typed", [False, True])
 @pytest.mark.parametrize("amount", [None, 25_000])
 async def test_payment_accept_is_refused_while_business_tools_are_disabled(proposals, app, model, engine, typed, amount):

@@ -335,6 +335,7 @@ WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
+AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -1942,8 +1943,11 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
                 interview.transcript.append(Entry(role="claude", text=following.question.strip()))
             _show_card(interview, replacement)
             return
-        if following.decision == "none" or not _decide_typed(interview, proposal_id,
-                                                            following.decision == "accept"):
+        if following.decision == "none":
+            return
+        if not _decide_typed(interview, proposal_id, following.decision == "accept"):
+            interview.transcript.pop()
+            interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
 
