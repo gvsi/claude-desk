@@ -204,6 +204,7 @@ def test_plain_environment_is_the_seam(desk_stacks):
         "KERNEL_URL": "http://127.0.0.1:8701",
         "PUBLIC_ORIGIN": "https://d111111abcdef8.cloudfront.net",
         "TRUSTED_PROXY_HOPS": "2",
+        "BUSINESS_TOOLS_ENABLED": "1",
     }
 
 
