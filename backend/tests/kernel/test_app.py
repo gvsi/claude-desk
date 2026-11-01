@@ -3,7 +3,10 @@
 import ast
 import json
 import logging
+import logging.config
 import re
+import sys
+from copy import deepcopy
 from pathlib import Path
 
 import desk_kernel
@@ -11,13 +14,14 @@ import psycopg
 import pytest
 from fastapi.routing import APIRoute, RouteContext, iter_route_contexts
 from sqlalchemy import select
+from uvicorn.config import LOGGING_CONFIG
 
 from desk import kernel_service
 from desk.contracts import LedgerEvent
 from desk.db.models import Desk, PriceItem
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_api import KERNEL_ROUTES, LedgerAppendRequest
-from desk.kernel_service import compiler, ledger
+from desk.kernel_service import activation, compiler, ledger
 from desk.kernel_service.app import KernelSettings, create_app, serve_config
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
 
@@ -92,7 +96,23 @@ async def test_production_without_seed_refuses_to_start(monkeypatch):
         await dispose_engines()
 
 
-def test_kernel_listens_on_loopback_only(monkeypatch):
+@pytest.fixture
+def restore_desk_logger():
+    # Config applies dictConfig immediately, binding stdout to this test's capture stream.
+    logger = logging.getLogger("desk")
+    handlers, level, propagate, disabled = logger.handlers[:], logger.level, logger.propagate, logger.disabled
+    try:
+        yield
+    finally:
+        for handler in logger.handlers:
+            if handler not in handlers:
+                handler.close()
+        logger.handlers = handlers
+        logger.setLevel(level)
+        logger.propagate, logger.disabled = propagate, disabled
+
+
+def test_kernel_listens_on_loopback_only(monkeypatch, restore_desk_logger):
     monkeypatch.setenv("KERNEL_HOST", "0.0.0.0")
     monkeypatch.setenv("KERNEL_PORT", "80")
     config = serve_config()
@@ -100,6 +120,25 @@ def test_kernel_listens_on_loopback_only(monkeypatch):
     assert config.lifespan == "on"          # a lifespan that refuses to start stops the process
     assert config.app == "desk.kernel_service.app:create_app" and config.factory
     assert config.access_log is False       # raw paths can hold single-use link tokens; failures log route templates
+
+
+def test_kernel_info_logs_go_to_stdout(capsys, restore_desk_logger):
+    original = deepcopy(LOGGING_CONFIG)
+    config = serve_config().log_config
+    assert config["loggers"]["desk"] == {"handlers": ["desk"], "level": "INFO", "propagate": True}
+    assert config["handlers"]["desk"] == {
+        "class": "logging.StreamHandler", "formatter": "desk", "stream": "ext://sys.stdout"}
+    assert config["formatters"]["desk"] == {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}
+    assert config["disable_existing_loggers"] is False
+    assert {name: value for name, value in config["loggers"].items() if name.startswith("uvicorn")} \
+        == original["loggers"]
+    assert LOGGING_CONFIG == original          # changes to our config never change uvicorn's defaults
+    logging.config.dictConfig(config)
+    logging.getLogger("desk.kernel_service.activation").info("proof_mode mode=cached")
+    stdout, stderr = capsys.readouterr()
+    assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} INFO "
+                        r"desk\.kernel_service\.activation proof_mode mode=cached\n", stdout)
+    assert stderr == ""
 
 
 # Plan 01a's "Kernel columns this plan relies on", beyond the columns the kernel_ro views list, but for
@@ -248,6 +287,16 @@ async def test_error_answers_commit_their_ledger_entry(app, client):
 
 
 NOTE = "Call me back at maria@riverapl.example"     # what a request carried, which no log may carry
+
+
+async def test_prover_stderr_logs_only_its_size(caplog):
+    # Prover diagnostics can quote policy/card text, paths, or any data from malformed inputs.
+    stderr = "owner-card-caf\u00e9 visitor-note session-secret link-token 123456\nforged_event".encode()
+    script = f"import sys; sys.stderr.buffer.write({stderr!r}); sys.stdout.buffer.write(b'report')"
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service.activation"):
+        result = await activation._run([sys.executable, "-c", script], kill_after=5)
+    assert result == (0, b"report")
+    assert [record.getMessage() for record in caplog.records] == [f"prover_stderr bytes={len(stderr)}"]
 
 
 async def test_error_logs_carry_no_request_text(app, client, caplog):

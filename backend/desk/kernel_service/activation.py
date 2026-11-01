@@ -180,7 +180,8 @@ async def _run(argv: Sequence[str], *, kill_after: float) -> tuple[int | None, b
                 pass
             await process.wait()
     if stderr:
-        log.info("prover_stderr %s", stderr[-2000:].decode("utf-8", "replace"))
+        # Diagnostics can quote policy inputs or paths; only their size belongs in the log.
+        log.info("prover_stderr bytes=%s", len(stderr))
     return process.returncode, stdout
 
 
@@ -824,14 +825,22 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     results: Rebuilt = {}
     left: list[tuple[str, str]] = []
     unscanned: list[str] = []
+
+    def finish(copies_left: list[str] | None) -> StartupRebuild:
+        rebuilt = sum(reason is None for reason in results.values())
+        log.info("startup_rebuild_done rebuilt=%s not_rebuilt=%s left=%s copies_left=%s seconds=%.1f",
+                 rebuilt, len(results) - rebuilt, len(left),
+                 "unlisted" if copies_left is None else len(copies_left), monotonic() - started)
+        return StartupRebuild(results=results, left=left, unscanned=copies_left)
+
     try:                                      # listing the copies counts against the budget too
         copies = await asyncio.wait_for(copy_ids(runtime), STARTUP_REBUILD_S)
     except TimeoutError:
         log.info("rebuild_copies_cut_off")
-        return StartupRebuild(results={}, left=[], unscanned=None)
+        return finish(None)
     except Exception as exc:
         log_error(log, exc, "rebuild_copies_failed")
-        return StartupRebuild(results={}, left=[], unscanned=None)
+        return finish(None)
     for n, copy_id in enumerate(copies):
         if spent():
             unscanned += copies[n:]
@@ -861,9 +870,7 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
                 left.append((copy_id, desk_id))
             elif done is not None:
                 results[(desk_id, done[0])] = done[1]
-    if left or unscanned:
-        log.info("startup_rebuild_left desks=%s copies=%s", len(left), len(unscanned))
-    return StartupRebuild(results=results, left=left, unscanned=unscanned)
+    return finish(unscanned)
 
 
 T = TypeVar("T")
@@ -926,7 +933,8 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
         await wait_to_retry(RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S)) - 1])
         pending, work = failed, again
         busy = await _alert_all(runtime, work, told)
-    log.info("background_rebuild_done desks=%s", len(results))
+    rebuilt = sum(reason is None for reason in results.values())
+    log.info("background_rebuild_done rebuilt=%s not_rebuilt=%s", rebuilt, len(results) - rebuilt)
     return results
 
 
@@ -1057,6 +1065,10 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
                 return None
             version = row.version
             done = version, await rebuild_version(ctx, desk_id, version, prove=prove)
+        # The context manager has committed: never claim a rolled-back rebuild succeeded.
+        if done[1] is None:
+            log.info("version_rebuilt copy_id=%s desk_id=%s version=%s proved=%s",
+                     copy_id, desk_id, version, "live" if prove else "cached")
         return done
     except Exception as exc:
         log_error(log, exc, "version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)

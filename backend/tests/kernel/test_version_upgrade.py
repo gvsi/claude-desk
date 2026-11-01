@@ -20,6 +20,8 @@ it would test nothing.
 
 import asyncio
 import json
+import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -198,6 +200,51 @@ async def seed_from_an_earlier_kernel(app: FastAPI, copy: Rivera, *more_cards: R
         for field in ("schema_json", "schema_sha256", "baseline_sha256", "invariants_sha256"):
             setattr(seed, field, KERNEL_CORE["version"][field])
         seed.cards = [*seed.cards, *more_cards]
+
+
+async def test_startup_logs_committed_cached_rebuilds_without_card_text(app, client, caplog):
+    copy = await rivera(app, client)
+    card_word = "CARD_LOG_CANARY_7f2e"
+    # Defaults are generated again by the compiler, so their stored wording doesn't change the proof key.
+    await seed_from_an_earlier_kernel(app, copy)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = await activation.active_version(ctx, copy.desk_id)
+        row.cards = [card.model_copy(update={"reason": card_word}) if card.is_default else card
+                     for card in row.cards]
+        assert any(card.reason == card_word for card in row.cards)
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service.activation"):
+        startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert startup.results == {(copy.desk_id, 1): None}
+    messages = [record.getMessage() for record in caplog.records]
+    assert f"version_rebuilt copy_id={copy.copy_id} desk_id={copy.desk_id} version=1 proved=cached" in messages
+    assert re.fullmatch(r"startup_rebuild_done rebuilt=1 not_rebuilt=0 left=0 copies_left=0 seconds=\d+\.\d",
+                        messages[-1])
+    assert all(card_word not in message for message in messages)
+
+
+async def test_background_logs_live_rebuilds_and_counts(app, client, registry, monkeypatch, caplog):
+    copy = await rivera(app, client)
+    adapters.register(payment_link(5_000), replace=True)
+    await with_kernel_core_version(app, copy)
+    monkeypatch.setattr(activation, "_proof_mode", "symcc")
+    proved = []
+    report = activation.ShippedReport.model_validate_json((activation.PROOFS_DIR / "rivera.json").read_bytes()).proof
+
+    async def passing(inputs):
+        proved.append(inputs)
+        return report
+
+    monkeypatch.setattr(activation, "prove", passing)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert startup.left == [(copy.copy_id, copy.desk_id)]
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service.activation"):
+        results = await activation.rebuild_in_background(app.state.kernel, startup)
+    assert results == {(copy.desk_id, 2): None}
+    assert len(proved) == 1
+    messages = [record.getMessage() for record in caplog.records]
+    assert f"version_rebuilt copy_id={copy.copy_id} desk_id={copy.desk_id} version=2 proved=live" in messages
+    assert messages[-1] == "background_rebuild_done rebuilt=1 not_rebuilt=0"
 
 
 async def test_a_seed_version_from_an_earlier_kernel_is_rebuilt_from_its_shipped_proof(app, client, frozen_clock,
@@ -686,7 +733,8 @@ async def test_a_copy_whose_background_lookup_fails_is_looked_at_again_after_a_w
 
 
 @pytest.mark.parametrize("how", ["blocks", "raises"])
-async def test_a_copy_listing_that_fails_at_startup_leaves_all_of_it_to_the_background(app, client, monkeypatch, how):
+async def test_a_copy_listing_that_fails_at_startup_leaves_all_of_it_to_the_background(
+        app, client, monkeypatch, how, caplog):
     # listing the copies counts against startup's budget: one that blocks is cut off, one that raises is logged,
     # and either way the background lists them and rebuilds the Desk, which refuses until then
     copy = await rivera(app, client)
@@ -703,8 +751,11 @@ async def test_a_copy_listing_that_fails_at_startup_leaves_all_of_it_to_the_back
 
     monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.05)
     monkeypatch.setattr(activation, "copy_ids", failing_once)
-    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service.activation"):
+        startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
     assert (startup.results, startup.left, startup.unscanned, startup.pending) == ({}, [], None, True)
+    assert re.fullmatch(r"startup_rebuild_done rebuilt=0 not_rebuilt=0 left=0 copies_left=unlisted seconds=\d+\.\d",
+                        caplog.records[-1].getMessage())
     visitor = await open_visitor(client, copy)
     refused = await decided(client, visitor, "native.find_slots", call_id="slots-waiting")
     assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
