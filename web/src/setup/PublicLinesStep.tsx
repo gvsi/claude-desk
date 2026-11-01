@@ -3,15 +3,15 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '../api/views.ts';
-import { Button, Card, cardChrome, CHANGED_REFRESHED, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
+import { Button, Card, CHANGED_REFRESHED, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 import { publicLineLimit } from './publicLineLimit.ts';
-import { formatPublicHours, formatPublicPrice } from './publicLinesFormat.ts';
+import { formatPublicHours, formatPublicPrice, publicLineLabel } from './publicLinesFormat.ts';
 
 import './PublicLinesStep.css';
 
 const copy = SETUP_COPY.publicLines;
-const labelOf = (line: SetupPublicLine) => cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label;
+const labelOf = (line: SetupPublicLine) => publicLineLabel(line.key);
 
 const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
