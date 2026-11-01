@@ -46,9 +46,7 @@ function closed(node: unknown): unknown {
  * shape: the mock sends them, so they are checked here until `contracts.schema.json` has them, and
  * then their entry goes (`pending_fields_wait_for_the_contracts`).
  */
-export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {
-  PublicDesk: { starters: { type: 'array', items: { type: 'string' }, maxItems: 3 } },
-};
+export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {};
 
 /** The schema with each pending field added to its model; a field the schema already has is left as the schema says. */
 function withPending(contracts: typeof schema): unknown {

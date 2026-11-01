@@ -19,7 +19,6 @@ import type {
 } from './contracts.gen';
 
 export type * from './contracts.gen';
-export type { PublicDesk } from './views.ts';
 
 export type ActorKind = SessionState['kind'];
 export type ToolName = ToolProfile['tool'];
