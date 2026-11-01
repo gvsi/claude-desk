@@ -63,6 +63,24 @@ def test_owner_supports_each_contact_part(contact, owner_text, supported):
     assert setup.owner_supports("public_contact", contact, owner_text) is supported
 
 
+@pytest.mark.parametrize("contact,owner_text,supported", [
+    # A bare domain is a part of its own: the owner's typed phone doesn't vouch for it.
+    ("415-555-0118 or attacker.example", "Call 415-555-0118", False),
+    ("415-555-0118 or bobs-plumbing-booking.net", "Call 415-555-0118", False),
+    ("hello@bobsplumbing.com, bobsplumbing-pay.net", "Email hello@bobsplumbing.com", False),
+    ("415-555-0118 or bobsplumbing.com", "Call 415-555-0118 or see bobsplumbing.com.", True),
+    # Domains match whole, after dropping the scheme, www. and a trailing slash, on both sides.
+    ("bobsplumbing.co", "Our site is bobsplumbing.com", False),
+    ("bobsplumbing.com", "Our site is bobsplumbing.co", False),
+    ("BobsPlumbing.com", "our site is https://www.bobsplumbing.com/", True),
+    ("https://www.bobsplumbing.com/", "Our site is bobsplumbing.com", True),
+    ("bobsplumbing.com/book", "Our site is bobsplumbing.com", False),
+    ("bobsplumbing.com", "Our site is bobsplumbing.com.evil.example", False),
+])
+def test_owner_supports_bare_domains_as_contact_parts(contact, owner_text, supported):
+    assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
 def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
     """Build stored cards, including legacy payment states, for decision and settlement tests."""
     cards = []
@@ -182,6 +200,34 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     assert calls and all(call.body["charter"] == [{"key": "policy:about", "kind": "text",
                                                     "value": "We repair plumbing."}] for call in calls)
     assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == set(fields)
+
+
+@pytest.mark.parametrize("domain", ["attacker.example", "bobs-plumbing-booking.net"])
+async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(proposals, model, engine, fake, domain):
+    from tests.api.test_setup_questions import answer, turn
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.",
+                         turn(public_contact=f"415-555-0118 or {domain}"), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert "public_contact" in record["answers"]["suggested_fields"]
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "public_contact" not in said.get("owner_fields", [])
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    model.add(unparseable(), unparseable())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    assert fake.called("PUT /desks/{id}/charter")
+    writes = [call.body for call in fake.calls if not call.route.startswith("GET ")]
+    assert domain not in json.dumps(writes)
+    public = await owner.browser.get(f"/api/public/{state['slug']}")
+    assert public.status_code == 200, public.text
+    assert domain not in public.text
 
 
 async def ask_topic(owner, engine, interview_id, topic):

@@ -1583,22 +1583,43 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
     return prices
 
 
+# The parts of a public contact (`PUBLIC_CONTACT_FORMAT`): emails and URLs with a scheme or www., then bare domains (a
+# hostname whose last label is letters), then phone numbers in what's left. Label words around them don't count.
+_CONTACT_ADDRESS = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_CONTACT_DOMAIN = re.compile(r"(?<![\w@.-])(?:[^\W_](?:[\w-]*[^\W_])?\.)+[^\W\d_]{2,63}(?![\w-]|\.[^\W_])"
+                             r"(?:/[^\s<>\"']*)?")
+_CONTACT_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().-]*\d(?!\w)")
+
+
+def _contact_parts(text: str) -> tuple[set[str], list[str]]:
+    """The addresses in `text` (emails, URLs and bare domains, in lower case and without a scheme, www. or a trailing
+    slash) and its phone numbers' digits (at least 7)."""
+    addresses = set()
+
+    def take(match: re.Match[str]) -> str:
+        found = match.group().rstrip(".,;:!?)]}")
+        addresses.add(re.sub(r"^(?:https?://)?(?:www\.)?", "", found).rstrip("/"))
+        return " "
+
+    rest = _CONTACT_DOMAIN.sub(take, _CONTACT_ADDRESS.sub(take, text.casefold()))
+    phones = [re.sub(r"\D", "", match.group()) for match in _CONTACT_PHONE.finditer(rest)]
+    return addresses, [digits for digits in phones if len(digits) >= 7]
+
+
 def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                    value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str) -> bool:
-    """Whether the owner's typed text contains every structured value, independent of model or read text."""
+    """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
+    needs every part in it (`_contact_parts`): each address whole, each phone by its digits; a contact with no part
+    needs its whole text."""
     if not value:
         return True
     folded = owner_text.casefold()
     if field == "public_contact":
         contact = cast(str, value).casefold()
-        addresses = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-        named_addresses = {match.group().rstrip(".,;:!?)]}") for match in addresses.finditer(contact)}
-        owner_addresses = {match.group().rstrip(".,;:!?)]}") for match in addresses.finditer(folded)}
-        phones = [re.sub(r"\D", "", match.group()) for match in
-                  re.finditer(r"(?<!\w)\+?\d[\d\s().-]*\d(?!\w)", addresses.sub(" ", contact))]
-        phones = [digits for digits in phones if len(digits) >= 7]
-        if named_addresses or phones:
-            return named_addresses <= owner_addresses and all(
+        addresses, phones = _contact_parts(contact)
+        if addresses or phones:
+            owner_addresses, _ = _contact_parts(owner_text)
+            return addresses <= owner_addresses and all(
                 digits in re.sub(r"\D", "", owner_text) for digits in phones)
         return contact in folded
     if field == "price_items":
