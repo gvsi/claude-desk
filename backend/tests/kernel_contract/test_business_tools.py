@@ -6,8 +6,9 @@ import json
 import pytest
 
 from desk.api.schemas import ToolRow
-from desk.contracts import BusinessTool, RuleCard
-from desk.kernel_api import BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, ToolPin, ToolsConfirmRequest
+from desk.contracts import BusinessTool, RuleCard, ToolCall
+from desk.kernel_api import (BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest,
+                             Probe, ToolPin, ToolsConfirmRequest)
 from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision, refused
 
 
@@ -163,3 +164,38 @@ async def test_reviewed_intake_decides_executes_and_cannot_select_its_config(ker
         blocked = await decide(session, visitor.state.session_id, visitor.state.generation,
                                f'bad-intake-{index}', tool.tool, {**args, **extra})
         assert blocked.outcome == 'refuse' and blocked.action is None
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_probe_treats_a_tools_confirm_drafts_intake_as_on_without_activating_it(kernel, ro_read):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.intake', title='New client intake', description='Take details.',
+                        config={'block': 'intake', 'questions': ['What?']})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    confirmed = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    version = confirmed.draft.version
+    request = PolicyProbeRequest(desk_id=desk_id, probes=[Probe(
+        actor='visitor', who='anyone', resource_kind='desk',
+        call=ToolCall(call_id='probe-intake', tool=tool.tool, args={'name': 'Dana', 'answers': ['Consult']}))])
+    [result] = await owner.call('POST /policy/{version}/probe', request, path={'version': version})
+    defaults = [card.card_id for card in confirmed.draft.cards if card.is_default and card.applies_to == tool.tool]
+    assert len(defaults) == 1
+    assert result.outcome == 'hold' and result.card_ids == defaults
+    assert not result.depends_on_review
+    [stored] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    assert stored['status'] == 'needs_review'
+    [draft] = ro_read(schema, copy.copy_id, 'SELECT status FROM {ro}.policy_versions WHERE desk_id = %s AND version = %s',
+                      (desk_id, version))
+    assert draft['status'] == 'proved'
+    # A subsequent configuration change removes the draft's stale pin from the probe only.
+    changed = tool.model_copy(update={'title': 'Client enquiry'})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[changed]), path={'id': desk_id})
+    [result] = await owner.call('POST /policy/{version}/probe', request, path={'version': version})
+    assert result.outcome == 'refuse' and result.card_ids == []
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    assert not any(entry.event.summary.get('refused') == 'pin_changed' for entry in ledger.entries)

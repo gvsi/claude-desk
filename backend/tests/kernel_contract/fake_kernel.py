@@ -124,7 +124,7 @@ import secrets
 import string
 import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
@@ -3869,8 +3869,24 @@ class FakeKernelState:
         if record is None and version != desk.policy_version:
             raise Refusal(404, "not_found")
         cards = record.cards if record is not None else desk.cards
-        enables = record.enables if record is not None and record.status not in ("active", "superseded") else ()
-        results = [self._probe(desk, cards, probe, enables=enables) for probe in body.probes]
+        probe_desk = desk
+        if record is not None and record.status not in ('active', 'superseded'):
+            from desk.kernel_service.adapters import profile_sha256
+
+            # A hypothetical overlay only: probing must never turn a stored tool on.
+            tools = dict(desk.tools)
+            for pin in record.enables:
+                tool = pin.tool
+                profile = desk.tools.get(tool)
+                tools.pop(tool, None)     # a stale draft cannot borrow a newer enabled pin
+                if (profile is not None and self._current_tool_pin(profile) == pin.definition_sha256
+                        and record.enable_profiles.get(tool) == profile_sha256(profile)
+                        and (profile.source != 'business' or self._business_profile(desk, tool) is not None)):
+                    tools[tool] = profile.model_copy(update={'status': 'enabled',
+                                                            'definition_sha256': pin.definition_sha256,
+                                                            'pending_definition_text': None, 'pending_sha256': None})
+            probe_desk = replace(desk, tools=tools)
+        results = [self._probe(probe_desk, cards, probe) for probe in body.probes]
         self.append(desk, "policy", {"version": version, "probes": len(results),
                                      "outcomes": [result.outcome for result in results]})
         return results
