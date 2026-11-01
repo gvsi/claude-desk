@@ -679,6 +679,36 @@ class SetupMessage(BaseModel):
     card: ProposalCard | None = None
 
 
+class SetupPublicLine(BaseModel):
+    """A nonblank setup charter line and whether the owner has confirmed its text."""
+
+    key: str
+    text: str
+    source: Literal["owner", "suggested"]
+    editable: bool
+
+
+class SetupPublicLines(BaseModel):
+    lines: list[SetupPublicLine]
+
+
+class SetupPublicLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+
+
+class SetupPublicLineError(BaseModel):
+    error: Literal["line_refused", "not_editable"]
+    key: str | None = None
+    reason: list[str] | None = None
+
+
+class SetupPublicLinesConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None

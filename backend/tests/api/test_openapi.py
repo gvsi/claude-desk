@@ -18,6 +18,8 @@ OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                                          "owner_draft_suggestion")},
                     **{(operation, "422"): ("ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_draft_money_cap", "owner_setup_rules", "owner_setup_confirm")},
+                    **{(operation, "422"): ("SetupPublicLineError", "ApiError")
+                       for operation in ("owner_setup_put_public_line", "owner_setup_confirm_public_lines")},
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included
@@ -150,6 +152,7 @@ PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug",
 SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
                "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
+               "/api/owner/setup/{id}/public_lines", "/api/owner/setup/{id}/public_lines/confirm",
                *(f"/api/owner/policy/setup/{{id}}/{step}"
                  for step in ("rules", "situations", "safety_check", "confirm", "go_live"))}
 

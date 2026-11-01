@@ -37,6 +37,10 @@ from desk.api.schemas import (
     SetupAnswerIn,
     SetupConsentIn,
     SetupProposalIn,
+    SetupPublicLineError,
+    SetupPublicLineIn,
+    SetupPublicLines,
+    SetupPublicLinesConfirmIn,
     SetupSuggestionsIn,
     SetupStartIn,
     SetupState,
@@ -208,6 +212,49 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
     back pinned and waiting for the owner's review. 409 `conflict` once the rules are confirmed."""
     state = await _moving_on(request, ctx, model=False)
     return await setup.connect_tools(ctx, state.database(), interview_id)
+
+
+@router.get("/{id}/public_lines", response_model=SetupPublicLines,
+            responses=error_responses(401, 404, 409, 422, 503))
+async def setup_public_lines(interview_id: InterviewId, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupPublicLines:
+    """Read the nonblank public charter lines in board order, with their provenance and editability.
+    Allowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending."""
+    return await setup.public_lines(ctx, runtime(request).started().database(), interview_id)
+
+
+@router.put("/{id}/public_lines", response_model=SetupPublicLines,
+            responses={**error_responses(401, 404, 409, 422, 503),
+                       422: {"model": SetupPublicLineError | ApiError}})
+async def setup_put_public_line(interview_id: InterviewId, body: SetupPublicLineIn, request: Request,
+                                ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Edit one public line and strictly publish the whole charter before saving its owner provenance.
+    Allowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. A refused charter is
+    422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.
+    `policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.put_public_line(ctx, state.database(), interview_id, body.key,
+                                                           body.text, state.clock()))
+
+
+async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublicLines | JSONResponse:
+    try:
+        return await work
+    except setup.PublicLineProblem as refused:
+        return JSONResponse(refused.answer.model_dump(mode="json", exclude_none=True), status_code=422)
+
+
+@router.post("/{id}/public_lines/confirm", response_model=SetupPublicLines,
+             responses={**error_responses(401, 404, 409, 422, 503),
+                        422: {"model": SetupPublicLineError | ApiError}})
+async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPublicLinesConfirmIn, request: Request,
+                                     ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Confirm all listed public lines without changing the setup step; publish before saving their provenance.
+    Allowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming
+    the refused key and reason codes when available; a charter cap names no key. A failed save restores the stored
+    charter once, then answers 409. Blank lines and suggestions outside the listed lines remain unconfirmed."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.confirm_public_lines(ctx, state.database(), interview_id, state.clock()))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------

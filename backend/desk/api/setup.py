@@ -232,6 +232,9 @@ from desk.api.schemas import (
     SafetyRow,
     SetupMessage,
     SetupProposalIn,
+    SetupPublicLine,
+    SetupPublicLineError,
+    SetupPublicLines,
     SetupStartIn,
     SetupState,
     SetupStep,
@@ -2633,6 +2636,116 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
                 slots.setdefault(slot_id, CalendarSlot(slot_id=slot_id, starts_at=datetime.combine(day, local, zone),
                                                        minutes=SLOT_MINUTES))
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
+
+
+PUBLIC_LINE_FIELDS = ("summary", "pricing", "intake", "after_hours", "urgent", "service_area", "how_we_help")
+
+
+class PublicLineProblem(Exception):
+    def __init__(self, error: Literal["line_refused", "not_editable"], *, key: str | None = None,
+                 reason: list[str] | None = None):
+        super().__init__(error)
+        self.answer = SetupPublicLineError(error=error, key=key, reason=reason)
+
+
+def _line_refused(failure: KernelFailed) -> PublicLineProblem:
+    # Only known claim keys and machine reason codes leave this boundary; never claim text.
+    if "charter" not in failure.detail:
+        for field in PUBLIC_LINE_FIELDS:
+            key = SETUP_POLICY_CLAIMS[field]
+            if key in failure.detail:
+                reasons = [code for code in failure.detail[key] if re.fullmatch(r"[a-z][a-z0-9_.]{0,79}", code)]
+                return PublicLineProblem("line_refused", key=key, reason=reasons)
+    return PublicLineProblem("line_refused")
+
+
+def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
+    return SetupPublicLines(lines=[
+        SetupPublicLine(key=SETUP_POLICY_CLAIMS[field], text=value.strip(),
+                        source="suggested" if field in answers.suggested_fields else "owner",
+                        editable=field != "how_we_help")
+        for field in PUBLIC_LINE_FIELDS if (value := getattr(answers, field)) and value.strip()
+    ])
+
+
+async def _public_lines_interview(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Interview:
+    interview = await _read(engine, owner, interview_id)
+    if interview.step not in ("rules", "situations") or interview.busy:
+        raise ApiProblem(409, "conflict")
+    return interview
+
+
+async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupPublicLines:
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        return _public_lines(interview.answers)
+
+
+async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: datetime) -> None:
+    timezone = (await _business(owner, interview.desk_id))["timezone"]
+    parts = seed_parts(interview.answers, timezone, business_type=interview.business_type,
+                       today=now.astimezone(ZoneInfo(timezone)).date())
+    try:
+        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter),
+                                path={"id": interview.desk_id})
+    except KernelFailed as failure:
+        if failure.status != 422:
+            raise
+        refused = _line_refused(failure)
+        logger.warning("setup public charter refused (key=%s)", refused.answer.key)
+        raise refused from None
+
+
+async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
+                          now: datetime) -> SetupPublicLines:
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        fields = {claim: field for field, claim in SETUP_POLICY_CLAIMS.items()}
+        if key not in fields:
+            raise ApiProblem(422, "invalid")
+        field = fields[key]
+        if field == "how_we_help":
+            raise PublicLineProblem("not_editable", key=key)
+        try:
+            interview.answers = SetupAnswers.model_validate({
+                **interview.answers.model_dump(), field: text.strip(),
+                "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
+            })
+        except ValidationError:
+            raise ApiProblem(422, "invalid") from None
+        return await _commit_public_lines(owner, engine, interview, seen, now)
+
+
+async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
+                               now: datetime) -> SetupPublicLines:
+    await _put_public_charter(owner, interview, now)
+    try:
+        await _commit(engine, owner, interview, seen)
+    except Exception as failed:
+        logger.warning("setup public lines save failed (%s)", type(failed).__name__)
+        try:
+            stored = await _read(engine, owner, interview.interview_id)
+            await _put_public_charter(owner, stored, now)
+        except Exception as restore_failed:
+            logger.error("setup public charter restore failed (%s)", type(restore_failed).__name__)
+        else:
+            logger.warning("setup public charter restored from stored answers")
+        raise ApiProblem(409, "conflict") from None
+    return _public_lines(interview.answers)
+
+
+async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
+                                now: datetime) -> SetupPublicLines:
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        listed = {line.key for line in _public_lines(interview.answers).lines}
+        confirmed = {field for field, key in SETUP_POLICY_CLAIMS.items() if key in listed}
+        interview.answers = interview.answers.model_copy(update={
+            "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now)
 
 
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,

@@ -854,6 +854,28 @@ export interface SetupProposalIn {
   autonomy?: ("auto" | "ask") | null;
 }
 /**
+ * A nonblank setup charter line and whether the owner has confirmed its text.
+ */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: "owner" | "suggested";
+  editable: boolean;
+}
+export interface SetupPublicLineError {
+  error: "line_refused" | "not_editable";
+  key?: string | null;
+  reason?: string[] | null;
+}
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
+}
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
+}
+export interface SetupPublicLinesConfirmIn {}
+/**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
@@ -1196,6 +1218,9 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
+  "GET /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },
