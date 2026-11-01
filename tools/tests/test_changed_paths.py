@@ -276,6 +276,26 @@ def test_non_pr_job_does_not_need_git(tmp_path, monkeypatch, event):
     assert output.read_text() == "backend=true\nweb=true\n"
 
 
+@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch", ""])
+@pytest.mark.parametrize("diff", ["web/src/App.tsx\n", "backend/desk/api/app.py\n", "docs/ci.md\n", "", "../bad\n"])
+def test_classifier_outputs_are_only_lowercase_true_or_false(tmp_path, monkeypatch, capsys, event, diff):
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    monkeypatch.setenv("PR_HEAD_SHA", "pr-head")
+
+    def git(command, **kwargs):
+        stdout = "base pr-head\n" if command[1] == "show" else diff
+        return subprocess.CompletedProcess(command, 0, stdout=stdout)
+
+    monkeypatch.setattr(subprocess, "run", git)
+    main()
+    assert capsys.readouterr().out == output.read_text()
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert set(values) == {"backend", "web"}
+    assert set(values.values()) <= {"true", "false"}
+
+
 def test_merge_diff_includes_the_old_path_of_a_rename_into_web(tmp_path, monkeypatch):
     """A deleted backend input must not disappear behind git's rename detection."""
     repo = tmp_path / "repo"
