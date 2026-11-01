@@ -695,6 +695,48 @@ describe('share', () => {
     expect(voicemailIn(screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
   });
 
+  it('a_rules_read_started_before_share_never_decides_the_promise', async () => {
+    // Rules has read the rules. Its next read, started with the urgent tool still on, is held; the
+    // tool goes off elsewhere and the owner opens Share, then that old answer arrives. Share never
+    // promises the emergency callback: only its own read, made on Share, decides.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    let old: unknown = null;
+    worker.use(
+      http.get(RULES_READ, async () => {
+        if (old !== null) return undefined;
+        // The answer as it was when this read started: the urgent tool on.
+        const answer = await mockStore.dispatch('rules', { params: { desk_id: RIVERA.deskId } });
+        if ('network' in answer) throw new Error('the mock reads the rules');
+        old = answer.body;
+        await released;
+        return HttpResponse.json(old as RulesView, { status: answer.status });
+      }),
+    );
+    // All rules reads the same rules as it opens, so a read is out as the owner moves on.
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.poll(() => old).not.toBeNull();
+    riverasUrgentTool('disabled');
+    let promised = false;
+    const watch = new MutationObserver(() => {
+      if (voicemailIn(screen.container)?.includes(EMERGENCY)) promised = true;
+    });
+    watch.observe(screen.container, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => watch.disconnect());
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    expect(voicemailIn(screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
+    expect(promised).toBe(false);
+  });
+
   it('a_failed_read_leaves_the_cached_emergency_promise_out', async () => {
     // The same cached read with the tool on, but Share's own read fails, its retry too.
     const { screen, router } = await renderRoute(`${DESK}/rules`, { retryScale: 0 });
