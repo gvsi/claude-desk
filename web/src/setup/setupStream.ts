@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { canFollowSetup, openSetupEvents, type SetupRead, type SetupStreamEvent } from '../api/setupEvents.ts';
 import type { SetupState } from '../api/views.ts';
+import { settledWords } from '../lib/GrowingReply.tsx';
 
 /** What a running turn shows so far: the finished reads' labels, in order, and the reply's words. */
 export interface Growing {
@@ -15,9 +16,16 @@ export interface Growing {
   labels: readonly { read: SetupRead; text: string }[];
   /** Claude's reply so far; empty before its first word and after a reset. */
   text: string;
+  /** `done` came: the reply is whole, its last word included, until the saved turn takes its place. */
+  final: boolean;
 }
 
-export const NOTHING_YET: Growing = { labels: [], text: '' };
+export const NOTHING_YET: Growing = { labels: [], text: '', final: false };
+
+/** Whether `growing` has words to show: any once it is whole, else a word something follows. */
+export function hasWords(growing: Growing): boolean {
+  return growing.final ? growing.text.trim() !== '' : settledWords(growing.text) !== '';
+}
 
 /**
  * What follows an event:
@@ -35,9 +43,9 @@ export type StreamNext = 'read_on' | 'refetch' | 'refetch_idle' | 'wait' | 'reop
 export function stepSetupStream(now: Growing, event: SetupStreamEvent | { type: 'failed' }, inFlight: boolean): { growing: Growing; next: StreamNext } {
   switch (event.type) {
     case 'delta':
-      return { growing: { labels: now.labels, text: event.text }, next: 'read_on' };
+      return { growing: { labels: now.labels, text: event.text, final: false }, next: 'read_on' };
     case 'reset':
-      return { growing: { labels: now.labels, text: '' }, next: 'read_on' };
+      return { growing: { labels: now.labels, text: '', final: false }, next: 'read_on' };
     case 'reading':
       // A read in progress shows as Claude writing, as the setup boards draw it.
       return { growing: now, next: 'read_on' };
@@ -46,11 +54,11 @@ export function stepSetupStream(now: Growing, event: SetupStreamEvent | { type: 
       const label = { read: event.read, text: event.text };
       const known = now.labels.some(({ read }) => read === event.read);
       const labels = known ? now.labels.map((shown) => (shown.read === event.read ? label : shown)) : [...now.labels, label];
-      return { growing: { labels, text: now.text }, next: 'read_on' };
+      return { growing: { labels, text: now.text, final: now.final }, next: 'read_on' };
     }
     case 'done':
       if (event.run === null) return { growing: now, next: inFlight ? 'reopen' : 'refetch_idle' };
-      return { growing: now, next: inFlight ? 'wait' : 'refetch' };
+      return { growing: { ...now, final: true }, next: inFlight ? 'wait' : 'refetch' };
     case 'error':
       return { growing: NOTHING_YET, next: inFlight ? 'wait' : 'refetch' };
     case 'failed':
@@ -74,9 +82,11 @@ export interface SetupStream {
  * (`inFlight`) until the interview is no longer busy. One stream at most, closed when watching
  * ends, on a new interview and on unmount. When it can't follow the turn (no `EventSource`, a
  * stream that fails, or no turn running while the interview reads busy), it stops and the step's
- * own reads of the interview (`useSetupWork`) carry on alone.
+ * own reads of the interview (`useSetupWork`) carry on alone. Once the turn is done, its words give
+ * way to the saved turn in the very render the interview holds it: when `saved`, the number of
+ * messages the page has, moves on from where it was at `done`, or when watching ends.
  */
-export function useSetupStream(id: string, watching: boolean, inFlight: boolean, reread: () => Promise<SetupState | null>): SetupStream {
+export function useSetupStream(id: string, watching: boolean, inFlight: boolean, reread: () => Promise<SetupState | null>, saved: number): SetupStream {
   const [growing, setGrowing] = useState<Growing>(NOTHING_YET);
   const [fellBack, setFellBack] = useState(false);
   /** Bumped to open the stream again. */
@@ -91,6 +101,11 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
   const reopens = useRef(0);
   /** The turn ended while its request was out: once it answers, look again if still busy. */
   const waiting = useRef(false);
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  /** How many messages the page had when the turn said `done`, until its saved turn shows. */
+  const [doneAt, setDoneAt] = useState<number | null>(null);
+  const superseded = doneAt !== null && saved !== doneAt;
 
   const show = (next: Growing) => {
     growingRef.current = next;
@@ -103,9 +118,18 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
     growingRef.current = NOTHING_YET;
     setGrowing(NOTHING_YET);
     setFellBack(false);
+    setDoneAt(null);
     reopens.current = 0;
     waiting.current = false;
   }, [watching, id]);
+
+  // The saved turn shows: its words have gone already in that render, and now from here too.
+  useEffect(() => {
+    if (!superseded) return;
+    growingRef.current = NOTHING_YET;
+    setGrowing(NOTHING_YET);
+    setDoneAt(null);
+  }, [superseded]);
 
   useEffect(() => {
     if (!watching || fellBack) return undefined;
@@ -134,6 +158,7 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
         if (ev.type === 'delta' || ev.type === 'label') reopens.current = 0;
         if (step.next === 'read_on') return;
         close();
+        if (ev.type === 'done' && ev.run !== null) setDoneAt(savedRef.current);
         if (step.next === 'wait') {
           waiting.current = true;
         } else if (step.next === 'reopen') {
@@ -141,9 +166,6 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
         } else if (step.next === 'refetch' || step.next === 'refetch_idle') {
           const idle = step.next === 'refetch_idle';
           void rereadRef.current().finally(() => {
-            // The saved turn is the interview's now, even while it still reads busy for a moment
-            // as the API unlocks it: its words never show twice.
-            if (live) show(NOTHING_YET);
             // Still busy with no turn this stream can see: the step's own reads carry on alone.
             if (idle) {
               if (live && watchingRef.current) setFellBack(true);
@@ -173,6 +195,6 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
     setAttempt((n) => n + 1);
   }, [inFlight, watching]);
 
-  const shown = watching && (growing.labels.length > 0 || growing.text.trim() !== '') ? growing : null;
+  const shown = watching && !superseded && (growing.labels.length > 0 || growing.text.trim() !== '') ? growing : null;
   return { growing: shown, fellBack: watching && fellBack };
 }

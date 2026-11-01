@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { NOTHING_YET, stepSetupStream, type Growing } from './setupStream.ts';
+import { NOTHING_YET, hasWords, stepSetupStream, type Growing } from './setupStream.ts';
 
 const run = 'r_7f3a';
 
@@ -22,13 +22,13 @@ function through(events: Parameters<typeof stepSetupStream>[1][], inFlight = fal
 
 describe('stepSetupStream', () => {
   it('shows_each_delta_whole', () => {
-    expect(through([{ type: 'delta', run, text: 'Got' }])).toEqual({ growing: { labels: [], text: 'Got' }, next: 'read_on' });
+    expect(through([{ type: 'delta', run, text: 'Got' }])).toEqual({ growing: { labels: [], text: 'Got', final: false }, next: 'read_on' });
     expect(
       through([
         { type: 'delta', run, text: 'Got' },
         { type: 'delta', run, text: 'Got it: leaks and blocked' },
       ]),
-    ).toEqual({ growing: { labels: [], text: 'Got it: leaks and blocked' }, next: 'read_on' });
+    ).toEqual({ growing: { labels: [], text: 'Got it: leaks and blocked', final: false }, next: 'read_on' });
   });
 
   it('clears_the_text_on_reset_and_keeps_the_reads', () => {
@@ -38,7 +38,7 @@ describe('stepSetupStream', () => {
         { type: 'delta', run, text: "Here's what I'd" },
         { type: 'reset', run },
       ]),
-    ).toEqual({ growing: { labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '' }, next: 'read_on' });
+    ).toEqual({ growing: { labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '', final: false }, next: 'read_on' });
   });
 
   it('shows_nothing_new_while_a_read_runs_and_each_label_once_it_ends', () => {
@@ -56,6 +56,7 @@ describe('stepSetupStream', () => {
         { read: 'website', text: 'Read chenco-cpa.example' },
       ],
       text: '',
+      final: false,
     });
   });
 
@@ -81,7 +82,8 @@ describe('stepSetupStream', () => {
         { type: 'delta', run, text: 'Got it.' },
         { type: 'done', run },
       ]),
-    ).toEqual({ growing: { labels: [], text: 'Got it.' }, next: 'refetch' });
+    // The reply is whole now: its last word shows too.
+    ).toEqual({ growing: { labels: [], text: 'Got it.', final: true }, next: 'refetch' });
   });
 
   it('clears_a_reply_reset_right_before_done_so_the_saved_turn_wins', () => {
@@ -92,11 +94,18 @@ describe('stepSetupStream', () => {
         { type: 'reset', run },
         { type: 'done', run },
       ]),
-    ).toEqual({ growing: NOTHING_YET, next: 'refetch' });
+    ).toEqual({ growing: { ...NOTHING_YET, final: true }, next: 'refetch' });
   });
 
   it('keeps_the_writing_state_through_a_turn_that_streams_only_done', () => {
-    expect(through([{ type: 'done', run }])).toEqual({ growing: NOTHING_YET, next: 'refetch' });
+    expect(through([{ type: 'done', run }])).toEqual({ growing: { ...NOTHING_YET, final: true }, next: 'refetch' });
+  });
+
+  it('shows_a_whole_reply_only_once_done_says_it_is_whole', () => {
+    expect(hasWords({ labels: [], text: 'Yes', final: false })).toBe(false);
+    expect(hasWords({ labels: [], text: 'Yes', final: true })).toBe(true);
+    expect(hasWords({ labels: [], text: 'Yes. Right', final: false })).toBe(true);
+    expect(hasWords({ labels: [], text: ' ', final: true })).toBe(false);
   });
 
   it('waits_for_the_request_still_out_on_done', () => {
@@ -108,7 +117,7 @@ describe('stepSetupStream', () => {
         ],
         true,
       ),
-    ).toEqual({ growing: { labels: [], text: 'Got it.' }, next: 'wait' });
+    ).toEqual({ growing: { labels: [], text: 'Got it.', final: true }, next: 'wait' });
   });
 
   it('looks_again_when_no_turn_runs_yet_while_its_request_is_out', () => {

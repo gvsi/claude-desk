@@ -4,13 +4,13 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { Choice, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
-import { GrowingReply, settledWords } from '../lib/GrowingReply.tsx';
+import { GrowingReply } from '../lib/GrowingReply.tsx';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
 import { isCard, liveChoices } from './conversation.ts';
 import { SetupChoices } from './SetupChoices.tsx';
 import './SetupConversation.css';
-import { useSetupStream } from './setupStream.ts';
+import { hasWords, useSetupStream } from './setupStream.ts';
 import { useSetupWork } from './useSetupWork.ts';
 
 /** Plan 02's limit on an answer. */
@@ -96,6 +96,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<CardDecision | null>(null);
+  /** A decision's request is out: a decision stays `deciding` while its turn runs busy after it. */
+  const [decisionOut, setDecisionOut] = useState(false);
   const [dismissed, setDismissed] = useState<ReadonlySet<number>>(() => new Set());
   const id = state.interview_id;
   const asking = awaitsConsent(state);
@@ -104,10 +106,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const busy = state.busy === true;
   const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
   const blocked = busy || sending !== null || deciding !== null || suggesting || retrying || consenting !== null;
-  // A turn's request is out (a decision's stays set while its turn runs busy), and the turn is
-  // followed as it is written from then until the interview is no longer busy.
-  const inFlight = sending !== null || consenting !== null || suggesting || (deciding !== null && !busy);
-  const stream = useSetupStream(id, !closing && (busy || inFlight), inFlight, reread);
+  // A turn's request is out, and the turn is followed as it is written from then until the
+  // interview is no longer busy.
+  const inFlight = sending !== null || consenting !== null || suggesting || decisionOut;
+  const stream = useSetupStream(id, !closing && (busy || inFlight), inFlight, reread, state.messages.length);
   const growing = stream.growing;
   // The question panel and its choices show once the turn is saved, never while its reply is written.
   const panel = live && !closing && !asking && !dismissed.has(live.index) && growing === null ? live : null;
@@ -271,6 +273,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     returnFocus.current = true;
     returnToTextarea.current = false;
     setDeciding(decision);
+    setDecisionOut(true);
     setDecisionFailed(null);
     setAmountRequired(null);
     let background = false;
@@ -291,6 +294,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       }
       setDecisionFailed(decision);
     } finally {
+      setDecisionOut(false);
       if (!background) setDeciding(null);
     }
   };
@@ -420,9 +424,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
             <ToolLabel text={label.text} />
           </div>
         ))}
-        {growing !== null && settledWords(growing.text) !== '' ? (
+        {growing !== null && hasWords(growing) ? (
           <div className="cd-claude-message cd-setup-growing" lang="en" aria-hidden="true">
-            <GrowingReply text={growing.text} streaming />
+            <GrowingReply text={growing.text} streaming={!growing.final} />
           </div>
         ) : null}
         {sending !== null || consenting !== null || busy || deciding !== null || suggesting ? <WritingIndicator language="en" /> : null}

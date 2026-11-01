@@ -43,10 +43,12 @@ const allClosed = () => sources.every((source) => source.readyState === EventSou
 interface Props {
   watching: boolean;
   inFlight: boolean;
+  /** How many messages the interview holds as the page has it. */
+  saved?: number;
 }
 
 async function follow(initialProps: Props, reread: () => Promise<SetupState | null> = () => Promise.resolve(null)) {
-  return renderHook((props?: Props) => useSetupStream(ID, props?.watching ?? false, props?.inFlight ?? false, reread), { initialProps });
+  return renderHook((props?: Props) => useSetupStream(ID, props?.watching ?? false, props?.inFlight ?? false, reread, props?.saved ?? 1), { initialProps });
 }
 
 describe('useSetupStream', () => {
@@ -66,7 +68,7 @@ describe('useSetupStream', () => {
     // Read again, the interview holds the saved turn and is no longer busy.
     const reread = vi.fn(() => Promise.resolve({ busy: false } as SetupState));
     const hook = await follow({ watching: true, inFlight: false }, reread);
-    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [], text: 'Got it: leaks and blocked drains.' }));
+    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [], text: 'Got it: leaks and blocked drains.', final: false }));
     expect(reread).not.toHaveBeenCalled();
     release();
     await vi.waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
@@ -87,15 +89,34 @@ describe('useSetupStream', () => {
       }),
     );
     const reread = vi.fn(() => read);
-    const hook = await follow({ watching: true, inFlight: false }, reread);
+    const hook = await follow({ watching: true, inFlight: false, saved: 3 }, reread);
     await vi.waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
-    // Till the saved turn is read, the words it wrote stay.
-    expect(hook.result.current.growing?.text).toBe('Got it.');
-    // Read, it is in the interview, which may still read busy for a moment as the API unlocks it:
-    // its words go, so they never show twice.
+    // Till the saved turn is read, the words it wrote stay, whole.
+    expect(hook.result.current.growing).toEqual({ labels: [], text: 'Got it.', final: true });
     answer({ busy: true } as SetupState);
-    await vi.waitFor(() => expect(hook.result.current.growing).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(hook.result.current.growing?.text).toBe('Got it.');
+    // The interview holds the saved turn, though it may still read busy for a moment: in that same
+    // render the words go, so they never show twice.
+    await hook.rerender({ watching: true, inFlight: false, saved: 5 });
+    expect(hook.result.current.growing).toBeNull();
     expect(hook.result.current.fellBack).toBe(false);
+  });
+
+  it('shows_the_reply_whole_once_done_while_its_request_is_out', async () => {
+    worker.use(
+      sse<Named>(EVENTS_URL, ({ client }) => {
+        client.send({ event: 'delta', data: { run: 'r_9', text: 'Got it. Weekdays' } });
+        client.send({ event: 'done', data: { run: 'r_9' } });
+      }),
+    );
+    const reread = vi.fn(() => Promise.resolve(null));
+    const hook = await follow({ watching: true, inFlight: true, saved: 2 }, reread);
+    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [], text: 'Got it. Weekdays', final: true }));
+    expect(reread).not.toHaveBeenCalled();
+    // The request answers with the saved turn: the words go in the same render.
+    await hook.rerender({ watching: false, inFlight: false, saved: 4 });
+    expect(hook.result.current.growing).toBeNull();
   });
 
   it('shows_the_reads_labels_and_clears_the_text_on_reset', async () => {
@@ -108,7 +129,7 @@ describe('useSetupStream', () => {
       }),
     );
     const hook = await follow({ watching: true, inFlight: false });
-    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '' }));
+    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '', final: false }));
   });
 
   it('closes_its_stream_when_watching_ends_and_on_unmount', async () => {
