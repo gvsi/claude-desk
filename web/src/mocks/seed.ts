@@ -14,7 +14,7 @@ import { seedAgentChat } from './agents.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
-export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
+export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document';
 
 export interface CopyIds {
   copyId: string;
@@ -321,6 +321,23 @@ export function seedWorld(world: MockWorld): void {
     });
   }
   if (seed === 'rivera_quiet') return;
+  if (seed === 'rivera_ended_document') {
+    const rule = main.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
+    const draft = world.draft(main, [{ ...rule, mode: 'ask', reason: 'Ask me before sharing a customer’s document.' }]);
+    world.confirmDraft(main, draft.version);
+    const chat = world.addSession(main);
+    world.verify(chat, rivera.people.dana);
+    world.replay(chat, opened - MINUTE, [{ text: 'Please send me my drain clearing invoice.', steps: [
+      (ctx) => ctx.status('held', ctx.decide({ ...DECISIONS.releaseInvoice, outcome: 'hold', executed: false, hold: 'ask',
+        reasonPlain: 'Dana Whitfield asked for her drain clearing invoice. Your rule asks before sharing documents.' })),
+      writing,
+      (ctx) => ctx.reply([rivera.blocks.handoff[ctx.language]]),
+    ] }]);
+    // The chat ends for good: the visitor's page hears the session error, and a new chat can't resume it.
+    world.emit(chat, { type: 'error', code: 'session' });
+    chat.ended = true;
+    return;
+  }
 
   // Alex Kim's assistant, a signed visiting agent, got a quote for the service call deposit and paid
   // it within its signed limit, forty minutes before the copy opened.

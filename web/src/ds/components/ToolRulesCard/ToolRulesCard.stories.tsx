@@ -106,6 +106,19 @@ export const WithoutLink: Story = {
   },
 };
 
+export const NameOnly: Story = {
+  name: 'Name only',
+  args: {
+    tool: { name: 'Payment link', description: '' },
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('region', { name: 'Payment link' });
+    await expect(card.querySelector('.cd-tool-rules__tool-description')).toBeNull();
+    await expect(card).toHaveAccessibleName('Payment link');
+    await expect(within(card).getByText('Payment link', { selector: '.cd-tool-rules__tool-name' })).toBeVisible();
+  },
+};
+
 export const RefundOnItsPage: Story = {
   args: {
     label: 'Your rules for refund',

@@ -164,6 +164,7 @@ from desk.api.prompts import (
     SETUP_TURNS,
     SETUP_UNDERSTAND_HEAD,
     SETUP_UNDERSTAND_SYSTEM,
+    SETUP_PAYMENT_UNAVAILABLE_LINE,
     SITUATIONS_HEAD,
     SITUATIONS_SYSTEM,
     SITUATION_CALLER_TOOL_REQUIRED,
@@ -279,8 +280,8 @@ TURN_MAX_TOKENS = 4096
 # The most one structured setup call may take, the SDK's retries included (and each of its tries): a stalled call ends
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
 SETUP_TIMEOUT_S = 60.0
-UNDERSTAND_TIMEOUT_S = 90.0
-UNDERSTAND_MAX_TOKENS = 4096
+UNDERSTAND_TIMEOUT_S = 60.0
+UNDERSTAND_MAX_TOKENS = 8192
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
@@ -316,6 +317,8 @@ WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
+PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
+                "now or later in Rules.")
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -422,6 +425,7 @@ class Interview:
     draft_cards: list[RuleCard] = field(default_factory=list)   # setup's own cards for its rules draft, once drafted
     draft_version: int | None = None                            # the kernel's version of the last rules draft
     business_tools_enabled: bool = False   # runtime setting, never stored in the interview row
+    turn_deadline: float | None = None     # runtime event-loop clock, never stored
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -650,7 +654,8 @@ def _errors(output: type[BaseModel], text: str) -> str | None:
 async def ask_model(model: ModelClient, record: Record, system: str, messages: list[dict], output: type[Output], *,
                     max_tokens: int, route: str = ROUTE, effort: Effort = "low",
                     check: Callable[[Output], str | None | Awaitable[str | None]] | None = None,
-                    timeout_s: float | None = None) -> Output | None:
+                    timeout_s: float | Callable[[], float] | None = None,
+                    retry_min_s: float = 0) -> Output | None:
     """A structured setup answer as `output` that `check` (if given, awaited when it answers an awaitable) finds
     nothing wrong with. A finished answer (`end_turn`) that doesn't fit, or that `check` lists problems with, gets one
     retry with them; None when the retry doesn't fit either. 503 `model_unavailable` when the model gives no answer at
@@ -658,8 +663,10 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
-    bound = SETUP_TIMEOUT_S if timeout_s is None else timeout_s
     for attempt in (1, 2):
+        bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
+        if bound <= 0 or (attempt == 2 and bound < retry_min_s):
+            return None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
                                timeout_s=bound)
@@ -1061,6 +1068,8 @@ def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
     parts = [SETUP_UNDERSTAND_HEAD.format(business_type=interview.business_type),
              SETUP_CLIENT_CARDS[interview.shows_cards],
              wrap(OWNER_DESCRIPTION_TAG, _history(interview)[0].text)]
+    if not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     for entry in entries:
         if entry.pending is not None and entry.pending == _run_id(interview):
             continue
@@ -1087,10 +1096,16 @@ def _normalize_choices(choices: list[Choice]) -> list[Choice]:
 async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
                          entries: list[Entry]) -> None:
     """Append the consultant opening and its first fact question; the caller owns persistence."""
+    def time_left() -> float:
+        if interview.turn_deadline is None:
+            return UNDERSTAND_TIMEOUT_S
+        return min(UNDERSTAND_TIMEOUT_S, interview.turn_deadline - asyncio.get_running_loop().time() - 10)
+
     try:
         answer = await _ask_drafts(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
                                  [_understanding_message(interview, entries)], SetupUnderstanding,
-                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=UNDERSTAND_TIMEOUT_S)
+                                 # Fifteen seconds left on the turn: ten to finish, five for a retry.
+                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left, retry_min_s=5)
     except ApiProblem as failed:
         if failed.status != 503 or failed.error != "model_unavailable":
             raise
@@ -1101,14 +1116,14 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         return
     opening = Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested)
     interview.transcript.append(opening)
-    opening.planned = [_planned_job(interview, draft) for draft in answer.jobs]
+    opening.planned = [card for draft in answer.jobs if (card := _planned_job(interview, draft)) is not None]
     seen = set()
     for draft in answer.connectors:
         if draft.app in seen:
             continue
         seen.add(draft.app)
         connector = ConnectorProposal(app=draft.app, label=CONNECTOR_LABELS[draft.app], why=draft.why,
-                                      connectable=draft.app == "stripe")
+                                      connectable=True)
         opening.planned.append(ProposalCard(
             proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector))
     interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
@@ -1312,6 +1327,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
                                      covered=", ".join(key for key in QUESTION_KEYS if key in interview.covered),
                                      uncovered=", ".join(key for key in QUESTION_KEYS if key not in interview.covered)),
               wrap(QUESTION_ASKED_TAG, asked)])
+    if not limit_turn and not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else transcript
     for entry in reads:
@@ -1402,7 +1419,10 @@ async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
         path={"id": desk_id})
 
 
-def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard:
+def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
+    if draft.job == "payment" and not interview.business_tools_enabled:
+        logger.warning("setup dropped an unavailable job of kind %s", draft.job)
+        return None
     fields = draft.model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
@@ -1446,6 +1466,8 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json()),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
+    if not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
     if closing:
         parts.append(SETUP_CLOSING_LINE)
@@ -1514,7 +1536,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
                                 connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
                                                             why=source.question.strip()[:200],
-                                                            connectable=app == "stripe"))
+                                                            connectable=True))
             reply.planned.append(card)
             available.append(card)
     asked = _next_ask(interview, source, available)
@@ -1528,7 +1550,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         fitting = _names_card(source, asked)
         if fitting and source.question.strip():
             interview.transcript.append(Entry(role="claude", text=source.question.strip()))
-        interview.transcript.append(Entry(role="claude", text="", card=asked.model_copy(deep=True)))
+        _show_card(interview, asked)
     else:
         # An added job becomes eligible only on a later planning call, never on the turn that minted it.
         if interview.shows_cards and interview.unshown:
@@ -1541,13 +1563,22 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         await close_setup(owner, engine, model, interview)
 
 
+def _show_card(interview: Interview, card: ProposalCard) -> None:
+    interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
+    payment = bool((card.job and card.job.job == "payment") or
+                   (card.connector and card.connector.app == "stripe"))
+    if payment and not interview.answers.auto_money_cap_cents and not any(
+            entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript):
+        interview.transcript.append(Entry(role="claude", text=PAYMENT_LINE))
+
+
 def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
     """Record additions and valid drops even on a follow-up; return only items available before this turn."""
     available = interview.unshown
     if source is not None:
         available_ids = {card.proposal_id for card in available}
         reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
-        reply.planned = [_planned_job(interview, draft) for draft in source.add_jobs]
+        reply.planned = [card for draft in source.add_jobs if (card := _planned_job(interview, draft)) is not None]
     return available
 
 
@@ -1585,6 +1616,8 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
             if card.job is None or not following.revised:
                 return
             replacement = _planned_job(interview, following.revised[0])
+            if replacement is None:
+                return
             # Keep the stored plan and its shown copy settled together; only the replacement waits.
             for entry in interview.transcript:
                 for planned in entry.planned:
@@ -1596,7 +1629,7 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
             reply.planned = [replacement]
             if following.question.strip():
                 interview.transcript.append(Entry(role="claude", text=following.question.strip()))
-            interview.transcript.append(Entry(role="claude", text="", card=replacement.model_copy(deep=True)))
+            _show_card(interview, replacement)
             return
         if following.decision == "none" or not _decide_typed(interview, proposal_id,
                                                             following.decision == "accept"):

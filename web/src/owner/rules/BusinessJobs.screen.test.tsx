@@ -6,6 +6,7 @@ import type { ToolRow } from '../../api/views.ts';
 import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { BUSINESS_OWNER_LINES } from '../connectors/businessWords.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 
@@ -140,7 +141,7 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
     ]);
     const untitled = jobs.getByRole('region', { name: 'A connected tool', exact: true }).elements();
     expect(untitled.map((card) => card.querySelector('.cd-tool-rules__tool-description')?.textContent)).toEqual([
-      intro.description_confirmed, 'Free intro call, 20 minutes, in your opening hours', 'Free intro call, 20 minutes, in your opening hours',
+      undefined, 'Free intro call, 20 minutes, in your opening hours', 'Free intro call, 20 minutes, in your opening hours',
     ]);
     for (const [index, card] of untitled.entries()) {
       expect(card.querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_RULE.reason);
@@ -149,9 +150,15 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
       expect(card.querySelectorAll('a')).toHaveLength(0);
     }
     expect(jobs.element().textContent).not.toMatch(/desk\./);
+    expect(jobs.element().textContent).not.toContain(intro.description_confirmed);
     for (const name of ['Unknown configuration job', 'Malformed configuration job']) {
       const job = jobs.getByRole('region', { name });
-      await expect.element(job.getByText(intro.description_confirmed, { exact: true })).toBeVisible();
+      if (name === 'Malformed configuration job') {
+        await expect.element(job.getByText(BUSINESS_OWNER_LINES.intake, { exact: true })).toBeVisible();
+      } else {
+        expect(job.element().querySelector('.cd-tool-rules__tool-description')).toBeNull();
+      }
+      expect([...job.element().querySelectorAll('p')].every((paragraph) => paragraph.textContent?.trim())).toBe(true);
       await expect.element(job.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
       expect(job.getByRole('link').elements()).toHaveLength(0);
     }

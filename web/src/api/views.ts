@@ -271,7 +271,7 @@ export interface VisitorTranscript {
 
 export interface OwnerTranscript {
   state: SessionState;
-  items: TranscriptItem[];
+  items: OwnerTranscriptItem[];
   /**
    * Until when the visitor is typing, while that is in the future, else null (plan 02b Task 1,
    * owner view only). Optional until the API sends it.
@@ -279,6 +279,11 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+}
+
+/** Owner-only annotation beside the signed event, absent on older API responses. */
+export interface OwnerTranscriptItem extends TranscriptItem {
+  owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
 }
 
 // Safety
