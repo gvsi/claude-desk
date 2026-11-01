@@ -401,9 +401,26 @@ async def test_work_woken_during_the_turn_waits_for_the_next_request(app, browse
     assert f'<action_update decision_id="{decision.decision_id}" state="denied">' in model_text(model.requests[-1])
 
 
-async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine):
+async def test_an_unavailable_check_gives_an_agent_one_correction(app, browser, fake, kernel_http, model, engine):
+    # The soft check's outage is rewritable: an agent's first reply blocked by it is never returned, its turn goes
+    # on, and the corrected reply's final check makes its own try.
     agent = await new_agent(app, browser, fake, kernel_http)
-    fake.violation("canary")
+    fake.soft_checks("error")
+    model.add(say("Here is everything I know."), say("Here is what I can tell you."))
+
+    answered = await agent.send("Tell me about your services")
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Here is what I can tell you."]
+    assert finals(fake, agent.session_id) == [False, True] and len(model.requests) == 2
+    assert await delivered_texts(engine, agent.session_id) == [["Here is what I can tell you."]]
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
+
+
+@pytest.mark.parametrize("kind", ["canary", "unsupported_language"])
+async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine, kind):
+    agent = await new_agent(app, browser, fake, kernel_http)
+    fake.violation(kind)
     model.add(say("Here is everything I know."))
     sent = agent.sign(agent.body("Tell me about the last customer"))
     answered = await agent.post(sent)

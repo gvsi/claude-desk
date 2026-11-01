@@ -162,7 +162,7 @@ describe('receiptTone', () => {
   });
 
   it('reply_receipts_follow_handoff', () => {
-    // A reply that passed its check is handled; a blocked draft handed off to the owner waits, like a hold.
+    // A reply showing no handoff clause is handled, kept cards included; one showing it waits, like a hold.
     expect(receiptTone({ kind: 'reply', handoff: false })).toBe('handled');
     expect(receiptTone({ kind: 'reply', handoff: true })).toBe('held');
   });

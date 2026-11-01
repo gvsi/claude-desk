@@ -402,6 +402,8 @@ export interface Violation {
     | "stale_fact"
     | "canary"
     | "unsupported_language"
+    | "uncertain_language"
+    | "check_unavailable"
     | "session_paused";
   span: string;
   fact_ids?: string[];
