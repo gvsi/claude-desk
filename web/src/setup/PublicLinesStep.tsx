@@ -233,12 +233,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'invalid'))) {
         const current = await reread();
         const stillHere = current?.step === 'rules' || current?.step === 'situations';
-        if (current === null || stillHere) {
+        if (stillHere) {
           const refreshed = await lines.refetch();
-          if (stillHere) {
-            if (refreshed.isSuccess) setError(CHANGED_REFRESHED.en);
-            return;
-          }
+          if (refreshed.isSuccess) setError(CHANGED_REFRESHED.en);
+          return;
         }
       }
       const line = err instanceof ApiError && err.status === 422 && err.code === 'line_refused'

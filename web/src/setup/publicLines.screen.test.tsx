@@ -126,6 +126,19 @@ it('shows only the list error when a stale confirm refetch fails', async () => {
   expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
 });
 
+it('shows one notice without refetching lines when a stale confirm interview read fails', async () => {
+  const { screen, state } = await openLines();
+  await mockStore.dispatch('setupPublicLine', { params: { id: state.interview_id }, body: { key: 'policy:about', text: 'Changed in another tab.' } });
+  mockStore.inject({ route: 'setup', status: 503 });
+  mockStore.inject({ route: 'setupPublicLines', status: 503 });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('alert').first()).toBeVisible();
+  await expect.poll(() => screen.container.querySelector('[aria-busy="true"]') === null).toBe(true);
+  expect(screen.getByRole('alert').elements()).toHaveLength(1);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLines')).toHaveLength(1);
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
 it('keeps an emptied review screen until Looks right after removing its last item', async () => {
   const state = await atSituations();
   const params = { id: state.interview_id };
