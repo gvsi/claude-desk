@@ -14,6 +14,7 @@ import {
   Notice,
   OUTCOME_GROUP_WORDS,
   PageHeader,
+  RulesReceipt,
   TextLink,
   ruleDiff,
 } from '../../ds/index.ts';
@@ -25,6 +26,8 @@ import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { draftFromAnswer, draftFromDiff, type RuleDraft } from './drafts.ts';
+import { rowsChangedBy, type ChangedRows } from './hub.ts';
+import { reducesMotion } from './landing.ts';
 import { RULES_TITLE } from './RulesPage.tsx';
 import { moneyCapWords } from './ruleWords.ts';
 
@@ -76,6 +79,14 @@ function Updated({ deskId }: { deskId: string }) {
   );
 }
 
+/** What a confirmed change changed, for Rules to show where it landed. */
+export interface ConfirmedChange {
+  /** The version now in force, from the API's answer, never the draft's guess. */
+  version: number;
+  /** The rows on Rules it changed (`rowsChangedBy`), from the draft's own cards. */
+  rows: ChangedRows;
+}
+
 /** "Was $500", or what a limit of 0 meant. */
 function wasWords(cents: number): string {
   return cents <= 0 ? 'Was: every payment asked you first' : `Was ${formatCents(cents)}`;
@@ -90,6 +101,11 @@ export interface RuleDraftReviewProps {
   inline?: boolean;
   /** Called once the owner confirmed the draft, or kept their rules; without it, keeping them goes back. */
   onDone?: (outcome: 'confirmed' | 'kept') => void;
+  /**
+   * Called once, before `onDone`, when a confirm the API answered applied the draft: the version
+   * its answer names and the rows on Rules the draft changed. Never on a failed confirm.
+   */
+  onConfirmed?: (change: ConfirmedChange) => void;
   /**
    * Applies the draft in the caller's way (setup's confirm); `confirmRules` by default. Either way
    * applying it makes `draft.version` the active rules, which is how a lost answer is settled.
@@ -114,13 +130,28 @@ export interface RuleDraftReviewProps {
  * has nothing to compare with, then `ChangeReview` with a row per change and the check in plain
  * words. Only a draft whose check passed can be confirmed, and nothing changes until it is.
  */
-export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, confirm, cancelLabel, onConfirmError, alreadyApplied = false }: RuleDraftReviewProps) {
+export function RuleDraftReview({
+  deskId,
+  draft,
+  title,
+  inline = false,
+  onDone,
+  onConfirmed,
+  confirm,
+  cancelLabel,
+  onConfirmError,
+  alreadyApplied = false,
+}: RuleDraftReviewProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
   const people = useQuery({ ...peopleQuery(deskId), ...READ_ONCE });
   const rules = useQuery({ ...rulesQuery(deskId), ...READ_ONCE });
   const [done, setDone] = useState(false);
+  // The version a confirm's answer named, which the receipt in Ask Claude says; null until then.
+  const [confirmed, setConfirmed] = useState<number | null>(null);
+  // The review fading out once its confirm is answered, before the receipt takes its place.
+  const [leaving, setLeaving] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -141,9 +172,18 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
     else if (outcome === 'kept') void (location.key !== 'default' ? navigate(-1) : navigate(root.href));
   };
 
-  const applied = () => {
+  /**
+   * The draft applied. `version` is the one the API's answer names (the confirm's, or the rules read
+   * after a lost answer), or null when a caller's own confirm answered with none. In Ask Claude the
+   * review fades out on motion-fast and the receipt lands in its place; under reduced motion, or
+   * with no version to say, the end state shows at once.
+   */
+  const applied = (version: number | null) => {
+    if (version !== null) onConfirmed?.({ version, rows: rowsChangedBy(draft, tools ?? []) });
     void queryClient.invalidateQueries({ queryKey: ['rules', deskId] });
-    setDone(true);
+    setConfirmed(version);
+    if (inline && version !== null && !reducesMotion()) setLeaving(true);
+    else setDone(true);
     finish('confirmed');
   };
 
@@ -151,9 +191,13 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
     setError(undefined);
     setPending(true);
     try {
-      if (confirm) await confirm();
-      else await request('confirmRules', { params: { desk_id: deskId }, body: { version: draft.version } });
-      applied();
+      if (confirm) {
+        await confirm();
+        applied(null);
+      } else {
+        const answer = await request('confirmRules', { params: { desk_id: deskId }, body: { version: draft.version } });
+        applied(answer.version);
+      }
     } catch (err) {
       // The session ended: the app goes back to the start, and there is nothing to say here.
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
@@ -166,7 +210,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
         // The answer was lost, so it may have applied: the rules as they stand say whether it did.
         // A caller's own confirm (setup's) applies the draft's version too, so they settle it as well.
         const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
-        if (now?.active.version === draft.version) applied();
+        if (now?.active.version === draft.version) applied(now.active.version);
         else setError(now === null || mayStillApply(err) ? NOT_CONFIRMED : ownerErrorCopy(err));
       } else {
         setError(ownerErrorCopy(err));
@@ -177,9 +221,13 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   };
 
   const finished = done || alreadyApplied;
+  // In Ask Claude, a confirm the API answered: its receipt, under Claude's message.
+  const receipt = inline && done && confirmed !== null;
 
   let body;
-  if (finished) {
+  if (receipt) {
+    body = <RulesReceipt version={confirmed} />;
+  } else if (finished) {
     body = <Updated deskId={deskId} />;
   } else if (tools === undefined && rules.isError) {
     body = (
@@ -235,8 +283,19 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
     );
   }
 
+  const className = `cd-rule-draft${leaving ? ' cd-rule-draft--leaving' : ''}${receipt ? ' cd-rule-draft--confirmed' : ''}`;
   return (
-    <div className="cd-rule-draft" onClick={followInAppLinks(navigate)}>
+    <div
+      className={className}
+      onClick={followInAppLinks(navigate)}
+      onAnimationEnd={(event) => {
+        if (!leaving || event.target !== event.currentTarget) return;
+        setLeaving(false);
+        setDone(true);
+      }}
+      // Nothing in the review can be pressed again while it fades out.
+      {...(leaving ? { inert: '' } : {})}
+    >
       {inline ? null : (
         <div className="cd-rule-draft__header">
           <Breadcrumb items={[root, { label: heading }]} linkComponent={RouterLink} />

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
@@ -31,7 +31,8 @@ import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { BusinessJobs } from './BusinessJobs.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { holdQuestion, hubSections, parseLimit } from './hub.ts';
+import { holdQuestion, hubSections, parseLimit, type HubSection } from './hub.ts';
+import { reducesMotion, takeLanding, useLanding, type Landing } from './landing.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
@@ -79,6 +80,59 @@ interface Said {
   line: string;
 }
 
+/** What has landed on Rules since the owner opened it: each tool's latest landing, and the payment limit's. */
+interface Landed {
+  tools: ReadonlyMap<string, number>;
+  limit: number | null;
+}
+
+const NOTHING_LANDED: Landed = { tools: new Map(), limit: null };
+
+/** `landed` with `landing`'s rows, each now from it. */
+function withLanding(landed: Landed, landing: Landing): Landed {
+  const tools = new Map(landed.tools);
+  for (const tool of landing.rows.tools) tools.set(tool, landing.id);
+  return { tools, limit: landing.rows.moneyLimit ? landing.id : landed.limit };
+}
+
+/** Under this width Ask Claude is a sheet over the page, so a change lands once it closes. */
+const ASK_CLAUDE_SHEET = '(max-width: 1023.98px)';
+
+/**
+ * The first row `landing` changed, in the page's order (`sections`), within the connector list
+ * `list`: the payment limit's line or a tool's row. Null when none is drawn.
+ */
+function firstLandedRow(list: Element, sections: readonly HubSection[], landing: Landing): HTMLElement | null {
+  const cards = list.querySelectorAll<HTMLElement>('.cd-connector-section');
+  for (const [index, section] of sections.entries()) {
+    const card = cards[index];
+    if (card === undefined) return null;
+    if (section.moneyLimit && landing.rows.moneyLimit) return card.querySelector<HTMLElement>('.cd-connector-section__above');
+    const changed: readonly string[] = landing.rows.tools;
+    const at = section.tools.findIndex((tool) => changed.includes(tool.key));
+    if (at !== -1) return card.querySelectorAll<HTMLElement>('.cd-connector-section__tool')[at] ?? null;
+  }
+  return null;
+}
+
+/** The nearest ancestor of `el` that scrolls, or none when the window does. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let at = el.parentElement; at !== null; at = at.parentElement) {
+    const { overflowY } = getComputedStyle(at);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && at.scrollHeight > at.clientHeight) return at;
+  }
+  return null;
+}
+
+/** Scrolls `row` to the middle of what shows it, unless it is in view already: at once under reduced motion. */
+function bringToMiddle(row: HTMLElement): void {
+  const scroller = scrollerOf(row);
+  const port = scroller === null ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+  const box = row.getBoundingClientRect();
+  if (box.top >= port.top && box.bottom <= port.bottom) return;
+  row.scrollIntoView({ block: 'center', behavior: reducesMotion() ? 'auto' : 'smooth' });
+}
+
 /** The payment limit's field while it is open, in one group at a time. */
 interface LimitField {
   group: string;
@@ -102,7 +156,7 @@ export function RulesPage() {
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
   const location = useLocation();
-  const { ask } = useAskClaude();
+  const { ask, open: asking } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
@@ -146,6 +200,38 @@ export function RulesPage() {
     if (drawn) reachPlace(location.key);
   }, [drawn, reachPlace, location.key]);
   const chips = question === null || (fixedChips.length === 0 && (!rules.isFetched || waitingForOpening)) ? fixedChips : [...fixedChips, question];
+
+  // A change the owner confirmed (in Ask Claude, or on its own review page) lands on the rows it
+  // changed once Rules shows the version it made, so its words cross-fade as the row lights up;
+  // while Ask Claude is a sheet over the page, once the sheet closes. Each row keeps "Updated"
+  // until the owner leaves Rules.
+  const landing = useLanding(deskId);
+  const [kept, setKept] = useState<Landed>(NOTHING_LANDED);
+  const [toReveal, setToReveal] = useState<Landing | null>(null);
+  const sheetOver = asking && window.matchMedia(ASK_CLAUDE_SHEET).matches;
+  const ready = landing !== null && active !== undefined && active.version >= landing.version && !sheetOver;
+  const landed = ready ? withLanding(kept, landing) : kept;
+  useEffect(() => {
+    if (!ready || landing === null) return;
+    setKept((now) => withLanding(now, landing));
+    setToReveal(landing);
+    takeLanding(landing);
+  }, [ready, landing]);
+  // The first row it changed, if it is out of view, scrolls to the middle: after the frame in which
+  // a closing sheet gives focus back to what opened it, so that doesn't scroll the page back.
+  const page = useRef<HTMLDivElement>(null);
+  const shown = rules.data;
+  useEffect(() => {
+    if (toReveal === null || shown === undefined) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const list = page.current?.querySelector('.cd-connector-list');
+      const row = list === null || list === undefined ? null : firstLandedRow(list, hubSections(shown, null), toReveal);
+      if (row !== null) bringToMiddle(row);
+    });
+    return () => cancelAnimationFrame(frame);
+    // Once per landing, at the rules it landed on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toReveal]);
 
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
@@ -240,7 +326,10 @@ export function RulesPage() {
                 key={section.connector.id}
                 connector={section.connector}
                 href={connectorPageHref(deskId, section.href)}
-                tools={section.tools.map((tool) => ({ ...tool, href: connectorPageHref(deskId, tool.href) }))}
+                tools={section.tools.map((tool) => {
+                  const at = landed.tools.get(tool.key);
+                  return { ...tool, href: connectorPageHref(deskId, tool.href), ...(at === undefined ? {} : { landed: at }) };
+                })}
                 linkComponent={RouterLink}
                 {...(section.moneyLimit
                   ? {
@@ -272,7 +361,7 @@ export function RulesPage() {
   }
 
   return (
-    <div className="cd-rules" onClick={followInAppLinks(navigate)}>
+    <div ref={page} className="cd-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-rules__header">
         <PageHeader
           title={RULES_TITLE}
