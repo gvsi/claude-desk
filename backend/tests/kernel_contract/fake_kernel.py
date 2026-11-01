@@ -140,6 +140,7 @@ from starlette.responses import Response
 from starlette.routing import Route, Router
 
 from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -901,7 +902,7 @@ def money(cents: int) -> str:
 # The kernel's policy-only phrase lists (`lexicon/policy_ai_denial.txt`, `lexicon/policy_free_price.txt`),
 # one entry per line, read on the accent-folded text.
 POLICY_AI_DENIAL = (
-    r"you(?:['’]ll|\s+will)\s+be\s+(?:talking|chatting|speaking)\s+(?:to|with)\s+an?\s+(?:real\s+)?(?:human|person)",
+    r"you(?:['’]ll|\s+will)\s+be\s+(?:talking|chatting|speaking)\s+(?:to|with)\s+an?\s+(?:real\s+)?(?:human|person)(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b)(?![^.!?]{0,40}\b(?:when|if|once)\s+you\s+(?:call|phone|ring|visit)\b|\s+(?:by|on\s+the|over\s+the)\s+phone\b)",
     r"you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)",
     r"you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
     r"(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))",
@@ -1045,7 +1046,8 @@ def public_policy_rules(text: str, key: str | None = None) -> list[str]:
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
         reading, origin = (public_commitment_reading(text) if rule == "language" or rule.startswith("policy.")
                            else (text, list(range(len(text)))))
-        if any(not (allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+        if any(not ((rule == "policy.ai_denial" and future_person_direction(text, origin[match.start()]))
+                    or allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
                     or ((rule.endswith(".promise") or rule == "policy.free_price")
                         and offers_amenity(text, origin[match.start()], origin[match.end() - 1] + 1)))
                for match in re.finditer(pattern, reading, re.IGNORECASE)):
@@ -1074,6 +1076,8 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
                            else (combined, list(range(len(combined)))))
         for match in re.finditer(pattern, reading, re.IGNORECASE):
             start, end = origin[match.start()], origin[match.end() - 1] + 1
+            if rule == "policy.ai_denial" and future_person_direction(combined, start):
+                continue
             # A service area's allowed number or a free amenity passes when its own card holds it ("Free parking.").
             if any(key is not None and low <= start and end <= high
                    and (allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)

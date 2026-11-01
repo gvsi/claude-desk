@@ -94,6 +94,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
@@ -319,7 +320,10 @@ def _policy_phrase_spans(text: str) -> set[tuple[int, int, str]]:
             for reading, origin in readings[keep_accents].items():
                 for pattern in patterns:
                     for match in pattern.finditer(reading):
-                        spans.add((origin[match.start()], origin[match.end() - 1] + 1, rule))
+                        start = origin[match.start()]
+                        if rule == "policy.ai_denial" and future_person_direction(text, start):
+                            continue
+                        spans.add((start, origin[match.end() - 1] + 1, rule))
     return spans
 
 

@@ -20,9 +20,18 @@ AI_DENIAL_REFUSALS = [(text, "policy.ai_denial") for text in (
     "Soy una persona.", "Soy una recepcionista humana.", "Soy un recepcionista humano.",
     "Soy una agente humana.", "Soy un agente humano.", "Soy una asistente humana.",
     "You'll be talking to a human.", "You will be chatting with a real person.",
-    "You’ll be speaking with a person.", "You'll be talking to a real person when you call.",
+    "You’ll be speaking with a person.",
+    "Call us. You'll be talking to a human.",
 )]
-AI_DENIAL_CONTROLS = ["No soy una persona, soy una IA.", "No soy una recepcionista humana."]
+AI_DENIAL_CONTROLS = [
+    "No soy una persona, soy una IA.", "No soy una recepcionista humana.",
+    "You'll be talking to a real person when you call.",
+    "Call us and you'll be talking to a real person.",
+    "If you call, you'll be speaking with a person, not a machine.",
+    "You'll be speaking with a human resources consultant.",
+    "You'll be speaking with a person by phone.",
+    "You'll be talking to a person once you visit.",
+]
 
 HUMAN_OCCUPATIONS = [
     "I am a human resource consultant.", "I'm a human relations consultant.",
