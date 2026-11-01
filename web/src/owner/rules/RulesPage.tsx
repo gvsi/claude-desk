@@ -51,6 +51,10 @@ export const RULES_TITLE = 'Rules';
 // The optional reads share one deadline, starting when the rules read settles.
 const NEEDS_YOU_FIRST_LOAD_WAIT_MS = 3_000;
 
+// How long Rules, back from a confirmed change, waits for its rules to have that change's version
+// before it draws the rules it has: a read can lag behind the confirm.
+const LANDING_WAIT_MS = 4_000;
+
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 
 /** RulesPage.css hides the chips below 640 px, so their read cannot move a phone's sections. */
@@ -231,10 +235,21 @@ export function RulesPage() {
   const landing = useLanding(deskId);
   // A review Rules opened comes back with its change confirmed, often before the rules read has the
   // version it made. Until it does, Rules shows its reading state, never the old rules, then draws
-  // the new rows and lands the change on them. A read that fails shows the rules it has, with its
-  // error. A change confirmed in Ask Claude lands on rows already drawn, as before.
+  // the new rows and lands the change on them. The wait ends early, for good, on a read that fails or
+  // waits for the network, and after `LANDING_WAIT_MS`: Rules then draws the rules it has, with the
+  // read's error if it has one, and the change still lands once a read has its version. A change
+  // confirmed in Ask Claude lands on rows already drawn, as before.
   const [openedWithLanding] = useState(() => landing !== null);
-  const awaitingLanding = openedWithLanding && landing !== null && active !== undefined && active.version < landing.version && !rules.isError;
+  const [landingWaitEnded, setLandingWaitEnded] = useState(false);
+  const behindLanding = openedWithLanding && landing !== null && active !== undefined && active.version < landing.version;
+  const readStuck = rules.isError || rules.isPaused;
+  if (behindLanding && readStuck && !landingWaitEnded) setLandingWaitEnded(true);
+  const awaitingLanding = behindLanding && !readStuck && !landingWaitEnded;
+  useEffect(() => {
+    if (!openedWithLanding) return undefined;
+    const timer = window.setTimeout(() => setLandingWaitEnded(true), LANDING_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [openedWithLanding]);
   // Suggestions use the capped optional wait above; they must not keep this region busy after it expires.
   const settled = [rules, people].every((read) => read.isFetched || read.isPaused);
   const [firstReadsEnded, setFirstReadsEnded] = useState(settled);

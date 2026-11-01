@@ -6,6 +6,7 @@
  * phone the sheet shows the receipt, and closing it brings Rules to the row. Under reduced motion
  * it is all at its end state at once.
  */
+import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { cdp, page, userEvent, type Locator } from 'vitest/browser';
@@ -15,7 +16,7 @@ import { apiPath, ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { worker } from '../../mocks/browser.ts';
 import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
-import { businessOut } from '../../mocks/readModels.ts';
+import { businessOut, rulesView } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
@@ -507,6 +508,74 @@ describe('a preset or a new payment limit', () => {
     await expect.poll(() => updatedRows(root)).toContain('Quote');
     await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
     expect(showsOutsideShapes(root, 'Version 7 of your rules')).toBe(false);
+  });
+
+  /** Rules, then the "Ask me first" preset's review, ready to confirm. Returns the version it makes. */
+  async function reviewAskMeFirst() {
+    const rendered = await renderRoute(`${DESK}/rules`);
+    await rendered.screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await rendered.screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    return { ...rendered, root: rendered.screen.container, version: desk().lastVersion };
+  }
+
+  /** Rivera's version 7 line, drawn on the page rather than in its loading shapes. */
+  const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Version 7 of your rules');
+
+  it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', async () => {
+    const { screen, root, version } = await reviewAskMeFirst();
+    // Every read after the confirm answers with the rules as they were, as a read that lags behind it might.
+    const older = rulesView(desk());
+    let lagging = true;
+    let olderReads = 0;
+    worker.use(
+      http.get(RULES_PATH, () => {
+        if (!lagging) return undefined;
+        olderReads += 1;
+        return HttpResponse.json(older);
+      }),
+    );
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const back = performance.now();
+
+    // The reading state, while the older rules keep coming, for a few seconds.
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await pause(2_000);
+    expect(olderReads).toBeGreaterThan(1);
+    expect(showsVersion7(root)).toBe(false);
+    // Then Rules draws the rules it has, with nothing marked as updated: they aren't the new ones yet.
+    await expect.poll(() => showsVersion7(root), { timeout: 5_000 }).toBe(true);
+    expect(performance.now() - back).toBeGreaterThan(3_000);
+    expect(updatedRows(root)).toEqual([]);
+
+    // A later read with the confirmed version still lands the change.
+    lagging = false;
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    expect(showsVersion7(root)).toBe(false);
+  });
+
+  it('a_read_waiting_for_the_network_ends_the_reading_state_at_once', async () => {
+    const { screen, root, version } = await reviewAskMeFirst();
+    // Offline as the change is confirmed: the read of the new rules waits for the network.
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const back = performance.now();
+
+    // Rules draws the rules it has well before the wait's deadline, with the network error it
+    // already shows for a read that can't go out, and nothing marked as updated yet.
+    await expect.poll(() => showsVersion7(root)).toBe(true);
+    expect(performance.now() - back).toBeLessThan(3_000);
+    await expect.element(screen.getByRole('button', { name: 'Try again' }).first()).toBeVisible();
+    expect(updatedRows(root)).toEqual([]);
+
+    // Back online, the read goes out, and the change lands.
+    onlineManager.setOnline(true);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
   });
 
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
