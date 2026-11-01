@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { useEffect, useState } from 'react';
+import { expect, fn, waitFor } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { ConnectorSection } from '../ConnectorSection/ConnectorSection.tsx';
-import { ConnectorList } from './ConnectorList.tsx';
+import { ConnectorList, type ConnectorListProps } from './ConnectorList.tsx';
 
 const meta = {
   title: 'Connectors/ConnectorList',
@@ -76,5 +77,36 @@ export const OnTheRulesPage: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('list', { name: 'Connectors' })).toBeVisible();
     await expect(canvas.queryByRole('button', { name: 'Add a connector' })).toBeNull();
+  },
+};
+
+/** The Rules page's summary for rules version `n`. */
+const versionLine = (n: number) => `Version ${n} of your rules, checked against the always-on rules`;
+
+/** The list drawn at version 7, then at 8 once it is on screen, as a confirmed change lands. */
+function VersionLands(args: ConnectorListProps) {
+  const [version, setVersion] = useState(7);
+  useEffect(() => setVersion(8), []);
+  return <ConnectorList {...args} summary={versionLine(version)} />;
+}
+
+export const VersionChanges: Story = {
+  args: { onAddConnector: undefined },
+  render: (args) => (
+    <div style={{ maxWidth: 960 }}>
+      <VersionLands {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote:
+      'The signed board draws the summary at rest; the review board UXC-P701-After draws the version number cross-fading as a confirmed change lands. Storybook shows the motion your system asks for: under reduced motion the new number is there at once.',
+  },
+  play: async ({ canvasElement }) => {
+    const line = canvasElement.querySelector<HTMLElement>('.cd-connector-list__summary');
+    if (!line) throw new Error('no summary');
+    // Only the number moves; once it has, the line reads the new version.
+    await Promise.all(line.getAnimations({ subtree: true }).map((fade) => fade.finished));
+    await waitFor(() => expect(line.textContent).toBe(versionLine(8)));
+    await expect(line.querySelector('.cd-cross-fade')).toBeNull();
   },
 };

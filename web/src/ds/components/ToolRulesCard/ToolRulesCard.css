@@ -1,6 +1,19 @@
 /* ToolRulesCard: a compact card. The tool's link on top, then the rules, each under a hairline,
    then the fallback row. Whatever comes first has no hairline above it. */
 
+/* Its content, which holds the fill it lights up in where a confirmed change landed: out to the
+   card's padding edge, at its corners, behind its words. */
+.cd-tool-rules {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+}
+
+.cd-tool-rules > .cd-landed-glow {
+  inset: calc(-1 * var(--space-16));
+  border-radius: calc(var(--radius-card) - 1px);
+}
+
 .cd-tool-rules__tool {
   display: flex;
   align-items: center;
@@ -14,8 +27,17 @@
   min-width: 0;
 }
 
+/* The tool's name, then "Updated" 8 px after it once a confirmed change landed on the card. */
+.cd-tool-rules__tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
 .cd-tool-rules__tool-name {
   display: block;
+  min-width: 0;
   color: var(--text-primary);
 }
 

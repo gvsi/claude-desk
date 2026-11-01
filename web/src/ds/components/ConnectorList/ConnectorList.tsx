@@ -1,11 +1,15 @@
 import { Children, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
 
 import './ConnectorList.css';
 
 export interface ConnectorListProps {
-  /** One line about the Desk's connectors and its rules version, from the active version. */
+  /**
+   * One line about the Desk's connectors and its rules version, from the active version. When it
+   * changes, as a confirmed change lands, only the words that changed cross-fade.
+   */
   summary: string;
   /** Adds "Add a connector" after the last connector: the screen opens the picker. The Rules page leaves it out, as connectors are added from the Connectors page. */
   onAddConnector?: () => void;
@@ -23,7 +27,9 @@ export function ConnectorList({ summary, onAddConnector, children }: ConnectorLi
   return (
     <div className="cd-connector-list">
       <div className="cd-connector-list__body">
-        <p className="cd-connector-list__summary cd-type-meta">{summary}</p>
+        <p className="cd-connector-list__summary cd-type-meta">
+          <CrossFade text={summary} fade byWord />
+        </p>
         <ul role="list" className="cd-connector-list__items" aria-label="Connectors">
           {sections.map((section, index) => (
             <li key={index} className="cd-connector-list__item">
