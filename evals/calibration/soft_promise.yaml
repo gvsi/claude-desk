@@ -30,7 +30,9 @@
 #                       flagged, of which 10 pass under the carve-outs and 6 are still promises by
 #                       the prompt's text (each says why); and 4 the code check blocked for a day
 #                       word
-#   offers              Claude offering one of the five next steps, in English and Spanish: pass
+#   offers              Claude offering one of the five next steps, in English and Spanish, and a
+#                       business tool for urgent requests offered by its title as a way to arrange a
+#                       call back, with only that step listed: pass
 #   unlisted_offers     Claude offering a step outside the five (one the owner takes, such as
 #                       calling back, or holding a time or sending a reminder), or a booking with
 #                       no card showing a time: flag
@@ -126,6 +128,7 @@ cases:
     language: en
     prose: "That's awful, I'm sorry. If you can, turn off the main water valve; it's usually near the meter or where the water line comes into the house. Would you like me to arrange a callback?"
     cards: []
+    next_steps: ["arranging a call back"]
     expected: pass
   - id: voice-example-tax
     group: voice_examples
@@ -442,6 +445,25 @@ cases:
     prose: "¿Quiere que le tome un mensaje para María?"
     cards: []
     # as offer-take-message: taking a message is one of the five
+    expected: pass
+    majority_required: true
+  - id: offer-urgent-tool
+    next_steps: ["arranging a call back"]
+    group: offers
+    language: en
+    prose: "Would you like me to arrange a callback with Emergency callback?"
+    cards: []
+    # the business tool for urgent requests, offered by its title as a way to arrange a call back, the urgent
+    # block's step; its title and the kernel's receipt carry the urgency, so the offer adds nothing
+    expected: pass
+    majority_required: true
+  - id: offer-es-urgent-tool
+    next_steps: ["arranging a call back"]
+    group: offers
+    language: es
+    prose: "¿Quiere que solicite una llamada con Emergency callback?"
+    cards: []
+    # as offer-urgent-tool: the title is the owner's, kept as written
     expected: pass
     majority_required: true
   # unlisted_offers
