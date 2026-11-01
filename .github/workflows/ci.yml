@@ -68,6 +68,8 @@ jobs:
         run: cd backend && uv run alembic upgrade head
       - name: Set the role passwords
         run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
       - name: Run the backend tests
         run: cd backend && uv run pytest -q
 
@@ -139,6 +141,8 @@ jobs:
         run: cd backend && uv run alembic upgrade head
       - name: Set the role passwords
         run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
       - name: Run the tier 1 evals
         run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
       - name: Run the kernel contract tests against the real kernel

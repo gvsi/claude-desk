@@ -357,6 +357,8 @@ def test_backend_job_fails_on_two_alembic_heads():
 
 GATE = ["uv", "run", "--project", "tools", "python", "-m", "desk_tools.gate"]
 MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
+# The job's database is thrown away with its runner, so it skips durable commits.
+THROWAWAY = "make db-throwaway"
 TIER2_BASE_SETUP = (
     'if [ -z "$RESULTS_BASE" ]; then\n'
     '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
@@ -366,12 +368,13 @@ TIER2_BASE_SETUP = (
 # What each check runs after its setup, as Plan 06a Task 2's job table says: a string is a plain
 # command, a list is the gate's arguments.
 CHECKS = {
-    "backend tests": [*MIGRATIONS, "cd backend && uv run pytest -q"],
+    "backend tests": [*MIGRATIONS, THROWAWAY, "cd backend && uv run pytest -q"],
     "kernel tests": ["cd kernel && cargo test --locked"],
     # Exactly the arguments test_gate's proofs regression exercises.
     "proofs": ["desk-prove --selftest", PROOFS_GATE],
     "tier 1 evals": [
         *MIGRATIONS,
+        THROWAWAY,
         [
             "--name", "tier1",
             "--run-if", "evals/run.py",
