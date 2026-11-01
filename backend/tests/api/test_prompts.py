@@ -120,9 +120,9 @@ def test_system_prompt_uses_the_business_policies():
         "Only on their yes, ask for what's missing of their name, a phone number or email and the reason, reusing "
         "what they've already given, and make that one call: the business tool for urgent requests (its "
         'description starts "Saves an urgent callback request") if one of your tools is one, otherwise '
-        "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in and the "
-        "card shows when to expect the call. Never present a callback window as help on the way, and never say "
-        "how soon. If they'd rather book, find open times instead.",
+        "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in; when the "
+        "card gives a time, it shows when to expect the call. Never present a callback window as help on the way, "
+        "and never say how soon. If they'd rather book, find open times instead.",
         "- When charter:policy:after_hours is there and they ask about reaching Rivera Plumbing outside its "
         "hours, show it with the policy clause.",
         "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
@@ -182,7 +182,7 @@ def test_urgent_requests_get_a_safety_step_then_ask_before_involving_the_owner()
     assert ('make that one call: the business tool for urgent requests (its description starts "Saves an urgent '
             'callback request") if one of your tools is one, otherwise native__request_callback.') in urgent
     # honest about timing, and nothing the soft-promise check reads as a promise
-    assert "say plainly that the request is in and the card shows when to expect the call" in urgent
+    assert "say plainly that the request is in; when the card gives a time, it shows when to expect the call." in urgent
     assert "Never present a callback window as help on the way, and never say how soon." in urgent
     assert "If they'd rather book, find open times instead." in urgent
     for promise in ("right away", "will call", "promise", "shortly"):

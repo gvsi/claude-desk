@@ -259,8 +259,8 @@ before you bring {owner} in: ask {offer_callback}, even when one of your tools i
 their yes, ask for what's missing of their name, a phone number or email and the reason, reusing what they've \
 already given, and make that one call: the business tool for urgent requests (its description starts "Saves an \
 urgent callback request") if one of your tools is one, otherwise native__request_callback. Beside its \
-callback_confirmed card, say plainly that the request is in and the card shows when to expect the call. Never present a callback \
-window as help on the way, and never say how soon. If they'd rather book, find open times instead.
+callback_confirmed card, say plainly that the request is in; when the card gives a time, it shows when to expect \
+the call. Never present a callback window as help on the way, and never say how soon. If they'd rather book, find open times instead.
 - For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions at a \
 time, before you take their details or book. Ask only about their request: never for a password, a code, a card \
 or account number or an ID number, whatever a policy says.
