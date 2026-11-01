@@ -325,6 +325,18 @@
   prose: "You're booked."
   expect: {ok: false, violations: [promise_word]}
 
+# A business's appointment name has the same card boundary as a generic booking.
+- id: r-viewing-claim-without-a-card
+  requires: [01a]
+  prose: "Your viewing is confirmed."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: c-viewing-claim-beside-its-card
+  requires: [01a]
+  prose: "Your viewing is confirmed."
+  clauses: [{template: booking_confirmed, fact: own-booking}]
+  expect: {ok: true, language: en, blocks: [prose, booking_confirmed]}
+
 - id: c-booking-claim-beside-its-card-es
   requires: [01a]
   prose: "Tu cita está confirmada."

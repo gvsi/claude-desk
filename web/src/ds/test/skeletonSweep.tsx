@@ -11,6 +11,7 @@ import { page } from 'vitest/browser';
 
 import { Skeleton, SkeletonCard } from '../components/Skeleton/Skeleton.tsx';
 import { SkeletonScreen } from '../components/Skeleton/SkeletonScreen.tsx';
+import { framesWithin } from './framesWithin.ts';
 import { watchRegion } from './skeletonRegion.ts';
 
 /** The shapes the checks read, by anchor: four left edges, one in an indented card, one a wide block. */
@@ -79,7 +80,7 @@ export async function mountSweep(): Promise<Record<SweepShape, HTMLElement>> {
 
 /** Resolves on the next frame the browser draws. */
 export function nextFrame(): Promise<number> {
-  return new Promise((resolve) => requestAnimationFrame(resolve));
+  return framesWithin('cd-skeleton-sweep frame');
 }
 
 /** The band's width, from its token. */

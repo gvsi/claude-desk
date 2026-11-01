@@ -832,7 +832,7 @@ const decisions = {
   executed: afterHold('executed', 6),
   failed: afterHold('failed', 6),
   unknown: afterHold('unknown', 6),
-  refused_at_execution: afterHold('refused_at_execution', 5),
+  refused_at_execution: { ...afterHold('refused_at_execution', 5), owner_plain: "Your rules changed before this ran, so it wasn't done." },
 } satisfies Record<DecisionState, Decision>;
 
 /**

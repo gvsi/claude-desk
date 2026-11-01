@@ -69,7 +69,10 @@ function levelOf(state: SessionState): string {
  */
 function latestOf(read: OwnerTranscriptRead): string | null {
   const items = [...read.items].sort((a, b) => b.n - a.n);
-  for (const { event } of items) if (event !== null && 'visitor_plain' in event) return event.visitor_plain;
+  for (const { event, owner_plain: ownerPlain } of items) {
+    if (event === null || !('visitor_plain' in event)) continue;
+    return event.type !== 'message' && event.state === 'refused_at_execution' && ownerPlain != null ? ownerPlain : event.visitor_plain;
+  }
   return null;
 }
 

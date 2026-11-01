@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { FONT_TIMEOUT, withinDeadline } from '../../test/fonts.ts';
 import { CodeBlock } from './CodeBlock.tsx';
 
 /** The example request on the agents page, as the board writes it: the A2A contract's endpoint, headers and body. */
@@ -47,7 +48,7 @@ export const ExampleRequest: Story = {
   parameters: { canvasNote: 'The example request under “Connect your own agent”, at the card’s inner width, 726 px.' },
   play: async ({ canvasElement }) => {
     // The mono font may arrive after the first layout, and a wider fallback wraps the longest line.
-    await document.fonts.load('13px "JetBrains Mono"');
+    await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Code block JetBrains Mono');
     // code_reads_as_written: every line exactly as given, in mono, marked as machine text.
     const block = canvasElement.querySelector('pre')!;
     await expect(block).not.toBeNull();
@@ -81,7 +82,7 @@ export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-06-Phone draws the request in a narrow card: long lines wrap inside the block, and nothing scrolls sideways.' },
   play: async ({ canvasElement }) => {
-    await document.fonts.load('13px "JetBrains Mono"');
+    await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Code block JetBrains Mono');
     const block = canvasElement.querySelector('pre')!;
     await expectWholeLines(block, REQUEST.split('\n').length);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
