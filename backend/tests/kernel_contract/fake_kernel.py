@@ -897,12 +897,15 @@ def money(cents: int) -> str:
 
 
 PUBLIC_POLICY_PATTERNS = (
-    ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"),
-    ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles)\b"),
-    ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?)\b"),
+    ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves)\b"),
+    ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
+     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad)\b"),
+    ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|"
+     r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
     ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
-     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|garant(?:o|imos|em)|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
      r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
     ("lex.en.promise", r"\b(?:(?<!feel )free(?! to\b))\b"),
@@ -938,13 +941,40 @@ def public_commitment_reading(text: str) -> tuple[str, list[int]]:
     return "".join(chars), origin
 
 
+SERVICE_AREA_BLANK = r"[\s\-‐‑]"
+SERVICE_AREA_UNIT = r"(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b"
+SERVICE_AREA_CARDINAL = (
+    r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
+    r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
+    r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
+SERVICE_AREA_AFTER_CARDINAL = (
+    rf"(?:{SERVICE_AREA_BLANK}+(?:y{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_CARDINAL}\b){{0,2}}"
+    rf"(?:{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+a"
+    rf"{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b)")
+SERVICE_AREA_DAY_WORDS = (
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
+    rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
+    rf"{SERVICE_AREA_BLANK}+semana|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches")
+
+
 def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Mirror the service-area allowance, contained in that policy's own text."""
+    """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
+    number before a distance unit or a year, a cardinal word before a unit or "days a week", "miles" as the
+    unit, and weekdays, weekends and parts of the day."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
-    return rule in {"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"} or (rule == "digit" and (
-        re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
-        or re.match(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", text[end:], re.IGNORECASE) is not None))
+    hit, after = text[start:end], text[end:]
+    if rule == "digit":
+        return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+                or re.match(rf"{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}", after, re.IGNORECASE) is not None)
+    if rule in ("lex.en.number", "lex.es.number"):
+        return re.fullmatch(r"miles|millas", hit, re.IGNORECASE) is not None or (
+            re.fullmatch(SERVICE_AREA_CARDINAL, hit, re.IGNORECASE) is not None
+            and re.match(SERVICE_AREA_AFTER_CARDINAL, after, re.IGNORECASE) is not None)
+    if rule in ("lex.en.date", "lex.es.date"):
+        return re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
+    return False
 
 
 def public_policy_rules(text: str, key: str | None = None) -> list[str]:
@@ -964,8 +994,10 @@ def public_policy_rules(text: str, key: str | None = None) -> list[str]:
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        if (re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE)
-                and not allowed_service_area_hit(key, text, 0, 0, rule)):
+        reading, origin = (public_commitment_reading(text) if rule == "language"
+                           else (text, list(range(len(text)))))
+        if any(not allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+               for match in re.finditer(pattern, reading, re.IGNORECASE)):
             rules.add(rule)
     if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
         rules.add("language")

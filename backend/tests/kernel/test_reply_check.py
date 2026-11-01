@@ -31,6 +31,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, render, reply_check
+from desk.next_steps import NEXT_STEPS
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
@@ -40,6 +41,10 @@ from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_approvals import answered
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
+
+VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
+    "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+    "native.quote", "native.request_callback", "native.start_verification")]
 
 ROUTE = "POST /check_reply"
 
@@ -1014,7 +1019,7 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
-    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -1864,7 +1869,7 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
-    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -1927,7 +1932,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[card.text])]
+                                                     cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)
@@ -2303,6 +2308,7 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
     ("Trabajamos con pequeños negocios y familias.", []),
     ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
     ("Pregunte por nuestros servicios aquí.", []),
+    ("Se requiere un garante.", []),
 ])
 def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
@@ -2313,6 +2319,15 @@ def test_scan_public_text(text, rules):
     "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
     "We drive a few miles past Oakland.", "The East Bay, seven days a week.",
     "Serving the East Bay since 1998.", "We do evenings and weekends.", "Trabajamos fines de semana.",
+    # A distance with a hyphen or a space before a singular or plural unit.
+    "Within a 25-mile radius of Oakland.", "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.", "A 50-km radius.", "Dentro de 1 kilómetro.",
+    "Within 25 kms of Oakland.", "Within 25 kilometres of Oakland.", "Hasta 40 kilometros de Madrid.",
+    # Cardinal number words before a distance unit or "days a week", and the days and parts of the
+    # day the business works.
+    "Within twenty-five miles of Oakland.", "Within a ten-mile radius.", "Dentro de treinta y cinco kilómetros.",
+    "Trabajamos siete días a la semana.", "Monday to Friday, mornings and afternoons.",
+    "De lunes a viernes, mañanas y tardes.", "Sábados y domingos.",
 ])
 def test_public_service_area_allowance_stays_with_its_key(text):
     assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
@@ -2326,9 +2341,40 @@ def test_public_service_area_allowance_stays_with_its_key(text):
     "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
     "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
     "Trip fee: 50.",
+    # Outside the distance allowance: round-the-clock hours, ZIP codes and years in business.
+    "Oakland and Berkeley, 24/7.", "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "Serving Oakland for 25 years.",
 ])
 def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     assert reply_check.scan_public_policies({"policy:service_area": text})
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    # Fractions and discounts
+    ("Outside Oakland, half off.", ["lex.en.number"]),
+    ("Half price outside Oakland.", ["lex.en.number"]),
+    ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
+    ("Fuera de Oakland, cobramos la mitad.", ["lex.es.number"]),
+    # Amounts with no currency word
+    ("Within 25 miles. Trip fee 1500.", ["digit"]),
+    ("Within 25 miles, 1000 off.", ["digit"]),
+    ("Oakland: 1500 minimum.", ["digit"]),
+    ("Trip charge twenty-five outside Oakland.", ["lex.en.number"]),
+    ("Trip fee: fifty.", ["lex.en.number"]),
+    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
+    # Response times and dates
+    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Same-day service in Oakland.", ["lex.en.date"]),
+    ("We can be there tomorrow.", ["lex.en.date"]),
+    ("Servicio el mismo día en Oakland.", ["lex.es.date"]),
+    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date", "lex.es.number"]),
+    ("Oakland, until 6 pm.", ["digit", "lex.en.date"]),
+    ("Seven days to finish any job in Oakland.", ["lex.en.number"]),
+])
+def test_public_service_area_allows_only_distances_years_and_day_words(text, rules):
+    """Under the service area, these rules refuse what they refuse under any other key."""
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {"policy:service_area": rules}
+    assert set(rules) <= set(reply_check.scan_public_policies({"policy:pricing": text})["policy:pricing"])
 
 
 def test_public_service_area_allowance_cannot_cross_into_other_policies_or_prose():
@@ -2364,6 +2410,14 @@ def test_public_text_refuses_format_controls(control, honest):
      {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
     ({"policy:a": "You are free to", "policy:b": "all clients"},
      {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+    # Call claims split across two policies, and a claim-group lookahead reading into the next one
+    ({"policy:a": "Your callback is", "policy:b": "scheduled."},
+     {key: ["lex.en.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Tu llamada está", "policy:b": "confirmada."},
+     {key: ["lex.es.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "tu cita."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "la tarea."}, {}),
 ])
 def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
     assert reply_check.scan_public_policies(values) == fields
@@ -2511,7 +2565,7 @@ def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(m
 
 
 @pytest.mark.parametrize("text", [
-    "garanto", "garantimos", "garante", "garantem", "garantia",
+    "garanto", "garantimos", "garantem", "garantia",
     "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
 ])
 def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
@@ -2522,7 +2576,9 @@ def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch)
     assert "language" not in prose_rules  # policy-only vocabulary
 
 
-@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía"])
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía",
+                                  # Spanish for guarantor, a Portuguese verb form too
+                                  "Se requiere un garante.", "El garante firma el contrato."])
 def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
     monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
     assert "language" not in reply_check.scan_public_text(text)

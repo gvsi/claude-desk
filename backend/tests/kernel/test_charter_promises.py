@@ -29,6 +29,11 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     "Serving the East Bay since 1998.",
     "We do evenings and weekends.",
     "Trabajamos fines de semana.",
+    "Within a 25-mile radius of Oakland.",
+    "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.",
+    "A 50-km radius.",
+    "Dentro de 1 kilómetro.",
 ])
 async def test_service_area_allows_area_and_weekly_availability(app, client, text):
     copy = await rivera(app, client)
@@ -213,7 +218,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     public_before = (await client.get(f"/public/{copy.slug}")).json()["charter"]
     entries = len(await entries_of(app, copy))
     fields = {f"policy:{key}": rules for key in POLICY_KEYS}
-    area_rules = {"within two hours": [], "after 6 pm": ["digit"], "Monday to Friday": []}.get(text, rules)
+    area_rules = {"Monday to Friday": []}.get(text, rules)
     if area_rules:
         fields["policy:service_area"] = area_rules
     else:
@@ -244,6 +249,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Pour-over coffee available",
     "Les ofrecemos envío a domicilio",
     "Emergency service available",
+    "Se requiere un garante.",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
     copy = await rivera(app, client)
@@ -285,6 +291,10 @@ async def test_rivera_seed_policies_pass_the_scan_and_charter_write(app, client,
     (("Sin", "costo para consultas aquí."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
     (("Your appointment is", "confirmed."), ("Tell us", "what you need."), "lex.en.booking"),
     (("Tu cita está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.booking"),
+    (("Your callback is", "scheduled."), ("Tell us", "what you need."), "lex.en.callback"),
+    (("Tu llamada está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.callback"),
+    # The claim's participle comes before the booking noun it needs, in the next policy.
+    (("Ya quedó hecha", "tu cita."), ("Ya quedó hecha", "la tarea."), "lex.es.booking"),
 ])
 async def test_split_policy_claims_follow_public_order_and_refuse_only_contributors(
         app, client, create, unsafe, honest, rule):

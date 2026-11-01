@@ -9,7 +9,7 @@
  */
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import type { SessionState } from '../api/contracts.ts';
+import type { RenderedBlock, SessionState } from '../api/contracts.ts';
 import {
   Button,
   CHAT_ENDED_COPY,
@@ -41,6 +41,7 @@ import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
+import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { messageReceiptVisible } from './messageReceipt.ts';
@@ -98,6 +99,7 @@ function failureLine(failure: SendFailure | undefined, language: CopyLanguage, c
 }
 
 interface RowProps {
+  paymentBlock: (block: RenderedBlock) => RenderedBlock;
   row: ChatRow;
   ownerPreview: boolean;
   ownerName: string;
@@ -108,7 +110,7 @@ interface RowProps {
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerPreview, ownerName, language, onResend, after = [] }: RowProps) {
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, paymentBlock, after = [] }: RowProps) {
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
@@ -174,7 +176,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, after =
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />
+        <ClaudeMessage blocks={ev.blocks.map(paymentBlock)} language={ev.language} ownerName={ownerName} />
       )}
     </TranscriptRow>
   );
@@ -464,6 +466,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
@@ -722,6 +725,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             <ChatRowView
               key={rowKey(row)}
               row={row}
+              paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
               ownerName={ownerName}
               language={language}

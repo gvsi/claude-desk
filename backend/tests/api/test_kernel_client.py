@@ -305,6 +305,33 @@ async def test_proving_routes_get_60_s():
             "POST /policy/{version}/probe", PolicyProbeRequest(desk_id="d1", probes=[]), path={"version": 3}) == []
 
 
+async def test_reply_check_gets_10_s_without_changing_other_routes(monkeypatch):
+    from desk.api import kernel_client
+    from desk.contracts import ReplyDraft
+    from desk.kernel_api import CheckReplyRequest
+
+    assert kernel_client.REPLY_CHECK_TIMEOUT_S == 10.0
+    kernel = ScriptedKernel()
+    # An unusable answer still records the request's transport timeout.
+    kernel.fail(httpx.Response(503))
+    async with kernel.client() as http:
+        for route, body in [("POST /check_reply", CheckReplyRequest(
+                draft=ReplyDraft(session_id="s1", generation=0, prose="Hello.", clauses=[]))),
+                            ("GET /whoami", None)]:
+            with pytest.raises(KernelUnavailable):
+                await http.session("session-token-1").call(route, body)
+    assert [request.extensions["timeout"]["read"] for request in kernel.requests] == [10.0, 6.0]
+
+    # Exercise the outer deadline over an in-process transport too, without a ten-second sleep.
+    monkeypatch.setattr(kernel_client, "REPLY_CHECK_TIMEOUT_S", 0.02)
+    kernel.fail(lambda request: asyncio.sleep(0.1, httpx.Response(503)))
+    async with kernel.client(timeout_s=1) as http:
+        with pytest.raises(KernelUnavailable) as caught:
+            await http.session("session-token-1").call("POST /check_reply", CheckReplyRequest(
+                draft=ReplyDraft(session_id="s1", generation=0, prose="Hello.", clauses=[])))
+    assert caught.value.status is None
+
+
 async def asgi_kernel(scope, receive, send):
     """An in-process kernel, as FakeKernel will be: fine for tests, refused in production."""
     await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json")]})

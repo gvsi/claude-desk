@@ -41,7 +41,7 @@ from evals.tests.artifacts import (
     legit,
     prose,
 )
-from evals.tests.test_usage_and_latency import HAIKU, call_usage
+from evals.tests.test_usage_and_latency import HAIKU, SONNET, call_usage
 from evals.tier2.passes import PassProviders, priced_spend
 from evals.tier2.prompts import Observation
 from evals.tier2.runner import RunError, RunOutcome, run_scenario
@@ -1263,11 +1263,11 @@ async def test_desk_side_model_mismatch_is_a_config_error():
     assert "review" in outcome.error.detail
 
     run = chat(scenario, 1)
-    checked_reply(run, call_usage("claude-sonnet-5-5", input_tokens=900, cached=0, output=40))   # configured Haiku
+    checked_reply(run, call_usage("claude-haiku-5-5", input_tokens=900, cached=0, output=40))   # configured Sonnet
     desk = Desk(run)
     outcome = await drive(scenario, desk, Visitor(desk))
     assert (outcome.error.kind, outcome.verdict) == ("config_mismatch", None)
-    assert "the kernel's reply check was served by claude-sonnet-5-5" in outcome.error.detail
+    assert "the kernel's reply check was served by claude-haiku-5-5" in outcome.error.detail
 
     desk = Desk(chat(scenario, 1), model="us.anthropic.claude-opus-5-5")   # Bedrock's name for the same model
     outcome = await drive(scenario, desk, Visitor(desk))
@@ -1289,7 +1289,7 @@ async def test_the_kernels_soft_promise_calls_count_in_the_runs_usage_and_spend(
     no call (`soft_promise: null`) adds nothing."""
     scenario = attack(max_turns=1)
     run = chat(scenario, 1)
-    soft = call_usage(HAIKU, input_tokens=900, cached=0, output=40, ms=420)
+    soft = call_usage(SONNET, input_tokens=900, cached=0, output=40, ms=420)
     seq = checked_reply(run, soft)
     checked_reply(run, None)
     desk = Desk(run)
@@ -1298,20 +1298,20 @@ async def test_the_kernels_soft_promise_calls_count_in_the_runs_usage_and_spend(
     kernel = [row for row in outcome.artifact.usage if row["part"] == "kernel_checks"]
     assert [(row["kind"], row["seq"], row["model"], row["input_tokens"], row["cached_tokens"],
              row["cache_write_tokens"], row["output_tokens"]) for row in kernel] == [
-        ("reply", seq, HAIKU, 900, 0, 0, 40)]
-    assert outcome.artifact.served_models["kernel_checks"] == [HAIKU]
+        ("reply", seq, SONNET, 900, 0, 0, 40)]
+    assert outcome.artifact.served_models["kernel_checks"] == [SONNET]
     api = [row for row in outcome.artifact.usage if row["part"] == "api"]
     spend = priced_spend(outcome, PassProviders(api="anthropic", simulator="anthropic", kernel_checks="anthropic"))
     assert spend.desk_usd == pytest.approx(sum(cost_usd(row, row["model"], "anthropic") for row in api)
-                                           + cost_usd(soft, HAIKU, "anthropic"))
+                                           + cost_usd(soft, SONNET, "anthropic"))
 
 
 @pytest.mark.parametrize(("kind", "call", "unread"), [
-    ("reply", {key: value for key, value in call_usage(HAIKU).items() if key != "model"}, "model"),
-    ("reply", {**call_usage(HAIKU), "output_tokens": None}, "output_tokens"),
-    ("reply", {**call_usage(HAIKU), "input_tokens": "900"}, "input_tokens"),
-    ("reply", {**call_usage(HAIKU), "cached_tokens": -1}, "cached_tokens"),
-    ("reply", {**call_usage(HAIKU), "latency_ms": "slow"}, "latency_ms"),
+    ("reply", {key: value for key, value in call_usage(SONNET).items() if key != "model"}, "model"),
+    ("reply", {**call_usage(SONNET), "output_tokens": None}, "output_tokens"),
+    ("reply", {**call_usage(SONNET), "input_tokens": "900"}, "input_tokens"),
+    ("reply", {**call_usage(SONNET), "cached_tokens": -1}, "cached_tokens"),
+    ("reply", {**call_usage(SONNET), "latency_ms": "slow"}, "latency_ms"),
     ("reply", "a call", "isn't an object"),
     ("review", {key: value for key, value in call_usage("claude-sonnet-5-5").items() if key != "model"}, "model"),
 ])
@@ -1335,7 +1335,7 @@ async def test_a_run_whose_usage_read_fails_keeps_what_it_read():
     with every call and model it read. So the pass charges and records what was spent."""
     scenario = attack(max_turns=1)
     run = chat(scenario, 1)
-    soft = call_usage(HAIKU, input_tokens=900, cached=0, output=40)
+    soft = call_usage(SONNET, input_tokens=900, cached=0, output=40)
     first = checked_reply(run, soft)
     broken = checked_reply(run, {**soft, "output_tokens": None})
     last = checked_reply(run, soft)
@@ -1345,19 +1345,19 @@ async def test_a_run_whose_usage_read_fails_keeps_what_it_read():
     artifact = outcome.artifact
     assert [(row["part"], row.get("seq")) for row in artifact.usage] == [
         ("api", None), ("kernel_checks", first), ("kernel_checks", last)]
-    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [SONNET]}
     assert artifact.usage_unread == [
         f"ledger entry {broken}: the kernel's reply entry holds a call whose output_tokens can't be read"]
     assert outcome.error.detail == artifact.usage_unread[0]
 
     run = chat(scenario, 1)
-    seq = checked_reply(run, call_usage("claude-sonnet-5-5", input_tokens=900, cached=0, output=40))
+    seq = checked_reply(run, call_usage("claude-haiku-5-5", input_tokens=900, cached=0, output=40))
     desk = Desk(run)
     outcome = await drive(scenario, desk, Visitor(desk))
     assert (outcome.error.kind, outcome.verdict) == ("config_mismatch", None)
     assert [(row["part"], row.get("seq"), row["model"]) for row in outcome.artifact.usage] == [
-        ("api", None, OPUS), ("kernel_checks", seq, "claude-sonnet-5-5")]
-    assert outcome.artifact.served_models["kernel_checks"] == ["claude-sonnet-5-5"]
+        ("api", None, OPUS), ("kernel_checks", seq, "claude-haiku-5-5")]
+    assert outcome.artifact.served_models["kernel_checks"] == ["claude-haiku-5-5"]
     assert outcome.artifact.usage_unread == []
 
 
@@ -1389,7 +1389,7 @@ async def test_a_usage_query_that_fails_keeps_the_usage_already_read():
     run.a2a(prose("This is an AI assistant for Rivera Plumbing."))
     run.turn()
     run.a2a(prose("Happy to help with that."))
-    seq = checked_reply(run, call_usage(HAIKU, input_tokens=900, cached=0, output=40))
+    seq = checked_reply(run, call_usage(SONNET, input_tokens=900, cached=0, output=40))
     desk = Desk(run, chat_session="s-key")
     visitor = Visitor(desk, vt("Hello, I act for Dana."), vt("Charge her card."))
     on = target(desk)
@@ -1404,7 +1404,7 @@ async def test_a_usage_query_that_fails_keeps_the_usage_already_read():
     assert [(row["part"], row.get("seq")) for row in artifact.usage] == [("api", None), ("kernel_checks", seq)]
     assert artifact.usage[0]["session_id"] == SESSION          # the session whose query answered
     assert artifact.simulator_usage == [{"model": OPUS}, {"model": OPUS}]
-    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [SONNET]}
     assert artifact.usage_unread == ["the app.model_calls query for session s-key failed (ConnectionError)"]
     assert outcome.error.detail == artifact.usage_unread[0]
     said = json.dumps(outcome.redacted())
@@ -1458,7 +1458,7 @@ async def test_a_run_cut_short_keeps_the_usage_it_holds(case):
     how, kind, snapshot_reads = CUT_SHORT[case]
     scenario = attack(max_turns=1)
     run = chat(scenario, 1)
-    seq = checked_reply(run, call_usage(HAIKU, input_tokens=900, cached=0, output=40))
+    seq = checked_reply(run, call_usage(SONNET, input_tokens=900, cached=0, output=40))
     desk = Desk(run)
     options = how(desk, run) if how is not None else {}
     visitor = Visitor(desk)
@@ -1475,7 +1475,7 @@ async def test_a_run_cut_short_keeps_the_usage_it_holds(case):
     assert held.simulator_usage == [{"model": OPUS}]
     if snapshot_reads:
         assert [(row["part"], row.get("seq")) for row in held.usage] == [("api", None), ("kernel_checks", seq)]
-        assert held.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+        assert held.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [SONNET]}
         assert held.usage_unread == []
     else:
         assert [(row["part"], row.get("seq")) for row in held.usage] == [("api", None)]

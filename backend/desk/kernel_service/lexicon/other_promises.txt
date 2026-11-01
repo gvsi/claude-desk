@@ -16,7 +16,8 @@ folded	remboursée?s?|remboursements?
 # Portuguese
 accented	grátis
 folded	sem[\s-]+(?:custos?|taxas?|cobrancas?)
-folded	descontos?|garantid[oa]s?|garant(?:o|imos|e|em)
+# Not "garante", which is also Spanish for a guarantor ("Se requiere un garante.").
+folded	descontos?|garantid[oa]s?|garant(?:o|imos|em)
 # Keep the Portuguese noun distinct from Spanish garantía.
 accented	garantia
 

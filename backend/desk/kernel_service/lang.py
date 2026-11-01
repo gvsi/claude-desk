@@ -83,24 +83,6 @@ def detect(text: str) -> Detected:
     of another language than of English (leaving out the English ones it writes too, `EN_SHARED`)
     and at least as many as of Spanish, or four or more words with no marker of any language;
     `none` for no words, a tie between English and Spanish, or a few unmarked words ("OK")."""
-    return _detect(text, unmarked_is_other=True)
-
-
-# Addresses supply no policy-language evidence; their contents still undergo lexical scans.
-POLICY_ADDRESS = re.compile(
-    r"\b(?:[a-z][a-z\d+.-]*://[^\s<>]+|"
-    r"(?:[\w.+%-]+@)?(?:[\w-]+\.)+[^\W\d_]{2,}(?::\d+)?(?:[/?#][^\s<>]*)?)", re.IGNORECASE)
-POLICY_NON_PREFIX = re.compile(r"\bnon[-‐‑‒–—−](?=[^\W\d_])", re.IGNORECASE)
-
-
-def positive_other_language(text: str) -> bool:
-    """Policy evidence without address tokens, English non- prefixes or unmarked-word guesses."""
-    evidence = POLICY_ADDRESS.sub(" ", unicodedata.normalize("NFKC", text))
-    evidence = POLICY_NON_PREFIX.sub("", evidence)
-    return _detect(evidence, unmarked_is_other=False) == "other"
-
-
-def _detect(text: str, *, unmarked_is_other: bool) -> Detected:
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
     if not words:
@@ -118,7 +100,45 @@ def _detect(text: str, *, unmarked_is_other: bool) -> Detected:
     if other > en - shared and other >= es:
         return "other"
     if en == es == 0:
-        return "other" if unmarked_is_other and len(words) >= MIN_UNMARKED_WORDS else "none"
+        return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"
     if en == es:
+        return "none"
+    return "en" if en > es else "es"
+
+
+# Addresses supply no policy-language evidence; their contents still undergo lexical scans.
+POLICY_ADDRESS = re.compile(
+    r"\b(?:[a-z][a-z\d+.-]*://[^\s<>]+|"
+    r"(?:[\w.+%-]+@)?(?:[\w-]+\.)+[^\W\d_]{2,}(?::\d+)?(?:[/?#][^\s<>]*)?)", re.IGNORECASE)
+POLICY_NON_PREFIX = re.compile(r"\bnon[-‐‑‒–—−](?=[^\W\d_])", re.IGNORECASE)
+
+
+def positive_other_language(text: str) -> bool:
+    """Policy evidence without address tokens, English non- prefixes or unmarked-word guesses."""
+    evidence = POLICY_ADDRESS.sub(" ", unicodedata.normalize("NFKC", text))
+    evidence = POLICY_NON_PREFIX.sub("", evidence)
+    return _marked_language(evidence) == "other"
+
+
+def _marked_language(text: str) -> Detected:
+    """`detect` with unmarked words read as `none`, never `other`: only another script or another
+    language's markers are evidence of it. Keep it in step with `detect`."""
+    lowered = unicodedata.normalize("NFKC", text).lower()
+    words = WORD.findall(lowered)
+    if not words:
+        return "none"
+    letters = [ch for ch in lowered if ch.isalpha()]
+    non_latin = sum(not unicodedata.name(ch, "").startswith("LATIN ") for ch in letters)
+    if non_latin > NON_LATIN_SHARE * len(letters):
+        return "other"
+    en = sum(word in EN_MARKERS for word in words)
+    es = sum(word in ES_MARKERS for word in words)
+    if any(mark in lowered for mark in SPANISH_MARKS):
+        es += SPANISH_MARK_BONUS
+    other = sum(word in OTHER_MARKERS for word in words)
+    shared = sum(word in EN_SHARED for word in words)
+    if other > en - shared and other >= es:
+        return "other"
+    if en == es:                                          # unmarked words too
         return "none"
     return "en" if en > es else "es"

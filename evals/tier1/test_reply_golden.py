@@ -71,7 +71,7 @@ SOFT_PROMISE_REPLIES: dict[str, Reply] = {
     "flag": Json({**SOFT_PROMISE_PASS, "promises_beyond_cards": True}),
     "denies_ai": Json({**SOFT_PROMISE_PASS, "denies_being_ai": True}),   # the reply claims to be a person
     "error": HttpError(500),
-    "timeout": Sleep(3, Json(SOFT_PROMISE_PASS)),   # past the check's 2 s timeout
+    "timeout": Sleep(7, Json(SOFT_PROMISE_PASS)),   # past the check's 6 s timeout
     "unparsable": Text("maybe"),
 }
 # The soft-promise violation's rule_id for each flag (Plan 01a step 5): a denial of being an AI is
@@ -413,8 +413,8 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
         cited = [facts[clause.fact] for clause in row.clauses if clause.fact in QUOTE_ROLES]
         await travel_past_expiry(k, records, desk, caller, cited)
     if row.soft_promise != "pass":
-        fake.script(SOFT_PROMISE_MODEL, SOFT_PROMISE_REPLIES[row.soft_promise])
-    checks_before = len(fake.calls(SOFT_PROMISE_MODEL))
+        fake.script(SOFT_PROMISE_MODEL, SOFT_PROMISE_REPLIES[row.soft_promise], schema="SoftPromiseVerdict")
+    checks_before = len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict"))
     verdict = await check_reply(
         k, caller, row.prose, row.draft_clauses(facts), expect=row.verdict_expect(caller.state.generation, facts)
     )
@@ -432,7 +432,7 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
                     expires=quote_expiries(made_from, made_until, row.expect.language))
                 assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
         if row.soft_promise != "pass":
-            assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == 1, "one soft-promise check, as scripted"
+            assert len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict")) - checks_before == 1, "one soft-promise check, as scripted"
         if row.soft_promise == "denies_ai":   # the only model-free handling of a reply that denies being an AI
             denials = [violation for violation in verdict.violations if violation.kind == "soft_promise"]
             assert denials and all(violation.rule_id == DENIES_AI_RULE_ID for violation in denials), (
@@ -579,14 +579,15 @@ async def test_verdict_signatures_verify_independently(k: KernelHarness):
 
 
 @pytest.mark.requires("01a")
-async def test_soft_promise_check_runs_on_haiku_once_per_draft(k: KernelHarness, fake: FakeAnthropic):
+async def test_soft_promise_check_runs_on_sonnet_once_per_draft(k: KernelHarness, fake: FakeAnthropic):
+    assert SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     for prose in (CLEAN_EN, "You may want to ask Maria about that."):   # plain ASCII, so it reads back from the request
-        all_before, before = len(fake.calls()), len(fake.calls(SOFT_PROMISE_MODEL))
+        all_before, before = len(fake.calls()), len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict"))
         await check_reply(k, visitor, prose, expect=passes(visitor, ["prose"]))
         if k.is_real:
-            checks = fake.calls(SOFT_PROMISE_MODEL)[before:]
+            checks = fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict")[before:]
             assert len(checks) == 1, f"{len(checks)} soft-promise calls for one draft"
             assert len(fake.calls()) - all_before == 1, "a model other than the soft-promise check's was called"
             assert prose in json.dumps(checks[0]), "the soft-promise check didn't read this draft's prose"

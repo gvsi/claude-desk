@@ -35,7 +35,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    cards is also scanned in reply order, separated by newlines, using the public-text rules.
    Unsafe policy clauses are refused as `unknown_fact` / `policy_combined`, naming the facts
    contributing to the match. Structured cards stay outside this public-text scan.
-5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
+5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
@@ -100,7 +100,8 @@ from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
-from desk.kernel_service.sessions import verified
+from desk.kernel_service.sessions import principal_for, verified
+from desk.next_steps import next_steps
 from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -532,17 +533,51 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
 
 
-SERVICE_AREA_RULES = frozenset({"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"})
-SERVICE_AREA_DISTANCE = re.compile(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", re.IGNORECASE)
+# The service area's allowance (the owner's ruling: distances, number words, years and day words).
+# Each pattern reads the policy's own text from a hit's end, so a unit can't come from another card.
+_BLANK = r"[\s\-‐‑]"
+_DISTANCE_UNIT = r"(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b"
+_CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+             r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
+             r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
+             r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+"
+             r"|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
+# A distance unit straight after a number, singular or plural, with a hyphen or blanks between
+# ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
+SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
+SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
+SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
+# After a cardinal, the rest of a compound number ("twenty-five", "treinta y cinco"), then a distance
+# unit or "days a week" ("días a la semana").
+_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
+SERVICE_AREA_AFTER_CARDINAL = re.compile(
+    rf"(?:{_BLANK}+(?:y{_BLANK}+)?{_CARDINAL}\b){{0,2}}(?:{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK})",
+    re.IGNORECASE)
+SERVICE_AREA_UNIT_WORDS = re.compile(r"miles|millas", re.IGNORECASE)   # the Spanish lexicon's "miles" (thousands)
+# Weekdays, weekends and the parts of the day, but no date, time or time window.
+SERVICE_AREA_DAY_WORDS = re.compile(
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
+    rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{_BLANK}+de{_BLANK}+semana"
+    r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Area claims may name distances, years and weekly availability, but no promises."""
+    """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
+    distance unit or a year; a cardinal number word right before a distance unit or "days a week", or
+    "miles" as the unit; a weekday, weekend or part of the day. Nothing else: no fraction, amount, time
+    window or date, so "half off", "trip fee 1500" and "same-day" stay refused as under any other key."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
-    return rule in SERVICE_AREA_RULES or (rule == "digit" and (
-        re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
-        or SERVICE_AREA_DISTANCE.match(text, end) is not None))
+    hit = text[start:end]
+    if rule == "digit":
+        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
+    if rule in ("lex.en.number", "lex.es.number"):
+        return SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or (
+            SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
+            and SERVICE_AREA_AFTER_CARDINAL.match(text, end) is not None)
+    if rule in ("lex.en.date", "lex.es.date"):
+        return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+    return False
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
@@ -637,19 +672,26 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
-def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
-    """Refuse unsafe policy text in the order a reply would show it, before signing.
+def policy_card_rules(prose: str, cards: Sequence[RenderedBlock]) -> dict[str, list[str]]:
+    """The policy cards that fail the public-text scan in the order a reply would show them
+    after `prose`, by fact ID in that order, each with its rule IDs and never its text.
 
-    Only free-text charter policies join the prose; structured cards legitimately carry
-    numbers. Keep contributing fact IDs in reply order and never echo policy text.
+    Only free-text charter policies join the prose; structured cards legitimately carry numbers.
     """
     policies = [(card.fact_id, card.text) for card in cards
                 if card.template == "policy" and card.fact_id is not None
                 and card.fact_id.startswith("charter:policy:")]
     if not policies:
-        return []
+        return {}
     refused = _scan_public_parts([(None, prose), *policies])
-    fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+    return {fact_id: refused[fact_id] for fact_id in dict.fromkeys(fact_id for fact_id, _ in policies)
+            if fact_id in refused}
+
+
+def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
+    """Refuse unsafe policy text in the order a reply would show it, before signing: one
+    `policy_combined` violation naming the contributing fact IDs in reply order (`policy_card_rules`)."""
+    fact_ids = list(policy_card_rules(prose, cards))
     if not fact_ids:
         return []
     return [Violation(kind="unknown_fact", span="policy", rule_id="policy_combined", fact_ids=fact_ids)]
@@ -825,7 +867,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage = await soft_promises(ctx, language, prose, backing)
+        found, usage = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
         blocks = [handoff(language, desk)]
@@ -837,15 +879,19 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                           handoff_backed=handoff_backed, final=final)
 
 
-async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
+async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
     spanning the prose's start; and the call's usage, for the ledger. (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    steps = next_steps(tools)
     verdict, usage = await ctx.decisions.soft_promise(
-        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
+        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards], next_steps=steps))
     if verdict is None:
         rule_ids = ["soft.unavailable"]
     else:
