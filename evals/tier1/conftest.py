@@ -18,9 +18,10 @@ Tier 1 makes no model calls: before any case imports a client, the process drops
 server that scripts nothing, so a client made outside a target fails the run instead of calling out.
 
 The fixtures a case uses: `k`, what it calls (the contract stub on `--target stub`, else a fresh
-`KernelTarget` on the travelling clock, started on emptied kernel and API tables); `fake`, the model server `k` calls (on the stub, one no
-call ever reaches); `records`, what `k` left in the database (on the stub, none); `api`, the API
-over `k` (Plan 02a's `make_api_target`), for the cases that require 02a or 02.
+`KernelTarget` on the travelling clock, started on a database `empty_database` emptied); `fake`,
+the model server `k` calls (on the stub, one no call ever reaches); `records`, what `k` left in the
+database (on the stub, none); `api`, the API over `k` (Plan 02a's `make_api_target`), for the cases
+that require 02a or 02.
 """
 
 import functools
@@ -34,11 +35,8 @@ from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
 
-from desk.db.session import database_url, libpq_url
-from desk.db.tables import APP_TABLES, KERNEL_TABLES
 from evals.fakes import FakeAnthropic
 from evals.records import NoRecords, Records
 from evals.tier1.harness import (
@@ -58,6 +56,7 @@ from evals.tier1.targets import (
     ApiTarget,
     KernelTarget,
     TargetError,
+    empty_database,
     load_api_target,
     refuse_real_models,
 )
@@ -128,16 +127,6 @@ def unscripted_model_server(loopback_only: None) -> Iterator[FakeAnthropic]:
     finally:
         fake.stop()
     fake.check()
-
-
-def empty_database() -> None:
-    """Empty every kernel and API table, as desk_admin (the kernel's role may not truncate the
-    ledger), so a case finds only what it makes. A kernel's startup looks at every copy in the
-    database (`rebuild_at_startup`), so copies left by earlier cases made each start slower than
-    the last."""
-    tables = [*(f"kernel.{table}" for table in KERNEL_TABLES), *(f"app.{table}" for table in APP_TABLES)]
-    with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
-        admin.execute("TRUNCATE " + ", ".join(tables))
 
 
 @pytest.fixture
