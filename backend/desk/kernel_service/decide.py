@@ -215,11 +215,11 @@ def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, e
     native = given & set(enabled) & set(adapters.ADAPTERS)
     if hasattr(enabled, "items"):
         from desk.kernel_service.adapters import blocks
-        # Probe wrappers are already eligible; rows and plain profiles carry their current status.
+        # Rows own their status; wrappers must carry an explicitly enabled profile.
         for tool, row in enabled.items():
             profile = row if isinstance(row, ToolProfile) else row.profile
             if (profile is not None and profile.source == "business" and profile.business is not None
-                    and getattr(row, "status", "enabled") == "enabled"
+                    and (row.status if hasattr(row, "status") else row.profile.status) == "enabled"
                     and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                     and blocks.BLOCK_BASE[profile.business.config.block] in given):
                 native.add(tool)

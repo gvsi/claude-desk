@@ -2025,7 +2025,7 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
     off."""
     from desk.kernel_service import decide       # decide builds on this module
 
-    tools = {tool: _ProbeTool(tool_row.profile, tool_row.profile_sha256)
+    tools = {tool: _ProbeTool(tool_row.profile.model_copy(update={"status": tool_row.status}), tool_row.profile_sha256)
              for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():

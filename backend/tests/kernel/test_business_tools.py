@@ -875,6 +875,30 @@ async def test_supported_blocks_gate_resolution_and_context_even_for_enabled_row
     assert not {profile.tool for profile in (*seen.tools, *seen.tools_declared)} & {'desk.new-enquiry', 'desk.urgent'}
 
 
+@pytest.mark.parametrize('shape,status', [
+    (shape, status) for shape in ('profile', 'row', 'probe')
+    for status in ('enabled', 'needs_review', 'disabled')
+])
+def test_tools_given_reads_business_status_from_rows_or_wrapped_profiles(shape, status):
+    from types import SimpleNamespace
+    from desk.contracts import BusinessToolDef, Principal
+    from desk.kernel_service import decide
+    from desk.kernel_service.adapters import blocks
+
+    profile = blocks.profile('desk.intake', BusinessToolDef(
+        title='Intake', description='Take details.', config={'block': 'intake', 'questions': ['What?']}))
+    # Persisted rows own their status, independently of the stored profile's review status.
+    if shape == 'row':
+        stored = SimpleNamespace(profile=profile, status=status)
+    else:
+        profile = profile.model_copy(update={'status': status})
+        stored = profile if shape == 'profile' else SimpleNamespace(profile=profile)
+    principal = Principal(kind='visitor', session_id='session', copy_id='copy', desk_id='desk')
+    given = decide.tools_given(principal, SimpleNamespace(preview=False), SimpleNamespace(answering=True),
+                               {profile.tool: stored})
+    assert given == ({profile.tool} if status == 'enabled' else set())
+
+
 @pytest.mark.parametrize('kind,mandate,answering,preview,expected', [
     ('visitor', False, True, False, {'intake', 'typed_booking', 'purpose_payment', 'urgent'}),
     ('agent', False, True, False, {'intake', 'typed_booking', 'urgent'}),
