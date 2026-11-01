@@ -1739,23 +1739,47 @@ def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
     return remaining < stored
 
 
+# The words that name each day in an owner's answer, in English or Spanish, singular or plural ("weekdays" and
+# "weekends" name theirs): a day added to the owner's hours off their home question is named in that answer.
+_DAY_NAMES: dict[str, tuple[str, ...]] = {
+    "mon": ("monday", "mon", "lunes", "weekday", "entre semana"),
+    "tue": ("tuesday", "tue", "tues", "martes", "weekday", "entre semana"),
+    "wed": ("wednesday", "wed", "miércoles", "miercoles", "weekday", "entre semana"),
+    "thu": ("thursday", "thu", "thur", "thurs", "jueves", "weekday", "entre semana"),
+    "fri": ("friday", "fri", "viernes", "weekday", "entre semana"),
+    "sat": ("saturday", "sat", "sábado", "sabado", "weekend", "fin de semana", "fines de semana"),
+    "sun": ("sunday", "sun", "domingo", "weekend", "fin de semana", "fines de semana"),
+}
+
+
+def _names_day(day: str, text: str) -> bool:
+    folded = text.casefold()
+    return any(re.search(rf"(?<!\w){re.escape(word)}s?(?!\w)", folded) for word in _DAY_NAMES[day])
+
+
 def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
     """The facts this turn gave off their topic (`_on_topic`) that the owner's own words this turn (`said`) back: a
     list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports`
     finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained
-    suggested item does; likewise only hours windows the owner's stored hours lack need it. Such a turn reads the
-    website and memory, so prices and times need explicit syntax. Free text is never backed off its topic."""
+    suggested item does. Hours replace the stored list whole, so only a pure addition to the owner's hours, keeping
+    every stored day and time, is checked on its new windows alone, each on a day that answer names. Such a turn reads
+    the website and memory, so prices and times need explicit syntax. Free text is never backed off its topic."""
     backed = set()
     for name in _fact_patch_fields(patch, key):
         if name not in FACT_HOMES or _on_topic(name, key):
             continue
         value = getattr(patch, name)
+        days_named = True
         if name == "hours" and value and before is not None and name not in before.suggested_fields:
-            # Only windows the owner's stored hours lack need stating, as only new or changed prices do.
             stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
+            patched = {(day, window.start, window.end) for answer in value for window in [answer.window()]
+                       for day in window.days}
             added = [answer for answer in value if any((day, window.start, window.end) not in stored
                                                        for window in [answer.window()] for day in window.days)]
-            value = added or value
+            if added and stored <= patched:
+                # A pure addition: only its new windows need stating, as only new or changed prices do.
+                value = added
+                days_named = all(_names_day(day, said) for answer in added for day in answer.days)
         if name == "price_items" and value and before is not None:
             if name in before.suggested_fields:
                 # A held list stays held until every retained item is backed, not just this turn's correction.
@@ -1766,8 +1790,8 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: Se
                 changed = [item for item in value if listed.get(_title(item.title)) != item.unit_cents]
                 value = changed or value
         if ((name in CLEARABLE and value == [])
-                or (name == "hours" and before is not None and _only_removes_hours(before, value))
-                or (name in {"public_contact", "price_items", "hours"}
+                or (name == "hours" and before is not None and _only_removes_hours(before, patch.hours or []))
+                or (name in {"public_contact", "price_items", "hours"} and days_named
                     and owner_supports(name, value, said, stated=True))):
             backed.add(name)
     return backed

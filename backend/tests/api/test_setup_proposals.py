@@ -746,6 +746,66 @@ def test_off_topic_hours_additions_need_only_the_new_windows_stated(windows, sai
     assert ("hours" in backed) is supported
 
 
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "10:00", "18:00")
+
+
+@pytest.mark.parametrize("stored,patched,said,supported", [
+    # A backed addition keeps every stored day: a patch that leaves Saturday out is checked whole, and fails.
+    ([WEEKDAYS, ("sat", "10:00", "14:00")], [WEEKDAYS, ("sun", "10:00", "14:00")],
+     "Call 415-555-0118. We're also open Sundays 10am to 2pm.", False),
+    ([WEEKDAYS, ("sat", "10:00", "14:00")], [WEEKDAYS, ("sat", "10:00", "14:00"), ("sun", "10:00", "14:00")],
+     "Call 415-555-0118. We're also open Sundays 10am to 2pm.", True),
+    # Each added day is named in that answer: a website Sunday never rides on the owner's Saturday times.
+    ([WEEKDAYS], [WEEKDAYS, ("sat", "sun", "10:00", "14:00")],
+     "Call 415-555-0118. We're also open Saturdays 10am to 2pm.", False),
+    ([WEEKDAYS], [WEEKDAYS, ("sat", "sun", "10:00", "14:00")],
+     "Call 415-555-0118. We're also open weekends 10am to 2pm.", True),
+    ([WEEKDAYS], [WEEKDAYS, ("sat", "10:00", "14:00")], "Call 415-555-0118. Sat 10am-2pm too.", True),
+    ([WEEKDAYS], [WEEKDAYS, ("sat", "10:00", "14:00")],
+     "Llámanos al 415-555-0118. También abrimos los sábados de 10am a 2pm.", True),
+])
+def test_a_backed_hours_addition_keeps_every_stored_day(stored, patched, said, supported):
+    def answers(windows):
+        return [HoursAnswer(days=list(window[:-2]), start=window[-2], end=window[-1]) for window in windows]
+
+    before = SetupAnswers(summary="Plumbing", hours=[window.window() for window in answers(stored)])
+    backed = setup._backed_off_topic(setup.SetupPatch(hours=answers(patched)), "contact_and_after_hours", said, before)
+    assert ("hours" in backed) is supported
+
+
+@pytest.mark.parametrize("case", ["drops_saturday", "website_sunday"])
+async def test_a_contact_hours_addition_never_drops_or_adds_another_day(proposals, model, engine, case):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    weekdays = {"days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "18:00"}
+    saturday = {"days": ["sat"], "start": "10:00", "end": "14:00"}
+    owned = [weekdays, saturday] if case == "drops_saturday" else [weekdays]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "10am to 6pm weekdays, Saturdays 10am to 2pm.", turn(hours=owned),
+                         question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    if case == "drops_saturday":
+        said, patched = ("Call 415-555-0118. We're also open Sundays 10am to 2pm.",
+                         [weekdays, {"days": ["sun"], "start": "10:00", "end": "14:00"}])
+    else:
+        said, patched = ("Call 415-555-0118. We're also open Saturdays 10am to 2pm.",
+                         [weekdays, {"days": ["sat", "sun"], "start": "10:00", "end": "14:00"}])
+    reply = await answer(owner, model, interview_id, said, turn(public_contact="415-555-0118", hours=patched),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.hours == [HoursAnswer(**window).window() for window in owned]
+    assert "hours" not in answers.suggested_fields
+    assert "hours" not in [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    weekdays_open = {date.fromisoformat(slot.slot_id[2:10]).weekday() for slot in parts.calendar}
+    assert 6 not in weekdays_open and (5 in weekdays_open) is (case == "drops_saturday")
+
+
 @pytest.mark.parametrize("said,added", [("Call 415-555-0118. We're also open Saturdays 10am to 2pm now.", True),
                                         ("Call 415-555-0118. We're also open Saturdays now.", False)])
 async def test_owner_hours_addition_on_the_contact_question_is_the_owners(proposals, model, engine, said, added):
@@ -1132,6 +1192,15 @@ def _fieldless_policy_turns():
     from desk.api.prompts import FIELD_TURNS
 
     return [(field, key) for field in POLICY_FIELDS for key in _fact_turns() if key not in FIELD_TURNS[field]]
+
+
+def test_fact_homes_cover_every_fact_a_patch_can_set():
+    from desk.api.prompts import LIMIT_QUESTIONS
+
+    # A fact missing from FACT_HOMES would count as the owner's on every turn; names are handled on their own.
+    facts = set(setup.SetupPatch.model_fields) - set(LIMIT_QUESTIONS) - {"business_name", "owner_display_name"}
+    assert set(setup.FACT_HOMES) == facts
+    assert set(HOMES) == facts
 
 
 def test_policy_turn_cases_cover_the_fixed_ones():
