@@ -33,6 +33,8 @@ describe('ask claude', () => {
     const { screen } = await renderRoute(RULES);
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
+    // The reload's outgoing frame also has a content element; measure after its fade ends.
+    await settled(screen.container);
     const sent = composer.element().getBoundingClientRect().left;
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
     await composer.fill(ASK);

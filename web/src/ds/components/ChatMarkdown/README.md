@@ -55,5 +55,6 @@ Under `prefers-reduced-motion: reduce` a revealed reply shows whole at once and 
 | `text` | `string` | Required. The whole text so far. It may grow between renders and may stop mid-token. |
 | `streaming` | `boolean` | `false` by default. The text is still growing. |
 | `reveal` | `boolean` | `false` by default. The text is whole; reveal it word by word. Only a message that arrives live passes it. |
+| `revealLength` | `number` | With `reveal`, for one of several blocks of a reply revealed one after another: the whole reply's length, which sets the pace, so the reply takes at most about 3 s in all. The text's own length by default. |
 | `onRevealed` | `() => void` | Called once, when everything in `text` is shown: at once when not revealing or under reduced motion. |
 | `links` | `'open' \| 'inert'` | `inert` by default, so a screen that leaves it out never opens an unchecked link: link text then its address as written, nothing clickable. `open`: links are clickable and show their text only. |

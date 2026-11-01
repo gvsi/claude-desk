@@ -81,6 +81,20 @@
   animation-delay: calc(var(--motion-stagger) * var(--cd-arrival, 1));
 }
 
+/* Under a row that follows a revealed reply (TranscriptRow's --waiting, then --following): while the
+   line waits for the reply's words, its dot and check wait with it, unplayed; then the dot grows and
+   the check draws as the line comes in, on its own beat after the reply's cards. A line already
+   shown before its row arrived doesn't wait. */
+.cd-transcript-row--live.cd-transcript-row--waiting > .cd-transcript-row__margin > :not(.cd-margin-line--shown) .cd-margin-line__dot > *,
+.cd-transcript-row--live.cd-transcript-row--waiting > .cd-transcript-row__margin > :not(.cd-margin-line--shown) .cd-margin-line__check path {
+  animation: none;
+}
+
+.cd-transcript-row--live.cd-transcript-row--following > .cd-transcript-row__margin .cd-margin-line__dot > *,
+.cd-transcript-row--live.cd-transcript-row--following > .cd-transcript-row__margin .cd-margin-line__check path {
+  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-next) + var(--cd-follow-line, 1) - 1));
+}
+
 @keyframes cd-margin-line-dot {
   from {
     transform: scale(0.5);

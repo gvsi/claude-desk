@@ -422,6 +422,8 @@ async def test_owner_transcript_shows_the_recorded_times(db, fake, api_settings,
         session_id = events[0].session_id
         transcript = (await client.get(f"/api/owner/conversations/{session_id}")).json()
         listed = (await client.get(f"/api/owner/desks/{copy['desks'][0]['desk_id']}/conversations")).json()
+        seeded_session = next(row["session_id"] for row in listed if row["session_id"] != session_id)
+        seeded_transcript = (await client.get(f"/api/owner/conversations/{seeded_session}")).json()
     assert [(item["kind"], item["created_at"], item["text"], (item["event"] or {}).get("type"))
             for item in transcript["items"]] == [
         ("visitor_text", stamp(LAST_NIGHT), "Hi, my kitchen sink drains slowly. Can someone come?", None),
@@ -430,6 +432,11 @@ async def test_owner_transcript_shows_the_recorded_times(db, fake, api_settings,
     assert transcript["state"]["generation"] == 0
     (summary,) = [row for row in listed if row["session_id"] == session_id]
     assert summary["last_activity"] == stamp(LAST_NIGHT + timedelta(seconds=60))
+    # both say it is recorded history, so the owner's screens label it and offer no take-over; the live hold isn't
+    assert (transcript["replayed"], summary["replayed"]) == (True, True)
+    assert {row["session_id"]: row["replayed"] for row in listed if row["session_id"] != session_id} == {
+        seeded_session: False}
+    assert seeded_transcript["replayed"] is False
 
 
 async def test_failed_replay_storage_still_creates_the_copy(db, fake, api_settings, clock, browser, monkeypatch,
