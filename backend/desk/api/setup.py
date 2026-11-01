@@ -2367,18 +2367,21 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
 
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
                publish_policies: bool = True) -> SeedParts:
-    """The Desk's parts from the answers: the public charter (the contact and business policies, omitting policy
-    fields filled from unconfirmed suggestions or all policies when disabled), the hours, the price list,
-    the calendar and notification defaults."""
-    claim_values = [("contact", answers.public_contact)]
+    """The Desk's parts from the answers: the public charter (the contact and the business's policies, or the
+    contact alone when policies are switched off), the hours, the price list, the calendar and the notification
+    defaults. Nothing listed in `suggested_fields` is published: it stays in the owner's answers until the owner
+    confirms it, so suggested hours open no calendar slots either."""
+    held = set(answers.suggested_fields)
+    claim_fields = [("public_contact", "contact")]
     if publish_policies:
-        claim_values.extend((key, getattr(answers, field)) for field, key in SETUP_POLICY_CLAIMS.items()
-                            if field not in answers.suggested_fields)
+        claim_fields.extend(SETUP_POLICY_CLAIMS.items())
     charter = [Claim(key=key, kind="text", value=value.strip())
-               for key, value in claim_values
-               if value and value.strip()]
-    return SeedParts(charter=charter, hours=list(answers.hours), prices=price_items(answers.price_items),
-                     calendar=calendar_slots(answers.hours, timezone, today),
+               for field, key in claim_fields
+               if field not in held and (value := getattr(answers, field)) and value.strip()]
+    hours = [] if "hours" in held else list(answers.hours)
+    prices = [] if "price_items" in held else price_items(answers.price_items)
+    return SeedParts(charter=charter, hours=hours, prices=prices,
+                     calendar=calendar_slots(hours, timezone, today),
                      notifications=default_notifications(business_type))
 
 

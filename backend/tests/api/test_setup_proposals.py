@@ -2,6 +2,7 @@
 
 import json
 import html
+from datetime import date
 from dataclasses import replace
 
 import pytest
@@ -24,6 +25,54 @@ def job(kind="schedule", **fields):
 
 def stripe():
     return ConnectorProposal(app="stripe", label="Wrong label", why="Take payments", connectable=False)
+
+
+@pytest.mark.parametrize("suggested", ["public_contact", "service_area", "hours", "price_items"])
+def test_seed_parts_withholds_each_suggested_field(suggested):
+    answers = SetupAnswers(summary="Tax advice", public_contact="hello@example.test", service_area="Oakland",
+                           hours=[{"days": ["mon"], "start": "09:00", "end": "17:00"}],
+                           price_items=[{"title": "Consultation", "unit_cents": 2500}],
+                           suggested_fields=[suggested])
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="office",
+                            today=date(2026, 11, 2))
+    assert [claim.key for claim in parts.charter] == [key for field, key in (
+        ("public_contact", "contact"), ("service_area", "policy:service_area")) if field != suggested]
+    assert bool(parts.hours) is (suggested != "hours")
+    assert bool(parts.calendar) is (suggested != "hours")
+    assert bool(parts.prices) is (suggested != "price_items")
+
+
+@pytest.mark.parametrize("suggested", [
+    ["public_contact", "hours", "price_items", "service_area"], [], ["hours", "service_area"]])
+async def test_first_rules_draft_publishes_only_owner_facts(proposals, model, engine, fake, suggested):
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    facts = dict(public_contact="hello@example.test", service_area="Oakland",
+                 hours=[{"days": ["mon"], "start": "09:00", "end": "17:00"}],
+                 price_items=[{"title": "Consultation", "unit_cents": 2500}])
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers = SetupAnswers(summary="Tax advice", **{k: v for k, v in facts.items() if k not in suggested})
+        interview.transcript.append(setup.Entry(role="claude", text="Homework",
+            suggested=setup.SuggestedFacts(**facts, after_hours="")))
+        await setup._save(conn, interview)
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert response.status_code == 200, response.text
+    saved = (await stored(engine, interview_id))["answers"]
+    assert set(saved["suggested_fields"]) == set(suggested)
+    assert all(saved[key] for key in facts)  # Owner views retain the suggestions.
+    model.add(unparseable(), unparseable())
+    response = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert response.status_code == 200, response.text
+    charter, = fake.called("PUT /desks/{id}/charter")
+    assert [claim["key"] for claim in charter.body["charter"]] == [key for field, key in (
+        ("public_contact", "contact"), ("service_area", "policy:service_area")) if field not in suggested]
+    for route, part, field in (("hours", "hours", "hours"), ("calendar", "calendar_slots", "hours"),
+                               ("prices", "price_items", "price_items")):
+        call, = fake.called(f"PUT /desks/{{id}}/{route}")
+        assert bool(call.body[part]) is (field not in suggested)
 
 
 def test_connector_connection_state_is_code_written_and_not_a_model_output():
