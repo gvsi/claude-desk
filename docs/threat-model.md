@@ -46,12 +46,16 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 
 ## External reply evaluation
 
-When the kernel's optional `TYPESAFE_API_KEY` is set, the scanned reply prose, rendered card texts
-and the session's fixed `next_steps` go to TypeSafe's HTTPS API for evaluation by `jev-1.13.0`.
+The owner enables this flow by setting the optional `TYPESAFE_API_KEY` (the
+`desk/typesafe-api-key` secret); its fixed `unset` placeholder keeps it off. When enabled, the
+scanned reply prose, rendered card texts and the session's fixed `next_steps` go to TypeSafe's
+HTTPS API for evaluation by `jev-1.13.0`.
 Card text may contain information the verified session is entitled to read. This adds an external
-data recipient. TypeSafe's terms bar training on Jev's outputs; the scores are used only for
-evaluation and reply decisions. The key stays in the kernel container. Request and response bodies
-and the key are never logged; only call status and latency are logged.
+data recipient. TypeSafe's terms on retaining or training on inputs (reply and card text) are
+not verified here; this is not a privacy guarantee. TypeSafe's terms allow evaluation only and
+bar us from training on Jev's outputs; the scores are used only for evaluation and reply decisions.
+The key stays in the kernel container. Request and response bodies and the key are never logged;
+only call status and latency are logged.
 
 Jev runs in parallel with Sonnet and can only add blocks, at a highest score of 0.95 or above.
 A Jev error, malformed answer or three-second timeout leaves Sonnet's verdict standing. Sonnet's

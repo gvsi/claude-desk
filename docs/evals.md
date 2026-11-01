@@ -22,8 +22,9 @@ not held-out attack or legitimate-task completion rates. A missed case means an 
 passed in at least one sample; an honest block means an expected pass was blocked in at least one.
 The existing labels were kept when comparing models.
 
-Haiku 5.5 failed the proposed widening twice: 55 promise cases slipped with the first wording and
-36 with the single revision. The revision passed all 7 honest voice cases but had 20 timeouts.
+Haiku 5.5 failed the proposed widening twice: 40 promise cases slipped with the first wording and
+36 with the single revision. A further 15 promise cases only timed out on the first wording;
+timeouts block, so they are not misses. The revision passed all 7 honest voice cases but had 20 timeouts.
 Its mean cost was $0.0000964 per check. The widened exemption did not ship on Haiku.
 
 Sonnet 5.5 at low effort with adaptive thinking was measured on all 220 cases at 5 samples each.
@@ -32,6 +33,11 @@ against 44 for production Haiku, and blocked 4 honest replies against 12. All 6 
 all 5 samples. Sonnet's p50 was 1.1 s, p95 2.8 s and maximum 5.2 s, with a mean cost of $0.0017
 per check. Production gives it one 6 s try, without retries or fallback, and the complete
 `/check_reply` request has a 10 s API client deadline.
+
+The Jev tables below come from an uncommitted evaluation run using local scripts; neither the
+runner nor the per-case Jev scores is in this repository. TypeSafe's terms allow evaluation only.
+The run measured score-based fast-lane rates and additional blocks beside saved Sonnet results,
+not end-to-end task completion. These figures cannot be reproduced from the committed artifacts.
 
 A proposed Jev fast lane would show a reply directly when every score was below 0.3, consulting
 Sonnet only otherwise. Two measurements used `jev-1.13.0` on the 215 cases the prose scan passed,
