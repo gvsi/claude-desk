@@ -758,19 +758,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
   // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
-  // type it into only once the Desk is read.
+  // type it into only once the page has opened (the Desk read, and on the owner's preview, the bar).
   const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
   const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || words === null || !box) return;
+    if (opening || !ready || words === null || !box) return;
     carried.current = null;
     const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
     if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
     fillComposer(box, text, { focus: words.focus === 'always' || free });
-  }, [ready, ideaOwner]);
+  }, [opening, ready, ideaOwner]);
 
   const present = (children?: ReactNode) => (
     <>

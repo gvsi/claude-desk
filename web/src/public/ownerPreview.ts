@@ -30,10 +30,16 @@ export function useOwnerPreviewBack(slug: string, previewDeskId: string | undefi
     queryFn: () => request('me'),
     enabled,
     retry: false,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false,
+    // Sent even while the browser says it's offline, so its answer or its failure (the request has a
+    // timeout of its own) settles it, rather than the read pausing and the page waiting on it.
+    networkMode: 'always',
   });
   if (!enabled) return { settled: true, href: null };
-  if (copy.isPending) return { settled: false, href: null };
-  const owned = (copy.data?.desks ?? []).some((desk) => desk.desk_id === previewDeskId && desk.slug === slug);
+  // Only this page's own read counts, and only an answer: one kept from before may be from a session
+  // that has since ended, and a failed read keeps it.
+  if (!copy.isFetchedAfterMount) return { settled: false, href: null };
+  const owned = copy.isSuccess && copy.data.desks.some((desk) => desk.desk_id === previewDeskId && desk.slug === slug);
   return { settled: true, href: owned ? ownerTodayPath(previewDeskId) : null };
 }
