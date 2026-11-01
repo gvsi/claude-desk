@@ -304,7 +304,7 @@ export function seedWorld(world: MockWorld): void {
       source: 'setup',
       label: { readers: ['public'], record_owner: null },
       title: 'Price list, from your answers in setup',
-      text: 'The price list Maria gave in setup covers the service call deposit, drain clearing, a water heater flush and leak repair. Each price is given in a quote from this list.',
+      text: 'The price list Maria gave in setup covers the service call deposit, drain clearing, a water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. Each price is given in a quote from this list.',
     },
   ];
   // The kernel stores these one after another on its live clock: website first, then price list.
