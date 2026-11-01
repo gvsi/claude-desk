@@ -221,6 +221,16 @@ export function RuleDraftReview({
     else settle();
   };
 
+  /**
+   * Settles a confirm whose answer can't say what applied, by the rules as they stand: applied with
+   * the version they name when it is the draft's, else `otherwise` (given whether the read worked).
+   */
+  const settleByReading = async (otherwise: (read: boolean) => string) => {
+    const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
+    if (now?.active.version === draft.version) applied(now.active.version);
+    else setError(otherwise(now !== null));
+  };
+
   const onConfirm = async () => {
     setError(undefined);
     setPending(true);
@@ -230,7 +240,10 @@ export function RuleDraftReview({
         applied(null);
       } else {
         const answer = await request('confirmRules', { params: { desk_id: deskId }, body: { version: draft.version } });
-        applied(answer.version);
+        // An answer that names no version of its own is settled by the rules read, as a lost one is,
+        // so the receipt never says a version the API didn't give.
+        if (Number.isSafeInteger(answer.version)) applied(answer.version);
+        else await settleByReading(() => NOT_CONFIRMED);
       }
     } catch (err) {
       // The session ended: the app goes back to the start, and there is nothing to say here.
@@ -243,9 +256,7 @@ export function RuleDraftReview({
       } else if (isUncertain(err)) {
         // The answer was lost, so it may have applied: the rules as they stand say whether it did.
         // A caller's own confirm (setup's) applies the draft's version too, so they settle it as well.
-        const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
-        if (now?.active.version === draft.version) applied(now.active.version);
-        else setError(now === null || mayStillApply(err) ? NOT_CONFIRMED : ownerErrorCopy(err));
+        await settleByReading((read) => (!read || mayStillApply(err) ? NOT_CONFIRMED : ownerErrorCopy(err)));
       } else {
         setError(ownerErrorCopy(err));
       }

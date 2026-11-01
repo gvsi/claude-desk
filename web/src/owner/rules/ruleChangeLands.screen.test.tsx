@@ -170,6 +170,39 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(sent).toEqual([{ version: desk().lastVersion }]);
   });
 
+  it('an_answer_without_a_version_settles_by_the_rules_read', async () => {
+    const { log } = await askForTheWeekdayChange();
+    const version = desk().lastVersion;
+    // The confirm applies, but its answer names no version of its own (here, a word for one).
+    worker.use(
+      http.post(
+        CONFIRM_PATH,
+        () => {
+          const applied = mockStore.world.confirmDraft(desk(), version);
+          if (typeof applied === 'string') throw new Error(`the draft didn't apply: ${applied}`);
+          return HttpResponse.json({ ...applied, version: '42' });
+        },
+        { once: true },
+      ),
+    );
+    const reads = requests('rules').length;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    // The rules, read again, say which version is in force: the receipt says that one, never "42".
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    expect(log.element().textContent).not.toContain('Version 42');
+  });
+
+  it('a_lost_answer_takes_its_version_from_the_rules_read', async () => {
+    const { log } = await askForTheWeekdayChange();
+    const version = desk().lastVersion;
+    // The confirm applies and its answer is lost on the way back.
+    mockStore.inject({ route: 'confirmRules', status: 'network', afterCommit: true });
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    expect(desk().policy.version).toBe(version);
+  });
+
   it('the_changed_row_lights_up_holds_lets_go_and_keeps_updated', async () => {
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
