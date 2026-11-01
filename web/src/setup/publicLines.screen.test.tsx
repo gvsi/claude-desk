@@ -123,7 +123,7 @@ it('holds a malformed held flag instead of confirming the line', async () => {
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
 
-it('keeps Looks right disabled after canceling when every displayed line is held', async () => {
+it('continues after canceling when every displayed line is held without confirming or publishing it', async () => {
   const state = await atSituations();
   await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
   storePublicLines(mockStore.world, state.interview_id, [{ key: 'policy:about', text: 'The owner’s stored words.', source: 'owner', editable: true, held: true }]);
@@ -132,10 +132,13 @@ it('keeps Looks right disabled after canceling when every displayed line is held
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('textbox', { name: 'About us', exact: true })).toHaveValue('The owner’s stored words.');
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeEnabled();
   expect(screen.getByRole('textbox').elements()).toHaveLength(0);
-  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
   expect(storedPublicState(mockStore.world, state.interview_id)).toEqual(before);
+  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: { charter: [] } });
 });
 
 it('opens public lines from Real situations with the signed labels and screen basics at both widths', async () => {

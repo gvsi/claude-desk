@@ -128,7 +128,11 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
   const confirm = async () => {
-    if (editingKey !== null || busy !== null || lines.data === undefined || confirmable.length === 0 || unknown) return;
+    if (editingKey !== null || busy !== null || lines.data === undefined || unknown) return;
+    if (confirmable.length === 0) {
+      onNext('safety_check');
+      return;
+    }
     setBusy('confirm');
     setError(null);
     try {
@@ -233,7 +237,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
             </div>
           </Card>
           <div className="cd-setup-step__actions">
-            {editingKey !== null || unknown || confirmable.length === 0 ? (
+            {editingKey !== null || unknown ? (
               <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
             ) : (
               <Button variant="primary" size="main" busy={busy === 'confirm'} onClick={() => void confirm()}>
