@@ -5,7 +5,7 @@
  * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import { handoffEntryOf, type HandoffEntry } from '../../api/handoffEntry.ts';
+import { handoffEntryOf, takeoverEntryOf, type HandoffEntry } from '../../api/handoffEntry.ts';
 import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
@@ -129,12 +129,15 @@ export const HANDOFF_ENTRY_COPY = {
 
 /**
  * An entry's name as a row of the record names it: its kind's, but a `desk_data` entry about a
- * handoff says which of the two it is. Every other `desk_data` entry, one about handoffs with a
- * `kind` this build doesn't know among them, stays "Desk details changed".
+ * handoff says which one it is, and a mode change back to Claude says so. Every other entry, a
+ * handoffs entry this build doesn't know or a mode change with no readable direction among them,
+ * keeps its kind's name.
  */
 export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
   const handoff = handoffEntryOf(event);
-  return handoff === null ? kindCopy(event.kind) : HANDOFF_ENTRY_COPY[handoff];
+  if (handoff !== null) return HANDOFF_ENTRY_COPY[handoff];
+  if (takeoverEntryOf(event) === 'handback') return 'Hand back to Claude';
+  return kindCopy(event.kind);
 }
 
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */

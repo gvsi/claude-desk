@@ -55,10 +55,14 @@ export function QuietNight({ since, action }: { since: string; action?: ReactNod
   return <EmptyState title="A quiet night" body={`Nothing new since ${formatClock(since, business.timezone)} yesterday.`} action={action} />;
 }
 
-/** The short form's rows: the newest blocked attempt, the newest booking, the newest lead or answer, each when there is one. */
+/**
+ * The short form's rows: the newest turned-down request, the newest booking, the newest lead or
+ * answer, each when there is one. A key the API leaves out, as one from before a kind was renamed
+ * would, makes no row rather than breaking the card.
+ */
 function shortForm(briefing: Today['briefing']): BriefingItem[] {
-  const { blocked, booking, lead_or_answer: leadOrAnswer } = briefing.newest;
-  return [blocked, booking, leadOrAnswer].filter((item): item is BriefingItem => item !== null);
+  const { turned_down: turnedDown, booking, lead_or_answer: leadOrAnswer } = briefing.newest;
+  return [turnedDown, booking, leadOrAnswer].filter((item): item is BriefingItem => item != null);
 }
 
 export interface SinceLastNightProps {

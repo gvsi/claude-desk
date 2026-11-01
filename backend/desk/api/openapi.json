@@ -2712,7 +2712,7 @@
     "/api/owner/setup/{id}": {
       "get": {
         "summary": "Setup Interview",
-        "description": "The setup interview as it stands, reopening consent when its run was abandoned.",
+        "description": "The setup interview as it stands, removing abandoned turn entries and reopening consent if needed.",
         "operationId": "owner_setup_interview",
         "parameters": [
           {
@@ -2793,7 +2793,7 @@
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "Start a background run that stores consent, then reads Claude memory and the named website through the\nkernel on yes, or skips both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answers 200 when finished within the following wait, otherwise 202 with consent still pending.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
+        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -2904,7 +2904,7 @@
     "/api/owner/setup/{id}/answer": {
       "post": {
         "summary": "Setup Answer",
-        "description": "The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or\nanother is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question\nis covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the\nsame answer can be sent again.",
+        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
         "operationId": "owner_setup_answer",
         "parameters": [
           {
@@ -2938,6 +2938,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -5840,6 +5850,79 @@
       }
     },
     "/api/owner/desks/{desk_id}/knowledge": {
+      "get": {
+        "summary": "Knowledge",
+        "description": "The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.\nContent the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text.",
+        "operationId": "owner_knowledge",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeRow"
+                  },
+                  "title": "Response Owner Knowledge"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
       "post": {
         "summary": "Add Knowledge",
         "description": "Tell Claude something about the business, kept by the kernel under its `item_id` (posting it again replaces\nit): owner-only, or public once the owner marks it so (`Label(readers=[\"public\"])`). It is information for Claude,\nnever a rule; the kernel refuses other readers or a text over 100 KiB (422), and keeps an item that quotes a\nprivate document owner-only.",
@@ -6608,6 +6691,117 @@
                     }
                   ],
                   "title": "Response 422 Owner Draft Money Cap"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/policy/{desk_id}/tools/confirm": {
+      "post": {
+        "summary": "Confirm Tools",
+        "description": "Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy\nconfirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request.",
+        "operationId": "owner_confirm_tools",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolsConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolConfirmed"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
@@ -9111,6 +9305,76 @@
           "label"
         ],
         "title": "KnowledgeItem"
+      },
+      "KnowledgeRow": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "readers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Readers"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "website",
+              "upload",
+              "setup",
+              "memory_import"
+            ],
+            "title": "Source"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "text",
+          "readers",
+          "source",
+          "created_at"
+        ],
+        "title": "KnowledgeRow",
+        "description": "An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view\nmasks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows\nwithout a timestamp. Every field is always sent."
       },
       "Label": {
         "properties": {
@@ -11725,7 +11989,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether a consent run is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {
@@ -12021,6 +12285,33 @@
         ],
         "title": "ToolCall"
       },
+      "ToolConfirmed": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ToolProfile"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "profiles",
+          "draft"
+        ],
+        "title": "ToolConfirmed"
+      },
       "ToolDecisionRow": {
         "properties": {
           "decision_id": {
@@ -12129,6 +12420,41 @@
         ],
         "title": "ToolDecisions",
         "description": "`GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest\nfirst; `next_before` is the cursor for the next page, None on the last."
+      },
+      "ToolPin": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "payments.list_charges",
+              "payments.create_refund"
+            ],
+            "title": "Tool"
+          },
+          "definition_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Definition Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tool",
+          "definition_sha256"
+        ],
+        "title": "ToolPin"
       },
       "ToolProfile": {
         "properties": {
@@ -12370,6 +12696,31 @@
         ],
         "title": "ToolRow",
         "description": "A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its\nstatus (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a\nconnected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the\nactive rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."
+      },
+      "ToolsConfirmIn": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolPin"
+            },
+            "type": "array",
+            "maxItems": 13,
+            "minItems": 1,
+            "title": "Tools"
+          },
+          "enable": {
+            "type": "boolean",
+            "title": "Enable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tools",
+          "enable"
+        ],
+        "title": "ToolsConfirmIn",
+        "description": "The shared batch review body; the checked Desk ID comes from the route."
       },
       "TranscriptItem": {
         "properties": {

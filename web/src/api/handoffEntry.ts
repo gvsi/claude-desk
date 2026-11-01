@@ -34,3 +34,14 @@ export function handoffEntryOf(event: Pick<LedgerEvent, 'kind' | 'summary'>): Ha
   const closedBy = summary.closed_by;
   return typeof closedBy === 'string' && Object.hasOwn(CLOSED_BY, closedBy) ? (CLOSED_BY[closedBy] ?? null) : null;
 }
+
+export type TakeoverEntry = 'takeover' | 'handback';
+
+/** The recorded direction of a mode change; null when the summary doesn't identify one. */
+export function takeoverEntryOf(event: Pick<LedgerEvent, 'kind' | 'summary'>): TakeoverEntry | null {
+  const { summary } = event;
+  if (event.kind !== 'takeover' || !isRecord(summary)) return null;
+  if (summary.from === 'ai' && summary.to === 'owner') return 'takeover';
+  if (summary.from === 'owner' && summary.to === 'ai') return 'handback';
+  return null;
+}

@@ -139,6 +139,8 @@ const CALLED = /\b(?:called|named)\s+([A-ZÀ-Ý0-9][^,]*)/;
 const MY_SHOP_IS = new RegExp(String.raw`\b(?:[Mm]y|[Oo]ur)\s+${SHOP}\s+is\s+(?:(?:called|named)\s+)?([A-ZÀ-Ý0-9][^,]*)`);
 /** A sentence that starts "X is my shop" (or "our business", "my café", "es mi negocio", …). */
 const IS_MY = new RegExp(String.raw`^([A-ZÀ-Ý0-9].*?)\s+(?:is\s+(?:my|our)\s+${SHOP}|es\s+(?:mi|nuestr[oa])\s+${TIENDA})(?![A-Za-zÀ-ÿ])`);
+/** A business followed by its work: "X is a salon", "X fixes leaks", and the Spanish equivalents. */
+const DESCRIBES = /^([A-ZÀ-Ý0-9].*?)\s+(?:is\s+a|fixes|manages|es\s+una?|arregla|administra)\s/;
 
 /** A greeting that can open an introduction ("Hi, I'm Ana", "Hola, soy Ana"). */
 const GREETING = String.raw`(?:[Hh]i|[Hh]ello|[Hh]ey|[Hh]ola)\b[\s,]*`;
@@ -186,7 +188,11 @@ const PHRASES: readonly [phrase: RegExp, end: RegExp][] = [
 
 /** The name a sentence gives the business with a phrase naming it, or null. */
 function namedIn(sentence: string): string | null {
-  const names = [...PHRASES.map(([phrase, end]) => phrase.exec(sentence)?.[1]?.split(end)[0]), IS_MY.exec(sentence)?.[1]];
+  const names = [
+    ...PHRASES.map(([phrase, end]) => phrase.exec(sentence)?.[1]?.split(end)[0]),
+    IS_MY.exec(sentence)?.[1],
+    DESCRIBES.exec(sentence)?.[1],
+  ];
   return names.find((name): name is string => name !== undefined && !PRONOUN.test(name) && !SCHEDULE.test(name)) ?? null;
 }
 
@@ -226,10 +232,10 @@ function nameAsKept(name: string): string | null {
   return kept === '' ? null : kept;
 }
 
-/** The description's sentences, each with its closing punctuation. */
+/** The description's sentences; "Co. is a" and "Co. es un/una" keep the business's abbreviation. */
 const sentencesOf = (description: string): string[] =>
   description
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?])(?<!\bCo\.)\s+|(?<=\bCo\.)(?!\s+(?:is\s+a|es\s+una?)\s)\s+|\n+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence !== '');
 /** A sentence without its closing punctuation. */

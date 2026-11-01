@@ -113,10 +113,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [
-  // Proving
-  'confirmTool',
-] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
@@ -146,6 +143,8 @@ export const NEVER_CALLED = [
   // Task 14 (Connectors) adds `connectTools` and `toolDecisions`.
   'POST /api/owner/desks/{desk_id}/tools/connect',
   'GET /api/owner/desks/{desk_id}/tools/{tool}/decisions',
+  // Settings > Knowledge adds its client route in the web follow-up.
+  'GET /api/owner/desks/{desk_id}/knowledge',
 ] as const satisfies readonly string[];
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

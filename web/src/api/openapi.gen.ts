@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, Violation } from './contracts.ts';
+import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -422,6 +422,19 @@ export interface KnowledgeIn {
   item: KnowledgeItem;
 }
 /**
+ * An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+ * masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+ * without a timestamp. Every field is always sent.
+ */
+export interface KnowledgeRow {
+  item_id: string;
+  title: string | null;
+  text: string | null;
+  readers: string[];
+  source: "website" | "upload" | "setup" | "memory_import";
+  created_at: string | null;
+}
+/**
  * Details a visitor left: the name and note as they typed them (untrusted text, either may be missing).
  */
 export interface Lead {
@@ -747,7 +760,7 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether a consent run is pending (`busy`), and the
+ * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
  * conversation so far. Its messages start at Claude's consent
  * question: the owner's opening description isn't shown back to them.
  */
@@ -907,6 +920,44 @@ export interface ToolDecisions {
   next_before: string | null;
 }
 /**
+ * The shared batch review body; the checked Desk ID comes from the route.
+ */
+export interface ToolsConfirmIn {
+  /**
+   * @minItems 1
+   * @maxItems 13
+   */
+  tools:
+    | [ToolPin]
+    | [ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ];
+  enable: boolean;
+}
+/**
  * One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
  *
  * `owner_joined` and `owner_left` (Plan 02b) are where the owner took the conversation over and handed it back, each
@@ -1001,7 +1052,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
-  "POST /api/owner/setup/{id}/answer": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
@@ -1034,6 +1085,7 @@ export const API_OPERATIONS = {
   "GET /api/owner/desks/{desk_id}/tools/{tool}/decisions": { 200: "ToolDecisions" },
   "POST /api/owner/desks/{desk_id}/tools/connect": { 200: "ToolRow[]" },
   "POST /api/owner/desks/{desk_id}/tools/simulate_change": { 200: "ToolProfile" },
+  "GET /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeRow[]" },
   "POST /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeItem" },
   "POST /api/owner/desks/{desk_id}/documents": { 201: "DocumentCreated" },
   "POST /api/owner/policy/{desk_id}/chat": { 200: "RuleChatOut", 202: "ProvingPending" },
@@ -1041,5 +1093,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/tools/confirm": { 200: "ToolConfirmed", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;
