@@ -120,7 +120,9 @@ def public_facts() -> list[ReviewFact]:
     """The seed's public facts as the recorded reviewer run saw them (FACTS_FILE), in _review's fact_id
     order: the saved answers were measured on exactly these inputs, so a later wording of the seed
     (the demo owner's rename) leaves them current. A test holds FACTS_FILE to the live seed, so any
-    change other than a reviewed rename still needs a new measurement."""
+    change other than a reviewed rename still needs a new measurement. A paid re-record regenerates
+    FACTS_FILE from seed_public_facts() first and empties the test's RENAMED pairs, so it measures
+    the seed's current wording."""
     return [ReviewFact.model_validate(fact) for fact in json.loads(FACTS_FILE.read_text(encoding="utf-8"))]
 
 
