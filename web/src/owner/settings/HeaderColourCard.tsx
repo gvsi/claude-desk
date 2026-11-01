@@ -40,9 +40,12 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
           setFailure(OWNER_ERROR_COPY.network);
           return;
         }
+        // This read is confirmed even if the following settle refetch fails.
+        setOptimistic(null);
         const now = read.find((item) => item.business_id === business.business_id);
         if (now === undefined || paletteKey(now.brand) !== previous) return;
       }
+      setOptimistic(null);
       setFailure(`That didn't save, so your header is still ${previous === null ? 'Custom colour' : PALETTE_NAMES[previous]}.`);
     },
     onSettled: async () => {

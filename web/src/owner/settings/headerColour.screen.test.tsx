@@ -252,3 +252,24 @@ it('takes coarse-pointer taps 4 px outside every drawn phone swatch without over
     await expect.element(group).toHaveAttribute('aria-busy', 'false');
   }
 });
+
+
+it('keeps a confirmed rollback when the settle read cannot reach the server', async () => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  mockStore.inject({ route: 'setBusiness', status: 'network' });
+  // The uncertain save's first read confirms Teal; only the subsequent settle read fails.
+  let reads = 0;
+  worker.use(http.get(ROUTES.desks.path, () => {
+    reads += 1;
+    return reads === 1 ? undefined : HttpResponse.error();
+  }));
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(card.getByRole('alert')).toHaveTextContent("That didn't save, so your header is still Teal.");
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  expect(reads).toBeGreaterThan(1);
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'teal' });
+});
