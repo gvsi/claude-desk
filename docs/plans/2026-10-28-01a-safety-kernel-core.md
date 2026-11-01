@@ -853,3 +853,13 @@ The paid calibration covered 220 cases: Sonnet let 6 promise cases slip against 
 and blocked 4 honest replies against 12. Measured latency was p50 1.1 s, p95 2.8 s, maximum 5.2 s,
 at $0.0017 per check. Errors, refusals, timeouts and unparsable answers still block as `soft.unavailable`.
 The API gives `/check_reply` 10 s, with the 6 s default unchanged for other non-proving routes.
+
+Owner decision, 2026-10-31, Jev second checker: optional TypeSafe `jev-1.13.0` runs alongside
+Sonnet after the prose scan, on the same prose, card texts and session next_steps. Seven measured
+statements are pinned by exact value; a highest score of 0.95 or above adds `soft.jev`, naming the
+top statement. Jev errors or its 3 s timeout leave Sonnet's verdict standing, and no key means no
+Jev call or warning. The ledger records both verdicts, status and all scores (lossless decimal
+strings). The key is kernel-only, supplied by the owner-set `desk/typesafe-api-key` placeholder.
+Rejected: a Jev fast lane, which let promise samples pass, and lower OR cutoffs, which added
+honest blocks. At 0.95 it caught 1 of Sonnet's 6 missed cases without adding an honest block on
+the calibration set. See the [calibration record](../evals.md#soft-check-calibration-2026-10-31).
