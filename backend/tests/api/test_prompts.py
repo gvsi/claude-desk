@@ -306,7 +306,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 "QUESTION_KEYS", "SETUP_NEXT_SYSTEM", "SETUP_NEXT_HEAD", "SetupNextStep",
                 "SETUP_CARD_ANSWER_SYSTEM", "SETUP_CLIENT_CARDS", "SETUP_CLOSING_LINE", "SetupCardAnswer",
                 "question_text", "setup_turn_head", "SetupStart", "SetupTurn", "SETUP_TURNS", "SetupPatch",
-                "SetupAnswers", "HoursAnswer", "PriceAnswer",
+                "SetupAnswers", "HoursAnswer", "PriceAnswer", "MemoryDraft", "ConnectorKey", "CONNECTOR_LABELS",
                 # triage and owner translations (Plan 02b, Task 10)
                 "TriageCategory", "TRIAGE_SYSTEM", "Triage", "TRANSLATION_SYSTEM", "Translation",
                 # the wrappers and the summary's labels
