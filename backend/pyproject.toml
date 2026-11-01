@@ -18,6 +18,7 @@ dependencies = [
     "cryptography>=50.0.2",
     "mcp==2.3.0",
     "httpx2>=2.13.1",
+    "markdown-it-py==4.2.0",
 ]
 
 # The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.

@@ -1,0 +1,27 @@
+"""The reply check on Markdown prose: the chats render Claude's prose as Markdown (the owner's decision
+of 2026-11-01), so the kernel scans what a visitor sees as well as the raw text.
+
+Formatting can't hide a price, date, discount or promise from the scan, and numbers stay refused in
+every Markdown form, list markers included; honest bullets, bold, headings, tables without numbers and
+links to the business's own site pass; a link's target must be the business's own contact; images are
+refused.
+"""
+
+from desk.kernel_service import markdown_text
+
+STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry"
+
+
+def test_an_ordered_list_is_read_with_the_numbers_it_renders():
+    assert markdown_text.read(STEPS).visible == (
+        "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry\n")
+    # a list renders its numbers from its start, whatever its other markers say
+    assert markdown_text.read("1. a\n1. b\n1. c").visible == "1. a\n2. b\n3. c\n"
+    assert markdown_text.read("3. a\n1. b").visible == "3. a\n4. b\n"
+    assert markdown_text.read("01. a\n02. b").visible == "1. a\n2. b\n"
+    assert markdown_text.read("100. dollars").visible == "100. dollars\n"
+    # a new delimiter starts a new list, here at 500; a list in a quote or a bullet renders its numbers too
+    assert markdown_text.read("1. a\n500) b").visible == "1. a\n500. b\n"
+    assert markdown_text.read("> 2. a\n- 7) b").visible == "2. a\n7. b\n"
+    eleven = "\n".join(f"{n}. step" for n in range(1, 12))
+    assert markdown_text.read(eleven).visible == "".join(f"{n}. step\n" for n in range(1, 12))
