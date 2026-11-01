@@ -2,7 +2,7 @@
 import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
-import { storedPublicState, storePublicState } from './publicLineStore.ts';
+import { heldPublicLineSeed, storedPublicState, storePublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { publicLineLimit } from '../setup/publicLineLimit.ts';
 import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
@@ -63,7 +63,10 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
   if (!saved) {
     const cpa = /^Chen & Co\.?(?: CPA)?$/i.test(sv.world.desk(state.desk_id)?.summary.business_name ?? '');
     saved = storePublicState(sv.world, state.interview_id, {
-      lines: seed(sv, state),
+      lines: seed(sv, state).map((line): SetupPublicLine => {
+        const text = heldPublicLineSeed(sv.world, state.interview_id, line.key);
+        return text === undefined ? { ...line, held: false } : { ...line, text, source: 'owner', held: true };
+      }),
       hours: cpa ? { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] } : null,
       prices: cpa ? { source: 'suggested', items: [
         { title: 'Tax return review', unit_cents: 25000 },
@@ -91,11 +94,12 @@ export const PUBLIC_LINES_ROUTES = {
     }
     if (!line.editable) return { status: 422, body: { error: 'not_editable', key: line.key } };
     const refused = found.lines.find((candidate) =>
-      (candidate === line || candidate.source === 'owner') && publicLineRefused(candidate === line ? text.trim() : candidate.text),
+      (candidate === line || (candidate.source === 'owner' && !candidate.held)) && publicLineRefused(candidate === line ? text.trim() : candidate.text),
     );
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     line.text = text.trim();
     line.source = 'owner';
+    line.held = false;
     return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
   setupPublicLinesConfirm(sv, req) {
@@ -108,7 +112,9 @@ export const PUBLIC_LINES_ROUTES = {
       return { status: 422, body: { error: 'invalid' } };
     }
     if (revision !== found.revision) return { status: 409, body: { error: 'conflict' } };
-    const refused = found.lines.find((line) => (line.source === 'owner' || keys.includes(line.key)) && publicLineRefused(line.text));
+    const held = found.lines.find((line) => line.held && keys.includes(line.key));
+    if (held) return { status: 422, body: { error: 'line_refused', key: held.key, reason: ['mock_scan'] } };
+    const refused = found.lines.find((line) => ((line.source === 'owner' && !line.held) || keys.includes(line.key)) && publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     for (const line of found.lines) if (keys.includes(line.key)) line.source = 'owner';
     return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };

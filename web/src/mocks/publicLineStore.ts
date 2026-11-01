@@ -3,6 +3,27 @@ import type { SetupPublicLine, SetupPublicLines } from '../api/views.ts';
 import type { MockWorld } from './world.ts';
 
 const STATES = new WeakMap<MockWorld, Map<string, SetupPublicLines>>();
+const HELD_SEEDS = new WeakMap<MockWorld, Map<string, Map<string, string>>>();
+
+/** Fixture hook: keep the owner's exact words held on this interview's first public-lines read. */
+export function holdPublicLineOnSeed(world: MockWorld, interviewId: string, key: string, text: string): void {
+  if (storedPublicState(world, interviewId)) throw new Error('public lines already seeded');
+  let interviews = HELD_SEEDS.get(world);
+  if (!interviews) {
+    interviews = new Map();
+    HELD_SEEDS.set(world, interviews);
+  }
+  let lines = interviews.get(interviewId);
+  if (!lines) {
+    lines = new Map();
+    interviews.set(interviewId, lines);
+  }
+  lines.set(key, text);
+}
+
+export function heldPublicLineSeed(world: MockWorld, interviewId: string, key: string): string | undefined {
+  return HELD_SEEDS.get(world)?.get(interviewId)?.get(key);
+}
 
 export function storedPublicState(world: MockWorld, interviewId: string): SetupPublicLines | undefined {
   return STATES.get(world)?.get(interviewId);

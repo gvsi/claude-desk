@@ -6,7 +6,7 @@ import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views
 import { OWNER_ERROR_COPY } from '../api/http.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
-import { storedPublicState, storePublicLines } from '../mocks/publicLineStore.ts';
+import { holdPublicLineOnSeed, storedPublicState, storePublicLines } from '../mocks/publicLineStore.ts';
 import { worker } from '../mocks/browser.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
@@ -42,6 +42,101 @@ async function openLines(viewport: Viewport = 'desktop') {
   await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
   return { screen, state };
 }
+
+it('opens a held line with the owner’s words and signed refusal, and publishes an accepted rewrite', async () => {
+  const state = await atSituations();
+  const text = 'We always charge $250.';
+  holdPublicLineOnSeed(mockStore.world, state.interview_id, 'policy:about', text);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone', strict: true });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  const field = screen.getByRole('textbox', { name: 'About us', exact: true });
+  await expect.element(field).toHaveValue(text);
+  await expect.element(field).toHaveAttribute('aria-invalid', 'true');
+  await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
+  await field.fill('We help local businesses.');
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(field).not.toBeInTheDocument();
+  expect(screen.getByText(REFUSED_COPY, { exact: true }).elements()).toHaveLength(0);
+  const saved = storedPublicState(mockStore.world, state.interview_id)!;
+  expect(saved.lines.find((line) => line.key === 'policy:about')).toMatchObject({ text: 'We help local businesses.', source: 'owner', held: false });
+  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: { charter: [
+    expect.objectContaining({ fact_id: 'charter:policy:about', title: 'We help local businesses.' }),
+  ] } });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: saved.lines.map((line) => line.key), revision: saved.revision });
+});
+
+it('opens the first held row in display order, preserves canceled holds and confirms only other lines', async () => {
+  const state = await atSituations();
+  const held = [
+    { key: 'policy:pricing', text: 'We always charge $250.' },
+    { key: 'policy:about', text: 'We always reply within 20 minutes.' },
+  ];
+  for (const line of held) holdPublicLineOnSeed(mockStore.world, state.interview_id, line.key, line.text);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  const about = screen.getByRole('textbox', { name: 'About us', exact: true });
+  await expect.element(about).toHaveValue(held[1]!.text);
+  expect(screen.getByRole('textbox').elements()).toHaveLength(1);
+  await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect.element(about).not.toBeInTheDocument();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(2).click();
+  const pricing = screen.getByRole('textbox', { name: 'Pricing', exact: true });
+  await expect.element(pricing).toHaveValue(held[0]!.text);
+  await expect.element(pricing).toHaveAttribute('aria-invalid', 'true');
+  await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
+  expect(screen.getByRole('textbox').elements()).toHaveLength(1);
+  await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
+  const selected = before.lines.filter((line) => !line.held);
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: selected.map((line) => line.key), revision: before.revision });
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  const after = storedPublicState(mockStore.world, state.interview_id)!;
+  for (const line of held) expect(after.lines.find((candidate) => candidate.key === line.key)).toEqual(before.lines.find((candidate) => candidate.key === line.key));
+  expect(after.hours).toEqual(before.hours);
+  expect(after.prices).toEqual(before.prices);
+  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: {
+    charter: selected.map((line) => expect.objectContaining({ fact_id: `charter:${line.key}`, title: line.text })),
+  } });
+});
+
+it('holds a malformed held flag instead of confirming the line', async () => {
+  const state = await atSituations();
+  const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in read) throw new Error('read failed');
+  const body = read.body as SetupPublicLines;
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { ...body, lines: body.lines.map((line) => ({ ...line, held: 0 })) } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.poll(() => screen.getByRole('button', { name: 'Edit', exact: true }).elements().length > 0 || screen.getByRole('alert').elements().length > 0).toBe(true);
+  expect(screen.getByRole('alert').elements()).toHaveLength(1);
+  await expect.element(screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+it('keeps Looks right disabled after canceling when every displayed line is held', async () => {
+  const state = await atSituations();
+  await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  storePublicLines(mockStore.world, state.interview_id, [{ key: 'policy:about', text: 'The owner’s stored words.', source: 'owner', editable: true, held: true }]);
+  const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('textbox', { name: 'About us', exact: true })).toHaveValue('The owner’s stored words.');
+  await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  expect(screen.getByRole('textbox').elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+  expect(storedPublicState(mockStore.world, state.interview_id)).toEqual(before);
+});
 
 it('opens public lines from Real situations with the signed labels and screen basics at both widths', async () => {
   for (const viewport of ['desktop', 'phone'] as const) {

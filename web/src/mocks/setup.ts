@@ -1286,7 +1286,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
-    charter: lines?.filter(({ source, text }) => source === 'owner' && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text }))
+    charter: lines?.filter(({ source, text, held }) => source === 'owner' && !held && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text }))
       ?? (interview.about === null || publicLineRefused(interview.about) ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
     agent_card: [],
     open_status: null,

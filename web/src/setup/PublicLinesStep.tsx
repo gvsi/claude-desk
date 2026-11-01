@@ -19,7 +19,8 @@ function checkedLines(value: SetupPublicLines): SetupPublicLines {
     || (value.prices !== null && (!value.prices || !['owner', 'suggested'].includes(value.prices.source) || !Array.isArray(value.prices.items)))
     || !Array.isArray(value.lines) || value.lines.some((line) =>
       !line || typeof line.key !== 'string' || typeof line.text !== 'string' || !line.text.trim()
-      || typeof line.editable !== 'boolean' || (line.source !== 'owner' && line.source !== 'suggested'),
+      || typeof line.editable !== 'boolean' || (line.source !== 'owner' && line.source !== 'suggested')
+      || (line.held !== undefined && typeof line.held !== 'boolean'),
     ) || new Set(value.lines.map((line) => line.key)).size !== value.lines.length
   ) throw new Error('invalid public lines');
   return value;
@@ -54,6 +55,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const invalid = text.trim() === '' || Array.from(text).length > limit;
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
+  const openedHeldOnLoad = useRef(false);
   useEffect(() => {
     if (editingKey === null && returnFocus.current !== null) {
       editButtons.current.get(returnFocus.current)?.focus();
@@ -75,8 +77,20 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     refetchOnWindowFocus: false,
   });
   const shown = PUBLIC_LINE_KEYS.flatMap((key) => lines.data?.lines.filter((line) => line.key === key && line.text.trim() !== '') ?? []);
+  const confirmable = shown.filter((line) => !line.held);
   const unknown = lines.data?.lines.some((line) => !knownKey(line.key)) ?? false;
   const empty = lines.data !== undefined && lines.data.lines.length === 0;
+  useEffect(() => {
+    const current = lines.data;
+    if (!current || openedHeldOnLoad.current) return;
+    openedHeldOnLoad.current = true;
+    const held = PUBLIC_LINE_KEYS.map((key) => current.lines.find((line) => line.key === key)).find((line) => line?.held);
+    if (held) {
+      setEditingKey(held.key);
+      setText(held.text);
+      setRefused(true);
+    }
+  }, [lines.data]);
   useEffect(() => {
     if (empty) onNext('safety_check');
   }, [empty, onNext]);
@@ -91,7 +105,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     setText(line.text);
     setEditingKey(line.key);
     setError(null);
-    setRefused(false);
+    setRefused(line.held === true);
   };
   const save = async () => {
     if (editingKey === null || busy !== null || invalid) return;
@@ -114,11 +128,11 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
   const confirm = async () => {
-    if (editingKey !== null || busy !== null || lines.data === undefined || shown.length === 0 || unknown) return;
+    if (editingKey !== null || busy !== null || lines.data === undefined || confirmable.length === 0 || unknown) return;
     setBusy('confirm');
     setError(null);
     try {
-      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: shown.map((line) => line.key), revision: lines.data.revision } }));
+      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: confirmable.map((line) => line.key), revision: lines.data.revision } }));
       queryClient.setQueryData(queryKey, confirmed);
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
       onNext('safety_check');
@@ -219,7 +233,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
             </div>
           </Card>
           <div className="cd-setup-step__actions">
-            {editingKey !== null || unknown ? (
+            {editingKey !== null || unknown || confirmable.length === 0 ? (
               <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
             ) : (
               <Button variant="primary" size="main" busy={busy === 'confirm'} onClick={() => void confirm()}>

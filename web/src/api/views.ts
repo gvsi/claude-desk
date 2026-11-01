@@ -585,6 +585,8 @@ export interface SetupPublicLine {
   text: string;
   source: 'owner' | 'suggested';
   editable: boolean;
+  /** Stored owner words held from publication; absent on older answers means false. */
+  held?: boolean;
 }
 
 export interface SetupPublicHours {
