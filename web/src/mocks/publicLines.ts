@@ -13,7 +13,7 @@ const CPA_LINES = [
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
   ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-  ['how_we_help', 'Book a free intro call: New clients pick a time within opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients who have been priced get a secure link to pay a retainer before work starts.'],
+  ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
 ] as const;
 
 /** Only an explicit after-hours clause is known; contact details and ambiguous answers stay out. */
@@ -89,7 +89,7 @@ export const PUBLIC_LINES_ROUTES = {
     if (req.malformed || typeof req.body !== 'object' || req.body === null || Array.isArray(req.body) || Object.keys(req.body).length !== 0) {
       return { status: 422, body: { error: 'invalid' } };
     }
-    const refused = found.lines.find((line) => line.editable && publicLineRefused(line.text));
+    const refused = found.lines.find((line) => publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: 'mock_scan' } };
     return { status: 200, body: structuredClone(found) };
   },

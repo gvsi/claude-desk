@@ -4,6 +4,8 @@ import type { PublicLines, QuestionKey, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS } from './setup.ts';
 import { mockStore } from './store.ts';
+import { publicLineRefused } from './publicLineScan.ts';
+import { storePublicLines } from './publicLineStore.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
@@ -58,7 +60,7 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
     ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
     ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
     ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-    ['how_we_help', 'Book a free intro call: New clients pick a time within opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients who have been priced get a secure link to pay a retainer before work starts.'],
+    ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
   ];
   const expected = { lines: board.map(([key, text]) => ({ key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
   const read = await mockStore.dispatch('setupPublicLines', { params });
@@ -126,7 +128,7 @@ it('updates one editable line and refuses unsafe, read-only or invalid edits wit
   expect(read).toMatchObject({ body: { lines: expect.arrayContaining([{ key, text: 'x'.repeat(500), source: 'owner', editable: true }]) } });
 });
 
-it('confirms all editable lines, rescans seeded answers and leaves the interview at rules', async () => {
+it('confirms all lines, rescans seeded answers and leaves the interview at rules', async () => {
   const params = await atRules();
   const confirmed = await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} });
   expect(confirmed).toMatchObject({ status: 200, body: { lines: expect.any(Array) } });
@@ -272,7 +274,7 @@ it('refuses free and numeric durations in seeded public lines, confirm and edits
   }
 });
 
-it('seeds How we help in third person without you or your', async () => {
+it('seeds How we help as customer-readable lines that pass the scan', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
@@ -280,9 +282,41 @@ it('seeds How we help in third person without you or your', async () => {
   const line = (read.body as PublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
   expect(line).toMatchObject({ editable: false });
   const jobs = line!.text.split('\n');
-  expect(jobs).toHaveLength(3);
+  expect(jobs).toEqual([
+    'New clients book a short introductory call.',
+    'Before their call, new clients answer three short questions.',
+    'Clients get a secure link to pay a retainer before work starts.',
+  ]);
   for (const job of jobs) {
-    expect(job).toMatch(/^.+: .+$/);
-    expect(job).not.toMatch(/\b(?:you|your)\b/i);
+    expect(job).not.toContain(':');
+    expect(job).not.toMatch(/\b(?:you|your|free)\b|\d/i);
+    expect(publicLineRefused(job)).toBe(false);
   }
+});
+
+it('scans read-only How we help before confirmation and public publication', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  const key = 'policy:how_we_help';
+  const text = 'Book a free 20-minute call.';
+  // Reproduce an unsafe code-built draft without allowing an owner to edit the read-only claim.
+  storePublicLines(mockStore.world, params.id, (read.body as PublicLines).lines.map((line) =>
+    line.key === key ? { ...line, text } : line,
+  ));
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({
+    status: 200, body: { lines: expect.arrayContaining([expect.objectContaining({ key, text, editable: false })]) },
+  });
+  const setup = await mockStore.dispatch('setup', { params });
+  if ('network' in setup) throw new Error('setup read failed');
+  const publicParams = { slug: (setup.body as SetupState).slug };
+  const hiddenClaim = { status: 200, body: { charter: expect.not.arrayContaining([expect.objectContaining({ fact_id: `charter:${key}` })]) } };
+  expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject(hiddenClaim);
+  expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({
+    status: 422, body: { error: 'line_refused', key },
+  });
+  expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject(hiddenClaim);
+  expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text: 'A replacement.' } })).toMatchObject({
+    status: 422, body: { error: 'not_editable', key },
+  });
 });
