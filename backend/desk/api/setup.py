@@ -47,9 +47,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   a field only of its own question's model, whose message leaves the memory and website out, and code drops it from
   any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
-  the quote question's prices, named from the owner's answer alone (the turn reads no price list): code updates the
-  item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
-  flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
+  the quote question's pricing text and price items, named from the owner's answer alone (the turn reads neither):
+  code replaces the pricing text and updates or adds price items by title, never removing one. Some fields (pricing,
+  intake, urgent, after_hours, hours and a website named) are only on the questions that ask for them
+  (`FIELD_TURNS`), and code drops one from any other turn's patch too, so each turn's schema stays small enough to
+  compile. A fact question clears the hours or the prices only by its flag, since an empty list leaves them as they
+  are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead.
@@ -156,6 +159,7 @@ from desk.api.prompts import (
     OWNER_ANSWER_TAG,
     OWNER_DECISION_TAG,
     OWNER_DESCRIPTION_TAG,
+    FIELD_TURNS,
     PRICE_ITEMS_MAX,
     PRICES_TAG,
     QUESTION_KEYS,
@@ -198,6 +202,7 @@ from desk.api.prompts import (
     SetupCardAnswer,
     QuestionKey,
     RuleCardDraft,
+    SETUP_POLICY_CLAIMS,
     SetupAnswers,
     SetupPatch,
     SetupStart,
@@ -418,6 +423,7 @@ class Entry(BaseModel):
     dropped: list[str] = []
     cards: bool | None = None
     pending: str | None = None
+    held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
     connected_apps: list[ConnectorKey] | None = None
 
 
@@ -506,6 +512,15 @@ class Interview:
     @property
     def suggested(self) -> SuggestedFacts | None:
         return next((entry.suggested for entry in self.transcript if entry.suggested is not None), None)
+
+    @property
+    def held_policy_keys(self) -> list[str]:
+        return next((entry.held_policy_keys for entry in reversed(self.transcript)
+                     if entry.held_policy_keys is not None), [])
+
+    def hold_policies(self, keys: list[str]) -> None:
+        """Persist the latest charter outcome with the interview's other transcript metadata."""
+        self.transcript[-1].held_policy_keys = list(keys)
 
     @property
     def covered(self) -> set[QuestionKey]:
@@ -609,6 +624,7 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> Setu
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
+                      held_policy_keys=interview.held_policy_keys,
                       messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
@@ -1412,8 +1428,9 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
 
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
-    its own question (`LIMIT_QUESTIONS`), and a fact only on a turn answering a question that owns no limit, but for
-    the prices the quote question names, which only update or add items (`_priced`); anything else is dropped and
+    its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
+    on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
+    question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
     logged (by its label or field name, never its value). Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
@@ -1423,9 +1440,12 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
         if name in LIMIT_QUESTIONS and key != LIMIT_QUESTIONS[name]:
             logger.warning("a setup turn answering %s carried %s; it was dropped", key, LIMIT_LABELS[name])
             continue
+        if name in FIELD_TURNS and key not in FIELD_TURNS[name]:
+            logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
+            continue
         if limit_turn and name not in LIMIT_QUESTIONS:
             if LIMIT_TURN_FACTS.get(name) == key:
-                values[name] = _priced(values[name], value, key)
+                values[name] = _priced(values[name], value, key) if name == "price_items" else value
             else:
                 logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
             continue
@@ -1784,7 +1804,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
         if reply.text:
             entries.append(reply)
-        site = website_url(turn.website)
+        site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
                 entries.append(await _read_website(ctx, desk_id, *site))
@@ -1992,25 +2012,77 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
-def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date) -> SeedParts:
-    """The Desk's parts from the answers: the public charter (the contact and the service area; never hours, which
-    have their own part), the hours, the price list, the calendar and the notification defaults."""
+def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
+               publish_policies: bool = True) -> SeedParts:
+    """The Desk's parts from the answers: the public charter (the contact and business policies, omitting policy
+    fields filled from unconfirmed suggestions or all policies when disabled), the hours, the price list,
+    the calendar and notification defaults."""
+    claim_values = [("contact", answers.public_contact)]
+    if publish_policies:
+        claim_values.extend((key, getattr(answers, field)) for field, key in SETUP_POLICY_CLAIMS.items()
+                            if field not in answers.suggested_fields)
     charter = [Claim(key=key, kind="text", value=value.strip())
-               for key, value in (("contact", answers.public_contact), ("policy:service_area", answers.service_area))
+               for key, value in claim_values
                if value and value.strip()]
     return SeedParts(charter=charter, hours=list(answers.hours), prices=price_items(answers.price_items),
                      calendar=calendar_slots(answers.hours, timezone, today),
                      notifications=default_notifications(business_type))
 
 
-async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> None:
+CHARTER_CAPS = frozenset({"policy_count_limit", "policy_text_limit"})
+POLICY_RETRIES = 2
+
+
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+    """Writes the charter, holding back what the kernel's public-text checks refuse, and returns the held keys in
+    the order they were dropped once a write succeeds.
+
+    A refusal (422 `invalid` naming keys) drops claims and the charter is sent again without them; nothing is ever
+    re-sent unchanged. The public contact is held like a policy line. The kernel checks the contact before any
+    policy line, so a refusal naming only the contact drops it without using up a policy retry. The first other
+    refusal drops just the claims it names; a cap refusal, one naming no claim sent, or a second one drops every
+    `policy:` claim left and any other claim it names. A cap refusal is one whose `charter` entry names a cap,
+    whatever other keys (such as the contact) come with it. That is at most four writes when the contact is refused
+    on its own and three otherwise. A refusal with nothing left to drop, a third, or any other failure propagates.
+    Each drop is logged by key and rule ids, never text.
+    """
+    held: list[str] = []
+    policy_refusals = 0
+    while True:
+        try:
+            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
+                                    path={"id": desk_id})
+            return held
+        except KernelFailed as refused:
+            if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+                raise
+            named = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
+            capped = not CHARTER_CAPS.isdisjoint(refused.detail.get("charter", ()))
+            if refused.detail.keys() == {"contact"} and named:
+                dropped = named
+            elif policy_refusals < POLICY_RETRIES:
+                targeted = policy_refusals == 0 and named and not capped
+                dropped = named if targeted else {claim.key: refused.detail.get(claim.key, []) for claim in charter
+                                                  if claim.key.startswith("policy:") or claim.key in named}
+                policy_refusals += 1
+            else:
+                raise
+            if not dropped:
+                raise
+            logger.warning("setup dropped refused charter claims: %s", dropped)
+            held.extend(dropped)
+            charter = [claim for claim in charter if claim.key not in dropped]
+
+
+async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> list[str]:
     path = {"id": desk_id}
-    await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter), path=path)
+    held = await _put_charter(owner, desk_id, parts.charter)
     await owner.kernel.call("PUT /desks/{id}/hours", DeskHoursRequest(hours=parts.hours), path=path)
     await owner.kernel.call("PUT /desks/{id}/prices", DeskPricesRequest(price_items=parts.prices), path=path)
     await owner.kernel.call("PUT /desks/{id}/calendar", DeskCalendarRequest(calendar_slots=parts.calendar), path=path)
     await owner.kernel.call("PUT /desks/{id}/notifications",
                             DeskNotificationsRequest(notifications=parts.notifications), path=path)
+    return held
 
 
 async def _business(owner: OwnerCtx, desk_id: str) -> dict:
@@ -2212,7 +2284,7 @@ async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, vers
 
 
 async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str,
-                now: datetime) -> RulesDraft:
+                now: datetime, *, setup_policy_claims_enabled: bool = True) -> RulesDraft:
     """The new Desk's parts and its first rules draft. The first time, the parts go to the kernel, then Claude
     drafts the cards, each set stored before the kernel drafts it; a set the kernel refuses as invalid gets Claude's
     one retry (`draft_cards`). Any later request re-posts the stored cards and never drafts again. A proof that is
@@ -2229,7 +2301,9 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
     if not cards:
         timezone = (await _business(owner, desk_id))["timezone"]
         today = now.astimezone(ZoneInfo(timezone)).date()
-        await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today))
+        held = await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today,
+                                                         publish_policies=setup_policy_claims_enabled))
+        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first

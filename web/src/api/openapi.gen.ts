@@ -881,6 +881,10 @@ export interface SetupState {
     | null;
   pending_card?: string | null;
   busy?: boolean;
+  /**
+   * Charter claim keys, such as a policy line or the public contact, withheld by the kernel's public-text checks; empty when nothing was held at the latest charter write.
+   */
+  held_policy_keys: string[];
   messages: SetupMessage[];
 }
 /**

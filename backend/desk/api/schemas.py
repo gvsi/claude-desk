@@ -660,6 +660,9 @@ class SetupState(BaseModel):
     question: QuestionKey | None
     pending_card: str | None = None
     busy: bool = False
+    held_policy_keys: list[str] = Field(description="Charter claim keys, such as a policy line or the public contact, "
+                                       "withheld by the kernel's public-text checks; empty when nothing was held at "
+                                       "the latest charter write.")
     messages: list[SetupMessage]
 
 

@@ -107,6 +107,27 @@ async def test_public_policy_refusal_detail_reaches_the_caller():
     assert str(refused.value) == "kernel answered 422 invalid"
 
 
+@pytest.mark.parametrize("body", [{"code": "invalid"}, {"code": "invalid", "detail": None}],
+                         ids=["no-detail", "null-detail"])
+async def test_a_refusal_without_detail_reaches_the_caller_with_an_empty_detail(body):
+    kernel = ScriptedKernel()
+    kernel.fail(httpx.Response(422, json=body))
+    async with kernel.client() as http:
+        with pytest.raises(KernelFailed) as refused:
+            await http.owner("owner-token").call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[]),
+                                                path={"id": "d1"})
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", {})
+
+
+def test_kernel_failed_takes_detail_by_keyword_and_never_holds_none():
+    assert KernelFailed(409, "conflict").detail == {}
+    assert KernelFailed(422, "invalid", detail=None).detail == {}
+    detail = {"contact": ["contact_format"]}
+    assert KernelFailed(422, "invalid", detail=detail).detail == detail
+    with pytest.raises(TypeError):
+        KernelFailed(422, "invalid", {"contact": ["contact_format"]})
+
+
 async def test_owner_client_sends_only_the_owner_token():
     kernel = ScriptedKernel()
     async with kernel.client() as http:
