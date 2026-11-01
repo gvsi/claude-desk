@@ -89,9 +89,11 @@ describe('ask claude', () => {
   });
 
   it('nothing_in_the_payments_rows_jumps_at_1512', async () => {
-    // At 1512 px the header keeps one line, but inside the Payments and Stripe rows, whose own
-    // height stays the same, the summary lines move when the column narrows. Scrolled to them, on
-    // the first frame of the open and of the close, every part of those rows is where it was.
+    // At 1512 px, beside the panel and the header's two actions, the subtitle takes a second line,
+    // above the rows scrolled to here, and the browser keeps them where they are on screen. Inside
+    // the Payments and Stripe rows, whose own height stays the same, the summary lines move when
+    // the column narrows. On the first frame of the open and of the close, every part of those rows
+    // is where it was in them.
     await cdp().send('Animation.enable');
     onTestFinished(async () => {
       await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
@@ -110,17 +112,28 @@ describe('ask claude', () => {
     const main = screen.container.querySelector('main') as HTMLElement;
     expect(main.scrollTop).toBeGreaterThan(0);
     const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]);
-    // Where each part is in the page, wherever it is scrolled (closing returns focus to the composer, which scrolls).
-    const tops = () => parts().map((el) => Math.round((el.getBoundingClientRect().top + main.scrollTop) * 10) / 10);
+    const header = screen.container.querySelector('.cd-rules__header') as HTMLElement;
+    // Where each part is from the top of the Payments rows, wherever the page is scrolled (closing
+    // returns focus to the composer, which scrolls) and however many lines the header takes; the
+    // rows themselves are checked on screen as the panel opens.
+    const tops = () => {
+      const start = (sections()[0] as HTMLElement).getBoundingClientRect().top;
+      return parts().map((el) => Math.round((el.getBoundingClientRect().top - start) * 10) / 10);
+    };
     /** Each part that moved more than half a pixel from `was`, as "class: from → to". */
     const jumps = (was: number[]) =>
       tops().flatMap((top, index) => (Math.abs(top - (was[index] ?? top)) > 0.5 ? [`${parts()[index]?.className}: ${was[index]} → ${top}`] : []));
     const closed = tops();
+    const onScreen = () => Math.round((sections()[0] as HTMLElement).getBoundingClientRect().top);
+    const seen = onScreen();
+    const lines = header.getBoundingClientRect().height;
 
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
     await expect.element(panel).toBeVisible();
+    expect(header.getBoundingClientRect().height - lines, "the subtitle's second line").toBe(20);
+    expect(onScreen(), 'the rows stay where they are on screen').toBe(seen);
     expect(jumps(closed), 'opening').toEqual([]);
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
     await settled(screen.container);
