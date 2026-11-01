@@ -364,6 +364,25 @@ describe('chatReducer', () => {
     expect(run(events([held, approved, executed], 9), reloaded).rows).toEqual(reloaded.rows);
   });
 
+  it.each(['refused_at_execution', 'failed', 'expired', 'cancelled', 'denied'] as const)(
+    'approved_then_%s_stay_under_the_same_message_live_and_after_reload', (state) => {
+      const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+      const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
+      const outcome: StatusEvent = { ...held, type: 'resolved', state, visitor_plain: rivera.decisions[state].visitor_plain, ledger_seq: 21 };
+      const live = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' },
+        ...events([held, handoff, { type: 'turn_end' }, approved, outcome])]);
+      const reloaded = run([{ type: 'history', transcript: transcript(5, [
+        visitorText(1, 'Can I get 10% off?'), { ...item(2, 'status'), event: held }, { ...item(3, 'delivered'), event: handoff },
+        { ...item(4, 'status'), event: approved }, { ...item(5, 'status'), event: outcome },
+      ]) }]);
+      const expected = [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(outcome)];
+      expect(live.rows[1]?.receipts).toEqual(expected);
+      expect(live.openHolds).toEqual([]);
+      expect(reloaded.rows[1]?.receipts).toEqual(expected);
+      expect(reloaded.openHolds).toEqual([]);
+    },
+  );
+
   it('reload_holding_approved_attaches_the_stream_outcome_below_it', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
