@@ -251,16 +251,15 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   };
 
   const renderRemove = (key: string, row: string, describedBy: string, itemId?: string) => {
-    const label = <>{copy.remove}{key === 'hours' ? <span className="cd-sr-only"> {copy.hours}</span> : null}</>;
     const buttonRef = (button: HTMLButtonElement | null) => {
       if (button) removeButtons.current.set(row, button);
       else removeButtons.current.delete(row);
     };
     return editingKey !== null ? (
-      <Button variant="ghost" disabled describedBy={describedBy} buttonRef={buttonRef}>{label}</Button>
+      <Button variant="ghost" disabled describedBy={describedBy} buttonRef={buttonRef}>{copy.remove}</Button>
     ) : (
       <Button variant="ghost" waiting={busy !== null} busy={removing === row} describedBy={describedBy} buttonRef={buttonRef}
-        onClick={() => void remove(key, row, itemId)}>{label}</Button>
+        onClick={() => void remove(key, row, itemId)}>{copy.remove}</Button>
     );
   };
 
@@ -327,15 +326,17 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       )}
     </div>
   );
-  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string, itemId?: string) => {
+  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string | string[], itemId?: string) => {
     const row = key === 'prices' ? `prices-${itemId}` : `hours-${index}`;
     return (
       <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={row}>
         <span className="cd-public-lines__label cd-type-meta">{label}</span>
-        <div id={`${fieldId}-${row}`} className="cd-public-lines__text" data-copy="user">{value}</div>
-        {key !== 'hours' || index === 0 ? <div className="cd-public-lines__actions">
+        <div id={`${fieldId}-${row}`} className="cd-public-lines__text" data-copy="user">
+          {Array.isArray(value) ? value.map((text, index) => <p key={index}>{text}</p>) : value}
+        </div>
+        <div className="cd-public-lines__actions">
           {renderRemove(key, row, `${fieldId}-${row}`, itemId)}
-        </div> : null}
+        </div>
       </div>
     );
   };
@@ -365,7 +366,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                 <p className="cd-public-lines-suggested__intro cd-type-meta">{copy.suggestedIntro}</p>
                 <div className="cd-public-lines">
                   {suggested.map(renderLine)}
-                  {hours.map((window, index) => renderStructured('hours', index, index === 0 ? copy.hours : '', formatPublicHours(window)))}
+                  {hours.length > 0 ? renderStructured('hours', 0, copy.hours, hours.map(formatPublicHours)) : null}
                   {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item), item.item_id))}
                 </div>
               </div>

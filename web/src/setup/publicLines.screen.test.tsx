@@ -57,8 +57,16 @@ it('removes the hours set once across multiple windows', async () => {
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByText('Sat, 10 am – 12 pm', { exact: true })).toBeVisible();
   const rows = [...screen.container.querySelectorAll('.cd-public-lines__row')].filter((row) => /Mon–Fri|Sat,/.test(row.textContent ?? ''));
+  expect(rows).toHaveLength(1);
+  expect([...rows[0]!.querySelectorAll('.cd-public-lines__text p')].map((p) => p.textContent)).toEqual([
+    'Mon–Fri, 9 am – 6 pm', 'Sat, 10 am – 12 pm',
+  ]);
   expect(rows.flatMap((row) => [...row.querySelectorAll('button')])).toHaveLength(1);
-  await screen.getByRole('button', { name: 'Remove Hours', exact: true }).click();
+  const remove = rows[0]!.querySelector('button')!;
+  expect(remove.textContent).toBe('Remove');
+  expect(document.getElementById(remove.getAttribute('aria-describedby')!)?.textContent).toContain('Mon–Fri, 9 am – 6 pm');
+  expect(document.getElementById(remove.getAttribute('aria-describedby')!)?.textContent).toContain('Sat, 10 am – 12 pm');
+  await userEvent.click(remove);
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByText('Sat, 10 am – 12 pm', { exact: true })).not.toBeInTheDocument();
   expect(storedPublicState(mockStore.world, params.id)!.hours).toBeNull();
@@ -161,8 +169,8 @@ it('keeps price row identity and restores Remove focus to the next row or fallba
   expect(document.activeElement).toBe(screen.container.querySelector('.cd-public-lines-suggested__heading'));
   await screen.getByRole('button', { name: /^Remove/ }).first().click();
   await expect.element(screen.getByText('(408) 555-0199, linda@chenandco.com', { exact: true })).not.toBeInTheDocument();
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove Hours', exact: true }).element());
-  await screen.getByRole('button', { name: 'Remove Hours', exact: true }).click();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove', exact: true }).first().element());
+  await screen.getByRole('button', { name: 'Remove', exact: true }).first().click();
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Remove/ }).element());
   await screen.getByRole('button', { name: /^Remove/ }).click();
@@ -813,11 +821,12 @@ it('draws the signed suggested group with actions per type and screen basics at 
     const rows = [...group.querySelectorAll('.cd-public-lines__row')];
     expect(rows.map((row) => row.querySelector('.cd-public-lines__label')?.textContent ?? '')).toEqual(['Contact', 'Hours', 'Price list', '', '']);
     expect(rows.map((row) => [...row.querySelectorAll('button')].map((button) => button.textContent))).toEqual([
-      ['Edit', 'Remove'], ['Remove Hours'], ['Remove'], ['Remove'], ['Remove'],
+      ['Edit', 'Remove'], ['Remove'], ['Remove'], ['Remove'], ['Remove'],
     ]);
     expect(rows.map((row) => row.querySelector('.cd-public-lines__text')?.textContent)).toEqual([
       '(408) 555-0199, linda@chenandco.com', 'Mon–Fri, 9 am – 6 pm', 'Tax return review, $250', 'Business tax return, $600', 'Monthly bookkeeping, $150',
     ]);
+    expect(rows[1]!.querySelectorAll('.cd-public-lines__text p')).toHaveLength(1);
     if (viewport === 'phone') expect(rows.map((row) => row.getBoundingClientRect().height)).toEqual([94, 109, 109, 91, 77]);
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
