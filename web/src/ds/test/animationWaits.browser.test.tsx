@@ -39,3 +39,9 @@ it('samples_and_finishes_a_held_check_draw', async () => {
   expect(draw.playState).toBe('finished');
   expect(getComputedStyle(stroke).strokeDashoffset).toBe('0px');
 });
+
+it('allows_a_correct_sequence_longer_than_the_simple_deadline', async () => {
+  const fade = root.animate({ opacity: [0, 1] }, { duration: 2200, fill: 'forwards', id: 'long-sequence' });
+  await settled(root);
+  expect(fade.playState).toBe('finished');
+});

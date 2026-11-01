@@ -1,4 +1,4 @@
-import { animationLabel, animationWithin } from './animationWithin.ts';
+import { animationDeadline, animationLabel, animationWithin } from './animationWithin.ts';
 
 /**
  * Waits until nothing under `root` is still arriving, so a test measures a screen at rest rather
@@ -10,6 +10,6 @@ export async function settled(root: Element): Promise<void> {
     .getAnimations({ subtree: true })
     .filter((animation) => animation.effect?.getComputedTiming().iterations !== Number.POSITIVE_INFINITY);
   await Promise.all(
-    ending.map((animation) => animationWithin(animation.finished.catch(() => undefined), animationLabel(animation))),
+    ending.map((animation) => animationWithin(animation.finished.catch(() => undefined), animationLabel(animation), animationDeadline(animation))),
   );
 }
