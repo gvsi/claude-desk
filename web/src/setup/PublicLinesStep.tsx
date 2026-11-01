@@ -27,7 +27,7 @@ function checkedLines(value: SetupPublicLines): SetupPublicLines {
     || !(value.hours === null || (value.hours && ['owner', 'suggested'].includes(value.hours.source)
       && Array.isArray(value.hours.windows) && value.hours.windows.every((window) => window
         && Array.isArray(window.days) && window.days.length > 0 && window.days.every((day) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(day))
-        && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.start) && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.end))))
+        && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(window.start) && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(window.end))))
     || !(value.prices === null || (value.prices && ['owner', 'suggested'].includes(value.prices.source)
       && Array.isArray(value.prices.items) && value.prices.items.every((item) => item
         && typeof item.item_id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.item_id) && item.item_id.length <= 40

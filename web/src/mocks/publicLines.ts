@@ -52,7 +52,7 @@ function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'>
     lines.splice(1, 0, { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
     return {
       lines,
-      hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
+      hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }] },
       prices: { source: 'suggested', items: priceItems([
         { title: 'Tax return review', unit_cents: 25000 },
         { title: 'Business tax return', unit_cents: 60000 },
@@ -95,6 +95,11 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
       }),
     });
   }
+  if (data.hours) data.hours.windows = data.hours.windows.map((window) => ({
+    ...window,
+    start: window.start.replace(/^(\d{2}:\d{2})$/, '$1:00'),
+    end: window.end.replace(/^(\d{2}:\d{2})$/, '$1:00'),
+  }));
   if (data.prices) data.prices.items = priceItems(data.prices.items);
   return data;
 }

@@ -11,6 +11,27 @@ import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
+it('serializes hours with seconds on public-lines reads and writes', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  expect(read).toMatchObject({ status: 200, body: { hours: { windows: [
+    { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' },
+  ] } } });
+  if ('network' in read) throw new Error('read failed');
+  storePublicState(mockStore.world, params.id, { ...(read.body as SetupPublicLines), hours: {
+    source: 'suggested', windows: [{ days: ['sat'], start: '09:30', end: '12:00' }],
+  } });
+  const current = await mockStore.dispatch('setupPublicLines', { params });
+  const saved = await mockStore.dispatch('setupPublicLine', { params, body: { key: 'contact', text: 'office@example.com' } });
+  const removed = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'tax-return-review' }, query: { title: 'Tax return review', unit_cents: '25000' } });
+  const confirmed = await confirmShown(params);
+  for (const response of [current, saved, removed, confirmed]) {
+    expect(response).toMatchObject({ status: 200, body: { hours: { windows: [
+      { days: ['sat'], start: '09:30:00', end: '12:00:00' },
+    ] } } });
+  }
+});
+
 it('confirms displayed structured keys with the current revision', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
@@ -41,7 +62,9 @@ it('changes revision on every suggestion removal and refuses the prior confirm w
     const latest = await mockStore.dispatch('setupPublicLines', { params });
     expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {
       keys: [...before.lines.map((line) => line.key), ...(before.hours ? ['hours'] : []), ...(before.prices ? ['prices'] : [])], revision: before.revision,
-    } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+    } })).toMatchObject(key === 'prices'
+      ? { status: 409, body: { error: 'conflict' } }
+      : { status: 422, body: { error: 'invalid' } });
     expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(latest);
   }
 });
@@ -349,7 +372,7 @@ it('seeds exactly the CPA suggestions alongside owner lines without moving the i
       { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true, held: false },
       expect.objectContaining({ key: 'policy:about', source: 'owner' }),
     ]),
-    hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
+    hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }] },
     prices: { source: 'suggested', items: [
       { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
       { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
@@ -719,7 +742,7 @@ it('seeds held CPA hours and prices with a stable revision that changes on PUT',
   const read = await mockStore.dispatch('setupPublicLines', { params });
   expect(read).toMatchObject({ status: 200, body: {
     revision: expect.any(String),
-    hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
+    hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }] },
     prices: { source: 'suggested', items: [
       { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
       { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
@@ -744,7 +767,10 @@ it('confirms listed hours and prices only when explicitly selected and leaves ev
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
-  let current = read.body as SetupPublicLines;
+  storePublicLines(mockStore.world, params.id, (read.body as SetupPublicLines).lines.map((line) => ({ ...line, source: 'suggested' })));
+  const seeded = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in seeded) throw new Error('read failed');
+  let current = seeded.body as SetupPublicLines;
   for (const key of ['hours', 'prices'] as const) {
     const confirmed = await mockStore.dispatch('setupPublicLinesConfirm', { params, body: { keys: [key], revision: current.revision } });
     if ('network' in confirmed) throw new Error('confirm failed');
