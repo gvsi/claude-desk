@@ -1,11 +1,170 @@
 """PR path scoping must only skip suites whose inputs are known to be unchanged."""
 
 import os
+import posixpath
+import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from desk_tools.changed_paths import classify, main
+
+
+ROOT = Path(__file__).resolve().parents[2]
+LITERAL = r'''(?:'[^'\n]*'|"[^"\n]*"|`[^`]*`)'''
+
+
+def tracked_files(*folders):
+    return subprocess.run(
+        ["git", "ls-files", "-z", "--", *folders], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    ).stdout.rstrip("\0").split("\0")
+
+
+def path_arguments(source, start):
+    """Split a JS call without splitting nested dirname/URL calls or template strings."""
+    parts, begin, depth, quote = [], start, 0, None
+    for i in range(start, len(source)):
+        char = source[i]
+        if quote:
+            if char == quote and source[i - 1] != "\\":
+                quote = None
+        elif char in "'\"`":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            if not depth:
+                return [*parts, source[begin:i].strip()]
+            depth -= 1
+        elif char == "," and not depth:
+            parts.append(source[begin:i].strip())
+            begin = i + 1
+    return []
+
+
+def web_read_paths(file, source):
+    """Recognize the imports, URL reads, path calls and local path aliases used by web.
+
+    Keep parent-relative literals even outside a recognized call, including ?raw imports.
+    Resolve path.join(web, '..', ...) against its declared alias, not scripts/.
+    Dynamic filename templates become globs; directory aliases alone aren't file reads.
+    """
+    folder = posixpath.dirname(file)
+    aliases = {}
+
+    def resolve(expression):
+        expression = expression.strip()
+        if re.fullmatch(LITERAL, expression):
+            return re.sub(r"\$\{[^}]+\}", "*", expression[1:-1]).split("?", 1)[0]
+        if expression in aliases:
+            return aliases[expression]
+        if expression in ("path.dirname(fileURLToPath(import.meta.url))", "dirname", "__dirname"):
+            return folder
+        if expression == "import.meta.url":
+            return file
+        if expression.startswith("fileURLToPath("):
+            return resolve(path_arguments(expression, expression.index("(") + 1)[0])
+        match = re.match(r"(?:path\.)?(join|resolve)\(|new URL\(", expression)
+        if match:
+            args = [resolve(arg) for arg in path_arguments(expression, match.end())]
+            if not args or any(arg is None for arg in args):
+                return None
+            if expression.startswith("new URL"):
+                return posixpath.normpath(posixpath.join(posixpath.dirname(args[1]), args[0]))
+            if args[0].startswith("."):
+                args.insert(0, folder)
+            return posixpath.normpath(posixpath.join(*args))
+        return None
+
+    for declaration in re.finditer(r"\bconst\s+(\w+)\s*=\s*([^;]+);", source):
+        value = resolve(declaration[2])
+        if value is not None:
+            aliases[declaration[1]] = value
+    candidates = []
+    for literal in re.finditer(LITERAL, source):
+        value = resolve(literal[0])
+        if value.startswith("../"):
+            candidates.append(posixpath.normpath(posixpath.join(folder, value)))
+    for call in re.finditer(r"(?:path\.)?(?:join|resolve)\(|new URL\(", source):
+        value = resolve(source[call.start():])
+        if value:
+            candidates.append(value)
+    return {
+        path for path in candidates
+        if not path.startswith("web/") and not (ROOT / path).is_dir()
+    }
+
+
+def test_web_external_reads_always_select_web():
+    reads = set()
+    for file in tracked_files("web"):
+        if any(part in {"node_modules", "dist", "storybook-static"} for part in Path(file).parts):
+            continue
+        try:
+            source = (ROOT / file).read_text()
+        except UnicodeDecodeError:
+            continue
+        for path in web_read_paths(file, source):
+            targets = [str(target.relative_to(ROOT)) for target in ROOT.glob(path)] if "*" in path else [path]
+            assert targets, (file, path)
+            for target in targets:
+                reads.add(target)
+                assert classify([target], "pull_request")["web"] is True, (file, target)
+    assert {"backend/desk/api/openapi.json", "backend/desk/contracts.py", "docs/product-proposal.md"} <= reads
+
+
+@pytest.mark.parametrize("expression", [
+    "import input from '../../backend/new.json';",
+    "import input from '../../backend/new.json?raw';",
+    "path.join(__dirname, '..', '..', 'backend', 'new.json')",
+    "path.join('..', '..', 'backend', 'new.json')",
+    'path.resolve(__dirname, "..", "..", "backend", "new.json")',
+    "new URL('../../backend/new.json', import.meta.url)",
+    "const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');\n"
+    "path.join(web, '..', 'backend', 'new.json')",
+    "const BACKEND = path.join(__dirname, '..', '..', 'backend');\n"
+    "path.join(BACKEND, 'new.json')",
+    "path.join(__dirname, '..', '..', 'backend', `${language}.json`)",
+])
+def test_web_read_scan_sees_relative_literals_segments_urls_and_aliases(expression):
+    paths = web_read_paths("web/scripts/read.mjs", expression)
+    assert "backend/new.json" in paths or "backend/*.json" in paths
+
+
+# These deployment paths do not make a CI suite consume the web source. CI synth uses
+# the site placeholder; preflight/deploy build the web app only during owner-run deployment.
+# Their tests create temporary dist files or inspect commands, rather than building web.
+WEB_REFERENCE_ALLOWLIST = {
+    "infra/scripts/deploy.sh": {"web/dist"},
+    "infra/scripts/preflight.py": {"web", "web/package.json", "web/dist"},
+    "infra/stacks/config.py": {"web", "web/dist"},
+    "infra/tests/test_config.py": {"web"},
+    "infra/tests/test_deploy.py": {"web"},
+    "infra/tests/test_edge.py": {"web"},
+    "infra/tests/test_preflight.py": {"web", "web/package.json"},
+}
+
+
+def test_backend_scoped_sources_do_not_read_web_except_deployment_paths():
+    references = {}
+    for file in tracked_files("backend", "evals", "kernel", "infra"):
+        if file.endswith(".md"):
+            continue
+        try:
+            source = (ROOT / file).read_text()
+        except UnicodeDecodeError:
+            continue
+        # Includes Python's repo / "web" / "dist", JS joined segments, relative
+        # imports and shell's $ROOT/web/dist. Ignore ordinary prose containing web.
+        paths = set(re.findall(r'''["'`](?:\.{1,2}/)*(web/[^\s"'`]+)''', source))
+        if re.search(r'''/\s*["']web["']|(?:path\.)?(?:join|resolve)\([^;\n]*["']web["']''', source):
+            paths.add("web")
+        paths.update(re.findall(r'''\$(?:ROOT|\{ROOT\})/(web/[^\s"'`]+)''', source))
+        if paths:
+            references[file] = paths
+    assert references == WEB_REFERENCE_ALLOWLIST, "Remove stale deployment exceptions"
 
 
 @pytest.mark.parametrize(
