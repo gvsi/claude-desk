@@ -24,13 +24,14 @@
   display: inline-flex;
   align-items: center;
   min-height: var(--size-control-main);
+  border-radius: var(--radius-control);
 }
 
 /* The title and subtitle ask for a third of a reading measure beside the actions, so
    with Ask Claude open beside the page the actions stay at the right of the title's line while the
-   column has room for both (N-Conn-12-Chat, and at 1280 px). In a narrower column the menu goes
+   column has room for both (N-Conn-12-Chat, and at 1280 px). In a narrower column the actions go
    under them and they keep the column's whole width, so the title never breaks. Under 640 px the
-   menu takes its own line (below). */
+   actions share their own line (below). */
 @media (min-width: 640px) {
   .cd-rules__header .cd-page-header__text {
     flex: 1 1 calc(var(--size-reading) / 3);
@@ -68,10 +69,12 @@
   }
 
   .cd-rules__header .cd-page-header__actions {
+    position: relative;
     padding-top: 0;
   }
 
   .cd-rules__header .cd-preset-menu {
+    position: static;
     width: auto;
   }
 

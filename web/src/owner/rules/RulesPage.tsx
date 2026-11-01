@@ -74,7 +74,8 @@ interface LimitField {
  * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
  * connector, each group and tool linking to its page under Connectors once those pages are built
  * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
- * header; "Start from a preset", which drafts a preset as one change; the payment limit atop
+ * header; the header's "See all rules" link before "Start from a preset", which drafts a preset
+ * as one change; the payment limit atop
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
 export function RulesPage() {

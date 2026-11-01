@@ -201,6 +201,42 @@ describe('rules page', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
   });
 
+  it('rules_phone_preset_menu_spans_the_actions_row_and_keeps_keyboard_navigation', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const actions = screen.container.querySelector('.cd-rules__header .cd-page-header__actions')!;
+    const button = screen.getByRole('button', { name: 'Start from a preset' });
+    await button.click();
+    const menu = screen.getByRole('menu', { name: 'Start from a preset' });
+    await expect.element(menu).toBeVisible();
+    const rowBox = actions.getBoundingClientRect();
+    const menuBox = menu.element().getBoundingClientRect();
+    expect(Math.round(menuBox.width), 'the menu spans the full actions row').toBe(Math.round(rowBox.width));
+    expect(menuBox.left).toBe(rowBox.left);
+    expect(menuBox.top - rowBox.bottom, 'the menu opens 6 px under the row').toBe(6);
+    expectNoHorizontalScroll();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.element(menu.getByRole('menuitem', { name: 'Recommended rules' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(menu).not.toBeInTheDocument();
+    await expect.element(button).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(menu.getByRole('menuitem', { name: 'Ask me first' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(button).toHaveFocus();
+  });
+
+  it('rules_header_link_has_a_rounded_keyboard_focus_ring', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
+    await expectTabOrderFromTop([link]);
+    link.focus();
+    expect(link.matches(':focus-visible')).toBe(true);
+    expect(getComputedStyle(link).outlineStyle).toBe('solid');
+    expect(getComputedStyle(link).borderRadius).toBe('8px');
+  });
+
   it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
@@ -511,7 +547,7 @@ describe('rules page', () => {
       expect(box(menu).left, `${width}`).toBeGreaterThan(box(title).right);
       expect(Math.round(box(menu).top - box(title).top), `${width}`).toBe(4);
     }
-    // In the narrowest column beside the panel, 360 px at 1024 px, the menu goes under the title and
+    // In the narrowest column beside the panel, 360 px at 1024 px, the actions go under the title and
     // its subtitle, which keep the column's whole width, and the title stays on one line.
     {
       const { title, header, text, menu } = await at(1024);
@@ -847,7 +883,8 @@ describe('rules page', () => {
     const changes = [...main.querySelectorAll<HTMLElement>('.cd-connector-section .cd-money-limit button')];
     expect(changes).toHaveLength(2);
     await expectOwnerBoard(screen.container, { current: 'Rules' });
-    const reached = await expectTabOrderFromTop([menu, composer, ...chips, ...changes]);
+    const headerLink = main.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
+    const reached = await expectTabOrderFromTop([headerLink, menu, composer, ...chips, ...changes]);
     expect(reached.filter((el) => el.closest('.cd-connector-section') !== null)).toEqual(changes);
 
     // As the board spaces them: the composer 20 px under the header, its suggestions 10 px under
