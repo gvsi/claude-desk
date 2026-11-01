@@ -364,3 +364,10 @@ def test_discovery_needs_exactly_one_running_machine(tmp_path):
     api = lambda *a, **kw: {'Reservations': []}
     with pytest.raises(RuntimeError, match='Expected one running standby test box in us-east-1, found 0'):
         client.choose_instance(tmp_path, 'us-east-1', api, True)
+
+
+def test_a_lanes_first_call_on_a_machine_says_it_is_setting_up_so_it_is_not_read_as_unreachable():
+    from desk_tools.testbox_client import new_lane_notice
+    assert 'setting up this lane' in new_lane_notice({'git': '', 'sources': {}})
+    assert '5 minutes' in new_lane_notice({'git': '', 'sources': {}})
+    assert new_lane_notice({'git': 'a' * 40 + ':' + 'b' * 40, 'sources': {'README.md': 'x'}}) is None

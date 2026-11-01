@@ -141,6 +141,14 @@ print(json.dumps({'git': signature, 'sources': sources}), flush=True)
 """.replace('BASE', repr(base))
 
 
+def new_lane_notice(remote: dict) -> str | None:
+    """A lane with no repository on the machine yet sets everything up on this call, which takes minutes."""
+    if remote["git"]:
+        return None
+    return ("testbox: setting up this lane on the test machine (its first call here: full sync, environment, kernel "
+            "and database), about 5 minutes; it is reachable, so don't retry")
+
+
 def transaction_script(base: str, command: list[str], cancel: list[str]) -> str:
     """Hold the lane until execution AND cancellation finish, including on client EOF."""
     return """import fcntl, os, select, signal, subprocess, sys, time
@@ -433,6 +441,8 @@ def run(args, root, lane, cache):
         if remote is None:
             return holder.wait()
         timing.mark("remote_lock")
+        if notice := new_lane_notice(remote):
+            print(notice, file=sys.stderr, flush=True)
         with tempfile.TemporaryDirectory(prefix="desk-testbox-") as tmp:
             tmp = Path(tmp)
             stage_runner(tmp)
