@@ -105,16 +105,16 @@ The exact kernel contract (how a configured tool is stored, pinned, reviewed and
 
 A web change to setup's screens: a design PR with Giovanni's sign-off.
 
-## Cost, lanes and cuts
+## Cost, ownership and cuts
 
-| Part | Size | Lane |
+| Part | Size | Owner |
 |---|---|---|
-| A. Setup consultant, inline proposals | L, setup code and prompts; setup web redesign | setup (af); setup web (cd) |
-| A. Sample memory and connected apps | M | kernel route (14, in progress); setup |
-| B. Building blocks | L | kernel (14 or 4b) and setup |
-| C. Business-aware visitor prompt, reply-check gap, demo tasks | M | visitor prompt (cb); kernel |
-| D. Test client, slot refresh | S to M | setup; kernel |
-| E. Starter businesses | S, design PR | setup web (cd) |
+| A. Setup consultant, inline proposals | L, setup code and prompts; setup web redesign | Setup API; setup web app |
+| A. Sample memory and connected apps | M | Kernel memory route; setup API |
+| B. Building blocks | L | Kernel; setup API |
+| C. Business-aware visitor prompt, reply-check gap, demo tasks | M | Visitor prompt; kernel; demo-agent API |
+| D. Test client, slot refresh | S to M | Setup API; kernel |
+| E. Starter businesses | S, design PR | Setup web app |
 
 **Cut order if time runs short:** new connector mocks first **(Giovanni)**, then building blocks fall back to words only, then Part D **(my call)**. The consultant, the visitor agent and the starters stay.
 
