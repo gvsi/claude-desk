@@ -19,6 +19,12 @@ from evals.tier1.harness import TravelClock, match_expect
 from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
 
+def test_timeout_reply_waits_past_the_production_soft_check_deadline():
+    from desk.kernel_service.decisions import SOFT_PROMISE_TIMEOUT_S
+
+    assert reply_golden.SOFT_PROMISE_REPLIES["timeout"].seconds > SOFT_PROMISE_TIMEOUT_S
+
+
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
     assert len(rows) == len({row.id for row in rows}) == 56
