@@ -393,7 +393,7 @@ async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> Desk
     if body.desk.auto_money_cap_cents != 0:
         raise KernelFailure(422, "invalid", "desk_money_cap")
     created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
-    await activation.activate_shipped(ctx, created.desk_id, "ask_first", 0)
+    await activation.activate_shipped(ctx, created.desk_id, desks.NEW_DESK_PRESET, 0)
     return created
 
 

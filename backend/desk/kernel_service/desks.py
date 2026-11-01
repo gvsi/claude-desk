@@ -62,6 +62,7 @@ from desk.db.models import (ActorSession, Booking, Business, CalendarSlot, Desk,
                              PriceItem, Tool, VerificationChallenge)
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
+from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.db.session import KernelRepo
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskMemoryRequest, DeskNotificationsRequest, DeskPeopleRequest,
@@ -671,6 +672,13 @@ async def _spoken_for(ctx: KernelCtx, desk_id: str) -> set[str]:
 
 CALENDAR_REFRESH_EVERY_S = 24 * 60 * 60   # a pass at the kernel's start, then one a day
 CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row another write holds
+# The shipped rule set `POST /desks`, the route setup makes a Desk through, activates as a new Desk's
+# version 1. Rivera's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
+# slots for each copy, so a Desk whose version 1 came from this preset is one setup made. Every
+# Desk has had a version 1 since it was created, and nothing writes a version's `preset` after
+# that: a confirm only changes `status`, and a rebuild only `_REBUILT_COLUMNS`
+# (`activation.rebuild_version`), which leave it out.
+NEW_DESK_PRESET = "ask_first"
 
 
 def later_slots(hours: Sequence[HoursWindow], timezone: str, now: datetime,
@@ -686,19 +694,23 @@ def later_slots(hours: Sequence[HoursWindow], timezone: str, now: datetime,
             if slot.starts_at.astimezone(zone).date() > last and slot.slot_id not in taken]
 
 
-async def _seeded(ctx: KernelCtx, desk_id: str) -> bool:
-    """Whether the Desk is Rivera Plumbing's seed, which builds its own two-hour slots for each
-    copy: only `POST /copies` writes its seed-only starter facts, and no write takes them off."""
-    found = await ctx.db.scalars(ctx.repo.scoped(select(FactRow.fact_id).where(
-        FactRow.desk_id == desk_id, FactRow.fact_id.startswith(STARTER_FACT_PREFIX)).limit(1)))
+def made_in_setup() -> ColumnElement[bool]:
+    """The condition on a Desk's `policy_versions` rows that finds its version 1 when setup made
+    the Desk (`NEW_DESK_PRESET`)."""
+    return and_(PolicyVersionRow.version == 1, PolicyVersionRow.preset == NEW_DESK_PRESET)
+
+
+async def _made_in_setup(ctx: KernelCtx, desk_id: str) -> bool:
+    found = await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow.version).where(
+        PolicyVersionRow.desk_id == desk_id, made_in_setup())))
     return found.first() is not None
 
 
 async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     """Adds to Desk `desk_id`'s calendar the slots its hours give for the days after its latest
     slot, up to 14 days ahead (`later_slots`), when it is a Desk whose calendar the kernel keeps
-    open: live, not deleted, with hours, and made in setup, which is any Desk but Rivera's seed
-    (`_seeded`). Returns their IDs, in order; [] when it adds none, and then writes nothing.
+    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Rivera's
+    seed. Returns their IDs, in order; [] when it adds none, and then writes nothing.
 
     It only inserts: a booked slot, one a request still names, and every change the owner made
     to the calendar stay exactly as they are. In the caller's transaction, bound to the Desk's
@@ -710,7 +722,7 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one_or_none()
     if (desk_row is None or desk_row.deleted_at is not None or not desk_row.answering or not desk_row.hours
-            or await _seeded(ctx, desk_id)):
+            or not await _made_in_setup(ctx, desk_id)):
         return []
     timezone = (await ctx.db.scalars(ctx.repo.scoped(select(Business.timezone).where(
         Business.business_id == desk_row.business_id)))).one()
@@ -728,17 +740,16 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
 
 
 async def desks_to_extend(runtime: KernelRuntime, copy_id: str) -> list[str]:
-    """The copy's live Desks with hours that aren't Rivera's seed, in ID order: the ones
-    `extend_calendar` may add to, which checks each again under its lock. Read through the copy's
-    own `KernelRepo`, as `repo.desks_to_bring_up` reads each copy."""
+    """The copy's live Desks with hours that setup made (`NEW_DESK_PRESET`), in ID order: the
+    ones `extend_calendar` may add to, which checks each again under its lock. Read through the
+    copy's own `KernelRepo`, as `repo.desks_to_bring_up` reads each copy."""
     copy = KernelRepo(copy_id)
     async with runtime.sessions() as db:
         copy.bind(db)
         live = (await db.execute(copy.scoped(select(Desk.desk_id, Desk.hours).where(
             Desk.deleted_at.is_(None), Desk.answering.is_(True)).order_by(Desk.desk_id)))).all()
-        seeded = set(await db.scalars(copy.scoped(select(FactRow.desk_id).where(
-            FactRow.fact_id.startswith(STARTER_FACT_PREFIX)))))
-    return [desk_id for desk_id, hours in live if hours and desk_id not in seeded]
+        setup_made = set(await db.scalars(copy.scoped(select(PolicyVersionRow.desk_id).where(made_in_setup()))))
+    return [desk_id for desk_id, hours in live if hours and desk_id in setup_made]
 
 
 async def extend_calendars(runtime: KernelRuntime) -> dict[str, list[str]]:

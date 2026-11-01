@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
+import psycopg
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
@@ -24,6 +25,7 @@ from desk.calendar import calendar_slots
 from desk.contracts import CalendarSlot, HoursWindow
 from desk.db.models import Booking
 from desk.db.models import CalendarSlot as SlotRow
+from desk.db.session import database_url, libpq_url
 from desk.kernel_service import desks
 from desk.kernel_service.app import create_app
 
@@ -172,6 +174,21 @@ async def test_only_a_live_setup_desk_with_hours_is_refreshed(app, client):
     assert list(added) == [live.desk_id]
     assert [(await slots_of(app, desk), await head_of(app, desk)) for desk in left] == before
 
+
+
+async def test_a_rivera_copy_made_before_its_starter_questions_is_left_alone(app, client, frozen_clock):
+    """Copies made before the seed wrote its starter questions have none: they are still Rivera's."""
+    copy = await rivera(app, client)
+    seed = SetupDesk(copy=copy, desk_id=copy.desk_id, slug=copy.slug)
+    with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
+        deleted = admin.execute("DELETE FROM kernel.facts WHERE desk_id = %s AND fact_id LIKE 'charter:starter:%%'",
+                                (copy.desk_id,)).rowcount
+    assert deleted == 6
+    frozen_clock.advance(7 * 24 * 60 * 60)   # a week on: its two-hour slots now end a week short of 14 days
+    before = (await slots_of(app, seed), await head_of(app, seed))
+
+    assert await desks.extend_calendars(app.state.kernel) == {}
+    assert (await slots_of(app, seed), await head_of(app, seed)) == before
 
 async def test_every_copys_desks_are_refreshed_in_their_own_copy(app, client):
     made = setup_calendar(days_ago=11)
