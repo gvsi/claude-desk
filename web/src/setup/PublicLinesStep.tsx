@@ -13,28 +13,37 @@ import './PublicLinesStep.css';
 const copy = SETUP_COPY.publicLines;
 const labelOf = (line: SetupPublicLine) => cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label;
 
+const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+
+function validLine(line: SetupPublicLine): boolean {
+  return Boolean(line && typeof line.key === 'string' && typeof line.text === 'string' && line.text.trim()
+    && typeof line.editable === 'boolean' && ['owner', 'suggested'].includes(line.source)
+    && (line.held === undefined || typeof line.held === 'boolean'));
+}
+
+function validHours(hours: SetupPublicLines['hours']): boolean {
+  return hours === null || Boolean(hours && ['owner', 'suggested'].includes(hours.source)
+    && Array.isArray(hours.windows) && hours.windows.every((window) => window
+      && Array.isArray(window.days) && window.days.length > 0 && window.days.every((day) => DAYS.has(day))
+      && CLOCK_PATTERN.test(window.start) && CLOCK_PATTERN.test(window.end)));
+}
+
+function validPrices(prices: SetupPublicLines['prices']): boolean {
+  return prices === null || Boolean(prices && ['owner', 'suggested'].includes(prices.source)
+    && Array.isArray(prices.items) && prices.items.every((item) => item
+      && typeof item.item_id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.item_id) && item.item_id.length <= 40
+      && typeof item.title === 'string' && item.title.trim() && Array.from(item.title).length <= 80
+      && Number.isSafeInteger(item.unit_cents) && item.unit_cents >= 0)
+    && new Set(prices.items.map((item) => item.item_id)).size === prices.items.length);
+}
+
 /** A malformed answer holds this step, including a 200 that cannot confirm what was checked. */
 function checkedLines(value: SetupPublicLines): SetupPublicLines {
-  if (
-    !value || typeof value.revision !== 'string' || value.revision.trim() === ''
-    || (value.hours !== null && (!value.hours || !['owner', 'suggested'].includes(value.hours.source) || !Array.isArray(value.hours.windows)))
-    || (value.prices !== null && (!value.prices || !['owner', 'suggested'].includes(value.prices.source) || !Array.isArray(value.prices.items)))
-    || !Array.isArray(value.lines) || value.lines.some((line) =>
-      !line || typeof line.key !== 'string' || typeof line.text !== 'string' || !line.text.trim()
-      || typeof line.editable !== 'boolean' || (line.source !== 'owner' && line.source !== 'suggested')
-      || (line.held !== undefined && typeof line.held !== 'boolean'),
-    ) || new Set(value.lines.map((line) => line.key)).size !== value.lines.length
-    || !(value.hours === null || (value.hours && ['owner', 'suggested'].includes(value.hours.source)
-      && Array.isArray(value.hours.windows) && value.hours.windows.every((window) => window
-        && Array.isArray(window.days) && window.days.length > 0 && window.days.every((day) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(day))
-        && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(window.start) && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(window.end))))
-    || !(value.prices === null || (value.prices && ['owner', 'suggested'].includes(value.prices.source)
-      && Array.isArray(value.prices.items) && value.prices.items.every((item) => item
-        && typeof item.item_id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.item_id) && item.item_id.length <= 40
-        && typeof item.title === 'string' && item.title.trim() && Array.from(item.title).length <= 80
-        && Number.isSafeInteger(item.unit_cents) && item.unit_cents >= 0)
-      && new Set(value.prices.items.map((item) => item.item_id)).size === value.prices.items.length))
-  ) throw new Error('invalid public lines');
+  if (!value || typeof value.revision !== 'string' || value.revision.trim() === ''
+    || !Array.isArray(value.lines) || !value.lines.every(validLine)
+    || new Set(value.lines.map((line) => line.key)).size !== value.lines.length
+    || !validHours(value.hours) || !validPrices(value.prices)) throw new Error('invalid public lines');
   return value;
 }
 
@@ -321,13 +330,13 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string, itemId?: string) => {
     const row = key === 'prices' ? `prices-${itemId}` : `hours-${index}`;
     return (
-    <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={row}>
-      <span className="cd-public-lines__label cd-type-meta">{label}</span>
-      <div id={`${fieldId}-${row}`} className="cd-public-lines__text" data-copy="user">{value}</div>
-      {key !== 'hours' || index === 0 ? <div className="cd-public-lines__actions">
-        {renderRemove(key, row, `${fieldId}-${row}`, itemId)}
-      </div> : null}
-    </div>
+      <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={row}>
+        <span className="cd-public-lines__label cd-type-meta">{label}</span>
+        <div id={`${fieldId}-${row}`} className="cd-public-lines__text" data-copy="user">{value}</div>
+        {key !== 'hours' || index === 0 ? <div className="cd-public-lines__actions">
+          {renderRemove(key, row, `${fieldId}-${row}`, itemId)}
+        </div> : null}
+      </div>
     );
   };
 

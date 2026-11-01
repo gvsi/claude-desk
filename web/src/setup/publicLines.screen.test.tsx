@@ -170,6 +170,23 @@ it('keeps price row identity and restores Remove focus to the next row or fallba
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Looks right' }).element());
 });
 
+it.each(['line', 'hours', 'prices'] as const)('holds malformed %s data before confirmation', async (field) => {
+  const state = await atSituations();
+  const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in read) throw new Error('read failed');
+  const data = read.body as SetupPublicLines;
+  const body = field === 'line' ? { ...data, lines: data.lines.map((line) => ({ ...line, held: 0 })) }
+    : field === 'hours' ? { ...data, hours: { ...data.hours!, windows: [{ ...data.hours!.windows[0]!, end: '18:00:60' }] } }
+      : { ...data, prices: { ...data.prices!, items: [data.prices!.items[0], data.prices!.items[0]] } };
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(screen.getByRole('alert').elements()).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
 it('confirms rendered group keys with the latest revision after removing Hours', async () => {
   const { screen, state } = await openLines('phone');
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).toBeVisible();
