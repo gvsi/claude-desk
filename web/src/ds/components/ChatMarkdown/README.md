@@ -7,7 +7,7 @@
 - Claude's prose on every chat screen: a delivered reply's prose blocks, the setup consultant's messages, Ask Claude's answers, owner transcripts and Safety's stopped drafts.
 - With `streaming` while an owner chat's reply is still arriving: pass the whole text so far on each `delta`, then the saved text without `streaming` once the turn is done.
 - With `reveal` for a visitor reply that has just arrived live. The kernel has checked the whole reply before the browser has any of it, so the reveal only shows more of text it already holds, in order. Messages from history, a reload or a reopened chat show whole.
-- With `links="inert"` for a stopped draft, which may hold the very link it was stopped for.
+- With `links="inert"` where a link's target hasn't been checked: a stopped draft, which may hold the very link it was stopped for, and, for now, every prose block `ClaudeMessage` draws (its README says why).
 - Not for agent-to-agent responses, which are for agents, not screens, or for the Vision pages, which keep plain text.
 
 ## What the consumer provides
@@ -24,7 +24,7 @@ As the signed Markdown boards (N-MD-01 to N-MD-06) draw it, in the reply type (`
 - Headings at the reply's size, weight 600: 15/23, with `h1` and `h2` at 17/25, `space-16` below what is above them, so a chat reply never gets page-size titles.
 - Bold at 600 and italic.
 - Lists indented 22 px, items `space-4` apart, their markers in `text-secondary`, `space-4` under the paragraph that leads into them.
-- Tables in a hairline card (`line-card`, `radius-card`) that scrolls sideways when the table is wider than the column, as on a phone: serif 14/20, the header row at 600 on `bg-muted`, cells padded `space-8` by `space-12` with hairlines between rows.
+- Tables in a hairline card (`line-card`, `radius-card`) that scrolls sideways when the table is wider than the column, as on a phone: serif 14/20, the header row at 600 on `bg-muted`, cells padded `space-8` by `space-12` with hairlines between rows. The header row's line and fill run the card's full width, its empty corner cell included, which is a plain cell for screen readers. The card takes focus so a keyboard can scroll it, and is a region named by its header words.
 - Links in `accent-blue`, underlined, showing their text only.
 - Inline code in the mono type on `fill-secondary`; quotes indented behind a hairline in `text-secondary`; rules as a hairline.
 
@@ -32,10 +32,12 @@ As the signed Markdown boards (N-MD-01 to N-MD-06) draw it, in the reply type (`
 
 - No images: `![alt](src)` renders its alt text, never an `<img>`.
 - No raw HTML: HTML in the text renders as text, never as elements. `rehype-raw` is left out of Streamdown's plugins.
-- Links only to whole `http:`, `https:` and `mailto:` URLs, opening in a new tab with `rel="noopener noreferrer"`. A link anywhere else, a path on this site included, renders as its link text, unlinked. A bare `www.` address opens as https, as the reply check reads it, though GitHub Markdown would link it to http; a link that shows or was written with `http://` keeps it.
-- With `links="inert"`, a link renders as its text, then its URL in brackets, and nothing is clickable. A bare URL or email address shows once.
+- Links only to whole `http:`, `https:` and `mailto:` URLs, opening in a new tab with `rel="noopener noreferrer"`. A link anywhere else, a path on this site included, renders as its link text, unlinked. A link whose visible text is a bare `www.` address opens as https, as the reply check reads it, though GitHub Markdown would link it to http; a link that shows `http://`, or whose text isn't its address, keeps its target.
+- With `links="inert"`, a link renders as its text, then its URL in brackets, and nothing is clickable. A link whose text is already its address (a bare URL, `www.` address or email) shows it once, compared as full addresses, so `https://example.com` matches `https://example.com/`.
 - No code highlighting, math or diagrams: Streamdown's plugins for them aren't installed, so their bundles never ship.
 - No footnotes: `[^note]` and `[^note]: …` stay as the words written, in place. Rendered, a footnote would move its note to the end under a label and a back link the reply never had.
+- No checkboxes: a task item, `- [x] Deposit sorted`, shows its mark as written.
+- No dropped words: a table row wider than its header keeps every cell, the header gaining empty cells, and a reference link (`[Book][1]` with `[1]: https://…` in another paragraph) keeps its address.
 
 ## Streaming and the reveal
 

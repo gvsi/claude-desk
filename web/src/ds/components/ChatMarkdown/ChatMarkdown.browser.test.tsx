@@ -171,7 +171,8 @@ it('the_rest_of_github_markdown_still_renders', () => {
 
 it('a_bare_www_address_opens_as_https', () => {
   // GitHub Markdown links www.example.com to http; the reply check reads a visible www. address
-  // as https, so that is where it opens. A link that shows or was written with http keeps it.
+  // as https, so that is where it opens. A link that shows http, or whose text isn't its address,
+  // keeps its target.
   const text = 'Visit www.example.com today, or www.example.com/hours?day=sat, [the old page](http://x.example) and http://y.example/a.';
   const md = reply(mount(<ChatMarkdown text={text} />));
   expect([...md.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
