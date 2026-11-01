@@ -18,7 +18,11 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   deletes its row, since nothing was made, so the same request can be sent again. Before the kernel is asked for the
   Desk, the start records a boundary in the kernel's clock domain on the row (`desk_requested_at`, committed): the
   copy's newest Desk creation time, or 1970-01-01 UTC when none exists. From then on the row keeps the outcome, a
-  failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
+  failure too (`start_error`). The Desk-list guard assumes no Desk is made outside setup between this read and
+  `POST /desks` (the web never does that), and the kernel clock does not step backwards during the start. An outside
+  Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live. Removing
+  these assumptions requires a kernel request tag on the Desk.
+  A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
   nothing made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again,
   so a new click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after`
   2 s), holding nothing while the client waits. A row still starting after the longest a start can take
@@ -841,7 +845,8 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
 def _failure_record(error: BaseException) -> dict:
     """What a start that failed once its Desk was asked for answered, kept on its row: the row is settled and its key
     spent. A repeat answers 409 `key_spent` from its presence. The Desk-list guard also distinguishes a definite
-    kernel refusal (`kernel: failed`, no Desk made) from an uncertain outcome (`kernel: unavailable`)."""
+    kernel refusal (`kernel: failed`, no Desk made only when the row keeps no Desk ID) from an uncertain outcome
+    (`kernel: unavailable`)."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
     if isinstance(error, KernelFailed):

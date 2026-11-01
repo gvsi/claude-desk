@@ -9,6 +9,11 @@ Desk's visitor and agent sessions count, the owner's previews among them; the ow
 never does. Nothing here writes or commits, and nothing is kept between reads: each one is computed from the rows as
 they stand.
 
+The unfinished-setup guard assumes no Desk is made outside setup between a start's boundary read and its create
+call (the web never makes Desks outside setup), and the kernel's clock does not step backwards during a start.
+An outside Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live.
+Identifying the exact Desk without those assumptions requires a kernel request tag on the Desk.
+
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
 
@@ -819,7 +824,8 @@ async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskS
     Only the copy's own interview rows are read, for its Desks. A Desk made outside setup has no interview, and one
     whose interview is `live` has finished. Pending keyed starts, in created order, each cover at most one unlinked
     Desk: the earliest after their kernel-clock boundary that no earlier row claimed. A definite kernel refusal
-    with no linked Desk claims nothing. Each Desk's actual interview wins; were there more, the newest would stand.
+    with no linked Desk claims nothing. Deleted Desks keep their claims, so deletion cannot move a claim to another
+    Desk; only active Desks are returned. Each Desk's actual interview wins; were there more, the newest would stand.
     """
     if not ctx.desk_ids:
         return {}
@@ -846,6 +852,10 @@ async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskS
                 # not Postgres's request time. Strict ordering excludes all Desks that already existed.
                 # Fail safe: if both link writes are lost (a stopped process or database outage), this Desk
                 # stays in setup indefinitely. Desks created before the request keep their live status.
+                # Assumes no outside-setup Desk is made between the boundary read and POST /desks (the web
+                # never does that), and the kernel clock never steps backwards during the start. The former
+                # can steal the claim; the latter can leave the start's Desk reading live. Exact ownership
+                # needs a kernel request tag on the Desk.
                 found[desk["desk_id"]] = DeskSetup(interview_id=row["interview_id"], step="questions")
                 break
     return {desk_id: setup for desk_id, setup in found.items() if desk_id in ctx.desk_ids}
