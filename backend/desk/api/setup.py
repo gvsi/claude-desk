@@ -1185,17 +1185,18 @@ def _check_decision(interview: Interview, proposal_id: str, decision: SetupPropo
     if card.job is None and (decision.title is not None or decision.autonomy is not None):
         raise ApiProblem(422, "invalid")
     config = card.job.config if card.job is not None and configs else None
+    if (decision.accept and card.job is not None and card.job.job == "payment"
+            and (not isinstance(config, PurposePaymentConfig)
+                 or (decision.amount_cents is None and config.amount_cents is None))):
+        raise ApiProblem(422, "amount_required")
     if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
         raise ApiProblem(422, "invalid")
-    if (decision.accept and isinstance(config, PurposePaymentConfig)
-            and decision.amount_cents is None and config.amount_cents is None):
-        raise ApiProblem(422, "amount_required")
     return card, decision
 
 
 def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
     """Validate an answer and change only the waiting card, without I/O or transcript additions."""
-    card, decision = _check_decision(interview, proposal_id, decision)
+    card, decision = _check_decision(interview, proposal_id, decision, configs=interview.business_tools_enabled)
     config = card.job.config if card.job is not None else None
     card.state = "accepted" if decision.accept else "declined"
     if decision.amount_cents is not None:
@@ -2026,21 +2027,27 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
 # Finish ------------------------------------------------------------------------------------------------------
 
+def _unpriced_payment(job: JobProposal | None) -> bool:
+    return (job is not None and job.job == "payment"
+            and (not isinstance(job.config, PurposePaymentConfig) or job.config.amount_cents is None))
+
+
 def settle_plan(interview: Interview) -> None:
     """Settle the remaining plan and emit each never-shown card once, without I/O."""
     # Changed cards and their superseded_by links stay intact; only proposed replacements can settle.
     pending = interview.pending_card
     for card in interview.unshown:
-        config = card.job.config if card.job is not None else None
-        card.state = ("declined" if card.job is not None and card.job.job == "payment"
-                      and (config is None or config.amount_cents is None) else "accepted")
+        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
         interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
     if pending is not None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
-        config = card.job.config if card.job is not None else None
-        card.state = ("declined" if card.job is not None and card.job.job == "payment"
-                      and (config is None or config.amount_cents is None) else "accepted")
+        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+    # Stored interviews may contain earlier acceptances that bypassed the amount check.
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.state == "accepted" and _unpriced_payment(card.job):
+                card.state = "declined"
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
@@ -2067,7 +2074,8 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
-    return [card.job for card in interview.planned if card.state == "accepted" and card.job is not None]
+    return [card.job for card in interview.planned
+            if card.state == "accepted" and card.job is not None and not _unpriced_payment(card.job)]
 
 
 def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
@@ -2075,7 +2083,8 @@ def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
     answers = []
     for entry in interview.transcript:
         card = entry.card
-        if not entry.owner_decided or card is None or card.state != "accepted" or card.job is None:
+        if (not entry.owner_decided or card is None or card.state != "accepted" or card.job is None
+                or _unpriced_payment(card.job)):
             continue
         job = card.job
         answer = {"job": job.job, "title": job.title, "autonomy": job.autonomy}

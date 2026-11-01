@@ -1239,28 +1239,82 @@ async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_late
     assert all(card['job']['config'] is None for card in shown(reply) if card['job'])
 
 
-async def test_typing_accept_after_business_tools_are_disabled_uses_the_visible_card(proposals, app, model, engine):
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("amount", [None, 25_000])
+async def test_payment_accept_is_refused_while_business_tools_are_disabled(proposals, app, model, engine, typed, amount):
     owner, state, ids = proposals
     interview_id = state["interview_id"]
     await show_card(engine, interview_id, ids[1])
     before = await stored(engine, interview_id)
-    payment = before["transcript"][-1]["card"]
-    assert payment["job"]["config"]["amount_cents"] is None
+    for entry in before["transcript"]:
+        for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])]:
+            if card["proposal_id"] == ids[1]:
+                card["job"]["config"]["amount_cents"] = amount
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(before["transcript"]), "id": interview_id})
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
-    model.add(card_answer("accept", reply="Accepted.", next=next_ask("hours_and_area"), question="Where do you work?"))
-    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1", json={"card": ids[1], "text": "Yes"})
-    assert reply.status_code == 200, reply.text
-    payment = next(card for card in shown(reply) if card["proposal_id"] == ids[1])
-    assert payment["state"] == "accepted" and payment["job"]["config"] is None
-    assert reply.json()["pending_card"] is None and reply.json()["question"] == "hours_and_area"
+    path = f"/api/owner/setup/{interview_id}"
+    if typed:
+        model.add(card_answer("accept", next=next_ask("hours_and_area")))
+        reply = await owner.browser.post(path + "/answer?cards=1", json={"card": ids[1], "text": "Yes"})
+        assert reply.status_code == 200, reply.text
+        assert reply.json()["pending_card"] == ids[1]
+    else:
+        reply = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1", json={"accept": True})
+        assert reply.status_code == 422 and reply.json()["error"] == "amount_required", reply.text
     saved = await stored(engine, interview_id)
-    assert all(card["job"]["config"] is None for entry in saved["transcript"]
-               for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])] if card["job"])
-    assert [entry["card"]["proposal_id"] for entry in saved["transcript"] if entry.get("owner_decided")] == [ids[1]]
+    assert not any(entry.get("owner_decided") for entry in saved["transcript"])
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     reloaded = await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")
     payment = next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])
-    assert payment["state"] == "accepted" and payment["job"]["config"] is None
+    assert payment["state"] == "proposed"
+    # Refusal leaves the decision available: declining remains valid with tools off.
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    declined = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1", json={"accept": False})
+    assert next(card for card in shown(declined) if card["proposal_id"] == ids[1])["state"] == "declined"
+
+
+@pytest.mark.parametrize("tools_enabled", [False, True])
+@pytest.mark.parametrize("config_missing", [False, True])
+async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_rules(
+        proposals, app, model, engine, tools_enabled, config_missing):
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[1])
+    saved = await stored(engine, interview_id)
+    for entry in saved["transcript"]:
+        for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])]:
+            if card["proposal_id"] == ids[1]:
+                card["state"] = "accepted"
+                if config_missing:
+                    card["job"]["config"] = None
+        if (entry.get("card") or {}).get("proposal_id") == ids[1]:
+            entry["owner_decided"] = True
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(saved["transcript"]), "id": interview_id})
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    assert all(job.job != "payment" for job in setup.accepted_jobs(interview))
+    assert setup.owner_job_answers(interview) == []
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=tools_enabled)
+    path = f"/api/owner/setup/{interview_id}"
+    finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
+    assert finished.status_code == 200, finished.text
+    assert next(card for card in shown(finished) if card["proposal_id"] == ids[1])["state"] == "declined"
+    assert "Pay a retainer" not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
+    reloaded = await owner.browser.get(path + "?cards=1")
+    assert next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])["state"] == "declined"
+    model.add(unparseable(), unparseable())
+    draft = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert draft.status_code == 200, draft.text
+    request = next(request for request in model.requests if request.route == setup.CARD_DRAFT_ROUTE)
+    assert "Pay a retainer" not in request.messages[0]["content"][0]["text"]
 
 
 def revised_plan(*, old_shown=True, replacement_shown=True):
