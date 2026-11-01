@@ -1192,6 +1192,31 @@ describe('setup', () => {
     expect(document.activeElement).toBe(document.body);
   });
 
+  it('a_refused_answer_comes_back_ahead_of_words_typed_meanwhile_and_focus_stays', async () => {
+    const { interview_id: id } = await startInterview();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    worker.use(http.post(`/api/owner/setup/${id}/answer`, async () => {
+      await gate;
+      return undefined;
+    }, { once: true }));
+    mockStore.inject({ route: 'setupAnswer', status: 409 });
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Leaks and drains.{Enter}');
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    // The owner goes on typing while the answer is out.
+    await userEvent.keyboard('Around Oakland.');
+    await expect.element(box).toHaveValue('Around Oakland.');
+    // Refused: the answer comes back first, the words typed since after it on a new line, with focus.
+    release();
+    await expect.element(box).toHaveValue('Leaks and drains.\nAround Oakland.');
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+    await expect.element(box).toHaveFocus();
+  });
+
   it('answer_failure_keeps_the_answer', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
