@@ -236,7 +236,8 @@ export function RulesPage() {
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
     const built: RuleDraft = draftFromDiff(draft, from, extra.preset);
-    const state: RuleDraftState = extra.title === undefined ? { draft: built } : { draft: built, title: extra.title };
+    // Once confirmed, the review comes back here, where the change lands.
+    const state: RuleDraftState = { draft: built, ...(extra.title === undefined ? {} : { title: extra.title }), fromRules: true };
     void navigate(draftPath(deskId, draft.version), { state });
   };
 
@@ -341,6 +342,7 @@ export function RulesPage() {
                           hint={moneyLimitHint(cap)}
                           {...(editing?.error === undefined ? {} : { error: editing.error })}
                           disabled={editing?.pending ?? false}
+                          updated={landed.limit !== null}
                           onEdit={() => setLimit({ group: section.connector.id, value: '', pending: false })}
                           onChange={(value) => setLimit((now) => (now === null ? null : { ...now, value, error: undefined }))}
                           onReview={() => void reviewLimit()}

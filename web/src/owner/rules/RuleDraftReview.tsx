@@ -27,7 +27,7 @@ import { cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { draftFromAnswer, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { rowsChangedBy, type ChangedRows } from './hub.ts';
-import { reducesMotion } from './landing.ts';
+import { land, reducesMotion } from './landing.ts';
 import { RULES_TITLE } from './RulesPage.tsx';
 import { moneyCapWords } from './ruleWords.ts';
 
@@ -312,12 +312,17 @@ export function RuleDraftReview({
 export interface RuleDraftState {
   draft: RuleDraft;
   title?: string;
+  /** Rules opened the review: once confirmed, it goes back to Rules, where the change lands. */
+  fromRules?: true;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Router state for this version: a card draft a screen built, or Today's answer with its card diff; else none. */
-function handedOver(state: unknown, version: number): { kind: 'built'; draft: RuleDraft; title?: string } | { kind: 'answer'; cardDiff: RuleCard[]; draft: RulesDraft } | null {
+function handedOver(
+  state: unknown,
+  version: number,
+): { kind: 'built'; draft: RuleDraft; title?: string; fromRules: boolean } | { kind: 'answer'; cardDiff: RuleCard[]; draft: RulesDraft } | null {
   if (!isRecord(state) || !isRecord(state.draft) || state.draft.version !== version) return null;
   const { draft } = state;
   if (Array.isArray(state.cardDiff) && Array.isArray(draft.cards)) {
@@ -325,7 +330,12 @@ function handedOver(state: unknown, version: number): { kind: 'built'; draft: Ru
   }
   // A tool's draft shows only where its tools were turned on: a read here couldn't say which.
   if (Array.isArray(draft.before) && Array.isArray(draft.after) && Array.isArray(draft.turnedOn) && draft.turnedOn.length === 0) {
-    return { kind: 'built', draft: draft as unknown as RuleDraft, ...(typeof state.title === 'string' ? { title: state.title } : {}) };
+    return {
+      kind: 'built',
+      draft: draft as unknown as RuleDraft,
+      ...(typeof state.title === 'string' ? { title: state.title } : {}),
+      fromRules: state.fromRules === true,
+    };
   }
   return null;
 }
@@ -335,7 +345,8 @@ function handedOver(state: unknown, version: number): { kind: 'built'; draft: Ru
  * after a reload, the draft read again by its version and its rows built the same way. A draft whose
  * version is in force says it has applied however the page is opened again (Back and Forward after
  * confirming it, or a new tab), and one older than the rules in force is offered to confirm only once
- * a read finds it still open, so no change is offered to confirm twice.
+ * a read finds it still open, so no change is offered to confirm twice. A review Rules opened goes
+ * back to Rules once confirmed, and the change lands on the rows it changed there.
  */
 export function RuleDraftPage() {
   const { desk } = useOwnerDesk();
@@ -386,7 +397,21 @@ export function RuleDraftPage() {
   useDocumentTitle(showsReview ? null : inApp(shownTitle));
 
   if (showsReview) {
-    return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} alreadyApplied={inForce} />;
+    // Back to Rules as "Keep my rules" goes back: to the entry it came from, else in this one's place.
+    const backToRules = (change: ConfirmedChange) => {
+      land(deskId, change);
+      void (location.key !== 'default' ? navigate(-1) : navigate(rulesPath(deskId), { replace: true }));
+    };
+    return (
+      <RuleDraftReview
+        key={built.draft.version}
+        deskId={deskId}
+        draft={built.draft}
+        {...(built.title === undefined ? {} : { title: built.title })}
+        {...(handed?.kind === 'built' && handed.fromRules ? { onConfirmed: backToRules } : {})}
+        alreadyApplied={inForce}
+      />
+    );
   }
 
   let body;

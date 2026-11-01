@@ -209,3 +209,64 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(desk().policy.version).toBe(7);
   });
 });
+
+/** Text that starts with `words`, whatever follows them. */
+const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+
+/** The names of the tool rows on Rules that say they were updated, in the page's order. */
+function updatedRows(root: HTMLElement): string[] {
+  return [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')]
+    .filter(saysUpdated)
+    .map((row) => row.querySelector('.cd-connector-section__tool-name')?.textContent ?? '');
+}
+
+describe('a preset or a new payment limit', () => {
+  it('a_preset_lands_on_every_row_it_changed', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    const version = desk().lastVersion;
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Confirmed, it goes back to Rules, where the change applies.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
+    expect(desk().policy.version).toBe(version);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    // Every row whose rules it changed lands, and those it left alone (the starter's own) don't.
+    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
+    await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
+    for (const name of changed) expect(fillOf(toolRow(root, name)), name).toBe(SELECTED);
+    for (const name of ['Find open times', 'Save a lead', 'Request a callback']) expect(fillOf(toolRow(root, name)), name).toBe('none');
+    expect(screen.container.textContent).not.toContain('Your rules are updated.');
+    await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
+    expect(updatedRows(root).sort()).toEqual([...changed].sort());
+  });
+
+  it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    await payments.getByRole('button', { name: 'Change' }).click();
+    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
+    await payments.getByRole('button', { name: 'Review change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Back on Rules: the limit's line in both groups has the new amount and says it was updated.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
+    const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
+    for (const name of ['Payments', 'Stripe']) {
+      const line = screen.getByRole('region', { name }).getByText(startingWith(limit100));
+      await expect.element(line).toBeVisible();
+      await expect.poll(() => line.element().querySelector('.cd-pill')?.textContent, { message: name }).toBe('Updated');
+    }
+    // Payment link's own $300, brought down to the new limit, lands too; nothing else does.
+    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
+    await expect.poll(() => fillOf(toolRow(root, 'Payment link'))).toBe(SELECTED);
+    expect(desk().policy.auto_money_cap_cents).toBe(10_000);
+  });
+});
