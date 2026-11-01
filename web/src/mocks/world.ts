@@ -38,6 +38,7 @@ import type {
   TranscriptKind,
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -80,6 +81,11 @@ export const TYPING_EVERY_MS = 2_000;
 
 export interface SessionRecord {
   state: SessionState;
+  /**
+   * The visitor's chat has ended for good (a seeded scenario: its document waits for the owner
+   * after the chat closed). The visitor's routes no longer find it; the owner's history still does.
+   */
+  ended: boolean;
   deskId: string;
   ownerPreview: boolean;
   /** The verified person on record, once the visitor confirmed it's them; null until then. */
@@ -267,7 +273,7 @@ export class MockWorld {
    * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
    * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
    */
-  readonly deletedDesks = new Set<string>();
+  readonly deletedDesks = new Map<string, DeskRecord>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -358,7 +364,7 @@ export class MockWorld {
     }
     const index = this.desks.indexOf(desk);
     if (index !== -1) this.desks.splice(index, 1);
-    this.deletedDesks.add(desk.summary.desk_id);
+    this.deletedDesks.set(desk.summary.desk_id, desk);
   }
 
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
@@ -367,6 +373,7 @@ export class MockWorld {
     const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
       state: { session_id: sessionId, kind, verified: false, assurance: 'none', mode: 'ai', generation: 1 },
+      ended: false,
       deskId: desk.summary.desk_id,
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
@@ -696,6 +703,20 @@ export class MockWorld {
     const session = this.sessions.get(record.decision.session_id);
     if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
     const { decision_id: decisionId, session_id: sessionId } = record.decision;
+    // Recheck before writing an approval: a refusal is one approval entry, with no execution.
+    const action = record.decision.action;
+    if (allows(answer) && session.ended && action?.effects.includes('private_data')) {
+      return this.refuseAnswer(record, answer, desk, 'session_ended', 'session_closed', 'Not shared: their session ended before your answer');
+    }
+    const rulesRefuse = action != null && rulesForTool(action, desk.policy.cards).some((card) => card.mode === 'never' && (
+      card.who === 'anyone' ||
+      (card.who === 'verified' && session.state.verified) ||
+      (card.who === 'person' && session.person?.personId === card.person_id) ||
+      (card.who === 'record_owner' && session.person != null && session.person.personId === action.resource.owner_person_id)
+    ));
+    if (allows(answer) && rulesRefuse) {
+      return this.refuseAnswer(record, answer, desk, 'rules_changed', 'policy', "Your rules changed before this ran, so it wasn't done.");
+    }
     const approval = this.appendLedger(desk, {
       kind: 'approval',
       origin: 'kernel',
@@ -719,19 +740,20 @@ export class MockWorld {
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
     if (allows(answer)) {
+      state = 'executed';
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state: 'executed' },
+        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state },
       });
-      state = 'executed';
       ledgerSeq = ran.seq;
     }
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: null,
       visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
       inbox: [],
       ledger_seq: ledgerSeq,
@@ -740,19 +762,41 @@ export class MockWorld {
     return record.decision;
   }
 
+  private refuseAnswer(record: DecisionRecord, answer: ApprovalAnswer, desk: DeskRecord, reason: string, check: string, ownerPlain: string): Decision {
+    const decision = record.decision;
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: decision.session_id, ref_id: decision.decision_id,
+      summary: { decision_id: decision.decision_id, action_id: decision.action?.action_id ?? null,
+        answer, state: 'refused_at_execution', reason, check },
+    });
+    record.decision = { ...decision, state: 'refused_at_execution', owner_plain: ownerPlain,
+      visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null),
+      inbox: [], ledger_seq: entry.seq, signature: sign(`${decision.decision_id}:refused_at_execution`) };
+    return record.decision;
+  }
+
   /**
    * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
    * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
-   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   * is `denied`. The Desk's chat is closed, so it hears nothing. Its retained ledger records the answer.
    */
   answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const desk = this.deletedDesks.get(record.deskId);
+    if (!desk) throw new Error('the decision has no deleted Desk');
+    if (allows(answer)) return this.refuseAnswer(record, answer, desk, 'rules_changed', 'desk', "This Desk was deleted before this ran, so it wasn't done.");
     const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
     const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: record.decision.session_id, ref_id: record.decision.decision_id,
+      summary: { decision_id: record.decision.decision_id, action_id: record.decision.action?.action_id ?? null, answer, state },
+    });
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: null,
       visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
       inbox: [],
+      ledger_seq: entry.seq,
       signature: sign(`${record.decision.decision_id}:${state}`),
     };
     return record.decision;

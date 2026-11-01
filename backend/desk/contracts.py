@@ -160,7 +160,7 @@ Effect = Literal["read", "private_data", "change", "charge", "pay_out", "send_me
 ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.release_document",
                    "native.payment_link", "native.charge_mandate", "native.capture_lead",
                    "native.request_callback", "native.start_verification",
-                   "native.fetch_website", "native.read_memory",
+                   "native.fetch_website", "native.read_memory", "native.web_search",
                    "payments.list_charges", "payments.create_refund"]
 MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
 MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects that take or pay out money: the one set
@@ -379,7 +379,7 @@ class Fact(BaseModel):
 
 class KnowledgeItem(BaseModel):           # untrusted text; never policy
     item_id: str
-    source: Literal["website", "upload", "setup", "memory_import"]
+    source: Literal["website", "upload", "setup", "memory_import", "web_search"]
     title: str
     text: str
     label: Label                          # owner-only until the owner marks it public
@@ -521,7 +521,7 @@ class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third
 class LedgerEvent(BaseModel):
     kind: Literal["session", "auth", "verify", "decide", "review", "breaker", "approval", "execute",
                   "payment", "document_link", "reply", "policy", "tool_pin", "takeover", "whisper",
-                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data"]
+                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search"]
     origin: Literal["kernel", "api"]      # "api" events are recorded as reported, not as verified
     session_id: str | None = None
     ref_id: str | None = None
