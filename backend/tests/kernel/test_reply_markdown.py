@@ -162,6 +162,19 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
 
 
+def test_titles_and_alt_text_are_read_after_the_body_so_they_split_no_word():
+    read = markdown_text.read('You get a [fr](https://r.example "details")ee ![x](https://r.example/a.png "t") visit.')
+    assert read.visible == "You get a free  visit.\ndetails\nx\nt\n"
+
+
+async def test_a_link_title_splits_no_word_from_the_scan(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, 'You get a [fr](https://riveraplumbing.example "details")ee inspection.')
+    assert verdict.ok is False
+    assert ("promise_word", "lex.en.promise", "free") in found(verdict)
+
+
 async def test_html_an_escaping_renderer_shows_is_caught_by_the_raw_reading(app, client):
     """A renderer that escapes raw HTML shows the prose as written, tags and all: that is the raw
     reading, so its number is the raw scan's."""

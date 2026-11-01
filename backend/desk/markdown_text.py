@@ -3,14 +3,15 @@
 
 `read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, raw HTML
 recognised) and returns what a reader sees of it: the text of every block, a newline after each,
-with entities and escapes decoded, emphasis joined to the letters around it, code as written,
-table cells, link and image text, link titles, and each ordered list item's number as its list
-renders it ("N. ", counted from its start), so formatting can hide no number or word from the reply
-check's scan. Every link a reader can click, with its text and target, for the reply check to judge
-(the owner's decision of 2026-11-01: every clickable link goes to the business's contact): inline,
-reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM does,
-each URL with a scheme or "www." (read as https) and each email address in the visible reading,
-code included (`literal_links`). And whether there is an image. Pure, with no I/O.
+with entities and escapes decoded, emphasis joined to the letters around it, code as written, table
+cells, link text, and each ordered list item's number as its list renders it ("N. ", counted from
+its start), so formatting can hide no number or word from the reply check's scan; then link titles
+and images' alt text and titles, after the whole body, so none splits a word of it. Every link a
+reader can click, with its text and target, for the reply check to judge (the owner's decision of
+2026-11-01: every clickable link goes to the business's contact): inline, reference and autolink
+forms, with a target of any scheme, and, since the chats autolink as GFM does, each URL with a
+scheme or "www." (read as https) and each email address in the visible reading, code included
+(`literal_links`). And whether there is an image. Pure, with no I/O.
 
 A numbered list of steps passes (the owner's decision of 2026-11-01): an ordered list that starts at
 1 and has at most nine items, as the parser reads it, shows only the numbers 1 to 9, so its numbers
@@ -126,8 +127,10 @@ def _marker_spans(text: str, tokens: list[Token], items: dict[int, tuple[int, bo
     return tuple(spans)
 
 
-def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
-    """An inline token's visible text, adding its links to `links`; and whether it holds an image."""
+def _inline(children: list[Token], links: list[Link], extras: list[str]) -> tuple[str, bool]:
+    """An inline token's body text, adding its links to `links`, and its link titles and images' alt
+    text and titles to `extras`, which are read after the whole body so none splits a word of it;
+    and whether it holds an image."""
     parts: list[str] = []
     images = False
     open_links: list[tuple[Token, int]] = []
@@ -138,17 +141,17 @@ def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
             parts.append("\n")
         elif child.type == "image":
             images = True
-            alt, _ = _inline(child.children or [], links)
-            parts.append(alt)
+            alt, _ = _inline(child.children or [], links, extras)
+            extras.append(alt)
             if title := child.attrGet("title"):
-                parts.append(f"\n{title}\n")
+                extras.append(str(title))
         elif child.type == "link_open":
             open_links.append((child, len(parts)))
         elif child.type == "link_close" and open_links:
             opened, first = open_links.pop()
             links.append(Link(text="".join(parts[first:]), href=str(opened.attrGet("href") or "")))
             if title := opened.attrGet("title"):
-                parts.append(f"\n{title}\n")
+                extras.append(str(title))
     return "".join(parts), images
 
 
@@ -160,6 +163,7 @@ def read(text: str) -> MarkdownText:
     items = _ordered_items(tokens)
     parts: list[str] = []
     links: list[Link] = []
+    extras: list[str] = []
     images = False
     for index, token in enumerate(tokens):
         if index in items:
@@ -167,12 +171,12 @@ def read(text: str) -> MarkdownText:
             if not passes:
                 parts.append(f"{number}. ")
         elif token.type == "inline":
-            shown, has_image = _inline(token.children or [], links)
+            shown, has_image = _inline(token.children or [], links, extras)
             parts.append(f"{shown}\n")
             images = images or has_image
         elif token.type in ("code_block", "fence"):
             parts.append(token.content if token.content.endswith("\n") else f"{token.content}\n")
-    visible = "".join(parts)
+    visible = "".join(parts) + "".join(f"{extra}\n" for extra in extras)
     return MarkdownText(visible=visible, links=(*links, *literal_links(visible)), images=images,
                         list_markers=_marker_spans(text, tokens, items))
 
