@@ -59,6 +59,7 @@ import {
 } from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
 import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -128,6 +129,9 @@ type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503 | 504;
 /** A refusal's body, as the API writes it: `error`, with a kernel failure's `code` or a conflict's `decision`. */
 export interface ErrorBody {
   error: string;
+  /** A public-line refusal's row; the internal reason is never rendered. */
+  key?: string;
+  reason?: string;
   code?: string;
   decision?: Decision;
   /** An `above_money_cap` refusal's limit for taking money without asking. */
@@ -428,6 +432,7 @@ function linkClosed(link: LinkRecord): Failure {
 const SERVED: ServedRoutes = {
   // The setup interview (setup.ts).
   ...SETUP_ROUTES,
+  ...PUBLIC_LINES_ROUTES,
   copies(sv, req) {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;

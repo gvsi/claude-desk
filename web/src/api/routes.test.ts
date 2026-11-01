@@ -68,6 +68,9 @@ const PLAN_02: Record<RouteKey, string> = {
   setupSuggestions: 'POST /api/owner/setup/{id}/suggestions',
   setupTools: 'GET /api/owner/setup/{id}/tools',
   setupConnect: 'POST /api/owner/setup/{id}/tools/connect',
+  setupPublicLines: 'GET /api/owner/setup/{id}/public_lines',
+  setupPublicLine: 'PUT /api/owner/setup/{id}/public_lines',
+  setupPublicLinesConfirm: 'POST /api/owner/setup/{id}/public_lines/confirm',
   // Public
   publicDesk: 'GET /api/public/{slug}',
   openSession: 'POST /api/public/desks/{slug}/sessions',

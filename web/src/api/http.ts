@@ -53,6 +53,7 @@ interface ApiErrorInit {
   cancelReason?: CancelReason | null;
   draft?: RulesDraft | null;
   capCents?: number | null;
+  lineKey?: string | null;
 }
 
 /** A request that didn't come back as a clear answer. Its message is its kind, never server text. */
@@ -78,6 +79,8 @@ export class ApiError extends Error {
   readonly draft: RulesDraft | null;
   /** A 422's `cap_cents`: the limit for taking money without asking that a draft went over. */
   readonly capCents: number | null;
+  /** A 422 line_refused's row key. The internal reason is deliberately discarded. */
+  readonly lineKey: string | null;
 
   constructor(kind: ApiErrorKind, init: ApiErrorInit) {
     super(kind);
@@ -94,6 +97,7 @@ export class ApiError extends Error {
     this.cancelReason = init.cancelReason ?? null;
     this.draft = init.draft ?? null;
     this.capCents = init.capCents ?? null;
+    this.lineKey = init.lineKey ?? null;
   }
 }
 
@@ -279,6 +283,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     cancelReason: conflict ? cancelReasonOf(body.cancel_reason) : null,
     draft: conflict ? draftOf(body.draft) : null,
     capCents: answer.status === 422 ? capCentsOf(body.cap_cents) : null,
+    lineKey: answer.status === 422 && body.error === 'line_refused' && typeof body.key === 'string' ? body.key : null,
   });
 }
 

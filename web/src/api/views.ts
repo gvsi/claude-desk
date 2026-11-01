@@ -576,6 +576,23 @@ export interface SetupTools {
   connectable: 'mock_payments'[];
 }
 
+/** The public charter lines the owner reviews before the safety check. */
+export interface PublicLine {
+  key: string;
+  text: string;
+  source: 'owner' | 'suggested';
+  editable: boolean;
+}
+
+export interface PublicLines {
+  lines: PublicLine[];
+}
+
+export interface PublicLineBody {
+  key: string;
+  text: string;
+}
+
 /** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
 export interface Situation {
   /** Claude's words, from the owner's answers. */
