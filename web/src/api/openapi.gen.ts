@@ -853,6 +853,10 @@ export interface SetupProposalIn {
   amount_cents?: number | null;
   autonomy?: ("auto" | "ask") | null;
 }
+export interface SetupPublicHours {
+  source: "owner" | "suggested";
+  windows: HoursWindow[];
+}
 /**
  * A nonblank setup charter line and whether the owner has confirmed its text.
  */
@@ -863,7 +867,7 @@ export interface SetupPublicLine {
   editable: boolean;
 }
 export interface SetupPublicLineError {
-  error: "line_refused" | "not_editable";
+  error: "line_refused" | "not_editable" | "not_suggested";
   key?: string | null;
   reason?: string[] | null;
 }
@@ -873,6 +877,16 @@ export interface SetupPublicLineIn {
 }
 export interface SetupPublicLines {
   lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+}
+export interface SetupPublicPrices {
+  source: "owner" | "suggested";
+  items: SetupPublicPriceItem[];
+}
+export interface SetupPublicPriceItem {
+  title: string;
+  unit_cents: number;
 }
 export interface SetupPublicLinesConfirmIn {}
 /**
@@ -1221,6 +1235,7 @@ export const API_OPERATIONS = {
   "GET /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
   "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
   "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/{key}": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },
