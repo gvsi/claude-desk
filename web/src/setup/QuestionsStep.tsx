@@ -105,7 +105,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const live = liveChoices(state);
   const busy = state.busy === true;
   const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
-  const blocked = busy || sending !== null || deciding !== null || suggesting || retrying || consenting !== null;
+  // A turn is on its way: an answer, the memory answer, a card's decision or suggestions went out, or
+  // the interview runs one. The owner can type the next answer meanwhile; it sends once the turn ends.
+  const replying = busy || sending !== null || deciding !== null || suggesting || consenting !== null;
+  const blocked = replying || retrying;
   // A turn's request is out, and the turn is followed as it is written from then until the
   // interview is no longer busy.
   const inFlight = sending !== null || consenting !== null || suggesting || decisionOut;
@@ -151,7 +154,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     const target = panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
       : window.matchMedia('(pointer: fine)').matches ? composer.current?.querySelector('textarea') : null;
     const focus = document.activeElement;
-    if (!target || (focus !== document.body && !step.current?.contains(focus))) return;
+    // An owner typing in the message box keeps it.
+    if (!target || composer.current?.contains(focus) || (focus !== document.body && !step.current?.contains(focus))) return;
     target.focus({ preventScroll: true });
   }, [asking, blocked, consentBusy, state.question, panel?.index]);
 
@@ -337,7 +341,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   useEffect(() => {
     const box = composer.current?.querySelector('textarea');
     if (refill === null || !box || box.disabled) return;
-    fillComposer(box, refill.text, { focus: false });
+    // Words typed while the turn ran stay, after the ones given back.
+    fillComposer(box, box.value.trim() === '' ? refill.text : `${refill.text}\n${box.value}`, { focus: false });
     setRefill(null);
   }, [refill, sending, retrying, failed, busy, consenting]);
 
@@ -359,6 +364,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (blocked || !returnFocus.current) return;
     returnFocus.current = false;
     const field = composer.current?.querySelector<HTMLElement>('textarea:not(:disabled)');
+    // The message box takes typing while a turn runs, so an owner who stayed in it keeps it.
+    if (field && document.activeElement === field) return;
     const pending = state.messages.find(({ card }) => card?.proposal_id === state.pending_card)?.card;
     const config = pending?.job?.config;
     const unpriced = pending?.job?.job === 'payment'
@@ -478,7 +485,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
             label={copy.composerLabel}
             placeholder={copy.placeholder}
             maxLength={ANSWER_MAX}
-            disabled={blocked}
+            // Only "Try again" waits on the turn; the message box holds Send instead.
+            disabled={failed !== null ? blocked : retrying}
+            sendHeld={replying}
             onSend={send}
             {...(failed === null ? {} : { failed: { text: failed.text, line: copy.failed, onRetry: () => void retry() } })}
           />
