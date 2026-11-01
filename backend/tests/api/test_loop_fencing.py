@@ -81,13 +81,13 @@ def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_
 @pytest.mark.parametrize("language", ["en", "es"])
 def test_a_recovered_call_back_offer_is_a_reply_whose_prose_wasnt_shown(language):
     # The kernel's call-back offer is a prose block it writes in place of a draft blocked only for its prose with no
-    # card to keep: delivered as a reply with no handoff, and Claude's own prose wasn't shown, unless those were its
-    # words (a passing reply that asks the same question shows Claude's prose).
+    # card to keep: delivered as a reply with no handoff, and Claude's own prose wasn't shown, the offer's words were
+    # (`shown_instead`), unless those were its words (a passing reply that asks the same question shows Claude's prose).
     offer = prompts.STATUS_LINES["offer_callback"][language]
     shown = SimpleNamespace(ref_id="msg-recovered", handoff=False, blocks=[RenderedBlock(kind="prose", text=offer)])
     blocked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "It's $89.", "clauses": []}))
     assert (blocked.delivered, blocked.result) == (
-        "reply", {"outcome": "delivered", "message_id": "msg-recovered", "prose_shown": False})
+        "reply", {"outcome": "delivered", "message_id": "msg-recovered", "prose_shown": False, "shown_instead": offer})
     asked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": offer, "clauses": []}))
     assert asked.result == {"outcome": "delivered", "message_id": "msg-recovered"}
 
@@ -1023,6 +1023,36 @@ async def test_recovered_final_prose_failure_ends_the_request_without_another_ca
     item = next(item for item in await transcript(api_conn, caller.ids, "owner")
                 if item.kind == "delivered" and item.event.message_id == verdict.message_id)
     assert item.event.handoff is drafted_handoff and [b.template for b in item.event.blocks] == templates
+
+
+async def test_a_recovered_call_back_offer_reaches_claude_before_the_visitors_yes(api_conn, engine, locks, caller,
+                                                                                  fake):
+    # A turn stopped after its final reply was delivered and before the results row, the reply blocked for its prose
+    # with no card to keep, so the kernel's call-back offer showed in its place. Recovery answers the call from that
+    # delivery with the offer's words (`shown_instead`), so the visitor's "Yes" reaches Claude with its question.
+    await said(api_conn, caller, "Hello")
+    assert await pending(caller, ScriptedModel([response(reply("Hello, how can I help?"))]), engine, locks) == "done"
+    await said(api_conn, caller, "OK, what's the next step?")
+    await prepare_model_input(api_conn, caller.session_id)
+    block = reply("It's $89 to come out.", id="toolu_crashed")
+    await append_assistant(api_conn, caller.ids, [block], generation=0)
+    await api_conn.commit()
+    verdict = await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=caller.session_id, generation=0, prose=block["input"]["prose"]), final=True))
+    offer = prompts.STATUS_LINES["offer_callback"]["en"]
+    assert not verdict.ok and verdict.blocks == [RenderedBlock(kind="prose", text=offer)]
+    await deliver(api_conn, caller.ids, Reply(verdict, "claude", "model", call_id=block["id"]),
+                  ro_schema=caller.ro_schema)
+    await api_conn.commit()
+    assert await pending(caller, ScriptedModel(), engine, locks) == "idle"
+    results = (await rows(api_conn, caller.session_id, "model_tool_results", "model_content"))[-1][0]
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": verdict.message_id,
+                                                 "prose_shown": False, "shown_instead": offer}
+    await said(api_conn, caller, "Yes")
+    later = ScriptedModel([response(reply("What's the best number to reach you?"))])
+    assert await pending(caller, later, engine, locks) == "done"
+    texts = json.dumps(later.requests[-1].messages)
+    assert offer in texts and "Yes" in texts
 
 
 async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine, locks, caller, fake):

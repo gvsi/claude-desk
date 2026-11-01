@@ -253,9 +253,9 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
                                               drafted):
     """A card withdrawn while the soft check runs is dropped at signing and ledgered in `dropped`.
     A prose-blocked draft keeps the cards still current, then a handoff clause it drafted; with no
-    card left it shows the call-back offer in place of both, as Rivera's Desk offers call backs. A
-    passing draft that loses a card shows the handoff clause. A shown handoff opens one owner
-    handoff and one alert."""
+    card left it shows the drafted handoff, or without one the call-back offer, as Rivera's Desk
+    offers call backs. A passing draft that loses a card shows the handoff clause. A shown handoff
+    opens one owner handoff and one alert."""
     from desk.db.models import Fact as FactRow
     from sqlalchemy import select
     from .helpers import kernel_ctx
@@ -298,13 +298,13 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     if flagged and keep_other:
         assert [(b.template, b.fact_id) for b in verdict.blocks] == [("payment_link", clauses[1]["fact_id"])] + (
             [("handoff", None)] if drafted else [])
-    elif flagged:
+    elif flagged and not drafted:
         assert_offered(verdict)                                              # nothing left to keep: ask first
     else:
         assert_handed_off(verdict)                                           # blocks == ["handoff"]
     verify_verdict(await public_key(client), visitor.session_id, verdict)
     shows_handoff = any(b.template == "handoff" for b in verdict.blocks)
-    assert shows_handoff == (not flagged or (keep_other and drafted))
+    assert shows_handoff == (not flagged or drafted)
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == (
         [("card", "open")] if shows_handoff else [])
     assert len(await handoff_alerts(app, copy)) == int(shows_handoff)
@@ -571,7 +571,7 @@ async def test_soft_promise_failures_block(app, client, reviewer, case, monkeypa
 
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("check_unavailable", "soft.unavailable", prose[:40])]
-        assert_offered(verdict)
+        assert_handed_off(verdict)                                        # an outage hands off
         assert len(model.requests) == 1                                   # one try: no recheck, no fallback
     entries = await reply_entries(app, copy)
     assert [entry.event.summary["rule_ids"] for entry in entries] == [["soft.unavailable"]] * len(replies)
@@ -784,8 +784,7 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     """A call-back request may run while the model reads a reply that leans on the open card
     handoff, and close that handoff to open its own. A call-back backs nothing, so the reply fails
     as the check would have failed it without the card: it keeps its checked card, or with none
-    asks with the call-back offer, and opens no second handoff: the call-back is the session's
-    open one."""
+    shows the handoff card, which opens no second handoff: the call-back is the session's open one."""
     copy, visitor = await visitor_of(app, client)
     from .test_handoff_card import quote_and_payment
     clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
@@ -813,8 +812,8 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("soft_promise", "soft.handoff_closed")]
     if card_template:
         assert [(b.template, b.fact_id) for b in verdict.blocks] == [(card_template, clauses[0]["fact_id"])]
-    else:
-        assert_offered(verdict)
+    else:                         # the call-back's open handoff stands: the handoff card, never the offer
+        assert_handed_off(verdict)
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
     assert rows.pop(card.handoff_id) == ("card", "done")
     assert list(rows.values()) == [("callback", "open")]

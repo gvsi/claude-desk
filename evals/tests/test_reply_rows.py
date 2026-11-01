@@ -212,8 +212,8 @@ def test_verdict_expect_states_each_block_and_its_fact():
 def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
     """A failure only of the prose keeps the checked cards, then a handoff clause Claude drafted
     (the owner's ruling of 2026-11-01); without a drafted one, the cards alone. With no card to
-    keep, the call-back offer the golden Desk has, in place of any drafted handoff (the owner's
-    decision of 2026-11-01)."""
+    keep and none drafted, the call-back offer the golden Desk has (the owner's decision of
+    2026-11-01), but for a checker outage, which hands off; a drafted handoff is honoured."""
     alone = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE],
                                     "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
     assert alone.blocks == ["quote"]
@@ -229,16 +229,20 @@ def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
                    [QUOTE_CARD.model_copy(update={"title": None}), HANDOFF],
                    [QUOTE_CARD.model_copy(update={"lines": []}), HANDOFF]):
         assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), expect)
-    for clauses in ([], [{"template": "handoff"}]):
-        no_cards = ReplyRow.model_validate({**GOOD_ROW, "clauses": clauses, "expect": {"ok": False,
-                                                                                       "violations": [kind]}})
-        assert no_cards.blocks == ["prose"]
-        offered = no_cards.verdict_expect(0, {})
-        assert match_expect(200, verdict([kind], [OFFER]).model_dump(mode="json"), offered) == []
-        spanish = OFFER.model_copy(update={"text": "¿Quiere que solicite una llamada?"})
-        assert match_expect(200, verdict([kind], [spanish], language="es").model_dump(mode="json"), offered) == []
-        for blocks in ([HANDOFF], [PROSE], [OFFER, HANDOFF], []):
-            assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), offered), blocks
+    drafted = ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}],
+                                      "expect": {"ok": False, "violations": [kind]}})
+    assert drafted.blocks == ["handoff"]                     # a drafted handoff with nothing to keep is honoured
+    no_cards = ReplyRow.model_validate({**GOOD_ROW, "expect": {"ok": False, "violations": [kind]}})
+    if kind == "check_unavailable":                          # a checker outage hands off
+        assert no_cards.blocks == ["handoff"]
+        return
+    assert no_cards.blocks == ["prose"]
+    offered = no_cards.verdict_expect(0, {})
+    assert match_expect(200, verdict([kind], [OFFER]).model_dump(mode="json"), offered) == []
+    spanish = OFFER.model_copy(update={"text": "¿Quiere que solicite una llamada?"})
+    assert match_expect(200, verdict([kind], [spanish], language="es").model_dump(mode="json"), offered) == []
+    for blocks in ([HANDOFF], [PROSE], [OFFER, HANDOFF], []):
+        assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), offered), blocks
 
 
 @pytest.mark.parametrize("kind", ["canary", "unknown_fact", "stale_fact", "unentitled_fact", "unsupported_language",

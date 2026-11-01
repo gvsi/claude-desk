@@ -31,8 +31,9 @@ contract test, before the task that first uses them.
   owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
   ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
   non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
-  shown draft blocked only for its prose with no checked card to keep asks first: the kernel's call-back offer, as
-  prose, when the session's tools offer a call back, and no handoff card, so it opens none. A
+  shown draft blocked only for its prose, with no card at all (none to keep, no drafted handoff) and no checker
+  outage, asks first: the kernel's call-back offer, as prose, when the session's tools offer a call back and it has
+  no open handoff, and no handoff card, so it opens none. A
   call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
   owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
@@ -3514,9 +3515,8 @@ class FakeKernelState:
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
         """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
-        clause when the draft has one; with no card to keep, the kernel's call-back offer as prose when the session's
-        tools offer a call back (`desk.next_steps`; the owner's decision of 2026-11-01), in place of any handoff
-        clause; else the handoff alone, ledgered and signed. An
+        clause when the draft has one; with no card at all, the kernel's call-back offer as prose when
+        `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3533,8 +3533,7 @@ class FakeKernelState:
             if kept and prose_only:
                 drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
                 blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
-            elif prose_only and CALL_BACK_STEP in next_steps(desk.tools[tool] for tool in self.tools_given(session,
-                                                                                                         desk)):
+            elif prose_only and self._offers_call_back(session, desk, blocks, violations):
                 blocks = [RenderedBlock(kind="prose", text=REPLY_TEXT[language]["offer_callback"])]   # ask first
             else:
                 blocks = [handoff]
@@ -3563,6 +3562,17 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _offers_call_back(self, session: Session, desk: Desk, blocks: list[RenderedBlock],
+                          violations: list[Violation]) -> bool:
+        """Whether a draft blocked only for its prose shows the kernel's call-back offer, as the kernel's
+        `reply_check.call_back_offered` decides: no card at all (no checked card to keep, and no handoff clause Claude
+        drafted, which is honoured), no checker outage (`check_unavailable`, which hands off), no open handoff of
+        either kind on the session, and a call back among the session's tools' next steps."""
+        return (not any(block.kind == "card" for block in blocks)
+                and not any(violation.kind == "check_unavailable" for violation in violations)
+                and self._open_handoff(session) is None
+                and CALL_BACK_STEP in next_steps(desk.tools[tool] for tool in self.tools_given(session, desk)))
 
     def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
         """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's

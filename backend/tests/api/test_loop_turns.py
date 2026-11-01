@@ -653,6 +653,48 @@ async def test_a_first_draft_claude_can_rewrite_is_checked_as_not_final_and_neve
         (None, prompts.STATUS_LINES["offer_callback"]["en"])]
 
 
+@pytest.mark.parametrize("fresh", [False, True], ids=["same-context", "fresh-context"])
+async def test_the_visitors_yes_reaches_claude_with_the_call_back_offer_it_answers(api_conn, caller, fake, fresh):
+    """Two blocked drafts show the kernel's call-back offer in their place. Claude reads the offer's words as the reply
+    call's `shown_instead`, so when the visitor answers "Yes", the next call's context holds the question that "Yes"
+    answers: in the same context through that tool result, and in a fresh one through the summary of what the visitor
+    was shown."""
+    await said(api_conn, caller, "OK, what's the next step?")
+    blocked = ScriptedModel([response(reply("It's $180 to come out.")), response(reply("It's $180 to come out."))])
+    assert await run_turn(api_conn, caller, blocked) == "done"
+    offer = prompts.STATUS_LINES["offer_callback"]["en"]
+    *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert json.loads(results[0]["content"])["shown_instead"] == offer
+    if fresh:
+        request = blocked.requests[-1]
+        await start_fresh_context(api_conn, caller.ids, request.tools, system=request.system)
+    await said(api_conn, caller, "Yes")
+    later = ScriptedModel([response(reply("What's the best number to reach you?"))])
+    assert await run_turn(api_conn, caller, later) == "done"
+    texts = json.dumps(later.requests[-1].messages)
+    assert offer in texts and "Yes" in texts
+    assert ("<conversation_so_far>" in texts) is fresh
+
+
+async def test_a_plain_text_answer_the_offer_replaced_leaves_claude_a_note_of_it(api_conn, caller, fake):
+    """Claude's plain text, blocked twice, also shows the call-back offer in its place. No tool result carries it, so
+    the turn leaves Claude a note holding the same result a reply call would have read (`shown_instead`), and the
+    visitor's "Yes" next comes with the question it answers."""
+    await said(api_conn, caller, "OK, what's the next step?")
+    blocked = ScriptedModel([response({"type": "text", "text": "It's $180."}),
+                             response({"type": "text", "text": "Still $180."})])
+    assert await run_turn(api_conn, caller, blocked) == "done"
+    offer = prompts.STATUS_LINES["offer_callback"]["en"]
+    *_, (note,) = await rows(api_conn, caller.session_id, "note", "text")
+    assert json.loads(note) == {"outcome": "delivered", "message_id": json.loads(note)["message_id"],
+                                "prose_shown": False, "shown_instead": offer}
+    await said(api_conn, caller, "Yes")
+    later = ScriptedModel([response(reply("What's the best number to reach you?"))])
+    assert await run_turn(api_conn, caller, later) == "done"
+    texts = json.dumps(later.requests[-1].messages)
+    assert offer in texts and "Yes" in texts
+
+
 async def test_a_first_draft_on_the_turns_last_call_is_final(api_conn, caller, fake):
     """On the turn's last allowed model call Claude can't rewrite, so its first draft is checked as final: blocked
     for its prose alone, the call-back offer that check shows goes out at once, with no further check, and ends the

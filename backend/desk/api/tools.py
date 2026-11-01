@@ -637,24 +637,40 @@ async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clau
         return _unavailable()
 
 
+def _drafted_prose(tool_input: Any) -> str | None:
+    """The prose Claude drafted (`tool_input`, its `send_reply` input, a nonempty string `prose`), stripped, if any."""
+    prose = tool_input.get("prose") if isinstance(tool_input, dict) else None
+    return prose.strip() if isinstance(prose, str) and prose.strip() else None
+
+
 def prose_unshown(tool_input: Any, blocks: Iterable[RenderedBlock]) -> bool:
     """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
     shown `blocks` holds: the check failed and showed the kept cards, a handoff or the kernel's call-back offer in its
     place. The offer is the one prose block the kernel writes, in the signed words (`CALL_BACK_OFFERS`), so a prose
     block holding them is Claude's only when Claude drafted those words."""
-    prose = tool_input.get("prose") if isinstance(tool_input, dict) else None
-    if not isinstance(prose, str) or not prose.strip():
-        return False
-    return not any(block.kind == "prose" and (block.text not in CALL_BACK_OFFERS or block.text == prose.strip())
-                   for block in blocks)
+    prose = _drafted_prose(tool_input)
+    return prose is not None and not any(
+        block.kind == "prose" and (block.text not in CALL_BACK_OFFERS or block.text == prose) for block in blocks)
 
 
-def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True) -> dict:
+def offer_shown_instead(tool_input: Any, blocks: Iterable[RenderedBlock]) -> str | None:
+    """The kernel's call-back offer when it was shown in place of Claude's own prose (`tool_input`, its `send_reply`
+    input): the offer's words, so Claude reads the question the visitor's next message answers; else None."""
+    prose = _drafted_prose(tool_input)
+    return next((block.text for block in blocks if block.kind == "prose" and block.text in CALL_BACK_OFFERS
+                 and block.text != prose), None)
+
+
+def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True,
+                     shown_instead: str | None = None) -> dict:
     """What Claude reads for a shown reply: `delivered_handoff` when it showed the handoff clause, else `delivered`
-    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown."""
+    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown, and the kernel's
+    call-back offer, when that was shown in its place, as `shown_instead`."""
     result = dict(DELIVERED_HANDOFF) if handoff else {"outcome": "delivered", "message_id": message_id}
     if not prose_shown:
         result["prose_shown"] = False
+    if shown_instead is not None:
+        result["shown_instead"] = shown_instead
     return result
 
 
@@ -668,8 +684,9 @@ async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, ca
     await conn.commit()
     if seq is None:
         return ToolOutcome(dict(NOT_RUN), True, fenced=True, **timing)
-    result = delivered_result(reply.handoff, verdict.message_id, prose_shown=not prose_unshown(
-        tool_input, verdict.blocks))
+    result = delivered_result(reply.handoff, verdict.message_id,
+                              prose_shown=not prose_unshown(tool_input, verdict.blocks),
+                              shown_instead=offer_shown_instead(tool_input, verdict.blocks))
     return ToolOutcome(result, reply.handoff, delivered="handoff" if reply.handoff else "reply",
                        message_id=verdict.message_id, **timing)
 
@@ -701,7 +718,8 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     the prose failed and the session is offered a call back, the kernel's call-back offer, delivered as a reply as
     kept cards are, and otherwise the handoff the kernel opened for the owner. Any shown handoff clause ends the turn
     as `delivered_handoff`, even when the draft passed. Either outcome carries `prose_shown` false when the prose
-    Claude drafted wasn't shown (the kept cards, the offer or a handoff in its place), so Claude never refers to it.
+    Claude drafted wasn't shown (the kept cards, the offer or a handoff in its place), so Claude never refers to it,
+    and the offer's words as `shown_instead` when the offer was shown, so Claude reads the question it asked.
     Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.
