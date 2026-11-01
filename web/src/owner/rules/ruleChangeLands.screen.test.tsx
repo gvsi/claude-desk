@@ -273,6 +273,31 @@ describe('a confirmed rule change in Ask Claude', () => {
   });
 });
 
+/**
+ * Holds the next confirm before it reaches the mock: `arrived()` once the app sent it, and
+ * `release()` lets it through to the mock, which applies it and answers.
+ */
+function holdNextConfirm(): { arrived: () => boolean; release: () => void } {
+  let arrived = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.post(
+      CONFIRM_PATH,
+      async () => {
+        arrived = true;
+        await released;
+        return undefined;
+      },
+      { once: true },
+    ),
+  );
+  return { arrived: () => arrived, release };
+}
+
 /** Text that starts with `words`, whatever follows them. */
 const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
@@ -306,6 +331,30 @@ describe('a preset or a new payment limit', () => {
     expect(screen.container.textContent).not.toContain('Your rules are updated.');
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(updatedRows(root).sort()).toEqual([...changed].sort());
+  });
+
+  it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
+    // All rules, then Rules, then a preset's review, whose confirm is held.
+    const { screen, router } = await renderRoute(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    const version = desk().lastVersion;
+    const held = holdNextConfirm();
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.poll(held.arrived).toBe(true);
+
+    // Back to Rules before the answer; then it comes. Rules reads the new rules, and stays where it is.
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    held.release();
+    await expect.poll(() => desk().policy.version).toBe(version);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await pause(300);
+    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
   });
 
   it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', async () => {

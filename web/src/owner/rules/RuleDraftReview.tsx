@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
@@ -103,9 +103,11 @@ export interface RuleDraftReviewProps {
   onDone?: (outcome: 'confirmed' | 'kept') => void;
   /**
    * Called once, before `onDone`, when a confirm the API answered applied the draft: the version
-   * its answer names and the rows on Rules the draft changed. Never on a failed confirm.
+   * its answer names and the rows on Rules the draft changed. Never on a failed confirm, nor once
+   * the review has gone. Returns true when it takes the owner away from the review, which then
+   * draws nothing more and calls nothing else.
    */
-  onConfirmed?: (change: ConfirmedChange) => void;
+  onConfirmed?: (change: ConfirmedChange) => boolean | void;
   /**
    * Applies the draft in the caller's way (setup's confirm); `confirmRules` by default. Either way
    * applying it makes `draft.version` the active rules, which is how a lost answer is settled.
@@ -172,19 +174,51 @@ export function RuleDraftReview({
     else if (outcome === 'kept') void (location.key !== 'default' ? navigate(-1) : navigate(root.href));
   };
 
+  // Whether the review is still on screen. An answer that comes after it has gone (the owner went
+  // Back while it was on its way) still has the rules read again, but draws nothing and moves no one.
+  const shown = useRef(false);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
+
+  /** The review's end: its receipt or its done line in place, and the caller told. */
+  const settle = () => {
+    setLeaving(false);
+    setDone(true);
+    finish('confirmed');
+  };
+
+  // The fade's end settles it (`onAnimationEnd`), and so does its cancelling, when the review is
+  // hidden as it runs; React 18 has no prop for that event.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!leaving || el === null) return undefined;
+    const cancelled = (event: AnimationEvent) => {
+      if (event.target === el) settle();
+    };
+    el.addEventListener('animationcancel', cancelled);
+    return () => el.removeEventListener('animationcancel', cancelled);
+    // Listened for while it fades, with the settle of that moment.
+  }, [leaving]);
+
   /**
    * The draft applied. `version` is the one the API's answer names (the confirm's, or the rules read
    * after a lost answer), or null when a caller's own confirm answered with none. In Ask Claude the
-   * review fades out on motion-fast and the receipt lands in its place; under reduced motion, or
-   * with no version to say, the end state shows at once.
+   * review fades out on motion-fast and the receipt lands in its place; under reduced motion the end
+   * state shows at once. A caller's own confirm (setup's) keeps the review's done line.
    */
   const applied = (version: number | null) => {
-    if (version !== null) onConfirmed?.({ version, rows: rowsChangedBy(draft, tools ?? []) });
     void queryClient.invalidateQueries({ queryKey: ['rules', deskId] });
-    setConfirmed(version);
-    if (inline && version !== null && !reducesMotion()) setLeaving(true);
-    else setDone(true);
-    finish('confirmed');
+    if (!shown.current) return;
+    if (version !== null && onConfirmed?.({ version, rows: rowsChangedBy(draft, tools ?? []) }) === true) return;
+    const receiptVersion = confirm === undefined ? version : null;
+    setConfirmed(receiptVersion);
+    if (inline && receiptVersion !== null && !reducesMotion()) setLeaving(true);
+    else settle();
   };
 
   const onConfirm = async () => {
@@ -288,10 +322,9 @@ export function RuleDraftReview({
     <div
       className={className}
       onClick={followInAppLinks(navigate)}
+      ref={box}
       onAnimationEnd={(event) => {
-        if (!leaving || event.target !== event.currentTarget) return;
-        setLeaving(false);
-        setDone(true);
+        if (leaving && event.target === event.currentTarget) settle();
       }}
       // Nothing in the review can be pressed again while it fades out.
       {...(leaving ? { inert: '' } : {})}
@@ -401,6 +434,7 @@ export function RuleDraftPage() {
     const backToRules = (change: ConfirmedChange) => {
       land(deskId, change);
       void (location.key !== 'default' ? navigate(-1) : navigate(rulesPath(deskId), { replace: true }));
+      return true;
     };
     return (
       <RuleDraftReview
