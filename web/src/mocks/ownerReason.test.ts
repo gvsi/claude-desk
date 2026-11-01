@@ -58,7 +58,7 @@ it('afterAnswer_clears_an_owner_annotation_again_before_its_status_step', async 
   const decision = mockStore.world.answer(mockStore.world.decisions.get(held.decision_id)!, 'allow_once');
   const ctx = mockStore.world.context(mockStore.world.sessions.get(held.session_id)!, 'en', '');
   const status = vi.spyOn(ctx, 'status');
-  script.afterAnswer('allow_once', decision)[0]!(ctx);
+  script.afterAnswer('allow_once', decision, null)[0]!(ctx);
   const received = status.mock.calls[0]![1];
   expect(received).not.toHaveProperty('owner_plain');
   expect(JSON.stringify(received)).not.toContain(decision.owner_plain!);
