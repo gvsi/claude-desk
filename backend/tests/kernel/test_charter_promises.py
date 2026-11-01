@@ -291,6 +291,10 @@ async def test_rivera_seed_policies_pass_the_scan_and_charter_write(app, client,
     (("Sin", "costo para consultas aquí."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
     (("Your appointment is", "confirmed."), ("Tell us", "what you need."), "lex.en.booking"),
     (("Tu cita está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.booking"),
+    (("Your callback is", "scheduled."), ("Tell us", "what you need."), "lex.en.callback"),
+    (("Tu llamada está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.callback"),
+    # The claim's participle comes before the booking noun it needs, in the next policy.
+    (("Ya quedó hecha", "tu cita."), ("Ya quedó hecha", "la tarea."), "lex.es.booking"),
 ])
 async def test_split_policy_claims_follow_public_order_and_refuse_only_contributors(
         app, client, create, unsafe, honest, rule):

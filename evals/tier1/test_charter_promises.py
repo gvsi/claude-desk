@@ -6,27 +6,39 @@ from evals.tier1.golden_desk import golden_desk, open_caller
 from evals.tier1.harness import Auth, Expect, KernelHarness
 from evals.tier1.test_reply_golden import check_reply, handed_off, passes
 
+# The golden Desk's own policy line, which a refused write leaves in place for the reply to cite
+SEEDED = "policy:service_area"
+
 
 @pytest.mark.requires("01b")
-@pytest.mark.parametrize(("text", "rules"), [
-    ("20% off for first-time clients", ["digit", "percent_sign"]),
-    ("We work with small businesses and families.", []),
-    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
-    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
-    ("Trabajamos con pequeños negocios y familias.", []),
-    ("We offer \u202eeerf\u202c consultations.", ["format_control"]),
-    ("Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
+@pytest.mark.parametrize(("key", "text", "rules"), [
+    ("policy:pricing", "20% off for first-time clients", ["digit", "percent_sign"]),
+    ("policy:pricing", "We work with small businesses and families.", []),
+    ("policy:pricing", "Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("policy:pricing", "20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("policy:pricing", "Trabajamos con pequeños negocios y familias.", []),
+    ("policy:pricing", "We offer \u202eeerf\u202c consultations.", ["format_control"]),
+    ("policy:pricing", "Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
+    # A service area may name a distance and the days it works, but no fee
+    ("policy:service_area", "Within 25 miles of Oakland.", []),
+    ("policy:service_area", "Within a 25-mile radius of Oakland.", []),
+    ("policy:service_area", "Trabajamos fines de semana.", []),
+    ("policy:service_area", "Within 25 miles, $50 trip fee.", ["currency", "digit"]),
+    ("policy:service_area", "Within 25 miles. Trip fee 1500.", ["digit"]),
 ])
-async def test_website_policy_is_refused_or_renders_from_an_accepted_fact(k: KernelHarness, records, text, rules):
+async def test_website_policy_is_refused_or_renders_from_an_accepted_fact(k: KernelHarness, records, key, text,
+                                                                          rules):
     desk = await golden_desk(k)
     before = await records.facts(desk.copy.copy_id) if k.is_real else []
-    expect = (Expect(status=422, fields={"code": "invalid", "detail.policy:pricing": rules}) if rules
+    expect = (Expect(status=422, fields={"code": "invalid", f"detail.{key}": rules}) if rules
               else Expect(fields={"desk_id": desk.desk_id}))
     await k.call("PUT /desks/{id}/charter", path={"id": desk.desk_id}, auth=desk.owner,
-                 body={"charter": [{"key": "policy:pricing", "kind": "text", "value": text}]}, expect=expect)
+                 body={"charter": [{"key": key, "kind": "text", "value": text}]}, expect=expect)
     visitor = await open_caller(k, desk, "visitor")
-    verdict = await check_reply(k, visitor, "", [{"template": "policy", "fact_id": "charter:policy:pricing"}],
-                                expect=handed_off(visitor, "unknown_fact") if rules else passes(visitor, ["policy"]))
+    refused_new = rules and key != SEEDED
+    verdict = await check_reply(k, visitor, "", [{"template": "policy", "fact_id": f"charter:{key}"}],
+                                expect=handed_off(visitor, "unknown_fact") if refused_new
+                                else passes(visitor, ["policy"]))
     page = await k.call("GET /public/{desk_slug}", path={"desk_slug": desk.slug}, auth=Auth.none())
     if k.is_real:
         if rules:

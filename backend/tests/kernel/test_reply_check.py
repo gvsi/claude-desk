@@ -2405,6 +2405,14 @@ def test_public_text_refuses_format_controls(control, honest):
      {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
     ({"policy:a": "You are free to", "policy:b": "all clients"},
      {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+    # Call claims split across two policies, and a claim-group lookahead reading into the next one
+    ({"policy:a": "Your callback is", "policy:b": "scheduled."},
+     {key: ["lex.en.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Tu llamada está", "policy:b": "confirmada."},
+     {key: ["lex.es.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "tu cita."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "la tarea."}, {}),
 ])
 def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
     assert reply_check.scan_public_policies(values) == fields
