@@ -1670,18 +1670,21 @@ def test_business_policy_facts_never_reach_limit_turns(caplog):
 def test_fact_turns_capture_business_policies_with_bounded_fields():
     descriptions = {
         "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult)',
-        "intake": "What to ask a new customer before the owner takes them on",
-        "urgent": "What this business treats as urgent and what to do then",
-        "after_hours": "What a customer is told about contacting the business outside its hours; public text, "
-                       "never private owner instructions or personal phone numbers",
+        "intake": "What new customers are asked or should have ready before the owner takes them on, "
+                  "written to the customer",
+        "urgent": "What customers are told counts as urgent and what happens, written to the customer; "
+                  "no promise of how soon",
+        "after_hours": "What a customer is told about contacting the business outside its hours",
     }
     for key in set(QUESTION_KEYS) - set(LIMIT_QUESTIONS):
         schema = SETUP_TURNS[key].model_json_schema()
         assert set(descriptions).issubset(schema["properties"]), key
         for name, description in descriptions.items():
             assert schema["properties"][name]["description"] == (
-                description + ". Describe the policy in words; keep amounts, percentages, times, days and numbers "
-                "out. Leave hours to the hours question.")
+                description + ". Write as the business speaking to its customers; never instructions to the Desk, "
+                "private owner instructions, or a contact route other than the contact on record. Describe the "
+                "policy in words; keep amounts, percentages, times, days and numbers, and promise words such as "
+                "free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.")
             assert schema["properties"][name]["maxLength"] == 500
             assert name in schema["required"]
         fields = {name: "x" * 500 for name in descriptions}
@@ -1717,16 +1720,27 @@ def test_suggested_fields_are_stored_only_by_code():
     assert "suggested_fields" not in SetupPatch.model_fields
     assert all("suggested_fields" not in output.model_fields for output in SETUP_TURNS.values())
     assert "suggested_fields" not in SetupStart.model_fields
+    schema = SetupAnswers.model_json_schema()["properties"]["suggested_fields"]
+    assert set(schema["items"]["enum"]) == set(desk_setup.SETUP_POLICY_CLAIMS)
+    assert schema["maxItems"] == len(desk_setup.SETUP_POLICY_CLAIMS)
+    assert "hours, contact and prices" in schema["description"]
+    for name in ("hours", "public_contact", "price_items", "unknown"):
+        with pytest.raises(ValidationError):
+            SetupAnswers(summary="Tax advice.", suggested_fields=[name])
+    with pytest.raises(ValidationError):
+        SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(desk_setup.SETUP_POLICY_CLAIMS) + 1))
 
 
 def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
     assert ("On the quote question, pricing records how the business prices in words, only from the owner's "
             "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
     assert ("For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, "
-            "times, days and numbers out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
-    assert ("after_hours is what a customer is told about contacting the business outside its hours, rendered "
-            "word for word to visitors. Never include private owner instructions or personal phone numbers.") in (
-                SETUP_TURN_SYSTEM)
+            "times, days and numbers, and promise words such as free, guaranteed, discount, refund or confirmed "
+            "out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
+            "customers on the public page. Write them as the business speaking to its customers; never "
+            "instructions to the Desk, private owner instructions, or a contact route other than the contact "
+            "on record.") in SETUP_TURN_SYSTEM
 
 
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,

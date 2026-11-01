@@ -186,6 +186,7 @@ from desk.api.prompts import (
     SetupCardAnswer,
     QuestionKey,
     RuleCardDraft,
+    SETUP_POLICY_CLAIMS,
     SetupAnswers,
     SetupPatch,
     SetupStart,
@@ -401,6 +402,7 @@ class Entry(BaseModel):
     dropped: list[str] = []
     cards: bool | None = None
     pending: str | None = None
+    held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
 
 
 @dataclass
@@ -480,6 +482,15 @@ class Interview:
     @property
     def suggested(self) -> SuggestedFacts | None:
         return next((entry.suggested for entry in self.transcript if entry.suggested is not None), None)
+
+    @property
+    def held_policy_keys(self) -> list[str]:
+        return next((entry.held_policy_keys for entry in reversed(self.transcript)
+                     if entry.held_policy_keys is not None), [])
+
+    def hold_policies(self, keys: list[str]) -> None:
+        """Persist the latest charter outcome with the interview's other transcript metadata."""
+        self.transcript[-1].held_policy_keys = list(keys)
 
     @property
     def covered(self) -> set[QuestionKey]:
@@ -577,6 +588,7 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> Setu
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
+                      held_policy_keys=interview.held_policy_keys,
                       messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
@@ -1796,17 +1808,6 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
-SETUP_POLICY_CLAIMS = {
-    "summary": "policy:about",
-    "service_area": "policy:service_area",
-    "pricing": "policy:pricing",
-    "intake": "policy:intake",
-    "after_hours": "policy:after_hours",
-    "urgent": "policy:urgent",
-    "how_we_help": "policy:how_we_help",
-}
-
-
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
                publish_policies: bool = True) -> SeedParts:
     """The Desk's parts from the answers: the public charter (the contact and business policies, omitting policy
@@ -1824,45 +1825,49 @@ def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessT
                      notifications=default_notifications(business_type))
 
 
-async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> None:
-    """Keep clean claims, then fall back to contact, with at most three kernel-checked writes."""
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+    """Keep clean claims, then fall back to contact, returning held keys after a successful checked write."""
     path = {"id": desk_id}
     try:
         await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-        return
+        return []
     except KernelFailed as refused:
         if refused.status != 422 or refused.code != "invalid" or not refused.detail:
             raise
         dropped = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
         if refused.detail in ({"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]}) or not dropped:
-            logger.warning("setup dropped refused charter claims: %s",
-                           [claim.key for claim in charter if claim.key.startswith("policy:")])
+            held = [claim.key for claim in charter if claim.key.startswith("policy:")]
+            logger.warning("setup dropped refused charter claims: %s", held)
             charter = [claim for claim in charter if not claim.key.startswith("policy:")]
             await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-            return
+            return held
         logger.warning("setup dropped refused charter claims: %s", dropped)
+        held = list(dropped)
         charter = [claim for claim in charter if claim.key not in refused.detail]
     try:
         await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-        return
+        return held
     except KernelFailed as refused:
         if refused.status != 422 or refused.code != "invalid" or not refused.detail:
             raise
         dropped = {claim.key: refused.detail.get(claim.key, []) for claim in charter
                    if claim.key.startswith("policy:")}
         logger.warning("setup dropped refused charter claims: %s", dropped)
+        held.extend(dropped)
         charter = [claim for claim in charter if not claim.key.startswith("policy:")]
     await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
+    return held
 
 
-async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> None:
+async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> list[str]:
     path = {"id": desk_id}
-    await _put_charter(owner, desk_id, parts.charter)
+    held = await _put_charter(owner, desk_id, parts.charter)
     await owner.kernel.call("PUT /desks/{id}/hours", DeskHoursRequest(hours=parts.hours), path=path)
     await owner.kernel.call("PUT /desks/{id}/prices", DeskPricesRequest(price_items=parts.prices), path=path)
     await owner.kernel.call("PUT /desks/{id}/calendar", DeskCalendarRequest(calendar_slots=parts.calendar), path=path)
     await owner.kernel.call("PUT /desks/{id}/notifications",
                             DeskNotificationsRequest(notifications=parts.notifications), path=path)
+    return held
 
 
 async def _business(owner: OwnerCtx, desk_id: str) -> dict:
@@ -2081,8 +2086,9 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
     if not cards:
         timezone = (await _business(owner, desk_id))["timezone"]
         today = now.astimezone(ZoneInfo(timezone)).date()
-        await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today,
-                                                  publish_policies=setup_policy_claims_enabled))
+        held = await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today,
+                                                         publish_policies=setup_policy_claims_enabled))
+        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first

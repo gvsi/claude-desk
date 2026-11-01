@@ -12366,6 +12366,14 @@
             "title": "Busy",
             "default": false
           },
+          "held_policy_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Held Policy Keys",
+            "description": "Charter claim keys withheld by the kernel's policy-text check; empty when nothing was held at the latest charter write."
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/SetupMessage"
@@ -12382,6 +12390,7 @@
           "step",
           "consent",
           "question",
+          "held_policy_keys",
           "messages"
         ],
         "title": "SetupState",

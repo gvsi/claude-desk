@@ -534,9 +534,12 @@ the owner says to remove all their opening hours or all their prices, such as "w
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
 - For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, \
-times, days and numbers out. Leave hours to the hours question.
-- after_hours is what a customer is told about contacting the business outside its hours, rendered \
-word for word to visitors. Never include private owner instructions or personal phone numbers.
+times, days and numbers, and promise words such as free, guaranteed, discount, refund or confirmed \
+out. Leave hours to the hours question.
+- summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to \
+customers on the public page. Write them as the business speaking to its customers; never \
+instructions to the Desk, private owner instructions, or a contact route other than the contact \
+on record.
 - On the quote question, pricing records how the business prices in words, only from the owner's answer; \
 price_items holds only the prices that answer names. Code replaces the pricing text and adds each price to the \
 price list, or updates the item with the same title, and removes none.
@@ -1223,22 +1226,33 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
         "business_name": (str, Field(max_length=80, description="The business's name, if the owner changes it.")),
         "owner_display_name": (str, Field(max_length=80, description="The owner's name, as customers see it.")),
         "service_area": (str, Field(max_length=500, description="Where the business works.")),
-        "pricing": (str, Field(max_length=500, description='How the business prices (a fixed menu, "from" prices, '
-                              'or per case after a consult). Describe the policy in words; keep amounts, percentages, '
-                              'times, days and numbers out. Leave hours to the hours question.')),
-        "intake": (str, Field(max_length=500, description="What to ask a new customer before the owner takes them on. "
-                             "Describe the policy in words; keep amounts, percentages, times, days and numbers out. "
-                             "Leave hours to the hours question.")),
-        "urgent": (str, Field(max_length=500, description="What this business treats as urgent and what to do then. "
-                             "Describe the policy in words; keep amounts, percentages, times, days and numbers out. "
-                             "Leave hours to the hours question.")),
+        "pricing": (str, Field(max_length=500, description=
+            'How the business prices (a fixed menu, "from" prices, or per case after a consult). Write as '
+            'the business speaking to its customers; never instructions to the Desk, private owner '
+            'instructions, or a contact route other than the contact on record. Describe the policy in '
+            'words; keep amounts, percentages, times, days and numbers, and promise words such as free, '
+            'guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
+        "intake": (str, Field(max_length=500, description=
+            'What new customers are asked or should have ready before the owner takes them on, written to '
+            'the customer. Write as the business speaking to its customers; never instructions to the Desk, '
+            'private owner instructions, or a contact route other than the contact on record. Describe the '
+            'policy in words; keep amounts, percentages, times, days and numbers, and promise words such as '
+            'free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
+        "urgent": (str, Field(max_length=500, description=
+            'What customers are told counts as urgent and what happens, written to the customer; no promise '
+            'of how soon. Write as the business speaking to its customers; never instructions to the Desk, '
+            'private owner instructions, or a contact route other than the contact on record. Describe the '
+            'policy in words; keep amounts, percentages, times, days and numbers, and promise words such as '
+            'free, guaranteed, discount, refund or confirmed out. Leave hours to the hours question.')),
         "hours": (list[HoursAnswer], Field(max_length=14, description="Opening hours, every window.")),
         "clear_hours": (bool, Field(description="True only when the owner says to remove all the opening hours; an "
                                                 "empty hours list leaves them as they are.")),
-        "after_hours": (str, Field(max_length=500, description="What a customer is told about contacting the business "
-                                  "outside its hours; public text, never private owner instructions or personal phone "
-                                  "numbers. Describe the policy in words; keep amounts, percentages, times, days and "
-                                  "numbers out. Leave hours to the hours question.")),
+        "after_hours": (str, Field(max_length=500, description=
+            'What a customer is told about contacting the business outside its hours. Write as the business '
+            'speaking to its customers; never instructions to the Desk, private owner instructions, or a '
+            'contact route other than the contact on record. Describe the policy in words; keep amounts, '
+            'percentages, times, days and numbers, and promise words such as free, guaranteed, discount, '
+            'refund or confirmed out. Leave hours to the hours question.')),
         "quote_auto_max_cents": (Cents | None, Field(description="The largest quote given without asking, in cents.")),
         "discount_auto_max_bp": (BasisPoints | None, Field(description="The largest discount given without asking, "
                                                                        "in basis points.")),
@@ -1311,6 +1325,19 @@ def _turn_model(key: QuestionKey) -> type[SetupTurn]:
 SETUP_TURNS: dict[QuestionKey, type[SetupTurn]] = {key: _turn_model(key) for key in QUESTION_KEYS}
 
 
+SETUP_POLICY_CLAIMS = {
+    "summary": "policy:about",
+    "service_area": "policy:service_area",
+    "pricing": "policy:pricing",
+    "intake": "policy:intake",
+    "after_hours": "policy:after_hours",
+    "urgent": "policy:urgent",
+    "how_we_help": "policy:how_we_help",
+}
+
+SetupPolicyField = Literal[*SETUP_POLICY_CLAIMS]
+
+
 class SetupAnswers(BaseModel):
     """The answers so far (stored in `app.setup_interviews.answers`): all optional but the summary, and an unanswered
     money cap is 0."""
@@ -1336,7 +1363,9 @@ class SetupAnswers(BaseModel):
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
     # Written by code when setup fills from suggestions, never by a model turn or patch.
-    suggested_fields: list[str] = Field(default_factory=list)
+    suggested_fields: list[SetupPolicyField] = Field(
+        default_factory=list, max_length=len(SETUP_POLICY_CLAIMS),
+        description="Unconfirmed policy suggestions only; hours, contact and prices are not gated by this list.")
 
 
 # Setup's rules (Plan 02b, Task 7) --------------------------------------------------------------------------------

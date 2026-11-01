@@ -33,9 +33,9 @@ from procrastinate.testing import InMemoryConnector
 from pydantic import ValidationError
 from sqlalchemy import text as sql
 
-from desk.api import proving, schemas
+from desk.api import proving, schemas, setup as desk_setup
 from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
-from desk.api.kernel_client import KernelFailed, KernelUnavailable
+from desk.api.kernel_client import KernelFailed, KernelUnavailable, KernelView
 from desk.api.main import _install_error_handlers as install_error_handlers
 from desk.api.main import create_app
 from desk.api.prompts import (
@@ -319,6 +319,56 @@ async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
     assert "$90" not in caplog.text and intake not in caplog.text
 
 
+@pytest.mark.parametrize("interrupt_draft", [False, True])
+async def test_setup_exposes_held_policy_keys_and_clears_them_after_rewording(
+        app, browser, fake, kernel_http, model, engine, monkeypatch, interrupt_draft):
+    denied = "You're chatting with a human receptionist."
+    monkeypatch.setitem(PATCHES, "what_you_do", {**PATCHES["what_you_do"], "urgent": denied})
+    call = KernelView.call
+
+    async def refuse_denial(view, route, body=None, **kwargs):
+        if route == "PUT /desks/{id}/charter" and any(
+                claim.key == "policy:urgent" and claim.value == denied for claim in body.charter):
+            raise KernelFailed(422, "invalid", {"policy:urgent": ["policy.ai_denial"]})
+        return await call(view, route, body, **kwargs)
+
+    monkeypatch.setattr(KernelView, "call", refuse_denial)
+    owner, state = await ready(app, browser, kernel_http, model)
+    assert state["held_policy_keys"] == []
+    state_path = f"/api/owner/setup/{state['interview_id']}"
+    if interrupt_draft:
+        model.add(cut_short(DraftedRules(cards=GOOD_CARDS)))
+        reply = await owner.browser.post(policy(state, "rules"))
+        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+        interrupted = (await owner.browser.get(state_path)).json()
+        assert interrupted["step"] == "tools" and interrupted["held_policy_keys"] == ["policy:urgent"]
+    await drafted_rules(owner, model, state)
+    resumed = (await owner.browser.get(state_path)).json()
+    assert resumed["step"] == "rules"
+    assert resumed["held_policy_keys"] == ["policy:urgent"]
+    desk = fake.desks[state["desk_id"]]
+    claims = {claim.key: claim.value for fact in desk.facts.values()
+              if fact.kind == "charter" and fact.fact_id != "charter:hours" for claim in fact.claims}
+    assert claims == {"contact": "(510) 555-0142", "policy:about": PATCHES["what_you_do"]["summary"],
+                      "policy:service_area": "Oakland and Berkeley", "policy:after_hours": "Take a message."}
+
+    # A later charter write uses the owner's reworded answer and replaces the stored held keys.
+    def reword(interview):
+        interview.answers.urgent = "Tell us if a pipe has burst."
+        interview.draft_cards = []
+
+    await desk_setup._update(engine, owner, state["interview_id"], reword)
+    app.state.runtime.proving.forget(state["desk_id"])
+    await drafted_rules(owner, model, state)
+    resumed = (await owner.browser.get(state_path)).json()
+    assert resumed["step"] == "rules" and resumed["held_policy_keys"] == []
+    assert fake.called("PUT /desks/{id}/charter")[-1].body["charter"][-1] == {
+        "key": "policy:urgent", "kind": "text", "value": "Tell us if a pipe has burst."}
+    schema = schemas.SetupState.model_json_schema()
+    assert "held_policy_keys" in schema["required"]
+    assert schema["properties"]["held_policy_keys"]["items"] == {"type": "string"}
+
+
 @pytest.mark.parametrize("detail", [
     {"charter": ["policy_count_limit"]},
     {"charter": ["policy_text_limit"]},
@@ -343,9 +393,10 @@ async def test_a_charter_refusal_without_claim_keys_retries_with_contact_only(de
     async with kernel.client() as http:
         owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
                          kernel=http.owner("owner-token"), ro=None)
-        await _put_parts(owner, "d1", parts)
+        held = await _put_parts(owner, "d1", parts)
 
     assert len(charters) == 2
+    assert held == [claim.key for claim in parts.charter if claim.key.startswith("policy:")]
     assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
     assert charters[1] == [claim for claim in charters[0] if claim["key"] == "contact"]
     assert [request.url.path for request in kernel.requests[2:]] == [
@@ -378,9 +429,10 @@ async def test_a_second_charter_refusal_drops_all_policies_before_the_third_put(
     async with kernel.client() as http:
         owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
                          kernel=http.owner("owner-token"), ro=None)
-        await _put_parts(owner, "d1", parts)
+        held = await _put_parts(owner, "d1", parts)
 
     assert len(charters) == 3
+    assert held == ["policy:pricing", "policy:about", "policy:service_area", "policy:intake"]
     assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
     assert charters[1] == [claim for claim in charters[0] if claim["key"] != "policy:pricing"]
     assert charters[2] == [claim for claim in charters[0] if claim["key"] == "contact"]
