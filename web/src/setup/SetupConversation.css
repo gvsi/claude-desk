@@ -27,6 +27,8 @@
 
 .cd-setup-q3__scroll {
   min-height: 0;
+  margin: calc(var(--space-8) * -1) calc(var(--space-12) * -1);
+  padding: var(--space-8) var(--space-12);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

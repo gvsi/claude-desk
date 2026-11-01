@@ -3186,6 +3186,9 @@ describe('consultant setup', () => {
     expect([...panel.element().querySelectorAll('.cd-setup-q3__question p')].map((p) => p.textContent)).toEqual(paragraphs);
     const area = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
     expect(area).not.toBeNull();
+    expect(area.scrollWidth).toBeLessThanOrEqual(area.clientWidth);
+    const dismiss = panel.getByRole('button', { name: 'Dismiss', exact: true }).element().getBoundingClientRect();
+    expect(dismiss.top).toBeGreaterThanOrEqual(area.getBoundingClientRect().top);
     expect(area.contains(panel.element().querySelector('.cd-setup-q3__question'))).toBe(true);
     expect(area.contains(panel.element().querySelector('ol'))).toBe(true);
     expect(area.scrollHeight).toBeGreaterThan(area.clientHeight);
@@ -3214,6 +3217,10 @@ describe('consultant setup', () => {
     const panel = screen.getByRole('region', { name: question.text, exact: true });
     await expect.element(panel).toBeVisible();
     const list = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
+    expect(list.scrollWidth).toBeLessThanOrEqual(list.clientWidth);
+    const bounds = list.getBoundingClientRect();
+    expect(panel.getByRole('button', { name: 'Dismiss', exact: true }).element().getBoundingClientRect().top).toBeGreaterThanOrEqual(bounds.top);
+    expect(panel.element().querySelector('.cd-setup-q3__row')!.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left + 4);
     const box = screen.getByRole('textbox', { name: 'Your answer', exact: true }).element();
     const inView = (element: Element) => {
       const rect = element.getBoundingClientRect();
