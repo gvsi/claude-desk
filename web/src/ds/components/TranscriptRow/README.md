@@ -41,7 +41,7 @@ A live row whose message reveals itself (`ClaudeMessage`'s `reveal`, Claude's re
 
 - The message doesn't rise: its words come in on their own, word by word, then its cards fade in (`ClaudeMessage`, "Arriving live").
 - While the words come in, what is attached waits unseen in its place, so nothing below it moves when it comes.
-- Then each line fades and rises `space-4` in, over `motion-base`, `motion-follow` apart, from the beat after the message's cards: the message tells the row that beat (`RowArrival`, in `arrival.ts`). From the third on they share a beat. A receipt's dot grows and its check draws on its line's beat.
+- Then each line fades and rises `space-4` in, over `motion-base`, `motion-follow` apart, from the beat after the message's last card: the message tells the row that beat (`RowArrival`, in `arrival.ts`). Each line has a beat of its own, however many there are. A receipt's dot grows and its check draws on its line's beat.
 - A line already shown before its row arrived (`MarginReceipt`'s `shownBefore`) is already read: it doesn't wait.
 - Once the last line has come in, the row is like any other, as after a landing.
 - Under reduced motion the reply shows whole and everything attached shows at once.

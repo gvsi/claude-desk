@@ -6,9 +6,6 @@ import { RowArrivalContext } from '../TranscriptRow/arrival.ts';
 /** The motion a revealed message comes in with: each word settling in (ChatMarkdown.css), then its cards (ClaudeMessage.css). */
 const COMING_IN: ReadonlySet<string> = new Set(['cd-md-settle', 'cd-md-settle-marker', 'cd-claude-message-follow']);
 
-/** From the third card on, cards share a beat, so a long list never keeps what follows waiting. */
-const CARD_BEATS = 3;
-
 export interface MessageReveal {
   /** The message's words are being revealed, or are still settling in: `ChatMarkdown`'s `reveal`. */
   revealing: boolean;
@@ -23,8 +20,8 @@ export interface MessageReveal {
 /**
  * How a message from Claude comes in. Revealed (`reveal`, read once, when first drawn, and never
  * under reduced motion), its prose blocks show word by word, one after another, while its cards wait
- * unseen in their places. Once the words are whole, the cards fade and rise in, one by one,
- * `motion-follow` apart, the first a beat after the words, or at once with no words before them,
+ * unseen in their places. Once the words are whole, the cards fade and rise in, one by one, each
+ * `motion-follow` after the one before, the first a beat after the words, or at once with no words before them,
  * and the `TranscriptRow` it arrived in brings what is attached in after them. Once its words
  * have settled and its cards have come in, it is drawn as a message from history is. Not revealed,
  * it shows whole at once.
@@ -47,9 +44,16 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
     if (waits) row?.wait();
   }, [waits, row]);
 
-  // Once the words are whole, the row's lines follow from the beat after the cards'.
+  // Each card's place among the cards, which its beat follows (ClaudeMessage.css), before it is drawn.
   useLayoutEffect(() => {
-    if (revealing && wordsIn) row?.follow(from + Math.min(cards, CARD_BEATS));
+    const el = ref.current;
+    if (!revealing || el === null) return;
+    el.querySelectorAll<HTMLElement>(':scope > .cd-reply-card').forEach((card, index) => card.style.setProperty('--cd-follow-card', String(index + 1)));
+  }, [ref, revealing, cards]);
+
+  // Once the words are whole, the row's lines follow from the beat after the last card's.
+  useLayoutEffect(() => {
+    if (revealing && wordsIn) row?.follow(from + cards);
   }, [revealing, wordsIn, row, from, cards]);
 
   // Everything has come in once the last word has settled and the cards' fade has played, or at

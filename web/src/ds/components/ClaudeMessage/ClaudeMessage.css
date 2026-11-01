@@ -28,25 +28,15 @@
 /* A reply revealed as it arrives live (reveal): while its words come in, its cards wait unseen in
    their places. Then they fade and rise space-4 in, one by one, motion-follow apart, the first a
    beat after the words (--cd-follow-from, 1), or at once with no words before them (0), each over
-   motion-base. From the third on they share a beat, so a long list never keeps the rest waiting.
-   Under reduced motion the reply shows whole, its cards at once. */
+   motion-base, each card on its own beat (--cd-follow-card, its place among the cards, which
+   ClaudeMessage sets). Under reduced motion the reply shows whole, its cards at once. */
 .cd-claude-message--revealing > .cd-reply-card {
   visibility: hidden;
 }
 
 .cd-claude-message--following > .cd-reply-card {
-  --cd-follow-card: 1;
-
   animation: cd-claude-message-follow var(--motion-base) var(--motion-ease) backwards;
-  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-from, 1) + var(--cd-follow-card) - 1));
-}
-
-.cd-claude-message--following > .cd-reply-card:nth-child(2 of .cd-reply-card) {
-  --cd-follow-card: 2;
-}
-
-.cd-claude-message--following > .cd-reply-card:nth-child(n + 3 of .cd-reply-card) {
-  --cd-follow-card: 3;
+  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-from, 1) + var(--cd-follow-card, 1) - 1));
 }
 
 @keyframes cd-claude-message-follow {

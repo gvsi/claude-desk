@@ -230,3 +230,13 @@ it('a_reply_of_several_prose_blocks_takes_at_most_about_3_s_in_all', async () =>
   expect(words(message).map((block) => block.length)).toEqual([BLOCK.length, BLOCK.length]);
   expect(words(message)).toEqual([BLOCK, BLOCK]);
 });
+
+it('every_card_comes_in_on_its_own_beat', async () => {
+  await motion();
+  vi.useFakeTimers();
+  const four = [QUOTE, TIMES, rivera.blocks.payment_link.en, rivera.blocks.document_link.en];
+  const message = mount(<ClaudeMessage blocks={[proseBlock(WORDS), ...four]} language="en" ownerName={OWNER} reveal />);
+  await pass(700);
+  // However many cards there are, each is 120 ms after the one before.
+  expect(arrivals(message).map((card) => card.delay)).toEqual(['0.12s', '0.24s', '0.36s', '0.48s']);
+});

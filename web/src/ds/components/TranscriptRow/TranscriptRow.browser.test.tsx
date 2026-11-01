@@ -269,3 +269,12 @@ it('a_line_shown_before_its_row_arrived_shows_at_once_under_a_revealed_reply', a
   // Already read under the question, it doesn't wait for the words.
   expect(lineArrivals(el)).toEqual([{ visibility: 'visible', name: 'none', delay: '0s' }]);
 });
+
+it('every_line_follows_on_its_own_beat_after_every_card', async () => {
+  await motion();
+  const four = [rivera.blocks.quote.en, rivera.blocks.booking_options.en, rivera.blocks.payment_link.en, rivera.blocks.document_link.en];
+  const { el, pass } = actHost(revealed([...LINES, 'Cancelled'], [proseBlock(WORDS), ...four]));
+  await pass(700);
+  // Four cards on the beats after the words, then each line on its own beat after the last card.
+  expect(lineArrivals(el).map((line) => line.delay)).toEqual(['0.6s', '0.72s', '0.84s']);
+});

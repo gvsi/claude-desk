@@ -63,6 +63,14 @@ export function TranscriptRow({ children, margin, live = false }: TranscriptRowP
     };
     return { wait: () => set('waiting'), follow: (beat) => set(beat) };
   }, []);
+  // Following a revealed message, each attached line's place among them, which its beat follows
+  // (TranscriptRow.css), before it is drawn: a line attached while they follow gets its place too.
+  useLayoutEffect(() => {
+    if (!arriving || typeof follow !== 'number') return;
+    rowRef.current
+      ?.querySelectorAll<HTMLElement>(':scope > .cd-transcript-row__margin > *')
+      .forEach((line, index) => line.style.setProperty('--cd-follow-line', String(index + 1)));
+  });
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!arriving || row === null) return undefined;
