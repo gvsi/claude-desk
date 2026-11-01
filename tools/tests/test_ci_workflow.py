@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -32,15 +33,34 @@ REQUIRED_CHECKS = [
     "repo checks",
 ]
 
-SHARD_JOBS = {
-    "backend-shard": "backend tests ${{ matrix.shard }}/4",
-    "tier1-shard": "tier 1 evals ${{ matrix.shard }}/4",
-}
-CHECK_JOBS = {"backend": "backend-shard", "tier1": "tier1-shard"}
+SUITES = {"backend": "backend tests", "tier1": "tier 1 evals"}
+SHARD_JOBS = {f"{suite}-{shard}": f"{name} {shard}/4" for suite, name in SUITES.items() for shard in range(1, 5)}
+CHECK_JOBS = {suite: [f"{suite}-{shard}" for shard in range(1, 5)] for suite in SUITES}
 SHARD_TEST_STEPS = {
-    "backend-shard": {"Run the backend tests"},
-    "tier1-shard": {"Run the tier 1 evals", "Run the kernel contract tests against the real kernel"},
+    f"{suite}-{shard}": steps
+    for suite, steps in {
+        "backend": {"Run the backend tests"},
+        "tier1": {"Run the tier 1 evals", "Run the kernel contract tests against the real kernel"},
+    }.items()
+    for shard in range(1, 5)
 }
+
+
+@pytest.mark.parametrize("suite, name", SUITES.items())
+def test_explicit_shards_are_identical_except_their_number(suite, name):
+    workflow_jobs = load(WORKFLOW)["jobs"]
+    normalized = []
+    for shard in range(1, 5):
+        job = deepcopy(workflow_jobs[f"{suite}-{shard}"])
+        assert job.pop("name") == f"{name} {shard}/4"
+        assert "strategy" not in job
+        assert job.pop("runs-on") == RUNS_ON.replace("<suffix>", f"{suite}-{shard}")
+        for step in job["steps"]:
+            if "PYTEST_ADDOPTS" in step.get("env", {}):
+                assert step["env"]["PYTEST_ADDOPTS"] == f"--shard={shard}/4"
+                step["env"]["PYTEST_ADDOPTS"] = "--shard=1/4"
+        normalized.append(job)
+    assert all(job == normalized[0] for job in normalized)
 
 
 @pytest.mark.parametrize("job_id, name", SHARD_JOBS.items())
@@ -48,7 +68,7 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
     workflow = load(WORKFLOW)
     job = workflow["jobs"][job_id]
     assert job["name"] == name
-    assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4]}}
+    assert "strategy" not in job
     assert "if" not in job and "needs" not in job
     assert "PYTEST_ADDOPTS" not in workflow["env"]
     for other_id, other in workflow["jobs"].items():
@@ -56,21 +76,29 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
         for step in other["steps"]:
             is_test = step.get("name") in SHARD_TEST_STEPS.get(other_id, set())
             options = step.get("env", {}).get("PYTEST_ADDOPTS")
-            assert options == ("--shard=${{ matrix.shard }}/4" if is_test else None)
+            shard = other_id.rsplit("-", 1)[-1]
+            assert options == (f"--shard={shard}/4" if is_test else None)
     assert {step["name"] for step in job["steps"] if "PYTEST_ADDOPTS" in step.get("env", {})} == SHARD_TEST_STEPS[job_id]
 
 
-@pytest.mark.parametrize("job_id, shard_id", CHECK_JOBS.items())
-@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped"])
-def test_required_suite_checks_fail_unless_all_shards_succeeded(tmp_path, job_id, shard_id, result):
+@pytest.mark.parametrize("job_id, shard_ids", CHECK_JOBS.items())
+@pytest.mark.parametrize("shard", range(1, 5))
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_required_suite_checks_fail_unless_all_shards_succeeded(tmp_path, job_id, shard_ids, shard, result):
     job = load(WORKFLOW)["jobs"][job_id]
-    assert job["needs"] == shard_id
+    assert job["needs"] == shard_ids
     assert job["if"] == "always()"
     assert set(job) == {"name", "runs-on", "timeout-minutes", "needs", "if", "steps"}
     [step] = job["steps"]
     assert set(step) == {"name", "env", "run"}
-    assert step["env"] == {"SHARD_RESULT": "${{ needs." + shard_id + ".result }}"}
-    executed, _ = Runner(tmp_path).run(step, "ARM64", SHARD_RESULT=result)
+    assert step["env"] == {
+        f"SHARD_{number}": "${{ needs." + shard_id + ".result }}"
+        for number, shard_id in enumerate(shard_ids, 1)
+    }
+    assert "||" not in step["run"]
+    results = {f"SHARD_{number}": "success" for number in range(1, 5)}
+    results[f"SHARD_{shard}"] = result
+    executed, _ = Runner(tmp_path).run(step, "ARM64", **results)
     assert executed.returncode == (0 if result == "success" else 1), executed.stderr
 
 
@@ -279,7 +307,7 @@ def test_job_names_are_the_required_checks():
         assert job["timeout-minutes"] == JOB_TIMEOUTS.get(job["name"], 25), job["name"]
 
 
-# Suite shards retain their time limit; their required checks only inspect the matrix result.
+# Suite shards retain their time limit; their required checks inspect each shard's own result.
 JOB_TIMEOUTS = {**dict.fromkeys(SHARD_JOBS.values(), 40), "backend tests": 5, "tier 1 evals": 5}
 
 
@@ -308,13 +336,9 @@ def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
     suffixes = []
     for job_id, job in workflow_jobs.items():
         assert job["runs-on"] == own_desk(job_id), (job_id, job["runs-on"])
-        # Expand the matrix as the launcher sees it: every shard gets its own machine.
-        if job_id in SHARD_JOBS:
-            assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4]}}
-            suffixes.extend(f"{job_id.removesuffix('-shard')}-{shard}" for shard in job["strategy"]["matrix"]["shard"])
-        else:
-            suffixes.append(job_id)
-            assert "strategy" not in job, job["name"]
+        # Each explicit shard and required check gets its own machine.
+        suffixes.append(job_id)
+        assert "strategy" not in job, job["name"]
         assert "container" not in job, job["name"]
     # Each label is unique within the run and in the launcher's form.
     assert len(suffixes) == len(set(suffixes)) == len(REQUIRED_CHECKS) + 8
@@ -387,7 +411,7 @@ def runs(job: dict) -> list[str]:
 
 
 def test_backend_job_fails_on_two_alembic_heads():
-    """Both jobs that migrate check for one head first, then migrate and set the role passwords."""
+    """Every shard that migrates checks for one head first, then migrates and sets the role passwords."""
     for name in SHARD_JOBS.values():
         commands = runs(job_named(name))
         assert SETTINGS in commands, name
@@ -396,7 +420,8 @@ def test_backend_job_fails_on_two_alembic_heads():
         assert commands[settings + 1 : settings + 4] == [ONE_HEAD, MIGRATE, "make db-roles"], name
         assert not any("alembic" in run for run in commands[:settings]), name
 
-    assert runs(job_named(SHARD_JOBS["backend-shard"]))[-1] == "cd backend && uv run pytest -q"
+    for shard_id in CHECK_JOBS["backend"]:
+        assert runs(job_named(SHARD_JOBS[shard_id]))[-1] == "cd backend && uv run pytest -q"
 
 
 GATE = ["uv", "run", "--project", "tools", "python", "-m", "desk_tools.gate"]
@@ -412,13 +437,15 @@ TIER2_BASE_SETUP = (
 # What each check runs after its setup, as Plan 06a Task 2's job table says: a string is a plain
 # command, a list is the gate's arguments.
 CHECKS = {
-    SHARD_JOBS["backend-shard"]: [*MIGRATIONS, THROWAWAY, "cd backend && uv run pytest -q"],
-    "backend tests": ['test "$SHARD_RESULT" = success'],
-    "tier 1 evals": ['test "$SHARD_RESULT" = success'],
+    **dict.fromkeys(
+        (SHARD_JOBS[shard_id] for shard_id in CHECK_JOBS["backend"]),
+        [*MIGRATIONS, THROWAWAY, "cd backend && uv run pytest -q"],
+    ),
+    **dict.fromkeys(SUITES.values(), [' && '.join(f'test "$SHARD_{shard}" = success' for shard in range(1, 5))]),
     "kernel tests": ["cd kernel && cargo test --locked"],
     # Exactly the arguments test_gate's proofs regression exercises.
     "proofs": ["desk-prove --selftest", PROOFS_GATE],
-    SHARD_JOBS["tier1-shard"]: [
+    **dict.fromkeys((SHARD_JOBS[shard_id] for shard_id in CHECK_JOBS["tier1"]), [
         *MIGRATIONS,
         THROWAWAY,
         [
@@ -433,7 +460,7 @@ CHECKS = {
             "--required-if", "backend/desk/api/kernel_client.py",
             "--", "make", "kernel-contract",
         ],
-    ],
+    ]),
     # The same gate arguments as test_gate, with a base selected for the workflow event.
     "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
     "web tests": [
@@ -937,10 +964,6 @@ ONLY_CI_JOBS = "only ci.yml's checks and suite shards may ask for desk labels"
 
 
 def own_desk(key: str) -> str:
-    if key in SHARD_JOBS:
-        return RUNS_ON.replace("<suffix>", key.removesuffix("-shard") + "-{3}").replace(
-            "github.run_attempt))", "github.run_attempt, matrix.shard))"
-        )
     return RUNS_ON.replace("<suffix>", key)
 
 
@@ -959,8 +982,9 @@ def own_desk(key: str) -> str:
         ("ci.yml", "web", "${{ vars.X == 'y' && 'self-hosted' || 'ubuntu-24.04' }}", NOT_ALLOWED),
         ("ci.yml", "web", "${{ matrix.os }}", NOT_ALLOWED),
         ("ci.yml", "backend", own_desk("web"), NOT_ALLOWED),
-        ("ci.yml", "backend-shard", own_desk("tier1-shard"), NOT_ALLOWED),
-        ("ci.yml", "backend-shard", own_desk("backend"), NOT_ALLOWED),
+        ("ci.yml", "backend-1", own_desk("tier1-1"), NOT_ALLOWED),
+        ("ci.yml", "backend-1", own_desk("backend"), NOT_ALLOWED),
+        ("ci.yml", "backend-1", own_desk("backend-2"), NOT_ALLOWED),
         ("ci.yml", "backend", ["self-hosted", "desk-ci-spot-1-1-backend"], NOT_ALLOWED),
         # Desk labels anywhere but ci.yml's checks and suite shards.
         ("other.yml", "backend", own_desk("backend"), ONLY_CI_JOBS),
@@ -980,8 +1004,7 @@ def test_runner_label_rules_catch_a_job_that_could_take_the_wrong_runner(file, k
         ("other.yml", "lint", {"runs-on": "windows-2025"}),
         ("other.yml", "lint", {"runs-on": "macos-15"}),
         ("ci.yml", "backend", {"runs-on": own_desk("backend")}),
-        ("ci.yml", "backend-shard", {"runs-on": own_desk("backend-shard")}),
-        ("ci.yml", "tier1-shard", {"runs-on": own_desk("tier1-shard")}),
+        *[("ci.yml", key, {"runs-on": own_desk(key)}) for key in SHARD_JOBS],
         ("ci.yml", "secret-scan", {"runs-on": own_desk("secret-scan")}),
         ("other.yml", "release", {"uses": "./.github/workflows/ci.yml"}),
     ],
