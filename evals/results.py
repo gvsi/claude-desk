@@ -48,7 +48,9 @@ plan its committed `landed.toml` lacks (`unarmed`), no results file is needed or
 head's rate history must be empty, its history must still extend the base's unchanged, its landed
 plans must keep the base's, its splits must hold its suite, and any added or edited results JSON
 must validate. `merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
-their landed plans and over the actual merge tree, with neither side holding a recorded rate.
+their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
+merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
+empty recorded-rate history, history growth and kept landed plans.
 Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
@@ -61,6 +63,9 @@ Every file it reads is read from git at the head and the base, never from the wo
 check sees what CI sees; the scenario files are listed with `-z` too, and a listed name git can't read
 fails the check, so none is left out of the suite it rebuilds. The steps that hold a file against the head (its inputs,
 gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
+The push-to-main check uses the root commit as its base, so it validates every historical results
+file still under `evals/results/` against today's schema. A results-file schema change must migrate
+or delete those old files; incompatible historical files fail closed.
 
 **The final gate** (`gate --pass <id> --final`, `final_gate`) certifies only a whole, current, local
 pass: it refuses a pass of part of the suite (`--suite`, `--split` or `--only`), a dry,
@@ -266,15 +271,27 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
         except ValueError as error:
             raise GitError(f"merge readiness {RATES_PATH} doesn't load: {error}") from None
         if pending_only and not any(histories):
-            try:
-                merged = git(root, "merge-tree", "--write-tree", head_commit, main_commit).strip()
-            except GitError as error:
-                return False, f"not ready: the merge tree couldn't be built: {error}"
+            done = subprocess.run(
+                ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
+                capture_output=True, text=True,
+            )
+            if done.returncode == 1:
+                # With -z, the tree id and conflicted paths precede an empty field and the messages.
+                paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
+                return False, ("not ready: the PR conflicts with origin/main in "
+                               f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
+            if done.returncode != 0:
+                raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
+            merged = done.stdout.split("\0", 1)[0].strip()
             try:
                 merged_pending_only = unarmed(merged, root)
             except CheckFailed as error:
-                raise GitError(str(error)) from None
+                return False, f"not ready: {error}; rebase onto origin/main"
             if merged_pending_only:
+                try:
+                    _check_unarmed(merged, base, root)
+                except CheckFailed as error:
+                    return False, f"not ready: {error}; rebase onto origin/main"
                 return True, ("ready: every scenario is pending under both sides' combined landed plans "
                               "and in their merge; no results file is needed")
         return False, (f"not ready: PR gated paths: {', '.join(repr(path) for path in pr_paths)}; "
@@ -756,21 +773,9 @@ def _check(base: str, root: Path) -> str:
                 if path == name:
                     # Supplying evidence for this head still has to describe its suite and pending plans.
                     reconcile(file, root, "HEAD", name=path)
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = _materialize(root, "HEAD", Path(tmp))
-            suite = load_suite(tree / SCENARIOS_PATH)
-            try:
-                splits = load_splits(tree / SPLITS_PATH)
-            except (OSError, ValueError) as error:
-                raise CheckFailed(f"the head's splits don't hold its suite: {error}") from None
-            if problems := split_problems(suite, splits):
-                raise CheckFailed("the head's splits don't hold its suite: " + "; ".join(problems))
-            try:
-                rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
-                    else RecordedRates(history=[])
-                landed = load_landed(tree / LANDED_PATH)
-            except (OSError, ValueError) as error:
-                raise CheckFailed(f"the head's eval files don't load: {error}") from None
+        _check_unarmed("HEAD", base, root)
+        return ("every scenario is pending at the head, so no results file is needed; "
+                "the strict check applies once any scenario can run")
     else:
         raw = show(root, "HEAD", name)
         if raw is None:
@@ -782,6 +787,45 @@ def _check(base: str, root: Path) -> str:
             raise CheckFailed(f"{name} doesn't validate: {_first_error(error)}") from None
         head = reconcile(file, root, "HEAD", name=name)
         rates, landed = head.rates, head.landed
+    before = _check_history(rates, landed, base, root)
+    result = gate_of(file, rates)
+    if not result.passed:
+        raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
+    # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
+    # a file whose rows were made before that plan never reads as clean.
+    skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
+    lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
+    return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
+
+
+def _check_unarmed(rev: str, base: str, root: Path) -> None:
+    """Checks that need no runs, shared by an unarmed head and the proposed merge tree."""
+    whose = "the head's" if rev == "HEAD" else f"{rev}'s"
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = _materialize(root, rev, Path(tmp))
+        try:
+            suite = load_suite(tree / SCENARIOS_PATH)
+            rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
+                else RecordedRates(history=[])
+            landed = load_landed(tree / LANDED_PATH)
+        except (OSError, ValueError) as error:
+            raise CheckFailed(f"{whose} eval files don't load: {error}") from None
+        try:
+            splits = load_splits(tree / SPLITS_PATH)
+        except (OSError, ValueError) as error:
+            raise CheckFailed(f"{whose} splits don't hold its suite: {error}") from None
+        if problems := split_problems(suite, splits):
+            raise CheckFailed(f"{whose} splits don't hold its suite: " + "; ".join(problems))
+    _check_history(rates, landed, base, root)
+    if rates.history:
+        subject = "the head" if rev == "HEAD" else rev
+        raise CheckFailed(f"recorded_rates.json has a recorded rate, so {subject} cannot pass as unarmed; "
+                          "a recorded rate means the gate was armed once")
+
+
+def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, root: Path) -> list[dict[str, Any]]:
+    """The rate history only grows and landed plans are kept, with or without runs."""
     with tempfile.TemporaryDirectory() as tmp:
         base_dir = _materialize(root, base, Path(tmp), only=(RATES_PATH, LANDED_PATH))
         base_rates = load_recorded_rates(base_dir / RATES_PATH) if (base_dir / RATES_PATH).exists() \
@@ -793,21 +837,7 @@ def _check(base: str, root: Path) -> str:
         raise CheckFailed(f"recorded_rates.json rewrites the history {base} holds; it only grows at its end")
     if dropped := [plan for plan in base_landed if plan not in landed]:
         raise CheckFailed(f"landed.toml drops plans {base} lists: {', '.join(dropped)}")
-    if pending_only:
-        if rates.history:
-            raise CheckFailed("recorded_rates.json has a recorded rate, so the head cannot pass as unarmed; "
-                              "a recorded rate means the gate was armed once")
-        return ("every scenario is pending at the head, so no results file is needed; "
-                "the strict check applies once any scenario can run")
-    result = gate_of(file, rates)
-    if not result.passed:
-        raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
-    # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
-    # a file whose rows were made before that plan never reads as clean.
-    skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
-    lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
-    return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
+    return before
 
 
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:

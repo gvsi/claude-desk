@@ -1,6 +1,7 @@
 """Pending-only heads need no placeholder evidence; runnable heads keep the strict check."""
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,33 @@ def test_merge_ready_accepts_two_unarmed_sides_with_gated_changes(tmp_path: Path
     assert "every scenario is pending" in reason
 
 
+def test_merge_ready_refuses_pending_merge_with_a_scenario_in_both_splits(tmp_path: Path):
+    repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
+    original = (repo / results.SPLITS_PATH).read_text()
+    git(repo, "checkout", "-q", "-b", "plan/change")
+    write(repo, "evals/tier2/scenarios/atk-new.yaml", scenario_yaml("atk-new"))
+    write(repo, results.SPLITS_PATH, original.replace("calibration:\n", "calibration:\n- atk-new\n"))
+    pr = commit(repo, "add a calibration scenario")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "evals/tier2/scenarios/atk-new.yaml", scenario_yaml("atk-new"))
+    write(repo, results.SPLITS_PATH, original.replace("heldout:\n", "heldout:\n- atk-new\n"))
+    main = commit(repo, "add the same scenario to heldout")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "plan/change")
+    assert results.results_check("main~1", repo)[0]
+    git(repo, "checkout", "-q", "main")
+    assert results.results_check("main~1", repo)[0]
+    git(repo, "checkout", "-q", "plan/change")
+    merged = git(repo, "merge-tree", "--write-tree", pr, main)
+    assert results.unarmed(merged, repo)
+
+    ready, reason = results.merge_ready(root=repo)
+
+    assert not ready
+    assert reason.startswith("not ready:")
+    assert "atk-new is in both splits" in reason
+
+
 @pytest.mark.parametrize("scenario_side", ["pr", "main"])
 @pytest.mark.parametrize("shared_id", [False, True])
 @pytest.mark.parametrize("split_plans", [False, True])
@@ -201,15 +229,22 @@ def test_malformed_committed_eval_files_cannot_claim_an_unarmed_pass(tmp_path: P
     assert "the head's eval files don't load" in reason
 
 
-@pytest.mark.parametrize(("path", "existing"), [("evals/recorded_rates.json", True),
-                                                ("evals/results/aaaaaaaaaaaaaaaa.json", False),
-                                                ("evals/results/aaaaaaaaaaaaaaaa.json", True)])
+@pytest.mark.parametrize(("side", "path", "existing"), [
+    ("head", results.RATES_PATH, True),
+    ("head", results.LANDED_PATH, True),
+    ("head", "evals/results/aaaaaaaaaaaaaaaa.json", False),
+    ("head", "evals/results/aaaaaaaaaaaaaaaa.json", True),
+    ("base", results.RATES_PATH, True),
+    ("base", results.LANDED_PATH, True),
+])
 @pytest.mark.parametrize("kind", ["gitlink", "tree", "missing blob"])
-def test_unreadable_committed_files_fail_closed(tmp_path: Path, path: str, existing: bool, kind: str):
+def test_unreadable_committed_files_fail_closed(tmp_path: Path, side: str, path: str, existing: bool, kind: str):
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
     if existing and path.startswith(results.RESULTS_DIR):
         write(repo, path, "{}\n")
     base = commit(repo, "the unarmed base")
+    original = git(repo, "rev-parse", f"HEAD:{path}") if existing else None
+    missing_oid = None
     if kind == "gitlink":
         git(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},{path}")
         git(repo, "commit", "-q", "-m", "unreadable gitlink")
@@ -221,11 +256,22 @@ def test_unreadable_committed_files_fail_closed(tmp_path: Path, path: str, exist
     else:
         write(repo, path, '{"history": [], "unreadable": true}\n')
         commit(repo, "evidence with a missing blob")
-        oid = git(repo, "rev-parse", f"HEAD:{path}")
-        (repo / ".git/objects" / oid[:2] / oid[2:]).unlink()
+        missing_oid = git(repo, "rev-parse", f"HEAD:{path}")
+    unreadable = git(repo, "rev-parse", "HEAD")
+    if side == "base":
+        base = unreadable
+        # Restore only the index: working-tree evidence must never influence the check.
+        if kind == "tree":
+            git(repo, "update-index", "--force-remove", path + "/child")
+        git(repo, "update-index", "--add", "--cacheinfo", f"100644,{original},{path}")
+        write(repo, "kernel/src/lib.rs", "// gated change after restoring readable evidence\n")
+        git(repo, "add", "kernel/src/lib.rs")
+        git(repo, "commit", "-q", "-m", "restore readable evidence at head")
+    if missing_oid is not None:
+        (repo / ".git/objects" / missing_oid[:2] / missing_oid[2:]).unlink()
 
     with pytest.raises(results.GitError, match="can't be read as a file"):
-        results.show(repo, "HEAD", path)
+        results.show(repo, unreadable, path)
     passed, reason = results.results_check(base, repo)
     assert not passed
     assert path in reason and "can't be read as a file" in reason
@@ -294,7 +340,7 @@ def test_merge_ready_checks_the_actual_merge_for_a_newly_runnable_scenario(tmp_p
 
 
 @pytest.mark.parametrize("failure", ["conflict", "command error"])
-def test_merge_ready_fails_closed_when_the_merge_tree_cannot_be_built(tmp_path: Path, monkeypatch, failure: str):
+def test_merge_ready_fails_closed_when_the_merge_tree_cannot_be_built(tmp_path: Path, monkeypatch, capsys, failure: str):
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
     git(repo, "checkout", "-q", "-b", "plan/change")
     write(repo, "kernel/src/lib.rs", "// PR\n")
@@ -305,18 +351,27 @@ def test_merge_ready_fails_closed_when_the_merge_tree_cannot_be_built(tmp_path: 
     git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(repo, "checkout", "-q", "plan/change")
     if failure == "command error":
-        real_git = results.git
+        real_run = subprocess.run
 
-        def fail_merge(root, *args, **kwargs):
-            if args[0] == "merge-tree":
-                raise results.GitError("merge-tree unavailable")
-            return real_git(root, *args, **kwargs)
+        def fail_merge(command, *args, **kwargs):
+            if "merge-tree" in command:
+                return subprocess.CompletedProcess(command, 128, "", "merge-tree unavailable")
+            return real_run(command, *args, **kwargs)
 
-        monkeypatch.setattr(results, "git", fail_merge)
-
-    ready, reason = results.merge_ready(root=repo)
-    assert not ready
-    assert "merge tree couldn't be built" in reason
+        monkeypatch.setattr(subprocess, "run", fail_merge)
+        with pytest.raises(results.GitError, match="merge-tree unavailable"):
+            results.merge_ready(root=repo)
+        assert run.merge_ready([], root=repo) == 2
+        assert "merge-ready: error:" in capsys.readouterr().out
+    else:
+        ready, reason = results.merge_ready(root=repo)
+        assert not ready
+        assert reason == ("not ready: the PR conflicts with origin/main in 'kernel/src/lib.rs'; "
+                          "rebase onto origin/main")
+        assert run.merge_ready([], root=repo) == 1
+        output = capsys.readouterr().out
+        assert "merge-ready: " + reason in output
+        assert len(output.splitlines()) == 1
 
 
 def test_push_to_main_from_readme_root_goes_strict_as_soon_as_02_lands(tmp_path: Path):
@@ -356,3 +411,24 @@ def test_merge_ready_cli_returns_two_for_malformed_landed_on_main(tmp_path: Path
 
     assert run.merge_ready([], root=repo) == 2
     assert "merge-ready: error:" in capsys.readouterr().out
+
+
+def test_merge_ready_cli_returns_two_for_a_scenario_gitlink_on_main(tmp_path: Path, capsys):
+    repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "-b", "plan/change")
+    write(repo, "kernel/src/lib.rs", "// PR\n")
+    commit(repo, "PR gated change")
+    git(repo, "checkout", "-q", "main")
+    path = "evals/tier2/scenarios/atk-held.yaml"
+    git(repo, "update-index", "--cacheinfo", f"160000,{base},{path}")
+    git(repo, "commit", "-q", "-m", "unreadable scenario on main")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "plan/change")
+
+    with pytest.raises(results.GitError, match=path):
+        results.merge_ready(root=repo)
+    assert run.merge_ready([], root=repo) == 2
+    output = capsys.readouterr().out
+    assert "merge-ready: error:" in output
+    assert path in output and "can't be read as a file" in output
