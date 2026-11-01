@@ -2595,7 +2595,7 @@ class FakeKernelState:
             # The fake has no provider charge records to resolve during refund normalization.
             raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
-        if profile.source == 'business':
+        if profile.source == 'business' and profile.business.config.block == 'intake':
             if len(args['answers']) != len(profile.business.config.questions):
                 raise AdapterCheckRefused('answer_count')
         from desk.kernel_service.adapters import profile_sha256
@@ -2983,7 +2983,8 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
-        elif tool == "native.capture_lead" or self._business_profile(desk, tool) is not None:
+        elif tool == "native.capture_lead" or (
+                self._business_profile(desk, tool) is not None and desk.tools[tool].business.config.block == 'intake'):
             lead_id = new_id("lead")
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
@@ -2998,6 +2999,40 @@ class FakeKernelState:
                                    Claim(key=f'answer:{index}', kind='text', value=answer)])
                 self._put_fact(desk, Fact(fact_id=f'lead:{lead_id}', kind='knowledge', status='committed',
                                           source='kernel', claims=claims, label=Label(readers=['owner'])))
+        elif ((urgent := self._business_profile(desk, tool)) is not None
+              and urgent.business.config.block == 'urgent'):
+            from desk.kernel_service import desks
+            from desk.kernel_service.adapters.base import quoted
+            from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body, window_claims
+
+            window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
+            start, end = window or (None, None)
+            handoff_id = new_id('handoff')
+            closed = [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
+                      and row['session_id'] == session.session_id and row['status'] == 'open']
+            for row in closed:
+                row['status'] = 'done'
+                self._put('handoffs', (row['handoff_id'],), dict(row))
+                old_fact = desk.facts.get('handoff:' + row['handoff_id'])
+                if old_fact is not None:
+                    self._put_fact(desk, old_fact.model_copy(update={'status': 'expired'}))
+            self.handoffs[handoff_id] = {
+                'handoff_id': handoff_id, **ids, 'session_id': session.session_id,
+                'reason': f"{args['name']} · {args['contact']} · {args['reason']}",
+                'callback_window': f'{start.isoformat()}/{end.isoformat()}' if start and end else None,
+                'status': 'open', 'kind': 'callback'}
+            self._put('handoffs', (handoff_id,), dict(self.handoffs[handoff_id]))
+            facts.append(Fact(fact_id=f'handoff:{handoff_id}', kind='handoff', status='committed', source='kernel',
+                              label=label, claims=window_claims(window), expires_at=end))
+            view = {'fact_id': facts[0].fact_id, 'handoff_id': handoff_id}
+            for row in closed:
+                self.append(desk, 'desk_data', {'part': 'handoffs', 'refs': [row['handoff_id']],
+                                               'replaced_by': handoff_id})
+            # Urgent delivery is immediate even when no notification settings request it.
+            self.inbox.append((desk.copy_id, DemoInboxEntry(
+                entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
+                body=f'Reported as urgent through {quoted(urgent.business.title)}. '
+                     + alert_body(window, RequestCallbackArgs(**args)))))
         elif tool == "native.request_callback":
             # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")

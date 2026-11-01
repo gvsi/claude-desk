@@ -54,6 +54,7 @@ OWNER_STATUS: dict[str, str] = {
 # visitor or another agent sees instead of the generic "executed" line. Like the status lines they
 # name the owner and nothing else, so they never carry an amount, a time or a date.
 EXECUTED: dict[str, str] = {
+    "urgent": "{title}: urgent request sent to {owner}",
     "intake": "{title}: details saved for {owner}",
     "native.quote": "Quoted from {owner}'s price list",
     "native.find_slots": "Times read from {owner}'s calendar",
@@ -87,6 +88,7 @@ OWNER_PREVIEWS: dict[str, str] = {
     "lockout": "Verification paused for a contact",
     "lead": "New lead",
     "callback": "Callback requested",
+    "urgent": "Urgent callback requested",
     "handoff": "A conversation was handed to you",
     "rules": "Your rules need checking",
     "public_page": "Hidden from your public page",

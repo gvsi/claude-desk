@@ -887,6 +887,7 @@ async def test_removed_tool_is_disabled_and_answering_off_keeps_intake(app, clie
 async def test_supported_blocks_gate_resolution_and_context_even_for_enabled_rows(app, client, monkeypatch):
     from desk.kernel_service.adapters import blocks
 
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake'}))
     assert blocks.SUPPORTED_BLOCKS == frozenset({'intake'})
     copy = await rivera(app, client)
     urgent = intake(tool='desk.urgent', title='Urgent support', description='Urgent-only marker.',
