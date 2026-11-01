@@ -138,7 +138,10 @@ function refuses(read: () => unknown): boolean {
 /** The tools that take or send money. */
 const MONEY_TOOLS: readonly ToolName[] = ['native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
 
-/** Working hours, as the preset's booking card keeps them (plan 01a: weekday bookings from 09:00 to 17:00). */
+/**
+ * Working hours, as the presets' own booking card keeps them (plan 01a: weekday bookings from 09:00 to
+ * 17:00), the fallback for a Desk without weekday hours; a Desk's draft of the preset takes its own.
+ */
 const WORKING_HOURS = { days: new Set(['mon', 'tue', 'wed', 'thu', 'fri']), start: '09:00:00', end: '17:00:00' };
 
 /** Seconds since midnight of a JSON time. */

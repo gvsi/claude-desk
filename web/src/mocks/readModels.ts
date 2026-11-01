@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -36,7 +36,7 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { AGENT_CARD_BLOCKS } from './agents.ts';
 import { refusalCause } from './causes.ts';
 import { VISITOR_PLAIN, type Language } from './script.ts';
-import { BUSINESS, PRESETS } from './seed.ts';
+import { BUSINESS, PRESETS, presetCards } from './seed.ts';
 import {
   LEDGER_KEY,
   MINUTE,
@@ -635,13 +635,14 @@ export const HEALTH: HealthOut = {
 };
 
 /**
- * The preset the owner cards came from: the one whose cards they are, exactly, else null. It is
- * provenance only, and Rivera's own rules match neither.
+ * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
+ * opening hours drafts it (`presetCards`), else null. It is provenance only, and Rivera's own rules
+ * match neither.
  */
-function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
+function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {
   const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
   const owned = set(cards);
-  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(PRESETS[preset]) === owned);
+  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(presetCards(preset, hours)) === owned);
   return match ?? null;
 }
 
@@ -671,7 +672,7 @@ export function rulesView(desk: DeskRecord): RulesView {
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
     };
   });
-  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards) };
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours) };
 }
 
 /**

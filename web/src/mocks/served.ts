@@ -57,7 +57,7 @@ import {
   type Language,
   type Step,
 } from './script.ts';
-import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
+import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
 import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
@@ -654,8 +654,9 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards in place of every owner card, personal ones included: its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, PRESETS[preset]));
+    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
+    // its diff lists each one it removes.
+    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
