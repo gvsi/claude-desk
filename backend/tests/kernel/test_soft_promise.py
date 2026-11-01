@@ -233,17 +233,24 @@ async def test_person_removed_while_soft_check_sleeps_loses_private_card(app, cl
 @pytest.mark.parametrize("change", ["readers", "status", "expiry"])
 @pytest.mark.parametrize("flagged", [False, True], ids=["passing", "blocked"])
 @pytest.mark.parametrize("keep_other", [False, True], ids=["last-card", "another-card"])
-async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_clock, change, flagged, keep_other):
+@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
+async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_clock, change, flagged, keep_other,
+                                              drafted):
+    """A card withdrawn while the soft check runs is dropped at signing and ledgered in `dropped`.
+    A prose-blocked draft keeps the cards still current, then a handoff clause it drafted; with no
+    card left it shows the handoff clause. A shown handoff opens one owner handoff and one alert."""
     from desk.db.models import Fact as FactRow
     from sqlalchemy import select
     from .helpers import kernel_ctx
-    from .test_handoff_card import quote_and_payment
+    from .test_handoff_card import handoff_alerts, quote_and_payment
     from .test_reply_check import public_key, verify_verdict
 
     copy, visitor = await visitor_of(app, client)
     clauses = await quote_and_payment(client, reviewer, visitor)
     if not keep_other:
         clauses = clauses[:1]
+    if drafted:          # drafted beside the quote card, which is the card withdrawn
+        clauses = [*clauses, clause("handoff")]
     asked, answer = asyncio.Event(), asyncio.Event()
     soft_promise = reviewer.soft_promise
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
@@ -272,10 +279,16 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     verdict = await asyncio.wait_for(checking, 5)
     assert not verdict.ok
     if flagged and keep_other:
-        assert [(b.template, b.fact_id) for b in verdict.blocks] == [("payment_link", clauses[1]["fact_id"])]
+        assert [(b.template, b.fact_id) for b in verdict.blocks] == [("payment_link", clauses[1]["fact_id"])] + (
+            [("handoff", None)] if drafted else [])
     else:
-        assert_handed_off(verdict)
+        assert_handed_off(verdict)                                           # blocks == ["handoff"]
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+    shows_handoff = any(b.template == "handoff" for b in verdict.blocks)
+    assert shows_handoff == (drafted or not (flagged and keep_other))
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == (
+        [("card", "open")] if shows_handoff else [])
+    assert len(await handoff_alerts(app, copy)) == int(shows_handoff)
     # Why the card went is ledgered, whether the draft passed or was already blocked for its prose:
     # the fact and the refusal's rule, never text.
     [entry] = [entry for entry in await reply_entries(app, copy) if entry.event.ref_id == verdict.message_id]
