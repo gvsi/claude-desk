@@ -622,9 +622,9 @@ def test_empty_database_empties_every_table_a_case_can_write():
 
 
 def test_each_case_on_the_real_kernel_starts_on_an_empty_database(tier1):
-    """`k` empties the kernel's and the API's tables before it starts the case's kernel, so a case
-    finds only what it makes: a kernel's startup looks at every copy in the database, and copies
-    that earlier cases left made each start slower than the last."""
+    """`k` empties every kernel, API, mock payments and job queue table before it starts the case's
+    kernel, so a case finds only what it makes: a kernel's startup looks at every copy in the
+    database, and copies that earlier cases left made each start slower than the last."""
     run = tier1({"test_empty": '''
         import psycopg
 

@@ -98,12 +98,16 @@ def empty_database() -> list[str]:
     """Empty every table in `CASE_SCHEMAS`, as desk_admin (the kernel's role may not truncate the
     ledger), and return their names, so a case finds only what it makes. A kernel's startup looks at
     every copy in the database (`rebuild_at_startup`), so copies left by earlier cases made each
-    start slower than the last, and an API target's worker could take a job an earlier case queued."""
+    start slower than the last, and an API target's worker could take a job an earlier case queued.
+    It empties the database `.env` names, as the backend's tests do: give a run a database of its own."""
     with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
         tables = [name for (name,) in admin.execute(
             "SELECT format('%%I.%%I', schemaname, tablename) FROM pg_tables WHERE schemaname = ANY(%s) ORDER BY 1",
             (list(CASE_SCHEMAS),),
         )]
+        # a transaction an earlier case left open fails this case within the minute instead of
+        # hanging the run until the job's timeout
+        admin.execute("SET lock_timeout = '30s'")
         admin.execute("TRUNCATE " + ", ".join(tables))
     return tables
 
