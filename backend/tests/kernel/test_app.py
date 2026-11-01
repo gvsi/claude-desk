@@ -97,22 +97,25 @@ async def test_production_without_seed_refuses_to_start(monkeypatch):
 
 
 @pytest.fixture
-def restore_desk_logger():
-    # Config applies dictConfig immediately, binding stdout to this test's capture stream.
-    logger = logging.getLogger("desk")
-    handlers, level, propagate, disabled = logger.handlers[:], logger.level, logger.propagate, logger.disabled
+def restore_kernel_loggers():
+    # Config also replaces uvicorn's handlers; none may retain a closed capture stream.
+    saved = {name: (logger.handlers[:], logger.level, logger.propagate, logger.disabled)
+             for name in (*LOGGING_CONFIG["loggers"], "desk")
+             for logger in [logging.getLogger(name)]}
     try:
         yield
     finally:
-        for handler in logger.handlers:
-            if handler not in handlers:
-                handler.close()
-        logger.handlers = handlers
-        logger.setLevel(level)
-        logger.propagate, logger.disabled = propagate, disabled
+        for name, (handlers, level, propagate, disabled) in saved.items():
+            logger = logging.getLogger(name)
+            for handler in logger.handlers:
+                if handler not in handlers:
+                    handler.close()
+            logger.handlers = handlers
+            logger.setLevel(level)
+            logger.propagate, logger.disabled = propagate, disabled
 
 
-def test_kernel_listens_on_loopback_only(monkeypatch, restore_desk_logger):
+def test_kernel_listens_on_loopback_only(monkeypatch, restore_kernel_loggers):
     monkeypatch.setenv("KERNEL_HOST", "0.0.0.0")
     monkeypatch.setenv("KERNEL_PORT", "80")
     config = serve_config()
@@ -122,7 +125,7 @@ def test_kernel_listens_on_loopback_only(monkeypatch, restore_desk_logger):
     assert config.access_log is False       # raw paths can hold single-use link tokens; failures log route templates
 
 
-def test_kernel_info_logs_go_to_stdout(capsys, restore_desk_logger):
+def test_kernel_info_logs_go_to_stdout(capsys, restore_kernel_loggers):
     original = deepcopy(LOGGING_CONFIG)
     config = serve_config().log_config
     assert config["loggers"]["desk"] == {"handlers": ["desk"], "level": "INFO", "propagate": True}
