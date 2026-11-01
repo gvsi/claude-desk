@@ -73,7 +73,11 @@ export interface ChatMarkdownProps {
   reveal?: boolean;
   /** Called once when everything in `text` is shown (at once when not revealing, or with reduce-motion on). */
   onRevealed?: () => void;
-  /** 'inert' (default): for stopped drafts, link text then the URL in plain text, not clickable. 'open': links clickable, text only, where a screen asks for it. */
+  /**
+   * 'inert' (default): link text, then its address as written, not clickable. For stopped drafts, and
+   * for ClaudeMessage's prose until the kernel's reply check reads Markdown links (its `PROSE_LINKS`).
+   * 'open': links clickable, text only, where a screen asks for it, as setup's docked question does.
+   */
   links?: 'open' | 'inert';
 }
 
@@ -162,8 +166,10 @@ function Link({ node, href, children }: ElementProps<'a'>) {
 }
 
 /**
- * With inert links, `linksAsText` has already turned every link into its words and its address as
- * written, so no link reaches the page. Should one ever arrive, it is its words, unlinked.
+ * Inert links, for stopped drafts and, until the kernel's reply check reads Markdown links,
+ * ClaudeMessage's prose (its `PROSE_LINKS`). `linksAsText` has already turned every link into its
+ * words and its address as written, so no link reaches the page. Should one ever arrive, it is its
+ * words, unlinked.
  */
 function Unlinked({ children }: ElementProps<'a'>) {
   return <>{children}</>;

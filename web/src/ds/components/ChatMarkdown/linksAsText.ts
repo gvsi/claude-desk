@@ -49,11 +49,12 @@ function restore(node: MarkdownNode, definitions: ReadonlyMap<string, string>): 
 }
 
 /**
- * For inert links: each link becomes its words, then its address in brackets exactly as Claude
- * wrote it, with nothing to click. The address is the one in the Markdown, not one a URL parser
- * has rewritten with an added slash, percent-encoding or an `xn--` domain, and a target that isn't
- * http, https or mailto shows too. A link whose words already are its address shows once.
- * Reference links take their address from their definition.
+ * For inert links, on stopped drafts and, until the kernel's reply check reads Markdown links, in
+ * ClaudeMessage's prose (its `PROSE_LINKS`): each link becomes its words, then its address in
+ * brackets exactly as Claude wrote it, with nothing to click. The address is the one in the
+ * Markdown, not one a URL parser has rewritten with an added slash, percent-encoding or an `xn--`
+ * domain, and a target that isn't http, https or mailto shows too. A link whose words already are
+ * its address shows once. Reference links take their address from their definition.
  */
 export function linksAsText() {
   return (tree: MarkdownNode): void => restore(tree, definitionsIn(tree, new Map()));
