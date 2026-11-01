@@ -699,7 +699,7 @@ export interface AgentRunStarted {
  * Which words the built-in agent's tasks take on a Desk (plan 09, C2): `rivera` on the copy's own
  * Desk, else the business type setup stored for it (`other` without one). A key, never words.
  */
-export type DemoTaskSet = 'rivera' | 'trade' | 'office' | 'landlord' | 'other';
+export type DemoTaskSet = import('./openapi.gen.ts').AgentTasks['task_set'];
 
 /** `GET /api/public/desks/{slug}/agent_tasks`: the Desk's set, read with the visitor's chat. */
 export interface AgentTasks {

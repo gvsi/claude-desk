@@ -19,22 +19,16 @@ export const DEMO_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] 
 
 export type DemoTask = (typeof DEMO_TASKS)[number];
 
-/**
- * Which words a Desk's tasks take, as the API names its set (`agent_tasks {task_set}`): Rivera's
- * seed keeps its own, and every other Desk takes its setup business type's (plan 09, C2).
- */
-export const DEMO_TASK_SETS = ['rivera', 'trade', 'office', 'landlord', 'other'] as const satisfies readonly DemoTaskSet[];
-
 export type { DemoTaskSet };
-
-export function isDemoTaskSet(value: unknown): value is DemoTaskSet {
-  return typeof value === 'string' && (DEMO_TASK_SETS as readonly string[]).includes(value);
-}
 
 /** The set whose words the panel shows when the Desk's set can't be read: plain words for any business. */
 export const FALLBACK_TASK_SET: DemoTaskSet = 'other';
 
-/** Each task's chip in each set, and the title of the agent's first request once it is sent. */
+/**
+ * Each task's chip in each set, and the title of the agent's first request once it is sent. The sets
+ * are the API's (`agent_tasks {task_set}`, plan 09, C2): Rivera's seed keeps its own, and every other
+ * Desk takes its setup business type's. A set the API adds has no words here, and fails to compile.
+ */
 export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoTaskSet, Readonly<Record<DemoTask, string>>>>>> = {
   en: {
     rivera: {
@@ -91,6 +85,13 @@ export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoT
     },
   },
 };
+
+/** The sets the page has words for: every set the API names. */
+export const DEMO_TASK_SETS = Object.keys(DEMO_TASK_COPY.en) as readonly DemoTaskSet[];
+
+export function isDemoTaskSet(value: unknown): value is DemoTaskSet {
+  return typeof value === 'string' && (DEMO_TASK_SETS as readonly string[]).includes(value);
+}
 
 /** How a request is signed, one line each, with the API's values as written. */
 export interface SigningLabels {
