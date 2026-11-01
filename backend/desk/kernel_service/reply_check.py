@@ -97,6 +97,7 @@ from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import desk_kernel
 from fastapi import APIRouter, Request
@@ -105,7 +106,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from desk.public_amenity import offers_amenity
 from desk.public_person import future_person_direction
-from desk.public_contact import valid_public_contact
+from desk.public_contact import bare_host, valid_public_contact
+from desk.public_contact import contact_endpoints as public_contact_endpoints
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
@@ -116,7 +118,7 @@ from desk.kernel_service import (agents, auth, context, demo_inbox, jev, labels,
                                  sessions)
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
-from desk.kernel_service.render.cards import DeskInfo, slot_claims
+from desk.kernel_service.render.cards import DeskInfo, slot_claims, text_claim
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
 from desk.next_steps import next_steps
@@ -131,6 +133,8 @@ KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})  
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
 logger = logging.getLogger(__name__)
+CONTACT_FACT = "charter:contact"
+PUBLIC_READERS = frozenset({"public"})
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
 
 # ---- Prose ----------------------------------------------------------------------------------------
@@ -623,21 +627,67 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
             or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
-def markdown_violations(prose: str, raw: Sequence[Violation],
-                        scan: Callable[[str], list[Violation]]) -> list[Violation]:
+async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str, raw: Sequence[Violation],
+                              scan: Callable[[str], list[Violation]]) -> list[Violation]:
     """What the prose shows once rendered as Markdown (`markdown_text.read`, the owner's decision of
     2026-11-01) that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries,
     names and passed cards) on the visible text, each violation whose kind, rule ID and span `raw`
-    doesn't hold, in order. Prose the parser can't read whole (`markdown_text.TooDeep`, or any
-    error) is one `promise_word` (`markdown.parse`), and nothing of its reading is trusted."""
+    doesn't hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text) for each
+    link whose text isn't its own target and whose target isn't the business's own contact
+    (`own_target`): payment and booking links come only from cards. Prose the parser can't read whole
+    (`markdown_text.TooDeep`, or any error) is one `promise_word` (`markdown.parse`), and nothing of
+    its reading is trusted."""
     try:
         reading = markdown_text.read(prose)
     except Exception as error:   # any failure fails closed: the reply is refused
         log_error(logger, error, "markdown_unread")
         return [Violation(kind="promise_word", span=_span(prose), rule_id="markdown.parse")]
     reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
-    return [violation for violation in scan(reading.visible)
-            if (violation.kind, violation.rule_id, violation.span) not in reported]
+    found = [violation for violation in scan(reading.visible)
+             if (violation.kind, violation.rule_id, violation.span) not in reported]
+    hidden = [link for link in reading.links if not _shows_target(link)]
+    if hidden:
+        hosts, emails = await contact_endpoints(ctx, desk_id)
+        found += [Violation(kind="promise_word", span=_span(link.text), rule_id="markdown.link")
+                  for link in hidden if not own_target(link.href, hosts, emails)]
+    return found
+
+
+def _shows_target(link: markdown_text.Link) -> bool:
+    """Whether a link's text is its own target, as an autolink's is, so a reader sees where it goes."""
+    text = link.text.strip()
+    return link.auto or text == link.href or f"mailto:{text}" == link.href
+
+
+def own_target(href: str, hosts: frozenset[str], emails: frozenset[str]) -> bool:
+    """Whether a link goes to the business's own contact: `https` to one of `hosts` exactly (a leading
+    "www." either side aside, `public_contact.bare_host`), or `mailto:` one of `emails`, in any case.
+    Any other scheme, host or form is not."""
+    scheme, colon, rest = href.partition(":")
+    if colon and scheme.casefold() == "mailto":
+        return unquote(rest).casefold() in emails
+    try:
+        url = urlsplit(href)
+        url.port                                  # a port that isn't one raises
+    except ValueError:
+        return False
+    return url.scheme.casefold() == "https" and url.hostname is not None and bare_host(url.hostname) in hosts
+
+
+async def contact_endpoints(ctx: KernelCtx, desk_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The hosts and emails the Desk's public contact names (`charter:contact` as the public page shows
+    it: public, current, valid; `public_contact.contact_endpoints`), or none."""
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_id, FactRow.fact_id == CONTACT_FACT)))).one_or_none()
+    if row is None or not labels.can_read(row.readers, PUBLIC_READERS):
+        return frozenset(), frozenset()
+    fact, template = labels.fact_of(row), render.TEMPLATES["contact"]
+    if not (template.reads(fact) and template.current(fact, ctx.clock.now())):
+        return frozenset(), frozenset()
+    try:
+        return public_contact_endpoints(text_claim(fact))
+    except TypeError:                             # not one text claim: names nothing
+        return frozenset(), frozenset()
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -1070,7 +1120,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
               "callback_card": any(card.template == "callback_confirmed" for card in cards)}
     raw = scan_prose(draft.prose, canaries, names, **passed)
     violations += raw
-    violations += markdown_violations(prose, raw, lambda visible: scan_prose(visible, canaries, names, **passed))
+    violations += await markdown_violations(ctx, desk_id, prose, raw,
+                                            lambda visible: scan_prose(visible, canaries, names, **passed))
     violations += refused
     violations += policy_card_violations(prose, cards)
     detected_language = detected if detected in ("en", "es") else None

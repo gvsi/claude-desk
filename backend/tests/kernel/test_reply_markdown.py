@@ -9,11 +9,12 @@ refused.
 
 import pytest
 
+from desk import public_contact
 from desk.contracts import RenderedBlock
 from desk.kernel_service import markdown_text
 
 from .test_adapters import visitor_of
-from .test_reply_check import checked
+from .test_reply_check import change_fact, checked
 
 STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry"
 
@@ -65,3 +66,74 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
+
+
+# The business's contact as its owner might write it: a phone, an email and a website, in its accepted form.
+RIVERA_CONTACT = "Call (510) 555-0142 · Email: maria@riveraplumbing.example · Website: www.riveraplumbing.example"
+
+
+async def with_contact(app, copy, contact: str = RIVERA_CONTACT) -> None:
+    await change_fact(app, copy, "charter:contact", claims=[{"key": "contact", "kind": "text", "value": contact}])
+
+
+def found(verdict) -> list[tuple[str, str, str]]:
+    return [(violation.kind, violation.rule_id, violation.span) for violation in verdict.violations]
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("[Pay here](https://elsewhere.example/pay) for the visit.", "Pay here"),
+    ("Here is our [site](javascript:alert)", "site"),
+    ("See [our photos](https://riveraplumbing.example.evil.example).", "our photos"),   # the host must match
+    ("See [our photos](https://evil.example/riveraplumbing.example).", "our photos"),
+    ("See [our photos](https://riveraplumbing.example@evil.example).", "our photos"),
+    ("See [our photos](http://riveraplumbing.example).", "our photos"),                # https only
+    ("See [our photos](ftp://riveraplumbing.example).", "our photos"),
+    ("Read [this page](/pay) first.", "this page"),
+    ("[riveraplumbing.example](https://elsewhere.example)", "riveraplumbing.example"),
+    ("[Write to us](mailto:someone@elsewhere.example)", "Write to us"),
+    ("[Write to us](mailto:maria@riveraplumbing.example.evil.example)", "Write to us"),
+    ("[Our page][page] has the details.\n\n[page]: https://elsewhere.example", "Our page"),
+    ("Everything is on [the page about the visit and what to bring along](https://elsewhere.example).",
+     "the page about the visit and what to bri"),
+])
+async def test_a_link_hiding_its_target_must_go_to_the_business_contact(app, client, prose, span):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert verdict.ok is False
+    assert ("promise_word", "markdown.link", span) in found(verdict)
+
+
+@pytest.mark.parametrize("prose", [
+    "- Turn off the main valve\n- Open the lowest tap\n- Keep the area dry until Maria gets there",
+    "* Turn off the main valve\n* Keep the area dry until Maria gets there",
+    "**Service call deposit**\n\nMaria credits it to the repair if you go ahead with it.",
+    "## What to do now\n\nTurn off the main valve and keep the area dry.",
+    "| Service | What it covers |\n|---|---|\n| Drain clearing | Kitchen and bathroom drains |",
+    "Photos of her past jobs are on [our website](https://riveraplumbing.example).",
+    "Photos of her past jobs are on [our website](https://www.riveraplumbing.example/photos).",
+    "Photos of her past jobs are on [our website](HTTPS://RiveraPlumbing.Example/photos).",
+    "Photos of her past jobs are at https://riveraplumbing.example and on the way.",
+    "Photos of her past jobs are at <https://riveraplumbing.example>.",
+    "You can also [email Maria](mailto:maria@riveraplumbing.example) about it.",
+    "You can also write to <maria@riveraplumbing.example> about it.",
+    "You can also see [https://elsewhere.example/rivera](https://elsewhere.example/rivera) for reviews.",
+])
+async def test_honest_formatting_and_the_business_own_links_pass(app, client, prose):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, found(verdict)) == (True, [])
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+
+
+@pytest.mark.parametrize(("contact", "hosts", "emails"), [
+    (RIVERA_CONTACT, {"riveraplumbing.example"}, {"maria@riveraplumbing.example"}),
+    ("Website: https://WWW.Rivera.example/book, Email: Maria@Rivera.example",
+     {"rivera.example"}, {"maria@rivera.example"}),
+    ("riverapl.example/photos or https://pay.riverapl.example", {"riverapl.example", "pay.riverapl.example"}, set()),
+    ("(510) 555-0142", set(), set()),
+    ("Call Maria any time, she is free", set(), set()),          # not a contact: names nothing
+])
+def test_a_public_contact_names_its_hosts_and_emails(contact, hosts, emails):
+    assert public_contact.contact_endpoints(contact) == (frozenset(hosts), frozenset(emails))
