@@ -48,11 +48,11 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
   the quote question's pricing text and price items, named from the owner's answer alone (the turn reads neither):
-  code replaces the pricing text and updates or adds price items by title, never removing one. Each business policy
-  (pricing, intake, urgent) is a field only of the question that asks for it (`POLICY_TURNS`), and code drops one from
-  any other turn's patch too, so each turn's schema stays small enough to compile. A fact question
-  clears the hours or the prices only by its flag, since an empty list leaves them as they are. A new website is
-  read only with consent; a new owner or business
+  code replaces the pricing text and updates or adds price items by title, never removing one. Some facts (pricing,
+  intake, urgent, after_hours, hours and a website named) are fields only of the questions that ask for them
+  (`FIELD_TURNS`), and code drops one from any other turn's patch too, so each turn's schema stays small enough to
+  compile. A fact question clears the hours or the prices only by its flag, since an empty list leaves them as they
+  are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead.
@@ -159,7 +159,7 @@ from desk.api.prompts import (
     OWNER_ANSWER_TAG,
     OWNER_DECISION_TAG,
     OWNER_DESCRIPTION_TAG,
-    POLICY_TURNS,
+    FIELD_TURNS,
     PRICE_ITEMS_MAX,
     PRICES_TAG,
     QUESTION_KEYS,
@@ -1427,11 +1427,10 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
 
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
-    its own question (`LIMIT_QUESTIONS`), each business policy only on the turn of the question that asks for it
-    (`POLICY_TURNS`), and any other fact only on a turn answering a question that owns no limit, but for the explicit
-    facts in `LIMIT_TURN_FACTS`: the quote question replaces pricing text and only updates or adds price items
-    (`_priced`). Anything else is dropped and logged (by its label or field name, never its value). Names are reduced
-    as the Desk takes them."""
+    its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
+    on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
+    question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
+    logged (by its label or field name, never its value). Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
@@ -1440,7 +1439,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
         if name in LIMIT_QUESTIONS and key != LIMIT_QUESTIONS[name]:
             logger.warning("a setup turn answering %s carried %s; it was dropped", key, LIMIT_LABELS[name])
             continue
-        if name in POLICY_TURNS and key != POLICY_TURNS[name]:
+        if name in FIELD_TURNS and key not in FIELD_TURNS[name]:
             logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
             continue
         if limit_turn and name not in LIMIT_QUESTIONS:
@@ -1804,7 +1803,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
         if reply.text:
             entries.append(reply)
-        site = website_url(turn.website)
+        site = website_url(getattr(turn, "website", ""))  # only what_you_do's model has it (`FIELD_TURNS`)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
                 entries.append(await _read_website(ctx, desk_id, *site))

@@ -9,8 +9,8 @@ budget well inside them (`SCHEMA_*_MAX`), counted through every `$ref` at each p
 strict schemas together pass the API's own limits (`REQUEST_*_MAX`).
 
 The API also refuses a schema whose compiled grammar is too large ("The compiled grammar is too large, which would cause
-performance issues"), which neither count sees: long field descriptions grow it too. A setup turn has the most fields,
-so each one's strict schema stays within `SETUP_TURN_SCHEMA_CHARS_MAX` characters.
+performance issues"), which neither count sees. A setup turn has the most fields, so each one's strict schema keeps
+within `SETUP_TURN_SCHEMA_CHARS_MAX` characters and `SETUP_TURN_PROPERTIES_MAX` top-level properties.
 """
 
 import json
@@ -41,6 +41,10 @@ REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
 # separators (how the live probe measured it): on the Claude API, a what_you_do turn of 8,337 characters compiled and
 # one of 10,895 was refused as too large a grammar.
 SETUP_TURN_SCHEMA_CHARS_MAX = 9_000
+# The most top-level properties a setup turn's strict schema may have: the limit found by live probes, which the
+# character cap alone didn't catch. Turns of 21 properties were refused as too large a grammar even with every
+# description stripped (5,951 characters), and removing any one property let them compile; turns of 20 compiled.
+SETUP_TURN_PROPERTIES_MAX = 20
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
@@ -181,3 +185,11 @@ def test_every_setup_turn_schema_is_small_enough_to_compile():
     assert not over, (f"setup turn strict schemas over {SETUP_TURN_SCHEMA_CHARS_MAX} characters, measured as "
                       f"len(json.dumps(strict_schema(SETUP_TURNS[key]))) with default separators, as the live grammar "
                       f"probe measures them: {over}; every turn: {sizes}")
+
+
+def test_every_setup_turn_schema_has_few_enough_properties_to_compile():
+    counts = {key: len(strict_schema(model)["properties"]) for key, model in SETUP_TURNS.items()}
+    over = {key: count for key, count in counts.items() if count > SETUP_TURN_PROPERTIES_MAX}
+    assert not over, (f"setup turn strict schemas over {SETUP_TURN_PROPERTIES_MAX} top-level properties, the limit "
+                      f"live probes found (21 refused, 20 compiled; the character cap didn't catch it): {over}; "
+                      f"every turn: {counts}")

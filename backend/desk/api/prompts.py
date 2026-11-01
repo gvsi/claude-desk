@@ -16,9 +16,9 @@ the attack and legitimate-task suites).
   `desk_reply_text(answer)`, how a Desk's answer reads to it (the caller wraps it as `<desk_reply>`).
 - The setup interview (Plan 02b): `SETUP_START_SYSTEM` and its output model `SetupStart` (what the owner's first
   description says), `SETUP_TURN_SYSTEM` and `SETUP_TURNS`, each question's own `SetupTurn` model (one answer turn: a
-  reply, a website the owner named and step_done, then on a limit question only its own limits and explicit facts
-  (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other the facts with their clear flags, each business policy
-  only on the question that asks for it (`POLICY_TURNS`); its `patch()` is the
+  reply and step_done, then on a limit question only its own limits and explicit facts
+  (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other the facts with their clear flags, some only on the
+  questions that ask for them (`FIELD_TURNS`); its `patch()` is the
   `SetupPatch` code merges), the stored
   `SetupAnswers`, the questions (`QUESTION_KEYS`, `question_text`), `setup_turn_head`, the fixed start of a turn's
   message before its wrapped parts, `this_question_so_far` of `summary_line`s labelled by `SETUP_EXCHANGE_LABELS`,
@@ -801,10 +801,12 @@ words, so they know you got it. When something technical comes up (a payment lin
 "asks you first"), explain it in a plain clause. If the answer doesn't cover the question yet, reply is your \
 short follow-up question instead. If the owner raises something new, answer it and ask only about that; the \
 topic you were on waits for a later turn.
-- Fields: everything this answer tells you, read with this question's exchange, even a fact for another topic \
-(hours given while you asked about services go in hours). Leave a text empty, a list empty, clear_hours and \
-clear_price_items false and anything else null when the answer doesn't give it. Use memory and website only for \
-facts about the business, never for limits.
+- Fields: everything this answer tells you, read with this question's exchange, even a fact for another topic, in \
+the field this turn has for it (a phone number given while you asked about services goes in public_contact). A \
+turn has only the fields its question records, such as website on what_you_do and after_hours on \
+contact_and_after_hours; a fact with no field on this turn waits for its own topic. Leave a text empty, a list \
+empty, clear_hours and clear_price_items false and anything else null when the answer doesn't give it. Use memory \
+and website only for facts about the business, never for limits.
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
 - For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, times, \
@@ -1142,8 +1144,8 @@ LIMIT_CHOICES: dict[QuestionKey, Callable[[BusinessType], list[LimitChoice]]] = 
 }
 
 
-# What every answer turn has, whatever its question: the reply, a website named and whether the question is answered.
-TURN_FRAME = frozenset({"reply", "website", "step_done"})
+# What every answer turn has, whatever its question: the reply and whether the question is answered.
+TURN_FRAME = frozenset({"reply", "step_done"})
 # The lists a fact turn can clear: an empty list leaves one as it is, so the owner saying to remove it all is a flag,
 # `clear_<name>`, which `SetupTurn.patch` turns into an empty list that replaces it.
 CLEARABLE = ("hours", "price_items")
@@ -1152,13 +1154,22 @@ CLEARABLE = ("hours", "price_items")
 # (`setup.merged`), never removing an item. The turn reads no fact so far, including pricing and the price list:
 # either may contain website or memory text.
 LIMIT_TURN_FACTS: dict[str, QuestionKey] = {"pricing": "quote_limit", "price_items": "quote_limit"}
-# The business policies each set only on the turn of the question that asks for it, so no other turn's schema has its
-# field: every field adds to the grammar the API compiles from a turn's schema, which has a size cap
-# (tests/api/test_schema_budget.py). How the business prices comes on the quote question (with `LIMIT_TURN_FACTS`),
-# what new customers are asked on what_you_do, and what counts as urgent on contact_and_after_hours. Code drops one
-# any other turn's patch carries (`setup.merged`).
-POLICY_TURNS: dict[str, QuestionKey] = {"pricing": "quote_limit", "intake": "what_you_do",
-                                        "urgent": "contact_and_after_hours"}
+# The fields each taken only on the turns of the questions that ask for them, so no other turn's schema has them: the
+# API compiles a turn's schema into a grammar and refuses one too large, and a turn of more than 20 top-level
+# properties was refused (tests/api/test_schema_budget.py). what_you_do, where the owner describes the business, takes
+# how it prices, what new customers are asked, what counts as urgent and a website they name, but no hours, which
+# hours_and_area always asks; the quote question takes pricing too (with `LIMIT_TURN_FACTS`), and
+# contact_and_after_hours takes what happens after hours and what counts as urgent. Code drops one any other turn's
+# patch carries (`setup.merged`).
+FIELD_TURNS: dict[str, frozenset[QuestionKey]] = {
+    "pricing": frozenset({"what_you_do", "quote_limit"}),
+    "intake": frozenset({"what_you_do"}),
+    "urgent": frozenset({"what_you_do", "contact_and_after_hours"}),
+    "after_hours": frozenset({"contact_and_after_hours"}),
+    "website": frozenset({"what_you_do"}),
+    "hours": frozenset({"hours_and_area", "contact_and_after_hours"}),
+    "clear_hours": frozenset({"hours_and_area", "contact_and_after_hours"}),
+}
 PRICE_ITEMS_MAX = 50
 
 
@@ -1501,13 +1512,12 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
 
 class SetupTurn(DraftOutput):
     """One answer turn (route `setup`): the base of each question's own model in `SETUP_TURNS`, which has the reply,
-    the fields that question's turn may set, a website named and step_done."""
+    the fields that question's turn may set (what_you_do's include a website named) and step_done."""
 
     model_config = ConfigDict(extra="forbid")
 
     if TYPE_CHECKING:                       # every question's model has these
         reply: str
-        website: str
         step_done: bool
 
     def patch(self) -> SetupPatch:
@@ -1522,16 +1532,16 @@ class SetupTurn(DraftOutput):
 
 def _in_turn(field: str, key: QuestionKey) -> bool:
     """Whether the answer turn to `key` has `field`: a limit only on its own question's turn (`LIMIT_QUESTIONS`); a
-    business policy only on the turn of the question that asks for it (`POLICY_TURNS`); any other fact (an answer
-    field, or its clear flag) only on a question that owns no limit, since a limit turn reads none of the facts so far
-    (`setup._turn_message`), but for the explicit facts in `LIMIT_TURN_FACTS`: the quote question's pricing text
-    replaces the stored text, and its price items are only added or updated by title."""
+    field in `FIELD_TURNS` only on the turns it lists; any other fact (an answer field, or its clear flag) only on a
+    question that owns no limit, since a limit turn reads none of the facts so far (`setup._turn_message`), but for
+    the explicit facts in `LIMIT_TURN_FACTS`: the quote question's pricing text replaces the stored text, and its
+    price items are only added or updated by title."""
     if field in TURN_FRAME:
         return True
     if field in LIMIT_QUESTIONS:
         return LIMIT_QUESTIONS[field] == key
-    if field in POLICY_TURNS:
-        return POLICY_TURNS[field] == key
+    if field in FIELD_TURNS:
+        return key in FIELD_TURNS[field]
     if LIMIT_TURN_FACTS.get(field) == key:
         return True
     return key not in LIMIT_QUESTIONS.values()
@@ -1546,11 +1556,11 @@ def _turn_model(key: QuestionKey) -> type[SetupTurn]:
 
 
 # Each question's answer turn, built once at import so its schema, and the grammar the API compiles from it and caches
-# for 24 hours, stays the same: the reply, a website named and step_done (`TURN_FRAME`), then on a limit question only
-# the limits and explicit facts that are its own (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other question
-# the facts and their clear flags, each business policy only on its own question (`POLICY_TURNS`). Every field is
-# required and only limits and choices are nullable, and descriptions are short, so each schema stays small enough
-# to compile, and to compile fast (tests/api/test_schema_budget.py).
+# for 24 hours, stays the same: the reply and step_done (`TURN_FRAME`), then on a limit question only the limits and
+# explicit facts that are its own (`LIMIT_QUESTIONS`, `LIMIT_TURN_FACTS`), and on any other question the facts and
+# their clear flags, some only on the questions that ask for them (`FIELD_TURNS`). Every field is required and only
+# limits and choices are nullable, descriptions are short and no turn has more than 20 top-level properties, so each
+# schema stays small enough to compile, and to compile fast (tests/api/test_schema_budget.py).
 SETUP_TURNS: dict[QuestionKey, type[SetupTurn]] = {key: _turn_model(key) for key in QUESTION_KEYS}
 
 
