@@ -277,9 +277,11 @@ async def test_resolver_logs_a_supported_block_with_no_registered_adapter(app, c
 
 
 @pytest.mark.parametrize('supported', [False, True])
-async def test_resolver_is_quiet_for_unsupported_blocks_and_warns_on_stale_hashes(app, client, caplog, supported):
+async def test_resolver_is_quiet_for_unsupported_blocks_and_warns_on_stale_hashes(app, client, caplog, monkeypatch, supported):
     import logging
+    from desk.kernel_service.adapters import blocks
 
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake'}))
     copy = await rivera(app, client)
     marker = 'Owner-only description marker'
     config = {'block': 'intake', 'questions': ['What?']} if supported else {'block': 'urgent', 'urgent_when': marker}
