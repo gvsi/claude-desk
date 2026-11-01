@@ -14,7 +14,7 @@ import { worker } from '../mocks/browser.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { renderRoute } from '../test/renderRoute.tsx';
+import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 
@@ -72,12 +72,26 @@ const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' |
 const TITLE = '.cd-page-header__title';
 const MAIN_BUTTON = '.cd-setup-step__actions > .cd-button:first-child';
 
+/** A part of a step: its shape's anchor, and a selector for the element it stands for on the page. */
+interface Part {
+  name: string;
+  page: string;
+}
+
 interface StepLoad {
   status: string;
   /** The step's read the test holds, and how. */
   hold: (state: SetupState) => { held: () => number; release: () => void };
+  /** Parts whose words are known: they land where their shapes were, within 2 px. */
   anchors: readonly SkeletonAnchor[];
   stays: readonly string[];
+  /**
+   * Parts whose words come with the read, drawn from estimates: every one of them, so that any move
+   * under them is accounted for. Each may land at most one line taller or shorter than its shape.
+   */
+  estimated?: readonly Part[];
+  /** Parts under estimated ones, which may move once as they land (decision 15): the last row in view and the main button. */
+  moved?: (viewport: Viewport) => readonly Part[];
 }
 
 const TOOL_ROW = (card: number, row: number) => `.cd-setup-tools > .cd-card:nth-child(${card}) .cd-setup-tools__row:nth-child(${row})`;
@@ -85,13 +99,27 @@ const TOOL_ROW = (card: number, row: number) => `.cd-setup-tools > .cd-card:nth-
 const GROUP_ROW = (child: number, row: number) => `.cd-outcome-groups > :nth-child(${child}) .cd-outcome-groups__row:nth-child(${row})`;
 /** A situation's or a trick's row in its card. */
 const RESULT_ROW = (row: number) => `.cd-setup-step__rows > li:nth-child(${row})`;
+const MAIN_BUTTON_PART: Part = { name: 'main-button', page: MAIN_BUTTON };
+/** The rows of a card of situations or tricks, as `prefix-0` and on. */
+const resultRows = (prefix: string, rows: number): Part[] => Array.from({ length: rows }, (_, i) => ({ name: `${prefix}-${i}`, page: RESULT_ROW(i + 1) }));
+
+/**
+ * The most an estimated part may differ from its shape: one line of the words it holds (body and
+ * control lines are 20 px, the tallest it uses). An estimate draws a fresh copy's own words at the
+ * lines one platform's fonts give them; another platform's fonts wrap a part's words at most one line
+ * differently (macOS and Linux differ by one line at most where they differ at all), so a part that
+ * is off by more is drawn wrong, not wrapped differently.
+ */
+const ONE_LINE_PX = 20;
 
 /**
  * Each step's load. The tools' words are the app's own, so their shapes take the lines those words
  * take in this browser's fonts, and every row is compared whole. The rules, situations and tricks
- * come with the read: their shapes' lines are estimates, which wrap differently from one platform's
- * fonts to another's, so only what sits above the first of them is compared, and that row's top,
- * left and width (decision 15: rows under them may move once as they land).
+ * come with the read: their shapes' lines are estimates, which can wrap differently on another
+ * platform's fonts. What sits above the first of them is compared within 2 px, with that first row's
+ * top, left and width but not its height, whose words aren't known. What sits under them may move
+ * once as it lands, by exactly what the estimated parts above it differ by, and then stays
+ * (`expectAcceptedMoves`).
  */
 const STEPS: Readonly<Record<Step, StepLoad>> = {
   tools: {
@@ -108,15 +136,33 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
     hold: (state) => holdPosts(path('setupRules', state)),
     anchors: [
       { name: 'rules-money-limit', page: '.cd-outcome-groups > .cd-card:first-child', size: true },
+      // The first rule's words come with the draft: its height is an estimate, checked below.
       { name: 'rules-auto-row-0', page: GROUP_ROW(2, 1), dimensions: ['width'] },
     ],
     stays: [TITLE],
+    estimated: [
+      ...Array.from({ length: 11 }, (_, i) => ({ name: `rules-auto-row-${i}`, page: GROUP_ROW(2, i + 1) })),
+      ...Array.from({ length: 2 }, (_, i) => ({ name: `rules-ask-row-${i}`, page: GROUP_ROW(3, i + 1) })),
+      { name: 'rules-never-row-0', page: GROUP_ROW(4, 1) },
+      // Known words, but in boxes sized by their own words, so their lines are estimates too.
+      { name: 'rules-always-on', page: '.cd-card:has(> .cd-always-on)' },
+      { name: 'rules-checks', page: '.cd-setup-rules__checks' },
+    ],
+    // The last row in view: the first that asks at 1440, the ninth Claude does on its own at 390.
+    moved: (viewport) => [
+      viewport === 'desktop' ? { name: 'rules-ask-row-0', page: GROUP_ROW(3, 1) } : { name: 'rules-auto-row-8', page: GROUP_ROW(2, 9) },
+      MAIN_BUTTON_PART,
+    ],
   },
   situations: {
     status: 'Trying real situations on your draft rules',
     hold: (state) => holdPosts(path('setupSituations', state)),
+    // The first situation's words come with the read: its height is an estimate, checked below.
     anchors: [{ name: 'situation-row-0', page: RESULT_ROW(1), dimensions: ['width'] }],
     stays: [TITLE],
+    estimated: resultRows('situation-row', 6),
+    // The last row in view: the sixth at 1440, the fourth at 390.
+    moved: (viewport) => [{ name: `situation-row-${viewport === 'desktop' ? 5 : 3}`, page: RESULT_ROW(viewport === 'desktop' ? 6 : 4) }, MAIN_BUTTON_PART],
   },
   // Opened at the safety check (a reload), the first results are drawn still, so they land in place.
   safety_check: {
@@ -124,17 +170,128 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
     hold: (state) => holdPosts(path('setupSafetyCheck', state)),
     anchors: [
       { name: 'safety-count', page: '.cd-setup-safety__count', size: true },
+      // The first trick's words come with the read: its height is an estimate, checked below.
       { name: 'trick-row-0', page: RESULT_ROW(1), dimensions: ['width'] },
     ],
     stays: [TITLE],
+    estimated: resultRows('trick-row', 6),
+    // The last row in view: the sixth at 1440, the fourth at 390.
+    moved: (viewport) => [{ name: `trick-row-${viewport === 'desktop' ? 5 : 3}`, page: RESULT_ROW(viewport === 'desktop' ? 6 : 4) }, MAIN_BUTTON_PART],
   },
 };
+
+/** The page's element for `selector`, not a shape in a skeleton layer. */
+function onPage(selector: string): Element | undefined {
+  return [...document.querySelectorAll(selector)].find((element) => !element.closest('.cd-skeleton-screen__layer'));
+}
+
+/** Where a part was drawn, in viewport px, and whether it was the page's element or its shape. */
+interface Place {
+  top: number;
+  left: number;
+  real: boolean;
+}
+
+/**
+ * Every place each part is drawn at, read at every change and every frame from now until `stop`:
+ * its shape while the shapes show, then the page's element from the moment it is drawn (while the
+ * shapes fade over it) on. A place within 2 px of the one before is the same place. The shape's last
+ * box is kept, to compare the page's element with.
+ */
+function watchPlaces(parts: readonly Part[]) {
+  const seen = parts.map(() => ({ shape: undefined as DOMRect | undefined, places: [] as Place[] }));
+  const look = () => {
+    parts.forEach((part, i) => {
+      const record = seen[i]!;
+      const element = onPage(part.page);
+      let box: DOMRect;
+      if (element) box = element.getBoundingClientRect();
+      else {
+        const shape = document.querySelector(`.cd-skeleton-screen__layer[data-state="shown"] [data-skeleton-anchor="${part.name}"]`);
+        if (!shape) return;
+        box = shape.getBoundingClientRect();
+        record.shape = box;
+      }
+      const last = record.places.at(-1);
+      const real = element !== undefined;
+      const moved = !last || last.real !== real || Math.abs(box.top - last.top) > SKELETON_TOLERANCE_PX || Math.abs(box.left - last.left) > SKELETON_TOLERANCE_PX;
+      if (moved) record.places.push({ top: box.top, left: box.left, real });
+    });
+  };
+  const observer = new MutationObserver(look);
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  let frame = 0;
+  const tick = () => {
+    look();
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  const stop = () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+  };
+  onTestFinished(stop);
+  return { seen, stop };
+}
+
+/** Waits `count` frames. */
+async function frames(count: number): Promise<void> {
+  for (let i = 0; i < count; i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+/**
+ * Decision 15's accepted moves on a step whose words come with the read. Each estimated part lands
+ * at most one line taller or shorter than its shape. Each part under them (the last row in view, the
+ * main button) is drawn in one place while the shapes show and lands in one place, so it moves at
+ * most once, in one direction, and doesn't move again; and it moves by exactly what the estimated
+ * parts above it differ by, so the move is the words wrapping and nothing else. On a platform whose
+ * fonts wrap the words as the estimate does, the move is zero.
+ */
+function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: ReturnType<typeof watchPlaces>): void {
+  const estimated = load.estimated ?? [];
+  const moved = load.moved?.(viewport) ?? [];
+  const records = new Map([...estimated, ...moved].map((part, i) => [part.name, watched.seen[i]!]));
+  const shapeOf = (part: Part) => {
+    const shape = records.get(part.name)?.shape;
+    expect(shape, `${part.name} was drawn as a shape while the shapes showed`).toBeDefined();
+    return shape!;
+  };
+  const pageOf = (part: Part) => {
+    const element = onPage(part.page);
+    expect(element, `${part.name} (${part.page}) is on the page`).toBeDefined();
+    return element!.getBoundingClientRect();
+  };
+  const taller = new Map(estimated.map((part) => [part.name, pageOf(part).height - shapeOf(part).height]));
+  for (const [name, difference] of taller) {
+    expect(Math.abs(difference), `${name} lands ${difference} px off its shape's height: more than one line`).toBeLessThanOrEqual(ONE_LINE_PX + SKELETON_TOLERANCE_PX);
+  }
+  for (const part of moved) {
+    const places = records.get(part.name)!.places;
+    const label = `${part.name}: ${JSON.stringify(places.map(({ top, real }) => `${real ? 'page' : 'shape'} ${Math.round(top)}`))}`;
+    expect(places.filter(({ real }) => !real), `${label}: one place while the shapes show`).toHaveLength(1);
+    expect(places.filter(({ real }) => real), `${label}: lands in one place and stays there`).toHaveLength(1);
+    expect(places.at(-1)?.real, `${label}: the page's element comes after its shape`).toBe(true);
+    const shape = shapeOf(part);
+    const landed = pageOf(part);
+    // Every estimated part that ends above this one moves it by its own difference in height.
+    const above = estimated.filter((other) => other.name !== part.name && shapeOf(other).bottom <= shape.top + SKELETON_TOLERANCE_PX);
+    const explained = above.reduce((sum, other) => sum + taller.get(other.name)!, 0);
+    expect(Math.abs(landed.top - shape.top - explained), `${label}: moves ${landed.top - shape.top} px; the estimated parts above it differ by ${explained} px`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(landed.left - shape.left), `${label}: lands at its shape's left`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    if (part.name === MAIN_BUTTON_PART.name) {
+      // Its label is known: it lands as wide and as tall as its shape.
+      expect(Math.abs(landed.width - shape.width), `${label}: width`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      expect(Math.abs(landed.height - shape.height), `${label}: height`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+}
 
 for (const viewport of ['desktop', 'phone'] as const) {
   for (const [step, load] of Object.entries(STEPS) as [Step, StepLoad][]) {
     it(`setup_steps_load_in_place: ${step} at ${viewport}`, async () => {
       const state = await interviewAt(step);
       const read = load.hold(state);
+      const watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
       await expectSkeletonLoad({
         status: load.status,
         anchors: load.anchors,
@@ -145,6 +302,10 @@ for (const viewport of ['desktop', 'phone'] as const) {
         },
         release: read.release,
       });
+      // Landed: the places keep being read for a while, so a later move would show as another place.
+      await frames(10);
+      watched.stop();
+      expectAcceptedMoves(load, viewport, watched);
       await expectScreenBasics(document.body, { owner: true });
     });
   }

@@ -299,7 +299,7 @@ export function DraftRulesSkeleton() {
           </div>
         ))}
       </div>
-      <SkeletonCard padding={16}>
+      <SkeletonCard padding={16} anchor="rules-always-on">
         <div className="cd-always-on">
           <div className="cd-section-header">
             <div className="cd-section-header__title">
@@ -325,7 +325,7 @@ export function DraftRulesSkeleton() {
           </ul>
         </div>
       </SkeletonCard>
-      <ul className="cd-setup-rules__checks">
+      <ul className="cd-setup-rules__checks" data-skeleton-anchor="rules-checks">
         <li className="cd-type-meta">
           <span className="cd-status-label">
             <Skeleton shape="circle" size={6} />
