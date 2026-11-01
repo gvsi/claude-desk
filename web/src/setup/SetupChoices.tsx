@@ -30,7 +30,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       }
       // The composer's words and controls elsewhere keep their normal keys.
       if (!inside && target !== document.body) return;
-      if (target.closest('.cd-icon-button')) return;
+      // So do Dismiss and a link in Claude's question: Enter opens the link.
+      if (target.closest('.cd-icon-button, a[href]')) return;
       const otherInput = target instanceof HTMLInputElement;
       const move = (index: number) => {
         setActive(index);

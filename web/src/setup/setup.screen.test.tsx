@@ -3835,6 +3835,26 @@ describe('consultant setup', () => {
     await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
   });
 
+  it('enter_on_a_link_in_a_docked_question_is_the_links_own', async () => {
+    const state = await consultantAt();
+    const question = 'Which payments do you take? [Stripe’s guide](https://stripe.com/docs) lists the usual ones.';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Cards', recommended: true }, { text: 'Bank transfers', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const link = screen.getByRole('link', { name: 'Stripe’s guide', exact: true });
+    await expect.element(link).toHaveAttribute('href', 'https://stripe.com/docs');
+    link.element().focus();
+    // The dock's keys leave a focused link alone: Enter opens it and sends no choice.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    link.element().dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
   it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
