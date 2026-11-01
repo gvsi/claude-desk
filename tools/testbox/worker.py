@@ -74,9 +74,10 @@ def main():
         run(["git", "update-ref", "refs/remotes/origin/main", request["main"]], cwd=repo)
         # Set HEAD and the index, without replacing the caller's uncommitted working files.
         run(["git", "update-ref", "--no-deref", "HEAD", request["head"]], cwd=repo)
-        run(["git", "read-tree", request["head"]], cwd=repo)
         (base / "git-signature").write_text(request["signature"])
         (transfer / "source.bundle").unlink(missing_ok=True)
+    # Commands may stage files without moving either ref. Restore the index every time.
+    run(["git", "read-tree", request["head"]], cwd=repo)
     timing.mark("git_import")
     env = {"HOME": "/home/ubuntu", "USER": "ubuntu", "LANG": "C.UTF-8", "PATH": "/home/ubuntu/.cargo/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin", "TMPDIR": str(base / "tmp")}
     (base / "tmp").mkdir(exist_ok=True)

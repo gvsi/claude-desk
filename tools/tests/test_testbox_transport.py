@@ -138,3 +138,40 @@ def test_lane_state_reads_actual_git_refs_when_a_remote_command_changes_head(tmp
     (tmp_path / 'manifest.json').write_text('[]')
     state = json.loads(subprocess.check_output([sys.executable, '-c', lane_state_script(str(tmp_path))], text=True))
     assert state['git'] == head + ':' + head
+
+
+def test_worker_restores_index_on_every_call_even_when_refs_are_unchanged(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import sys
+    import pytest
+
+    spec = importlib.util.spec_from_file_location('testbox_worker', Path(__file__).parents[1] / 'testbox/worker.py')
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    repo = tmp_path / 'repo'
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
+    (repo / 'source.txt').write_text('committed')
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'source')
+    head = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', head)
+    (repo / 'source.txt').write_text('staged')
+    git('add', '.')
+    (repo / 'source.txt').write_text('unstaged')
+    transfer = tmp_path / 'transfer'
+    transfer.mkdir()
+    (transfer / 'manifest.json').write_text('["source.txt"]')
+    (transfer / 'request.json').write_text(json.dumps({'signature': head + ':' + head, 'head': head, 'main': head, 'bundle': False, 'lane': 'fixture', 'ci': None}))
+    monkeypatch.setattr(sys, 'argv', ['worker.py', str(tmp_path)])
+    class Prepared(Exception):
+        pass
+    def finished(*args):
+        raise Prepared()
+    monkeypatch.setattr(worker, 'remote_environment', finished)
+    with pytest.raises(Prepared):
+        worker.main()
+    assert git('diff', '--cached', '--name-only') == ''
+    assert (repo / 'source.txt').read_text() == 'unstaged'
