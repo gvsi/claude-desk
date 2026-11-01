@@ -842,20 +842,20 @@ async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *
     can't be reached: nothing ran that the kernel didn't allow, and setup goes on. `timeout_s` overrides only
     execution's transport deadline; context and decision calls retain the client's default."""
     decision = await decide_setup_tool(owner, desk_id, tool, args)
-    if decision is None:
+    if decision is None or decision == "not_given":
         return None
     return await execute_setup_tool(owner, tool, decision, timeout_s=timeout_s)
 
 
-async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> Decision | None:
-    """Check the owner's context and obtain an allow, without starting execution. Fail closed on kernel errors."""
+async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> Decision | Literal["not_given"] | None:
+    """Obtain an allow without executing; distinguish a tool not given from a failed or refused read."""
     session_id, generation = owner.owner_session_id, owner.owner_generation
     try:
         context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
                                           query={"desk_id": desk_id})
         if tool not in {profile.tool for profile in context.tools}:
             logger.info("the setup tool %s isn't given on this Desk", tool)
-            return None
+            return "not_given"
         call = ToolCall(call_id="setup-" + secrets.token_hex(12), tool=tool, args=args)
         decision = await owner.kernel.call("POST /decide", DecideRequest(session_id=session_id, generation=generation,
                                                                          call=call, desk_id=desk_id))
@@ -940,12 +940,15 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
                   WEB_SEARCH_EXECUTE_TIMEOUT_S)
                  for query in (interview.transcript[0].search_queries or [])[:3])
     tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
+    not_given: set[int] = set()
     try:
         async with asyncio.timeout(HOMEWORK_BUDGET_S):
             allowed = []
             for index, (tool, args, _, timeout_s) in enumerate(reads):
                 decision = await decide_setup_tool(owner, desk_id, tool, args)
-                if decision is not None:
+                if decision == "not_given":
+                    not_given.add(index)
+                elif decision is not None:
                     allowed.append((index, tool, decision, timeout_s))
             # /decide takes an exclusive session lock; /execute holds a shared lock through the read.
             # Finish every decision first so a long search cannot block a later decision's short timeout.
@@ -960,8 +963,18 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
-    return [entry(tasks[index].result() if index in tasks and not tasks[index].cancelled() else None)
-            for index, (_, _, entry, _) in enumerate(reads)]
+    entries = []
+    search_failed = False
+    for index, (tool, _, entry, _) in enumerate(reads):
+        if tool == "native.web_search" and index in not_given:
+            continue
+        result = entry(tasks[index].result() if index in tasks and not tasks[index].cancelled() else None)
+        if result.read == "web_search" and result.text == WEB_SEARCH_FAILED_LABEL:
+            if search_failed:
+                continue
+            search_failed = True
+        entries.append(result)
+    return entries
 
 
 # The interview -----------------------------------------------------------------------------------------------------

@@ -1884,11 +1884,11 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
     state = await consent(owner, state["interview_id"], True, model)
     assert state["consent"] is True and state["question"] == "what_you_do" and not state["busy"]
     labels = [message["text"] for message in state["messages"] if message["role"] == "tool_label"]
-    assert labels == ["Couldn't search your Claude memory", "Couldn't read rivera-plumbing.example", *[
-        "Couldn't search the web just now" if all_slow or query in slow else f"Searched the web: {query}"
-        for query in queries]]
+    assert labels == ["Couldn't search your Claude memory", "Couldn't read rivera-plumbing.example", *(
+        ["Couldn't search the web just now"] if all_slow else
+        [f"Searched the web: {queries[0]}", "Couldn't search the web just now", f"Searched the web: {queries[2]}"])]
     reads = [entry for entry in (await stored(engine, state["interview_id"]))["transcript"] if entry.get("read")]
-    assert [entry["read"] for entry in reads] == ["memory", "website", "web_search", "web_search", "web_search"]
+    assert [entry["read"] for entry in reads] == ["memory", "website", *(["web_search"] * (1 if all_slow else 3))]
     assert all(entry.get("content") is None for entry in reads if entry["text"].startswith("Couldn't"))
 
 
@@ -1985,6 +1985,8 @@ async def test_no_search_without_consent_queries_or_the_tool(app, browser, fake,
     assert state["question"] == "what_you_do" and not state["busy"]
     assert not any(call.body["call"]["tool"] == "native.web_search" for call in fake.called("POST /decide"))
     assert not any(record.tool == "native.web_search" for record in fake.decisions.values())
+    assert not any("search the web" in message["text"].lower() or "Searched the web:" in message["text"]
+                   for message in state["messages"] if message["role"] == "tool_label")
 
 
 async def test_web_search_caps_its_label_and_content(app, browser, fake, kernel_http, model, engine):
@@ -2016,6 +2018,32 @@ def test_web_search_wrapping_skips_the_running_turn():
     assert f"<web_search>{html.escape(forged, quote=False)}</web_search>" in text
     assert "Staged search" not in text and "<system>" not in text
     assert text.count("<web_search>") == 1
+
+
+@pytest.mark.parametrize("failed_queries", [(0, 1, 2), (0, 2), (1, 2)])
+async def test_consent_shows_only_one_search_failure_label(
+    app, browser, fake, kernel_http, model, monkeypatch, failed_queries,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    queries = ["salon intake", "salon cancellations", "salon consultations"]
+    state = await begin(owner, model, search_queries=queries)
+    decide = desk_setup.decide_setup_tool
+
+    async def refuse_some(ctx, desk_id, tool, args, **kwargs):
+        if tool == "native.web_search" and queries.index(args["query"]) in failed_queries:
+            return None
+        return await decide(ctx, desk_id, tool, args, **kwargs)
+
+    monkeypatch.setattr(desk_setup, "decide_setup_tool", refuse_some)
+    state = await consent(owner, state["interview_id"], True, model)
+    expected = ["Searched your Claude memory"]
+    for index, query in enumerate(queries):
+        if index not in failed_queries:
+            expected.append(f"Searched the web: {query}")
+        elif index == failed_queries[0]:
+            expected.append("Couldn't search the web just now")
+    assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == expected
+    assert state["question"] == "what_you_do" and not state["busy"]
 
 
 @pytest.mark.parametrize("failure", ["refused", "held", "failed", "unavailable"])
