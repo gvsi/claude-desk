@@ -1,7 +1,7 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
 import type { SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
-import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
+import { SETUP_QUESTIONS, SETUP_ROUTES, TEST_CLIENT_OFFER, setupAbout } from './setup.ts';
 import { heldPublicLineSeed, storedPublicState, storePublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { publicLineLimit } from '../setup/publicLineLimit.ts';
@@ -67,6 +67,8 @@ function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'>
     if (message.role === 'claude') {
       const asked = SETUP_QUESTIONS.find((q) => message.text.endsWith(q.text));
       if (asked) question = asked.key;
+      // The owner's answer to the test-client offer answers no question of the interview.
+      else if (message.text === TEST_CLIENT_OFFER) question = undefined;
     } else if (message.role === 'owner' && question !== undefined) {
       answers.set(question, message.text);
     }

@@ -77,6 +77,12 @@ export const FOLLOW_UP = "That's fine. Give me your best guess, and you can chan
 
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
+
+/** The test-client offer at the end of setup's plan, its two choices and Claude's line after a yes: the API's own words. */
+export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? I can add you as a test client, with your own contact, so you can check verification and private answers yourself.';
+export const TEST_CLIENT_YES = 'Add me as a test client';
+export const TEST_CLIENT_NO = 'Not now';
+export const TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me.";
 /** The label of the read of the owner's Claude memory, as the API writes it. */
 export const MEMORY_LABEL = 'Searched your Claude memory';
 
@@ -91,6 +97,10 @@ interface Interview {
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
+  /** What the owner typed on the contact question, follow-ups included, which their test-client contact comes from. */
+  contactSaid: string[];
+  /** Whether the test-client offer was asked: it is asked once. */
+  offered: boolean;
   /** The words and booking days of the business the description names, for its situations and draft rules (`situationWordsOf`). */
   words: SituationWords;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
@@ -827,11 +837,104 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   } else {
     say(interview, 'claude', QUESTIONS_DONE);
   }
+  // With the owner's own contact typed, the test-client offer comes once, after the plan, and the Tools step waits for it.
+  if (!interview.offered && ownerContactOf(interview) !== null) {
+    interview.offered = true;
+    askTestClient(interview);
+    return;
+  }
+  enterTools(world, interview);
+}
+
+/** The Tools step, after the plan and any test-client offer: accepted jobs become business tools, accepted apps connect. */
+function enterTools(world: MockWorld, interview: Interview): void {
+  interview.state.question = null;
   moveTo(interview, 'tools');
+  const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
   if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
+}
+
+// The owner's own contact for the test client, read as the API reads it (setup.py `_owner_contact`): every email and
+// phone typed on the contact question, without the hours beside a phone and without one the owner rejects in its
+// clause or gives as someone else's; of the rest, those marked as the owner's own come first, then the one email,
+// else the one phone. Unlike the API, the mock reads no names.
+const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const CONTACT_PHONE = /(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)/g;
+const HOUR = String.raw`(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?`;
+const TIMES = new RegExp(String.raw`(?<![\w.+-])(?:${HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*${HOUR}|24\s*\/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)(?![\w-]|[.:]\d)`, 'gi');
+const CLAUSE_END = /[;!?\n]|[.,](?=\s|$)/g;
+const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
+const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
+const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
+
+/** Each email and phone in `text`, in order, a phone as one number of 7 to 15 digits. */
+function contactsIn(text: string): { start: number; end: number; value: string; email: boolean }[] {
+  const found = [...text.matchAll(CONTACT_EMAIL)].map((match) => ({ start: match.index, end: match.index + match[0].length, value: match[0], email: true }));
+  const blank = (match: string) => ' '.repeat(match.length);
+  const rest = text.replace(CONTACT_EMAIL, blank).replace(/(?:https?:\/\/|www\.)\S+/g, blank).replace(TIMES, blank);
+  for (const match of rest.matchAll(CONTACT_PHONE)) {
+    const phone = (/^(.*\d{3})[\s(]+\d{1,2}$/.exec(match[0])?.[1] ?? match[0]).replace(/[\s(.-]+$/, '');
+    const digits = phone.replace(/\D/g, '').length;
+    if (digits >= 7 && digits <= 15) found.push({ start: match.index, end: match.index + phone.length, value: phone, email: false });
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+
+function ownerContactOf(interview: Interview): string | null {
+  const contacts = new Map<string, { value: string; email: boolean; rejected: boolean; someoneElses: boolean; marked: boolean }>();
+  for (const said of interview.contactSaid) {
+    const text = said.replace(/’/g, "'");
+    const ends = [...text.matchAll(CLAUSE_END)].map((match) => match.index + match[0].length);
+    let previous = 0;
+    for (const { start, end, value, email } of contactsIn(text)) {
+      const before = text.slice(Math.max(previous, ...ends.filter((stop) => stop <= start)), start).toLowerCase();
+      previous = end;
+      const key = email ? value.toLowerCase() : value.replace(/\D/g, '');
+      const contact = contacts.get(key) ?? { value, email, rejected: false, someoneElses: false, marked: false };
+      contacts.set(key, { ...contact, value });
+      const kept = contacts.get(key)!;
+      if (REJECTED.test(before)) kept.rejected = true;
+      else if (SOMEONE_ELSE.test(before)) kept.someoneElses = true;
+      else if (OWNERS.test(before)) kept.marked = true;
+    }
+  }
+  const kept = [...contacts.values()].filter(({ rejected, someoneElses }) => !rejected && !someoneElses);
+  const marked = kept.filter(({ marked }) => marked);
+  const pool = marked.length > 0 ? marked : kept;
+  const emails = pool.filter(({ email }) => email);
+  const phones = pool.filter(({ email }) => !email);
+  if (emails.length > 0) return emails.length === 1 ? emails[0]!.value : null;
+  return phones.length === 1 ? phones[0]!.value : null;
+}
+
+/** The words a typed answer to the offer is read by (setup.py `_reads_yes`): a "no" one wins; with neither, the offer is asked again. */
+const TYPED_YES = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'please do', 'do it', 'add me', 'sounds good', 'sí', 'si', 'vale', 'claro', 'dale', 'añádeme', 'agrégame'];
+const TYPED_NO = ['no', 'not', "don't", 'dont', 'nope', 'not now', 'later', 'skip', 'no gracias'];
+
+function readsYes(text: string): boolean | null {
+  const said = ` ${(text.toLowerCase().replace(/’/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? []).join(' ')} `;
+  if (TYPED_NO.some((phrase) => said.includes(` ${phrase} `))) return false;
+  if (TYPED_YES.some((phrase) => said.includes(` ${phrase} `))) return true;
+  return null;
+}
+
+function askTestClient(interview: Interview): void {
+  interview.state.question = 'test_client';
+  say(interview, 'claude', TEST_CLIENT_OFFER, [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }]);
+}
+
+/** A yes says Claude's line and a no says nothing, and both move on to the Tools step; anything else gets the offer again. */
+function answerTestClient(world: MockWorld, interview: Interview, text: string): void {
+  const yes = readsYes(text);
+  if (yes === null) {
+    askTestClient(interview);
+    return;
+  }
+  if (yes) say(interview, 'claude', TEST_CLIENT_ADDED);
+  enterTools(world, interview);
 }
 
 /** The reads and first question after the owner gives (or declines) consent. */
@@ -893,6 +996,10 @@ export function holdNextDecision(world: MockWorld, interviewId: string): (outcom
 function applyAnswer(world: MockWorld, interview: Interview, text: string, ownerStored = false): void {
   const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
   if (!ownerStored) say(interview, 'owner', text.trim());
+  if (interview.state.question === 'test_client') {
+    answerTestClient(world, interview, text);
+    return;
+  }
   if (interview.state.pending_card) {
     const card = interview.proposals.find((card) => card.proposal_id === interview.state.pending_card)!;
     const words = text.trim();
@@ -942,12 +1049,13 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
     }
     return;
   }
+  if (interview.state.question === 'contact_and_after_hours') interview.contactSaid.push(text.trim());
   if (FOLLOW_UP_TRIGGER.test(text)) {
     say(interview, 'claude', FOLLOW_UP);
     return;
   }
   const question = interview.state.question;
-  if (question !== null && question !== 'test_client') {
+  if (question !== null) {
     interview.covered.add(question);
     interview.answers[question] = text.trim();
   }
@@ -1086,6 +1194,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     covered: new Set(),
     answers: {},
     usedSuggestions: false,
+    contactSaid: [],
+    offered: false,
     state: {
       interview_id: world.id('setup'),
       desk_id: deskId,
@@ -1243,12 +1353,11 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
     const cardAnswer = question === null && typeof card === 'string' && card !== '';
-    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question))) return INVALID;
+    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !(question === 'test_client' || SETUP_QUESTIONS.some((q) => q.key === question)))) return INVALID;
     const { interview } = found;
-    const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
     if (interview.state.step !== 'questions') return CONFLICT;
-    if (cardAnswer ? card !== interview.state.pending_card : at === -1 || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
+    if (cardAnswer ? card !== interview.state.pending_card : interview.state.question === null || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
     if (interview.holdNext) {
@@ -1326,6 +1435,12 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview } = found;
     if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
+    if (interview.state.question === 'test_client') {
+      // The plan is closed already: the suggestions move on with no second plan, and nothing is added.
+      say(interview, 'owner', 'Use your suggestions');
+      enterTools(sv.world, interview);
+      return ok(stateOf(interview, req.query));
+    }
     interview.usedSuggestions = true;
     say(interview, 'owner', 'Use your suggestions');
     say(interview, 'claude', CPA_COPY.rest);
