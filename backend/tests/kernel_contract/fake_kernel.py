@@ -247,7 +247,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -2962,8 +2962,7 @@ class FakeKernelState:
             blocks = []
         elif not ok:
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
-            if kept and all(violation.kind in {"number_in_prose", "promise_word", "soft_promise",
-                                               "uncertain_language", "check_unavailable"} for violation in violations):
+            if kept and all(violation.kind in PROSE_ONLY for violation in violations):
                 blocks = kept
             else:
                 text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)

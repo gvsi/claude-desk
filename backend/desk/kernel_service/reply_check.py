@@ -107,7 +107,7 @@ from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
 from desk.next_steps import next_steps
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -116,8 +116,6 @@ NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one nu
 NO_CANARIES = labels.NO_CANARIES
 logger = logging.getLogger(__name__)
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
-PROSE_ONLY = frozenset({"number_in_prose", "promise_word", "soft_promise", "uncertain_language",
-                        "check_unavailable"})
 
 # ---- Prose ----------------------------------------------------------------------------------------
 

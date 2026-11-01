@@ -24,7 +24,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Reply, Sleep, Text
 from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
 from evals.tier1.args import book_args, payment_link_args, quote_args
@@ -57,7 +57,6 @@ OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
-PROSE_FAILURES = {"number_in_prose", "promise_word", "soft_promise", "uncertain_language", "check_unavailable"}
 
 # Rows of golden/replies.yaml
 
@@ -192,7 +191,7 @@ class ReplyRow(BaseModel):
         if not self.expect.ok:
             if not self.final and set(self.expect.kinds) <= REWRITABLE:
                 return []
-            if set(self.expect.kinds) <= PROSE_FAILURES and self.kept_clauses:
+            if set(self.expect.kinds) <= PROSE_ONLY and self.kept_clauses:
                 return [clause.template for clause in self.kept_clauses]
             return HANDED_OFF
         return (["prose"] if self.prose else []) + [clause.template for clause in self.clauses]
