@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
@@ -83,11 +83,12 @@ interface LimitField {
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
 export function RulesPage() {
-  const { desk } = useOwnerDesk();
+  const { desk, reachPlace } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
+  const location = useLocation();
   const { ask } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   const people = useQuery(peopleQuery(deskId));
@@ -116,6 +117,11 @@ export function RulesPage() {
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
+  const drawn = !waitingForNeedsYou && active !== undefined;
+  // Back and "Keep my rules" may return while the gate leaves the page too short to restore.
+  useLayoutEffect(() => {
+    if (drawn) reachPlace(location.key);
+  }, [drawn, reachPlace, location.key]);
   const chips = question === null || (fixedChips.length === 0 && !rules.isFetched) ? fixedChips : [...fixedChips, question];
 
   /** Opens a card draft's review, with what it was drafted from. */
@@ -162,9 +168,10 @@ export function RulesPage() {
     }
   };
 
-  let body;
+  // A Rules error belongs to its read, regardless of whether the rows above it are ready.
+  let readError = null;
   if (rules.data === undefined && rules.isError) {
-    body = (
+    readError = (
       <Notice
         tone="error"
         action={
@@ -176,25 +183,31 @@ export function RulesPage() {
         {ownerErrorCopy(rules.error)}
       </Notice>
     );
-  } else if (rules.data === undefined || active === undefined || waitingForNeedsYou) {
+  } else if (failure !== null) {
+    readError = (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+            Try again
+          </Button>
+        }
+      >
+        {failure.line}
+      </Notice>
+    );
+  }
+
+  let body;
+  if (rules.data === undefined && rules.isError) {
+    body = null;
+  } else if (waitingForNeedsYou || rules.data === undefined || active === undefined) {
     body = <LoadingLine>Reading your rules</LoadingLine>;
   } else {
     const cap = capOf(active);
     const sections = hubSections(rules.data, people.data ?? null);
     body = (
       <>
-        {failure === null ? null : (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-                Try again
-              </Button>
-            }
-          >
-            {failure.line}
-          </Notice>
-        )}
         <BusinessJobs view={rules.data} people={people.data ?? null} />
         <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
           {sections.map((section) => {
@@ -259,6 +272,7 @@ export function RulesPage() {
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
       {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+      {readError}
       {body}
       <AlwaysOnList />
     </div>

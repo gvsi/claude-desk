@@ -9,7 +9,7 @@ import type { RouteObject } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
-import { observeRequests, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { observeRequests, OWNER_ERROR_COPY, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
@@ -845,7 +845,8 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
-  it('going_back_returns_to_the_place_on_rules', async () => {
+  it.each(['Rivera Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
+    renameBusiness(business);
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
     const limit = () => payments.getByText(LIMIT_500, { exact: true }).element();
@@ -956,6 +957,18 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it('a_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    mockStore.inject({ route: 'rules', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 1_000 }).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+  });
+
   it('another_business_keeps_the_hold_question_beside_a_failed_rules_read', async () => {
     renameBusiness('Acme Accounting');
     mockStore.inject({ route: 'rules', status: 503, times: 2 });
