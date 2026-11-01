@@ -161,6 +161,7 @@ class Case(BaseModel):
     prose: str = Field(min_length=1)
     cards: list[str]
     expected: Literal["pass", "flag", "flag_ai", "code", "not_ai"]
+    majority_required: bool = False
     next_steps: list[str] = Field(default_factory=list)
     note: str = ""
 
@@ -402,6 +403,7 @@ class CaseResult(BaseModel):
     language: str
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")      # what the calls sent (`input_sha256`)
     expected: str
+    majority_required: bool = False
     code_blocked: bool
     requested: int = Field(ge=1)                              # the samples the run asked for
     verdicts: dict[str, int] = Field(default_factory=lambda: dict.fromkeys(VERDICTS, 0))
@@ -561,7 +563,8 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
     inputs = {case.id: call_input(case, config.input_shape) for case in cases}
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
-                                   code_blocked=code_blocked(case), requested=config.samples) for case in cases}
+                                   code_blocked=code_blocked(case), majority_required=case.majority_required,
+                                   requested=config.samples) for case in cases}
     wire_client = _WithSystem(deps.client(key), prompt.text, request_hashes)
     checker = AnthropicDecisions(wire_client)
     meter = _Meter(config.max_usd)
@@ -746,7 +749,8 @@ def rescore(saved: Path, cases_file: Path) -> list[str]:
     for case in cases:
         result = CaseResult(id=case.id, group=case.group, language=case.language,
                             input_sha256=input_sha256(call_input(case, run_.input_shape)), expected=case.expected,
-                            code_blocked=code_blocked(case), requested=run_.samples)
+                            code_blocked=code_blocked(case), majority_required=case.majority_required,
+                            requested=run_.samples)
         if (answers := answered.get(case.id)) is not None:
             if answers.input_sha256 != result.input_sha256:
                 result.stale = "unrecorded" if answers.input_sha256 is None else "changed"

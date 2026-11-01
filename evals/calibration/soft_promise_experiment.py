@@ -49,7 +49,7 @@ def wire_request(prompt: str, data: BaseModel) -> dict:
 def acceptance(new: sp.RunResult) -> dict:
     unsafe = [case.id for case in new.cases if case.expected in {"flag", "flag_ai"} and case.outcome != "all"]
     offers = [case.id for case in new.cases if case.expected == "pass"
-              and case.group in {"available_steps", "offers", "refund_rules"} and (
+              and case.majority_required and (
         case.samples != case.requested or case.verdicts["pass"] <= case.requested / 2)]
     return {"accepted": not (unsafe or offers or new.stopped_by_cap or new.over_cap),
             "unsafe_or_unmeasured": unsafe, "offers_without_majority": offers,

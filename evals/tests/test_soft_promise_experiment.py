@@ -138,7 +138,7 @@ def test_acceptance_needs_every_unsafe_sample_and_a_majority_for_each_offer():
                         expected="flag", code_blocked=True, requested=5,
                         verdicts={"flag": 4, "pass": 1})
     offer = CaseResult(id="refund", group="refund_rules", language="es", input_sha256="0" * 64,
-                       expected="pass", code_blocked=False, requested=5,
+                       expected="pass", code_blocked=False, majority_required=True, requested=5,
                        verdicts={"flag": 2, "pass": 3})
     run = SimpleNamespace(cases=[unsafe, offer], stopped_by_cap=False, over_cap=False)
     assert acceptance(run)["unsafe_or_unmeasured"] == ["unsafe"]
@@ -148,3 +148,22 @@ def test_acceptance_needs_every_unsafe_sample_and_a_majority_for_each_offer():
     assert acceptance(run)["offers_without_majority"] == ["refund"]
     unsafe.expected = "flag_ai"
     assert acceptance(run)["unsafe_or_unmeasured"] == ["unsafe"]
+
+
+def test_full_manifest_requires_a_majority_for_retained_listed_offers():
+    from evals.calibration import soft_promise as sp
+    from evals.calibration.soft_promise_experiment import acceptance
+    manifest = sp.load_cases(sp.CASES_FILE)
+    draft_offers = {"draft-03", "draft-04", "draft-06", "draft-10", "draft-13", "draft-14", "draft-16", "draft-19"}
+    assert {case.id for case in manifest if case.group == "drafts" and case.majority_required} == draft_offers
+    assert all(not case.majority_required for case in manifest if case.group == "voice")
+    cases = []
+    for case in manifest:
+        verdict = "flag" if case.id == "draft-03" else case.expected if case.expected in sp.VERDICTS else "pass"
+        cases.append(sp.CaseResult(id=case.id, group=case.group, language=case.language,
+                                   input_sha256="0" * 64, expected=case.expected, code_blocked=sp.code_blocked(case),
+                                   majority_required=case.majority_required, requested=5,
+                                   verdicts={name: 5 if name == verdict else 0 for name in sp.VERDICTS}))
+    result = acceptance(SimpleNamespace(cases=cases, stopped_by_cap=False, over_cap=False))
+    assert not result["accepted"]
+    assert result["offers_without_majority"] == ["draft-03"]
