@@ -1342,6 +1342,20 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
   });
 
+  it('the_kept_cards_handoff_names_that_owner', async () => {
+    // The demo command whose checked card is kept with Claude's drafted handoff: the handoff is the
+    // Desk's own, and Rivera's Desk still gets the fixtures' card.
+    const slug = await liveDesk(CPA);
+    expect((await repliesTo(slug, 'cards-kept-handoff')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }),
+    );
+    expect((await repliesTo(slug, 'tarjetas-con-traspaso')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    );
+    expect(await repliesTo(RIVERA.slug, 'cards-kept-handoff')).toEqual([rivera.blocks.quote.en, rivera.blocks.handoff.en]);
+    expect(await repliesTo(RIVERA.slug, 'tarjetas-con-traspaso')).toEqual([rivera.blocks.quote.es, rivera.blocks.handoff.es]);
+  });
+
   it('with_no_owner_name_the_lines_name_the_business_owner', async () => {
     // Setup's fallback, "Owner", is no one's name, and the page never shows it. The lines that would
     // name the owner say "the business owner" instead, the words the page's "Ask for a person" uses,

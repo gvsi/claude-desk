@@ -761,7 +761,7 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
-      (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true }),
+      (ctx) => ctx.reply([blocks.quote[ctx.language], handoff(ctx)], { blocked: true }),
     ],
   },
   {
