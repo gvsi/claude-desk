@@ -50,6 +50,23 @@ HANDOFF_CARD = {"en": "Let me check with Maria Rivera.\nMaria Rivera will reply 
                 "es": "Déjame consultarlo con Maria Rivera.\nMaria Rivera te responderá aquí."}
 
 
+@pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
+    ("", [clause("handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED, [clause("hours", "charter:hours")], True, False, ["hours"],
+     "Reply checked against Maria Rivera's rules"),
+    (BLOCKED, [], False, False, [], "Passed to Maria Rivera to answer"),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+async def test_reply_receipt_follows_the_shown_handoff_clause(app, client, prose, clauses, final, ok, templates,
+                                                            receipt):
+    _, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose, clauses, final=final)
+    assert verdict.ok is ok
+    assert [block.template for block in verdict.blocks] == templates
+    assert verdict.visitor_plain == receipt
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
 async def quote_and_payment(client, reviewer, visitor):
     from .test_decide import PASS
     from .test_payment_links import link_for
@@ -73,7 +90,7 @@ async def test_final_prose_failure_keeps_only_checked_cards(app, client, reviewe
     assert not verdict.ok
     assert {v.kind for v in verdict.violations} == {"number_in_prose"}
     assert [(b.template, b.fact_id) for b in verdict.blocks] == [(c["template"], c["fact_id"]) for c in clauses]
-    assert verdict.visitor_plain == "Passed to Maria Rivera to answer"
+    assert verdict.visitor_plain == "Reply checked against Maria Rivera's rules"
     assert await handoffs_of(app, copy) == []
     assert await handoff_alerts(app, copy) == []
     assert handoff_entries(await ledger_rows(app, copy)) == []
@@ -272,7 +289,7 @@ async def test_claudes_own_draft_citing_the_handoff_card_opens_one(app, client, 
     verdict = await checked(client, visitor, prose, [clause("handoff")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [block.template or block.kind for block in verdict.blocks] == blocks
-    assert verdict.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert verdict.visitor_plain == "Passed to Maria Rivera to answer"
     [handoff] = await handoffs_of(app, copy)
     assert (handoff.session_id, handoff.kind, handoff.status, handoff.callback_window) == (
         visitor.session_id, "card", "open", None)

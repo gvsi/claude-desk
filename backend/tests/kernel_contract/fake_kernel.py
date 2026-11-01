@@ -2756,7 +2756,7 @@ class FakeKernelState:
         return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
-        """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's
+        """Check Claude's draft; prose-only failures keep checked cards, other failures hand off. An agent's
         check may end its nonce's turn (`_end_agent_turn`)."""
         draft = body.draft
         session, desk = self.session_call(request, draft.session_id)
@@ -2881,7 +2881,7 @@ class FakeKernelState:
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
-        """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
+        """Step 7: keep checked cards on prose-only failures, else hand off; ledger and sign the verdict. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -2891,8 +2891,13 @@ class FakeKernelState:
         if not ok and author == "owner":
             blocks = []
         elif not ok:
-            text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
-            blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+            kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
+            if kept and all(violation.kind in {"number_in_prose", "promise_word", "soft_promise",
+                                               "uncertain_language", "check_unavailable"} for violation in violations):
+                blocks = kept
+            else:
+                text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
+                blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
         shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
         if author == "claude" and not shown:
             blocks = []                     # the API rewrites it: no handoff card is signed that no handoff backs
@@ -2907,7 +2912,7 @@ class FakeKernelState:
             "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids, "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
-            "checked" if ok else "handed_off")
+            "handed_off" if not shown or any(block.template == "handoff" for block in blocks) else "checked")
         visitor_plain = REPLY_TEXT[language][plain].format(owner=desk.owner_display_name)
         blocks_sha256 = sha256_hex(canonical([block.model_dump(mode="json") for block in blocks]))
         return ReplyVerdict(

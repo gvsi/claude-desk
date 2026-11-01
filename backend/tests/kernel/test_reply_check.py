@@ -1809,7 +1809,7 @@ async def test_unread_price_still_needs_the_soft_check(app, client, reviewer, pr
     assert len(reviewer.soft_inputs) == 1
 
 
-async def test_unmarked_payment_caption_gets_a_checked_rewrite(app, client, reviewer):
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(app, client, reviewer):
     from .test_handoff_card import handoffs_of
 
     copy, visitor = await visitor_of(app, client)
@@ -1823,11 +1823,19 @@ async def test_unmarked_payment_caption_gets_a_checked_rewrite(app, client, revi
     first = await checked(client, visitor, "Absolutely. Payment link below.", cited, final=False)
     assert [(v.kind, v.rule_id) for v in first.violations] == [("uncertain_language", "language_uncertain")]
     assert first.blocks == []
+    assert first.visitor_plain == "Passed to Maria Rivera to answer"
     assert await handoffs_of(app, copy) == []
     corrected = await checked(client, visitor, "Here is the link to pay.", cited)
     assert corrected.ok
     assert [b.template for b in corrected.blocks] == [None, "payment_link"]
     assert corrected.blocks[-1].fact_id == fact.fact_id
+    assert await handoffs_of(app, copy) == []
+    kept = await checked(client, visitor, "Absolutely. Payment link below.", cited)
+    assert not kept.ok
+    assert [(v.kind, v.rule_id) for v in kept.violations] == [("uncertain_language", "language_uncertain")]
+    assert [b.template for b in kept.blocks] == ["payment_link"]
+    assert kept.blocks[0].fact_id == fact.fact_id
+    assert kept.visitor_plain == "Reply checked against Maria Rivera's rules"
     assert await handoffs_of(app, copy) == []
 
 

@@ -725,9 +725,12 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, final}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
-    when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
-    and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
+    violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
+    `reply_handed_off` exactly when its blocks include the handoff clause (template `handoff`),
+    otherwise `reply_checked`. The receipt, the API's delivered event flag `handoff` and the public
+    chat's handling of the "Reply checked" line all follow this same shown-block rule. A blocked
+    first attempt with no shown blocks keeps `reply_handed_off`. The owner's say ends here too, with
+    its own receipts and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
     holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
@@ -804,7 +807,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
     if visitor_plain_key is None:
-        visitor_plain_key = "reply_checked" if ok else "reply_handed_off"
+        visitor_plain_key = ("reply_handed_off" if not shown or any(block.template == "handoff" for block in blocks)
+                             else "reply_checked")
     visitor_plain = render.status(visitor_plain_key, language, owner=owner)
     signature = sign_verdict(ctx.signer, session_id=session_row.session_id, generation=session_row.generation,
                              message_id=message_id, blocks=blocks, visitor_plain=visitor_plain, ledger_seq=entry.seq)
