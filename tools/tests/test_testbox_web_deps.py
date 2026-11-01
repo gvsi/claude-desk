@@ -38,8 +38,13 @@ def lane(tmp_path, monkeypatch):
         (web / 'node_modules/.package-lock.json').write_text('{}')
 
     monkeypatch.setattr(worker, 'run', fake_run)
-    env = {'npm_config_cache': '/srv/testbox/cache/npm'}
-    return SimpleNamespace(worker=worker, base=tmp_path, repo=repo, web=web, installs=installs, failures=failures,
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    node = bin_dir / 'node'
+    node.write_text('node v24')
+    node.chmod(0o755)
+    env = {'npm_config_cache': '/srv/testbox/cache/npm', 'PATH': str(bin_dir)}
+    return SimpleNamespace(worker=worker, base=tmp_path, repo=repo, web=web, node=node, installs=installs, failures=failures,
                            prepare=lambda: worker.install_web_dependencies(tmp_path, repo, env))
 
 
@@ -73,6 +78,29 @@ def test_missing_or_unfinished_node_modules_installs_again(lane):
     assert len(lane.installs) == 2
 
 
+def test_node_modules_changed_since_the_recorded_install_installs_again(lane):
+    """A lane command's `npm install`, or a cancelled `npm ci`, rewrites npm's marker after the worker's install."""
+    lane.prepare()
+    (lane.web / 'node_modules/.package-lock.json').write_text('{"drifted": 1}')
+    lane.prepare()
+    assert len(lane.installs) == 2
+    lane.prepare()
+    assert len(lane.installs) == 2
+
+
+def test_a_changed_install_command_or_node_installs_again(lane, monkeypatch):
+    lane.prepare()
+    monkeypatch.setattr(lane.worker, 'NPM_CI', lane.worker.NPM_CI + ['--omit=optional'])
+    lane.prepare()
+    assert lane.installs[-1].cmd[-1] == '--omit=optional'
+    assert len(lane.installs) == 2
+    lane.node.write_text('node v26, a different build')
+    lane.prepare()
+    assert len(lane.installs) == 3
+    lane.prepare()
+    assert len(lane.installs) == 3
+
+
 def test_a_worktree_without_a_web_lockfile_skips_the_install(lane):
     (lane.web / 'package-lock.json').unlink()
     assert lane.prepare() is None
@@ -92,7 +120,13 @@ def test_a_failed_install_fails_the_call_clearly_and_retries_next_time(lane, cap
     assert len(lane.installs) == 3
 
 
-def test_worker_installs_web_dependencies_before_the_lane_database_and_command(tmp_path, monkeypatch):
+class DatabaseStep(Exception):
+    pass
+
+
+@pytest.fixture
+def worker_call(tmp_path, monkeypatch):
+    """worker.main() on a committed lane repo with web/, recording each command it runs and stopping at the database lock."""
     worker = load_worker()
     repo = tmp_path / 'repo'
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
@@ -110,15 +144,32 @@ def test_worker_installs_web_dependencies_before_the_lane_database_and_command(t
     (transfer / 'manifest.json').write_text('[]')
     (transfer / 'request.json').write_text(json.dumps({'signature': head + ':' + head, 'head': head, 'main': head, 'bundle': False,
                                                        'lane': 'fixture', 'ci': None, 'command': ['true']}))
-    ran = []
-    monkeypatch.setattr(worker, 'run', lambda cmd, **kwargs: ran.append(cmd))
-    class DatabaseStep(Exception):
-        pass
+    ran, locks, failing = [], [], []
+
+    def fake_run(cmd, **kwargs):
+        ran.append(cmd)
+        if cmd[:2] in failing:
+            raise subprocess.CalledProcessError(1, cmd)
+
     def database_lock(*args, **kwargs):
+        locks.append(args)
         raise DatabaseStep()
+
+    monkeypatch.setattr(worker, 'run', fake_run)
     monkeypatch.setattr(worker, 'open', database_lock, raising=False)
     monkeypatch.setattr('sys.argv', ['worker.py', str(tmp_path)])
     monkeypatch.chdir(tmp_path)
+    return SimpleNamespace(main=worker.main, ran=ran, locks=locks, failing=failing)
+
+
+def test_worker_installs_web_dependencies_before_the_lane_database_and_command(worker_call):
     with pytest.raises(DatabaseStep):
-        worker.main()
-    assert ['npm', 'ci'] in [cmd[:2] for cmd in ran]
+        worker_call.main()
+    assert ['npm', 'ci'] in [cmd[:2] for cmd in worker_call.ran]
+
+
+def test_a_failed_install_stops_the_call_before_the_database_and_command(worker_call):
+    worker_call.failing.append(['npm', 'ci'])
+    assert worker_call.main() == 1
+    assert worker_call.locks == []
+    assert ['true'] not in worker_call.ran

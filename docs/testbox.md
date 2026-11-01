@@ -110,7 +110,7 @@ Do merges, rebases, fetches and commits locally: the remote copy is disposable a
 Remote test reports remain in the lane; source files are never copied back automatically.
 
 Changed kernel sources or build inputs trigger `make kernel` before the requested command.
-Web dependencies install automatically (`npm ci` in web/, from the shared npm cache) on a lane's first call and whenever web/package.json or web/package-lock.json changes, so narrow web commands work without `make web-test`.
+Web dependencies install automatically (`npm ci` in web/, from the shared npm cache) on a lane's first call and whenever web/package.json or web/package-lock.json changes, so narrow web commands work without `make web-test`. A failed install stops the call, whatever its command, and the next call retries it; keep web/package.json and web/package-lock.json in agreement.
 Each database is cloned from a template keyed by migration inputs and migrated with the
 same development role passwords as `make db-roles`. A schema change recreates that lane's
 throwaway database. Lanes reach Postgres directly at the test bridge's address,
