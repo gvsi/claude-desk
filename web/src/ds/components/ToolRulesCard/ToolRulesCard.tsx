@@ -44,8 +44,8 @@ export interface ToolRulesCardProps {
 function ToolText({ name, description }: { name: string; description: string }) {
   return (
     <span className="cd-tool-rules__tool-text">
-      <span className="cd-tool-rules__tool-name cd-type-section">{name}</span>{' '}
-      <span className="cd-tool-rules__tool-description cd-type-meta">{description}</span>
+      <span className="cd-tool-rules__tool-name cd-type-section">{name}</span>
+      {description ? <> <span className="cd-tool-rules__tool-description cd-type-meta">{description}</span></> : null}
     </span>
   );
 }

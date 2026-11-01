@@ -1,6 +1,6 @@
 import type { PeopleOut, RulesView } from '../../api/views.ts';
 import { ToolRulesCard } from '../../ds/index.ts';
-import { BUSINESS_WORDS, businessRulesDescription } from '../connectors/businessWords.ts';
+import { BUSINESS_WORDS, businessOwnerLine, businessRulesDescription } from '../connectors/businessWords.ts';
 import { businessTools, isBusinessToolName, toolDisplayName, toolState } from '../connectors/catalog.ts';
 import { defaultRow } from './defaultRow.ts';
 import { toolFallback, toolRuleRows } from './hub.ts';
@@ -16,7 +16,7 @@ export function BusinessJobs({ view, people }: { view: RulesView; people: People
     const state = toolState(row);
     if (state !== 'on' && state !== 'changed') return [];
     const name = toolDisplayName(row.tool, business) ?? 'A connected tool';
-    const description = businessRulesDescription(row.business) ?? row.description_confirmed;
+    const description = businessRulesDescription(row.business) ?? businessOwnerLine(row.business?.config) ?? '';
     return [{ row, name, description }];
   });
   if (jobs.length === 0) return null;
