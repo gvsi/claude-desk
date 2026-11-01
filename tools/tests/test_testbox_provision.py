@@ -168,6 +168,32 @@ def test_fresh_instance_bootstraps_once_with_small_user_data(monkeypatch):
     assert 'bootstrap-version' in payload
 
 
+def test_bootstrap_browser_version_matches_web_lockfile():
+    import re
+    root = Path(__file__).resolve().parents[2]
+    bootstrap = (root / 'tools/testbox/bootstrap.sh').read_text()
+    pinned = re.search(r'playwright@([0-9.]+)', bootstrap).group(1)
+    locked = json.loads((root / 'web/package-lock.json').read_text())['packages']['node_modules/@playwright/test']['version']
+    assert pinned == locked
+
+
+def test_uv_archive_is_verified_before_extraction(tmp_path):
+    import subprocess
+    script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
+    start = script.index('  curl -fsSL https://github.com/astral-sh/uv/')
+    end = script.index('  install -D /tmp/uv-', start)
+    commands = script[start:end].replace('/tmp/testbox-uv.tar.gz', str(tmp_path / 'uv.tar.gz'))
+    (tmp_path / 'bin').mkdir()
+    (tmp_path / 'bin/curl').write_text('#!/bin/sh\nprintf corrupt > "$4"\n')
+    (tmp_path / 'bin/curl').chmod(0o755)
+    (tmp_path / 'bin/tar').write_text('#!/bin/sh\ntouch ' + str(tmp_path / 'extracted') + '\n')
+    (tmp_path / 'bin/tar').chmod(0o755)
+    import os
+    result = subprocess.run(['bash', '-e', '-c', commands], env={**os.environ, 'PATH': str(tmp_path / 'bin') + ':' + os.environ['PATH']}, capture_output=True)
+    assert result.returncode != 0
+    assert not (tmp_path / 'extracted').exists()
+
+
 def test_rebootstrap_restarts_postgres_only_when_configuration_changes(tmp_path):
     import os
     import subprocess

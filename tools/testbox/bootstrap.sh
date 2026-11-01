@@ -100,6 +100,7 @@ rustup toolchain install 1.99.1 --profile minimal --no-self-update
 rustup default 1.99.1
 if ! uv --version 2>/dev/null | grep -q 'uv 0.13.0'; then
   curl -fsSL https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-unknown-linux-gnu.tar.gz -o /tmp/testbox-uv.tar.gz
+  echo '3ccfb6af6e242433eb552f7d9676abd5412c6595c497e990d9c8cb7b5bd4d2c3  /tmp/testbox-uv.tar.gz' | sha256sum -c --strict
   tar -xzf /tmp/testbox-uv.tar.gz -C /tmp
   install -D /tmp/uv-aarch64-unknown-linux-gnu/uv "$HOME/.local/bin/uv"
 fi
