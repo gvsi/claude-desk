@@ -2161,6 +2161,8 @@ describe('public chat page', () => {
     const messages = shownMessages().length;
     mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock('You can [Pay here](https://evil.example/pay) today.')]));
     await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
+    // It arrived live, so its words are revealed: read it once it shows whole.
+    await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
 
     const reply = shownMessages()[messages] as HTMLElement;
     expect(reply.querySelectorAll('a')).toHaveLength(0);
