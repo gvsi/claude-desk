@@ -1271,6 +1271,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
                                      covered=", ".join(key for key in QUESTION_KEYS if key in interview.covered),
                                      uncovered=", ".join(key for key in QUESTION_KEYS if key not in interview.covered)),
               wrap(QUESTION_ASKED_TAG, asked)])
+    if not limit_turn and not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else transcript
     for entry in reads:

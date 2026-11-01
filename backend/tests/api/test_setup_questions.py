@@ -3477,6 +3477,21 @@ def runtime_interview():
         transcript=[desk_setup.Entry(role="owner", text=DESCRIPTION)])
 
 
+@pytest.mark.parametrize("key", QUESTION_KEYS)
+def test_fact_turns_report_payment_availability_while_limit_turns_stay_identical(key):
+    interview = runtime_interview()
+    interview.business_tools_enabled = False
+    off = desk_setup._turn_message(interview, key, "Always ask")["content"][0]["text"]
+    interview.business_tools_enabled = True
+    on = desk_setup._turn_message(interview, key, "Always ask")["content"][0]["text"]
+    assert desk_setup.SETUP_PAYMENT_UNAVAILABLE_LINE not in on
+    if key in desk_setup.LIMIT_QUESTIONS.values():
+        assert off == on
+    else:
+        assert off.split("\n\n")[1] == desk_setup.SETUP_PAYMENT_UNAVAILABLE_LINE
+        assert "A code-built line may say payment jobs are unavailable; offer Stripe instead when it appears." in SETUP_TURN_SYSTEM
+
+
 async def test_the_understanding_retry_is_skipped_near_the_deadline(monkeypatch):
     interview = runtime_interview()
     interview.turn_deadline = asyncio.get_running_loop().time() + 14

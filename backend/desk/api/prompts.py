@@ -626,6 +626,7 @@ match what you heard. Then next is the first thing those jobs need. The ask righ
 fact topic or a card; limit topics come on a later turn.
 
 What you get
+A code-built line may say payment jobs are unavailable; offer Stripe instead when it appears.
 - On a fact question: the business type, <question_asked> (what you actually asked), the topics covered and left, \
 <answers_so_far>, <memory> and <website> if read, and <setup_plan> (your understanding and plan, each item with \
 its id and status: planned, shown, accepted, declined, changed or dropped), and whether the client shows cards.
