@@ -53,6 +53,7 @@ import {
   ruleChatReply,
   scriptedTurn,
   turnEnd,
+  visitorSafe,
   type Language,
   type Step,
 } from './script.ts';
@@ -286,16 +287,16 @@ export class Server {
     this.world = this.freshWorld();
   }
 
-  private freshWorld(): MockWorld {
-    const world = new MockWorld(this.seed, this.naming.copyNo(), () => this.naming.linkToken());
+  private freshWorld(seed: MockSeed = this.seed): MockWorld {
+    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken());
     seedWorld(world);
     return world;
   }
 
   /** A new copy of the same seed, with new ids and slugs; the old copy's chats and turns are left behind. */
-  startOver(): void {
+  startOver(seed: MockSeed = this.world.seed): void {
     this.stopTurns();
-    this.world = this.freshWorld();
+    this.world = this.freshWorld(seed);
   }
 
   stopTurns(): void {
@@ -330,7 +331,7 @@ export class Server {
     if (!desk || slug === undefined) return NOT_FOUND;
     const sessionId = cookies.visitor(slug);
     const session = sessionId === undefined ? undefined : this.world.sessions.get(sessionId);
-    if (!session || session.deskId !== desk.summary.desk_id) return NO_SESSION;
+    if (!session || session.ended || session.deskId !== desk.summary.desk_id) return NO_SESSION;
     return { desk, session };
   }
 
@@ -429,6 +430,8 @@ const SERVED: ServedRoutes = {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;
     if (passcode === 'wrong') return failWith(401, 'wrong_passcode');
+    // Mock-only capture path: enter this passcode to answer a document hold after its chat ended.
+    if (passcode === 'not-shared') sv.startOver('rivera_ended_document');
     req.cookies.setOwner();
     return ok(copyOut(sv.world), 201);
   },
@@ -508,11 +511,11 @@ const SERVED: ServedRoutes = {
     }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
-    if (session) sv.runTurn(session, afterAnswer(given, decision, record.approved ?? null), session.language, '');
+    if (session) sv.runTurn(session, afterAnswer(given, visitorSafe(decision), record.approved ? visitorSafe(record.approved) : null), session.language, '');
     const out: ApprovalAnswerOut = {
       decision,
       execution_state: decision.state === 'executed' ? 'succeeded' : null,
-      card_diff: cardDiffFor(given, decision, session?.person ?? null),
+      card_diff: decision.state === 'refused_at_execution' ? null : cardDiffFor(given, decision, session?.person ?? null),
     };
     return ok(out);
   },
