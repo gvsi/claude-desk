@@ -150,26 +150,23 @@ it('opens the row named by a refused confirm and lets the owner correct it', asy
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
 });
 
-it('rereads the interview on a 409 from each public-lines route and shows its current step', async () => {
-  for (const route of ['get', 'put', 'confirm'] as const) {
-    mockStore.reset('rivera');
-    const state = await atSituations();
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { name: 'Real situations', exact: true })).toBeVisible();
-    if (route === 'get') await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
-    await screen.getByRole('button', { name: 'Looks right' }).click();
-    if (route !== 'get') {
-      await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
-      await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
-      if (route === 'put') {
-        await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
-        await screen.getByRole('textbox', { name: 'About us', exact: true }).fill('My draft is still here.');
-        await screen.getByRole('button', { name: 'Save', exact: true }).click();
-      } else await screen.getByRole('button', { name: 'Looks right' }).click();
-    }
-    await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
-    expect(mockStore.requests.filter((r) => r.key === 'setup').length).toBeGreaterThanOrEqual(2);
+it.each(['get', 'put', 'confirm'] as const)('rereads the interview on a 409 from public-lines %s and shows its current step', async (route) => {
+  const state = await atSituations();
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await expect.element(screen.getByRole('heading', { name: 'Real situations', exact: true })).toBeVisible();
+  if (route === 'get') await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  if (route !== 'get') {
+    await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+    await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
+    if (route === 'put') {
+      await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+      await screen.getByRole('textbox', { name: 'About us', exact: true }).fill('My draft is still here.');
+      await screen.getByRole('button', { name: 'Save', exact: true }).click();
+    } else await screen.getByRole('button', { name: 'Looks right' }).click();
   }
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setup').length).toBeGreaterThanOrEqual(2);
 });
 
 it('skips directly to Safety check when GET returns no lines without sending a confirm', async () => {
