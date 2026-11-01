@@ -151,3 +151,32 @@ it('uses the shared warm focus ring without changing the selected ring', async (
     probe.remove();
   }
 });
+
+
+it.each(['network', 500] as const)('reads back a committed pick when its save response is lost (%s)', async (status) => {
+  const { screen } = await renderRoute(GENERAL);
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  mockStore.inject({ route: 'setBusiness', status, afterCommit: true });
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});
+
+
+it('keeps an unconfirmed pick when the save response and reread both fail', async () => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  mockStore.inject({ route: 'setBusiness', status: 'network', afterCommit: true });
+  mockStore.inject({ route: 'desks', status: 'network', times: 10 });
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
+  await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});

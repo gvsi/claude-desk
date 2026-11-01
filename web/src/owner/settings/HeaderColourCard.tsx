@@ -2,12 +2,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 
 import type { BrandPalette } from '../../api/contracts.ts';
-import { request } from '../../api/http.ts';
+import { isUncertain, OWNER_ERROR_COPY, request } from '../../api/http.ts';
 import type { BusinessOut, DeskSummary } from '../../api/views.ts';
 import { Card, Notice } from '../../ds/index.ts';
 import { brandFrom } from '../../public/brand.ts';
 import { PALETTE_KEYS, PALETTE_NAMES, paletteBrand, paletteKey } from '../../public/palette.ts';
-import { DESKS_KEY } from '../useDesks.ts';
+import { DESKS_KEY, desksQuery } from '../useDesks.ts';
 
 /** The signed SET-02 card: a palette pick saves on tap and previews before the answer arrives. */
 export function HeaderColourCard({ business, desk }: { business: BusinessOut; desk: DeskSummary }) {
@@ -18,6 +18,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   const [failure, setFailure] = useState<string | null>(null);
   // Fence a second click before React has drawn the pending state. Controls keep their focus.
   const saving = useRef(false);
+  const unconfirmed = useRef(false);
   const selected = optimistic ?? paletteKey(business.brand);
   const shown = optimistic === null ? business.brand ?? {} : paletteBrand(optimistic);
   const { brand } = brandFrom({ business_name: business.name, desk_name: desk.name, owner_display_name: business.owner_display_name, brand: shown });
@@ -33,12 +34,24 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
       await queryClient.cancelQueries({ queryKey: DESKS_KEY });
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((item) => item.business_id === business.business_id ? { ...item, brand: paletteBrand(palette) } : item));
     },
-    onError: () => {
+    onError: async (err) => {
       const previous = paletteKey(business.brand);
+      if (isUncertain(err)) {
+        // A lost response can follow a committed write. Only a fresh read can confirm a rollback.
+        await queryClient.cancelQueries({ queryKey: DESKS_KEY });
+        const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+        if (read === null) {
+          unconfirmed.current = true;
+          setFailure(OWNER_ERROR_COPY.network);
+          return;
+        }
+        const now = read.find((item) => item.business_id === business.business_id);
+        if (now === undefined || paletteKey(now.brand) !== previous) return;
+      }
       setFailure(`That didn't save, so your header is still ${previous === null ? 'Custom colour' : PALETTE_NAMES[previous]}.`);
     },
     onSettled: () => {
-      setOptimistic(null);
+      if (!unconfirmed.current) setOptimistic(null);
       saving.current = false;
     },
   });
@@ -46,6 +59,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   function pick(palette: BrandPalette) {
     if (saving.current || palette === selected) return;
     saving.current = true;
+    unconfirmed.current = false;
     setFailure(null);
     setOptimistic(palette);
     save.mutate(palette);
