@@ -43,6 +43,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const [busy, setBusy] = useState<'save' | 'confirm' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
+  const notice = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error !== null) notice.current?.scrollIntoView({ block: 'nearest' });
+  }, [error]);
   const limit = publicLineLimit(editingKey ?? '');
   const invalid = text.trim() === '' || Array.from(text).length > limit;
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -133,7 +137,9 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      {error !== null || unknown ? <Notice tone="error">{error ?? ownerErrorCopy(null)}</Notice> : null}
+      {error !== null || unknown ? (
+        <div ref={notice}><Notice tone="error">{error ?? ownerErrorCopy(null)}</Notice></div>
+      ) : null}
       {lines.data === undefined ? (
         lines.isError ? (
           <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>

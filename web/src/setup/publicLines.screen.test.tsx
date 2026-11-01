@@ -1,6 +1,6 @@
 import { http } from 'msw';
 import { userEvent } from 'vitest/browser';
-import { expect, it, onTestFinished } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 
 import type { SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
@@ -369,4 +369,32 @@ it('reviews Contact after About, saves within its 200-character limit and confir
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
+});
+
+
+it('scrolls a cross-line refusal Notice into view from a low open row on a phone', async () => {
+  const { screen } = await openLines('phone');
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(5).click();
+  const field = screen.getByRole('textbox', { name: 'Service area', exact: true });
+  await field.fill('Clients can reach our team.');
+  const save = screen.getByRole('button', { name: 'Save', exact: true });
+  save.element().scrollIntoView({ block: 'end' });
+  expect(screen.getByRole('heading', { name: 'What customers will read', exact: true }).element().getBoundingClientRect().bottom).toBeLessThan(0);
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  onTestFinished(() => scroll.mockRestore());
+  mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: ['INTERNAL refusal'] } });
+  await save.click();
+  const notice = screen.getByRole('alert');
+  await expect.element(notice).toHaveTextContent(REFUSED_COPY);
+  await expect.poll(() => scroll.mock.calls.some(([options], index) =>
+    options !== null && typeof options === 'object' && options.block === 'nearest'
+    && (scroll.mock.contexts[index] as HTMLElement | undefined)?.contains(notice.element()),
+  )).toBe(true);
+  await expect.poll(() => {
+    const bounds = notice.element().getBoundingClientRect();
+    return bounds.top >= -1 && bounds.bottom <= window.innerHeight + 1;
+  }).toBe(true);
+  await expect.element(field).toHaveValue('Clients can reach our team.');
+  expect(screen.container.textContent).not.toContain('INTERNAL refusal');
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
