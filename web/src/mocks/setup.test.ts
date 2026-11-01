@@ -1342,6 +1342,27 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
   });
 
+  it('the_verification_code_names_that_business', async () => {
+    // The code the kernel sends to the contact on record names the Desk's own business, as its
+    // public page does, in the chat's language; Rivera's reads as before.
+    const codesFor = async (slug: string, text: string) => {
+      await turnOn(slug, text);
+      const sessionId = mockStore.visitorSession(slug)?.state.session_id;
+      return mockStore.world.inbox.filter((record) => record.sessionId === sessionId).map((record) => record.entry.body).at(-1);
+    };
+    const slug = await liveDesk(CPA);
+    expect(await codesFor(slug, 'Can you send my invoice?')).toBe(
+      "Your Chen & Co. code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(slug, 'Necesito mi factura')).toBe('Tu código de Chen & Co. es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.');
+    expect(await codesFor(RIVERA.slug, 'Can you send my invoice?')).toBe(
+      "Your Rivera Plumbing code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(RIVERA.slug, 'Necesito mi factura')).toBe(
+      'Tu código de Rivera Plumbing es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
+    );
+  });
+
   it('the_kept_cards_handoff_names_that_owner', async () => {
     // The demo command whose checked card is kept with Claude's drafted handoff: the handoff is the
     // Desk's own, and Rivera's Desk still gets the fixtures' card.

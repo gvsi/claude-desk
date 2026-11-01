@@ -50,8 +50,9 @@ export function turnLanguage(text: string): Language {
 /**
  * Whom a Desk's visitor lines name (`MockWorld.ownerOf`), as the kernel renders them from the
  * Desk's `owner_display_name`: the owner's display name, or null when they gave none and the Desk
- * carries setup's fallback, "Owner", which is no one's name; and the business's name, which
- * `NO_NAME_OWNER` may name in that owner's place.
+ * carries setup's fallback, "Owner", which is no one's name; and the business's name, as its
+ * public page shows it, which a verification code's message names and `NO_NAME_OWNER` may name in
+ * that owner's place.
  */
 export interface DeskOwner {
   readonly name: string | null;
@@ -407,10 +408,10 @@ const verifyFirstProse: Record<Language, RenderedBlock> = {
 
 /**
  * The kernel's Demo inbox message for a verification code (`inbox_code_body`, kernel verification,
- * plan 01b), rendered from the business's name and the code in the chat's language.
+ * plan 01b), rendered from the Desk's business name (`DeskOwner.business`) and the code in the
+ * chat's language. No sentence ends on the name, so none needs `afterName`.
  */
-function codeBody(language: Language, code: string): string {
-  const business = rivera.business.name;
+function codeBody(language: Language, code: string, business: string): string {
   return language === 'es'
     ? `Tu código de ${business} es ${code}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`
     : `Your ${business} code is ${code}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
@@ -789,7 +790,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         ctx.startVerification({
           person: rivera.people.dana,
           code: DEMO_CODE,
-          body: codeBody(ctx.language, DEMO_CODE),
+          body: codeBody(ctx.language, DEMO_CODE, ctx.owner.business),
           preview: inboxPreview[ctx.language],
         }),
     ],
