@@ -843,9 +843,9 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
 
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
     """Asks the reviewer about the call's action: the action as the adapter resolved it, the
-    pending cards, the Desk's public charter facts and the free-text arguments, never the
-    conversation. Only a normalized action is reviewed: without one this raises, and the call ends
-    with nothing stored."""
+    pending cards, the Desk's public charter facts but the seed-only starter questions
+    (`charter:starter:*`), and the free-text arguments, never the conversation. Only a normalized
+    action is reviewed: without one this raises, and the call ends with nothing stored."""
     if call.action is None:
         raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
