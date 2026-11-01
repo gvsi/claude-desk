@@ -23,6 +23,10 @@ SEEDED = "policy:service_area"
     ("policy:pricing", "Talk to a real person by phone.", []),
     ("policy:pricing", "Las consultas no cuestan nada.", ["policy.free_price"]),
     ("policy:pricing", "No cobramos por adelantado.", []),
+    ("policy:pricing", "Free parking.", []),
+    ("policy:pricing", "Consultations are complimentary.", ["lex.en.promise"]),
+    ("policy:pricing", "Free water heater flush.", ["lex.en.promise"]),
+    ("policy:pricing", "Free parking and drain clearing.", ["lex.en.promise"]),
     # A service area may name a distance and the days it works, but no fee
     ("policy:service_area", "Within 25 miles of Oakland.", []),
     ("policy:service_area", "Within a 25-mile radius of Oakland.", []),
