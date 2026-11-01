@@ -3857,7 +3857,7 @@ async def test_public_contact_is_structured(kernel, create):
         path={"id": copy.desk_ids[0]})
 
 
-PUBLIC_CONTACTS = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
+PUBLIC_CONTACTS = [*policy_cases.CONTACT_FORMS, "(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
                    "Email: help@example.test · Llámanos al 555-0142",
                    "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
                    "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",

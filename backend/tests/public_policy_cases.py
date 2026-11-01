@@ -27,3 +27,8 @@ HUMAN_OCCUPATIONS = [
     "I am a human factors engineer.", "I'm a human services worker.", "I am a human biology tutor.",
     "Human factors engineer.", "Human services worker.", "Human biology tutor.",
 ]
+
+CONTACT_FORMS = [
+    "Call or text us at (510) 555-0142", "Text or call (510) 555-0142",
+    "(510) 555-0142 (call or text)", "WhatsApp: +1 510 555 0142", "calendly.com/maria-rivera/30min",
+]
