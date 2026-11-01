@@ -166,6 +166,9 @@ export function ConversationsPage() {
           items.length > 0 ? <p className="cd-conversations__quiet cd-conversations__pick cd-type-meta">Choose a conversation to read it.</p> : null
         ) : (
           <>
+            {/* Under 1024 px the list, and its title, step aside for the conversation: the page keeps
+                its one top heading here, out of sight, while the conversation opens and once it has. */}
+            <h1 className="cd-sr-only cd-conversations__open-title">{TITLE}</h1>
             <p className="cd-conversations__back cd-type-meta">
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>

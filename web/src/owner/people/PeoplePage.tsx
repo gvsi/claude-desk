@@ -18,14 +18,13 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { peopleQuery } from '../rules/RuleDraftReview.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { PEOPLE_SUBTITLE } from './copy.ts';
 import { PeopleSkeleton } from './PeopleSkeleton.tsx';
 
 import './People.css';
 
 /** The Desk's people label, the one the sidebar shows: the page's title. The concept and route stay People. */
 export const PEOPLE_LABEL = 'Customers';
-
-const SUBTITLE = 'Leads and customers on this Desk. Verified means a code reached their contact on record.';
 
 /** The business's people and leads, polled as the owner's lists are. */
 export function usePeople(deskId: string) {
@@ -147,7 +146,7 @@ export function PeoplePage() {
 
   return (
     <div className="cd-people" onClick={followInAppLinks(navigate)}>
-      <PageHeader title={PEOPLE_LABEL} subtitle={SUBTITLE} />
+      <PageHeader title={PEOPLE_LABEL} subtitle={PEOPLE_SUBTITLE} />
       {/* Under the real header, everything the people read draws: its failure, the sections or the empty state. */}
       <SkeletonScreen loading={loading} status="Loading your customers" skeleton={<PeopleSkeleton withHeader={false} />} className="cd-people__region">
         <ReadFailed failure={failure} />

@@ -35,6 +35,7 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { TRANSCRIPT_NOTE } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
@@ -339,7 +340,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           </div>
         ) : null}
         <Transcript label={`Conversation with ${who}`}>
-          <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
+          <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}
             agentName={who}

@@ -948,11 +948,69 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'conversation-row-2', page: '.cd-conversations__items > li:nth-child(3) > .cd-conversation-item', size: true },
 ];
 
-/** The open conversation's parts the skeleton draws: who it is with and its first message. */
+/**
+ * The open conversation's parts the skeleton draws, in a wide window, where a fresh copy's chat fits
+ * and opens at its top: who it is with, and its first message.
+ */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'conversation-name', page: '.cd-conversation__name' },
   { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message' },
 ];
+
+/**
+ * On a phone, where a fresh copy's chat is taller than its region and opens at its latest: who it
+ * is with, and the chat's last part (its held request) at the foot of the region, over the owner's
+ * controls.
+ */
+const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'conversation-name', page: '.cd-conversation__name' },
+  { name: 'last-message', page: '.cd-conversation .cd-transcript > :last-child', bottom: true },
+];
+
+/**
+ * The chat's parts in view as the pane lands, each where it was first drawn, from the commit that
+ * puts the chat on the page under the fading shapes. Take over and the whisper box arrive with it,
+ * and the transcript settles at its end; `expectStill` checks nothing in view moved through that.
+ */
+function watchMessagesInView() {
+  const first = new Map<Element, DOMRect>();
+  const look = () => {
+    const region = landedElement('.cd-conversation__scroll');
+    if (region === null) return;
+    const view = region.getBoundingClientRect();
+    for (const part of region.querySelectorAll('.cd-transcript > *')) {
+      if (first.has(part)) continue;
+      const box = part.getBoundingClientRect();
+      if (box.bottom > view.top && box.top < view.bottom) first.set(part, box);
+    }
+  };
+  const observer = new MutationObserver(look);
+  observer.observe(document.body, { subtree: true, childList: true });
+  let frame = 0;
+  const sample = () => {
+    look();
+    frame = requestAnimationFrame(sample);
+  };
+  frame = requestAnimationFrame(sample);
+  const stop = () => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+  };
+  onTestFinished(stop);
+  return {
+    expectStill: async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      stop();
+      expect(first.size, 'the chat was in view as it landed').toBeGreaterThan(0);
+      for (const [part, box] of first) {
+        const now = part.getBoundingClientRect();
+        for (const edge of ['top', 'left', 'height'] as const) {
+          expect(Math.abs(now[edge] - box[edge]), `${part.className || part.localName} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+        }
+      }
+    },
+  };
+}
 
 it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', async (viewport) => {
   await withRecordedHistory();
@@ -972,26 +1030,23 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   expectNoHorizontalScroll();
   expectNoWindowScroll();
 
-  // A conversation opens in place too. On a phone it opens at its latest, so the chat there is one
-  // short enough to show its first message.
-  let sessionId = SEEDED_HOLD;
-  if (viewport === 'phone') {
-    const chat = mockStore.world.addSession(mockStore.world.desk(RIVERA.deskId)!);
-    mockStore.world.visitorText(chat, 'Hi, can someone look at a dripping tap this week?');
-    sessionId = chat.state.session_id;
-  }
-  const chat = holdReads(conversationRead(sessionId));
+  // The fresh copy's held chat opens in place too: at its top in a wide window, where it fits, and
+  // at its latest on a phone, over the owner's controls.
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  const inView = watchMessagesInView();
   await expectSkeletonLoad({
     status: 'Opening the conversation',
-    anchors: PANE_ANCHORS,
+    anchors: viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS,
     stays: ['.cd-conversations__footer'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
-      else await router.navigate(`${CONVERSATIONS}/${sessionId}`);
+      else await router.navigate(`${CONVERSATIONS}/${SEEDED_HOLD}`);
     },
     release: chat.release,
   });
   await expect.element(screen.getByRole('log')).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
+  await inView.expectStill();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -1093,24 +1148,24 @@ it('conversations_still_under_reduced_motion', async () => {
 });
 
 it('conversation_reload_hands_off at 390', async () => {
-  // A chat short enough to show its first message on a phone, where a chat opens at its latest.
-  const added = mockStore.world.addSession(mockStore.world.desk(RIVERA.deskId)!);
-  mockStore.world.visitorText(added, 'Hi, can someone look at a dripping tap this week?');
-  const sessionId = added.state.session_id;
+  // The fresh copy's held chat, which on a phone opens at its latest.
   const desks = holdReads(ROUTES.desks.path);
-  const chat = holdReads(conversationRead(sessionId));
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
   const gaps = watchSkeletonGaps('.cd-conversation__head');
-  const { screen } = await renderRoute(`${CONVERSATIONS}/${sessionId}`, { viewport: 'phone', pollScale: 100 });
+  const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: 'phone', pollScale: 100 });
+  // From the loading page's first commit, which keeps the frame's hidden heading.
+  const headings = watchTopHeadings();
   await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
   await nextFrames();
   // The full-page skeleton draws the way back and the open conversation's pane, as well as the frame.
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
-  const names = PANE_ANCHORS.map(({ name }) => name);
+  const names = PHONE_PANE_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
+  const inView = watchMessagesInView();
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     continues: true,
-    anchors: PANE_ANCHORS,
+    anchors: PHONE_PANE_ANCHORS,
     stays: ['.cd-conversations__footer'],
     open: async () => {
       desks.release();
@@ -1120,7 +1175,9 @@ it('conversation_reload_hands_off at 390', async () => {
     },
     release: chat.release,
   });
+  await inView.expectStill();
   expect(gaps()).toBe(0);
+  expect(headings(), 'one top heading through the reload, the hand-off and the landing').toEqual([1]);
   expectNoHorizontalScroll();
   await expectScreenBasics(document.body, { owner: true });
 });
@@ -1155,4 +1212,73 @@ it('conversations_reload_hands_off at 1440', async () => {
   expect(gaps()).toBe(0);
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
+});
+
+/**
+ * Every count of top headings a reader can reach, from now on, read at each change and each frame:
+ * `h1`s that are drawn (a visually hidden one included) and not inside anything hidden from them.
+ */
+function watchTopHeadings(): () => number[] {
+  const counts: number[] = [];
+  const look = () => {
+    const reachable = [...document.querySelectorAll('h1')].filter((h1) => h1.getClientRects().length > 0 && h1.closest('[aria-hidden="true"]') === null);
+    if (counts.at(-1) !== reachable.length) counts.push(reachable.length);
+  };
+  look();
+  const observer = new MutationObserver(look);
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state', 'class'] });
+  let frame = 0;
+  const sample = () => {
+    look();
+    frame = requestAnimationFrame(sample);
+  };
+  frame = requestAnimationFrame(sample);
+  onTestFinished(() => {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+  });
+  return () => [...counts];
+}
+
+it.each(['desktop', 'phone'] as const)('opening_a_conversation_keeps_one_heading at %s', async (viewport) => {
+  const { screen, router } = await renderRoute(CONVERSATIONS, { viewport, pollScale: 100 });
+  await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').first()).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  const headings = watchTopHeadings();
+  await router.navigate(`${CONVERSATIONS}/${SEEDED_HOLD}`);
+  await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeInTheDocument();
+  chat.release();
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
+  // Waiting, shown, fading and landed: one top heading each time, never none and never two.
+  expect(headings()).toEqual([1]);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each([620, 700])('customers_reload_draws_the_subtitles_own_lines at %i px', async (width) => {
+  // Between the phone and the laptop, the subtitle wraps by its words in this browser's fonts, not
+  // by a count read off one machine, so the list under it starts where its shapes did.
+  const desks = holdReads(ROUTES.desks.path);
+  const people = holdReads(PEOPLE_READ);
+  const { screen } = await renderRoute(PEOPLE, { viewport: { width, height: 900 }, pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  const drawn = [...document.querySelectorAll(`${FULL_LAYER} .cd-page-header__subtitle .cd-skeleton-line`)].filter((line) => line.getClientRects().length > 0);
+  // Measured from the page's top: at this width the frame's own shapes (the reviewer bar) sit a few
+  // pixels off the landed frame, which is the frame's skeleton, not Customers'.
+  const shapePage = document.querySelector(`${FULL_LAYER} .cd-people`)!.getBoundingClientRect();
+  const [head] = fullPageShapes(['people-head']);
+  desks.release();
+  people.release();
+  await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const subtitle = landedElement('.cd-page-header__subtitle')!;
+  const lines = Math.round(subtitle.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(subtitle).lineHeight));
+  expect(drawn, 'the skeleton draws the subtitle in as many lines as its words take').toHaveLength(lines);
+  const real = landedElement('.cd-people__head .cd-section-header__heading')!.getBoundingClientRect();
+  const page = landedElement('.cd-people')!.getBoundingClientRect();
+  expect(Math.abs(real.top - page.top - (head!.top - shapePage.top)), 'the list starts where its shapes did').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });

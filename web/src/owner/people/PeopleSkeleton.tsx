@@ -1,4 +1,8 @@
+import { useRef } from 'react';
+
 import { PageHeaderSkeleton, Skeleton } from '../../ds/index.ts';
+import { useTextLines } from '../../lib/useTextLines.ts';
+import { PEOPLE_SUBTITLE } from './copy.ts';
 
 import './People.css';
 
@@ -15,7 +19,27 @@ const CONTACTS = [{ name: '30%' }, { name: '40%' }] as const;
  * the app the real header stays, and this draws only what is under it.
  */
 export function PeopleSkeleton({ withHeader }: { withHeader: boolean }) {
-  const list = (
+  return withHeader ? <PeoplePageShapes /> : <ListShapes />;
+}
+
+/**
+ * The whole page, as the full-page loader draws it: the header as shapes, its subtitle in as many
+ * lines as its words take at the column's width in this browser's fonts, then the list.
+ */
+function PeoplePageShapes() {
+  const page = useRef<HTMLDivElement>(null);
+  const subtitleLines = useTextLines(page, { parts: [PEOPLE_SUBTITLE], className: 'cd-page-header__subtitle cd-type-body' }, 1);
+  return (
+    <div ref={page} className="cd-people">
+      <PageHeaderSkeleton subtitleLines={subtitleLines} />
+      <ListShapes />
+    </div>
+  );
+}
+
+/** The list under the header. */
+function ListShapes() {
+  return (
     <div className="cd-people__section">
       <div className="cd-people__head">
         <div className="cd-section-header">
@@ -39,13 +63,6 @@ export function PeopleSkeleton({ withHeader }: { withHeader: boolean }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-  if (!withHeader) return list;
-  return (
-    <div className="cd-people">
-      <PageHeaderSkeleton subtitleLines={{ wide: 1, phone: 2 }} />
-      {list}
     </div>
   );
 }
