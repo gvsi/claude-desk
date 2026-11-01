@@ -278,7 +278,7 @@ describe('Safety', () => {
         const safety = document.querySelector<HTMLElement>('.cd-safety');
         if (!safety) throw new Error('the Safety page');
         const ownCopy = safety.cloneNode(true) as HTMLElement;
-        ownCopy.querySelectorAll('.cd-attempt__summary, .cd-attempt-row__title, .cd-sr-only[role="status"], [hidden], [aria-hidden="true"]').forEach((el) => el.remove());
+        ownCopy.querySelectorAll('.cd-attempt__summary, .cd-attempt-row__title, [hidden], [aria-hidden="true"]').forEach((el) => el.remove());
         expect(ownCopy.textContent, 'page text excluding Claude summaries').not.toMatch(/attempt/i);
         const names = [...ownCopy.querySelectorAll('*')].flatMap((el) =>
           ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'alt'].map((name) => el.getAttribute(name) ?? ''),
@@ -290,7 +290,8 @@ describe('Safety', () => {
           expect(screen.getByText('Nothing stopped this week', { exact: true }).elements()).toHaveLength(0);
           await expect.element(screen.getByRole('link', { name: 'Open your public page' })).toBeVisible();
         } else if (state === 'loading') {
-          await expect.element(screen.getByText('Reading the attempts', { exact: true })).toHaveClass('cd-sr-only');
+          expect(screen.getByText('Reading the attempts', { exact: true }).elements()).toHaveLength(0);
+          await expect.element(screen.getByText('Reading what was stopped', { exact: true })).toHaveClass('cd-sr-only');
         } else {
           await expect.element(screen.getByRole('group', { name: 'Show by kind' })).toBeVisible();
           if (state === 'chip with nothing') {

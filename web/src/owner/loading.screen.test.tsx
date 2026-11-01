@@ -1443,7 +1443,7 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
   const landing = watchPaneLanding(SAFETY_ANCHORS, '.cd-safety__region .cd-skeleton-screen__layer');
   const headings = watchTopHeadings();
   await expectSkeletonLoad({
-    status: 'Reading the attempts',
+    status: 'Reading what was stopped',
     anchors: SAFETY_ANCHORS,
     stays: ['.cd-safety > .cd-page-header', '.cd-owner-layout__footer'],
     open: async () => { await router.navigate(SAFETY); }, release: ledger.release,
@@ -1456,7 +1456,7 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
 
 it.each([
   { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__all' },
-  { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading the attempts', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
+  { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading what was stopped', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
 ].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', async ({ path, read, region, status, anchors, until, viewport }) => {
   if (path === RULES) withFreshRules();
   else await withFreshRecord();
@@ -1754,7 +1754,7 @@ it.each(['ledger', 'health', 'today', 'safety'] as const)('safety_waits_for_the_
   const { screen, router } = await beforeSafety();
   const others = ['ledger', 'health', 'today', 'safety'].filter(route => route !== key);
   await expectSkeletonLoad({
-    status: 'Reading the attempts', anchors: SAFETY_ANCHORS,
+    status: 'Reading what was stopped', anchors: SAFETY_ANCHORS,
     open: async () => {
       await router.navigate(SAFETY);
       await vi.waitFor(() => expect(held.held()).toBe(1));
@@ -1787,7 +1787,7 @@ it.each(['ledger', 'health'] as const)('safety_waits_for_the_record_and_health: 
 
 it.each([
   { path: RULES, read: RULES_READ, status: 'Reading your rules', anchors: RULES_ANCHORS },
-  { path: SAFETY, read: LEDGER_READ, status: 'Reading the attempts', anchors: SAFETY_ANCHORS },
+  { path: SAFETY, read: LEDGER_READ, status: 'Reading what was stopped', anchors: SAFETY_ANCHORS },
 ])('$status stays still under reduced motion', async ({ path, read, status, anchors }) => {
   if (path === RULES) withFreshRules();
   else await withFreshRecord();

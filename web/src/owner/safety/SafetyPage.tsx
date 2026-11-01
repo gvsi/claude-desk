@@ -315,7 +315,7 @@ export function SafetyPage() {
   return (
     <div className="cd-safety" onClick={followInAppLinks(navigate)}>
       <PageHeader title={TITLE} actions={<HeldForYou deskId={deskId} />} />
-      <SkeletonScreen loading={view === 'attempts' && !ready} status="Reading the attempts" skeleton={<SafetySkeleton withHeader={false} />} className="cd-safety__region">
+      <SkeletonScreen loading={view === 'attempts' && !ready} status="Reading what was stopped" skeleton={<SafetySkeleton withHeader={false} />} className="cd-safety__region">
         <Headline deskId={deskId} slug={desk.slug} />
         <div className="cd-safety__bar">
           {/* A failed read of the record says so first, beside the check it last made, which the
