@@ -36,8 +36,8 @@ class PurposePaymentArgs(BaseModel):
 
 # Fixed sentences are code-owned. The owner's description and canonical configuration stay quoted data.
 BLOCK_SENTENCES = {
-    "intake": "Saves the visitor's name, contact and one answer per configured question for the owner to follow up.",
-    "typed_booking": "Books one open calendar slot for the configured appointment type.",
+    "intake": "Saves the person's name, contact details and answers to your questions, so you can follow up.",
+    "typed_booking": "Books one open time on your calendar for this kind of appointment.",
     "purpose_payment": "Creates a payment link for the configured purpose and kernel-owned amount.",
     "urgent": "Saves an urgent callback request and alerts the owner.",
 }
