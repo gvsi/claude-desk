@@ -327,6 +327,25 @@ async def test_every_sample_row_is_finished(week_on, app, client):
     assert [row.kind for row in inbox if row.kind != "head_checkpoint"] == ["alert"]   # the seeded hold's alone
 
 
+async def test_the_denied_hold_isnt_the_live_holds_ask(week_on, app, client):
+    """The sample's discount the owner turned down is for another job and amount than the live seeded hold waiting in
+    Needs you, so the history never reads as the Desk asking again for something already turned down; the price
+    list rule still holds it (a discount on the list price, `H.twin.rv-quote`)."""
+    from desk.db.models import Action as ActionRow
+
+    created = await create_copy(client, replay_night=True)
+    ids = {row.session_id for row in await sample_sessions(app, created)}
+    [denied] = await rows_of(app, created.copy_id, select(DecisionRow).where(
+        DecisionRow.session_id.in_(ids), DecisionRow.state == "denied"))
+    assert (denied.outcome, denied.policy_ids, denied.card_ids) == ("hold", ["H.twin.rv-quote"], ["rv-quote"])
+    [action] = await rows_of(app, created.copy_id, select(ActionRow).where(ActionRow.action_id == denied.action_id))
+    assert (action.args_json["items"], action.discount_bp) == ([{"item_id": "heater", "qty": 1}], 1000)
+    assert (action.list_cents, action.amount_cents) == (15_000, 13_500)
+    live = created.seeded_chat.decision.action
+    assert (live.list_cents, live.discount_bp) != (action.list_cents, action.discount_bp)
+    assert "10% off" in denied.reason_plain
+
+
 def created_at(created: CopyCreated) -> datetime:
     return max(datetime.fromisoformat(event.shown_at) for event in created.replayed_messages) + timedelta(hours=1)
 
