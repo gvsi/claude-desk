@@ -12,6 +12,7 @@ import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contrac
 import { request } from '../api/http.ts';
 import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
+import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMITED_COPY, UNREACHABLE_COPY, type PublicShellScrollerDetail } from '../ds/index.ts';
 import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
@@ -161,6 +162,137 @@ beforeEach(() => {
 });
 
 describe('public chat page', () => {
+  it('first_view_supports_spanish_and_desks_without_starters_and_limits_them_to_three', async () => {
+    const spanish = await renderRoute(PAGE, { language: 'es-MX', viewport: 'phone' });
+    await ready(spanish.screen);
+    await expect.element(spanish.screen.getByRole('heading', { name: '¿En qué te puede ayudar Rivera Plumbing?' })).toBeVisible();
+    await expect.element(spanish.screen.getByText('Prueba una de estas o pregunta con tus palabras.')).toBeVisible();
+    await expect.element(spanish.screen.getByRole('button', { name: '¿Puede venir alguien el martes?', exact: true })).toBeVisible();
+    const words = '¿Cuánto cuesta destapar un desagüe?';
+    await spanish.screen.getByRole('button', { name: words, exact: true }).click();
+    await turnEnded(0);
+    expect(requests('sendMessage').at(-1)?.body).toMatchObject({ text: words });
+    await expect.element(spanish.screen.getByRole('group', { name: 'Sugerencias' })).not.toBeInTheDocument();
+
+    const { starters: _starters, ...without } = rivera.publicDesk.en;
+    await renderRoute('/no/such/page', { seed: 'rivera' });
+    mockStore.inject({ route: 'publicDesk', status: 200, body: without });
+    const noStarters = await renderRoute(PAGE);
+    await ready(noStarters.screen);
+    await expect.element(noStarters.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect.element(noStarters.screen.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect.element(noStarters.screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
+
+    mockStore.inject({ route: 'publicDesk', status: 200, body: { ...without, starters: ['One', 'Two', 'Three', 'Four'] } });
+    const capped = await renderRoute(PAGE);
+    await ready(capped.screen);
+    expect(capped.screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').elements()).toHaveLength(3);
+    await expect.element(capped.screen.getByRole('button', { name: 'Four', exact: true })).not.toBeInTheDocument();
+  });
+
+  it('typed_first_message_removes_the_invitation_and_history_never_replays_it', async () => {
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    await expect.element(first.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await say(first.screen, 'How much is drain clearing?');
+    await expect.element(first.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
+    await expect.element(first.screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
+    const resumed = await renderRoute(PAGE);
+    await ready(resumed.screen);
+    await expect.element(resumed.screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
+    await expect.element(resumed.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
+    expect(document.querySelector('.cd-public-shell__welcome')).toBeNull();
+  });
+
+  it('first_send_is_immediate_with_reduced_motion_on_desktop_and_phone', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(true);
+    onTestFinished(() => reduceMotion(reduced));
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+      const animate = vi.spyOn(Element.prototype, 'animate');
+      await type(screen, 'How much is drain clearing?');
+      expect(animate).not.toHaveBeenCalled();
+      expect(document.querySelector('.cd-public-shell__welcome')).toBeNull();
+      expect(document.querySelector('.cd-public-shell__starters')).toBeNull();
+      expect(document.querySelector('.cd-public-shell__composer-group')?.getAttribute('style') ?? '').not.toContain('transform');
+      animate.mockRestore();
+      await turnEnded(0);
+    }
+  });
+
+  it('first_send_glides_only_the_desktop_composer_and_fades_the_invitation', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(false);
+    onTestFinished(() => reduceMotion(reduced));
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    // Inspect in the same frame as Send, before a short animation can finish on a busy runner.
+    const animations: Animation[] = [];
+    const original = Element.prototype.animate;
+    const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, ...args) {
+      const animation = original.apply(this, args);
+      animations.push(animation);
+      return animation;
+    });
+    await type(screen, 'How much is drain clearing?');
+    const glide = animations.find((animation) => (animation.effect as KeyframeEffect).target?.classList.contains('cd-public-shell__composer-lift'));
+    expect(glide, 'the desktop composer glides').toBeDefined();
+    expect(glide!.effect!.getTiming().duration).toBe(260);
+    const frames = (glide!.effect as KeyframeEffect).getKeyframes();
+    expect(frames.every((frame) => 'transform' in frame && !('top' in frame) && !('height' in frame))).toBe(true);
+    const fades = animations.filter((animation) => animation.effect!.getTiming().duration === 120);
+    expect(fades).toHaveLength(2);
+    animate.mockRestore();
+    await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
+  });
+
+  it('first_view_places_the_composer_under_the_invitation_without_overflow', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await vi.waitFor(() => {
+        const welcome = document.querySelector('.cd-public-shell__welcome')!.getBoundingClientRect();
+        const composer = document.querySelector('.cd-composer')!.getBoundingClientRect();
+        expect(Math.round(composer.top - welcome.bottom)).toBe(viewport === 'desktop' ? 20 : 16);
+        if (viewport === 'desktop') expect(welcome.top).toBeLessThan(window.innerHeight * 0.45);
+      });
+      await expectNoHorizontalScroll();
+      const body = document.querySelector('.cd-public-shell__body')!;
+      expect(body.scrollWidth).toBeLessThanOrEqual(body.clientWidth);
+      await expect.element(screen.getByText("You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.")).toBeVisible();
+      if (viewport === 'phone') {
+        expect(document.querySelector('.cd-public-shell__about')!.getBoundingClientRect().top)
+          .toBeGreaterThan(document.querySelector('.cd-public-shell__composer')!.getBoundingClientRect().bottom);
+      }
+    }
+  });
+
+  it('first_view_chip_sends_its_exact_words_through_the_visitor_send_path', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const starters = screen.getByRole('group', { name: 'Suggestions' });
+    expect(starters.getByRole('button').elements()).toHaveLength(3);
+    expect(starters.getByRole('button').elements().every((chip) => chip.closest('[data-copy="user"]') !== null)).toBe(true);
+    await starters.getByRole('button', { name: 'How much is drain clearing?', exact: true }).click();
+    await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
+    await turnEnded(0);
+    expect(requests('sendMessage').at(-1)?.body).toMatchObject({ text: 'How much is drain clearing?' });
+    await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
+    await expect.element(starters).not.toBeInTheDocument();
+    await expect.element(chatBox(screen)).toHaveFocus();
+  });
+
+  it('first_view_invites_a_question_in_the_business_name', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect.element(screen.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    expect(document.querySelector('.cd-public-shell__welcome [data-copy="user"]')?.textContent).toBe('Rivera Plumbing');
+  });
+
   it('public_page_discloses_ai_en_es', async () => {
     document.title = APP_TITLE;
     const { screen } = await renderRoute(PAGE);
@@ -775,7 +907,7 @@ describe('public chat page', () => {
       const failed = screen.getByRole('alert');
       await expect.element(failed.getByText(line, { exact: true })).toBeVisible();
 
-      const row = rowOf(screen.getByText(text, { exact: true }).element());
+      const row = rowOf(screen.getByRole('log').getByText(text, { exact: true }).element());
       const bubble = row.querySelector('.cd-visitor-message__bubble')?.getBoundingClientRect();
       if (!bubble) throw new Error('no visitor bubble');
       const words = textBox(failed.getByText(line, { exact: true }).element());
@@ -1183,7 +1315,7 @@ describe('public chat page', () => {
 
   it('new_chat_after_one_ends_on_a_phone_opens_at_its_start', async () => {
     // A chat ends on a phone with the visitor at its end. "Start a new chat" opens the new one at its
-    // start, as a first visit does, with the about column's heading under the chat's head, not
+    // start, as a first visit does, with the invitation under the chat's head, not
     // where the browser left the region as the old rows went; and the page follows the new chat's
     // end from its first message.
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
@@ -1203,26 +1335,26 @@ describe('public chat page', () => {
     await frames();
     expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(0);
     const region = chatScroller();
-    const heading = screen.getByRole('heading', { name: 'About Rivera Plumbing' }).element();
+    const heading = screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' }).element();
     expect({ scrollTop: region.scrollTop, heading: shownIn(heading, region) }).toEqual({ scrollTop: 0, heading: true });
 
     await say(screen, 'How much is drain clearing?');
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
-    expect(region.scrollTop, 'the new chat followed its first message').toBeGreaterThan(0);
+    expect(chatScroller().scrollTop, 'the new chat followed its first message').toBeGreaterThan(0);
   });
 
   it('a_new_chat_on_a_phone_opens_at_its_start', async () => {
-    // A new chat on a phone, before anything is said: the about column opens the conversation's
-    // scroll region, taller than the region, and the page shows it from its start, its heading right
-    // under the chat's head, with the composer in view. From the first message on, the newest row
+    // A new chat on a phone opens with the invitation and inline composer before the About cards.
+    // The narrow body scrolls before the first message; the conversation scrolls after it.
+    // From the first message on, the newest row
     // sits above the composer.
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
     await ready(screen);
     await frames();
     const region = chatScroller();
-    const heading = screen.getByRole('heading', { name: 'About Rivera Plumbing' }).element();
+    const heading = screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' }).element();
     const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element();
-    expect(region.scrollHeight, 'the about column is taller than the region').toBeGreaterThan(region.clientHeight);
+    expect(region.scrollHeight, 'the invitation and about cards scroll inside the body').toBeGreaterThan(region.clientHeight);
     expect({ scrollTop: region.scrollTop, heading: shownIn(heading, region), composer: inWindow(composer) }).toEqual({
       scrollTop: 0,
       heading: true,
@@ -1231,7 +1363,7 @@ describe('public chat page', () => {
 
     await say(screen, 'How much is drain clearing?');
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
-    expect(region.scrollTop, 'the conversation followed its first message').toBeGreaterThan(0);
+    expect(chatScroller().scrollTop, 'the conversation followed its first message').toBeGreaterThan(0);
   });
 
   it('disclosure_stays_in_view_through_a_long_chat', async () => {
@@ -3251,6 +3383,7 @@ const SCRIPT_SAMPLES: Record<RuleName, string[]> = {
   booked: ['Book the first one', 'Quiero reservar la primera'],
   book: ['Can someone come Tuesday afternoon?', 'Quiero reservar'],
   price: ['How much is drain clearing?', '¿Cuánto cuesta?'],
+  area: ['Do you work in Alameda?', '¿Trabajan en Alameda?'],
   callback: ['Can you call me back?', 'Llámame, por favor'],
   talk: ["I'd like to talk to Maria Rivera.", 'Quiero hablar con Maria'],
   outage: ['outage'],

@@ -1108,3 +1108,47 @@ export const SkeletonShort: Story = {
     viewport: { options: { 'skeleton-short': { name: 'Short phone', styles: { width: '390px', height: '480px' }, type: 'mobile' } } },
   },
 };
+
+/** A visitor has not asked anything yet: invitation, composer and the Desk's own starters. */
+export const FirstViewEnglish: Story = {
+  args: {
+    firstView: true,
+    openStatus: OPEN_EN,
+    starters: { words: desk.en.starters, onPick: fn() },
+    children: <Transcript label="Conversation with Rivera Plumbing">{null}</Transcript>,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect(within(canvas.getByRole('group', { name: 'Suggestions' })).getAllByRole('button')).toHaveLength(3);
+  },
+};
+
+export const FirstViewSpanish: Story = {
+  args: {
+    ...FirstViewEnglish.args,
+    language: 'es',
+    about: desk.es.charter,
+    openStatus: { ...OPEN_EN, text: 'Abierto ahora, hasta las 18:00' },
+    composer: composer.es,
+    starters: { words: desk.es.starters, onPick: fn() },
+    children: <Transcript label="Conversación con Rivera Plumbing">{null}</Transcript>,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: '¿En qué te puede ayudar Rivera Plumbing?' })).toBeVisible();
+    await expect(canvas.getByText('Prueba una de estas o pregunta con tus palabras.')).toBeVisible();
+    await expect(within(canvas.getByRole('group', { name: 'Sugerencias' })).getAllByRole('button')).toHaveLength(3);
+  },
+};
+
+export const FirstViewWithoutStarters: Story = {
+  args: { ...FirstViewEnglish.args, starters: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect(canvas.queryByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
+  },
+};

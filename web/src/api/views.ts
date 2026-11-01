@@ -37,6 +37,12 @@ import type {
   ToolProfile,
 } from './contracts.ts';
 import type { Attempt as ApiAttempt, DeskSetup, DeskSummary, Triage } from './openapi.gen.ts';
+import type { PublicDesk as KernelPublicDesk } from './contracts.gen.ts';
+
+/** Additive API field, optional until every server supplies the visitor's localized starters. */
+export interface PublicDesk extends KernelPublicDesk {
+  starters?: string[];
+}
 
 // Copy and Desks
 

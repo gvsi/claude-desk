@@ -34,6 +34,7 @@ const SAMPLES: Record<RuleName, string[]> = {
   booked: ['Book the first one', 'Quiero reservar la primera'],
   book: ['Can I book Tuesday?', 'Quiero reservar'],
   price: ['How much is drain clearing?', '¿Cuánto cuesta?'],
+  area: ['Do you work in Alameda?', '¿Trabajan en Alameda?'],
   callback: ['Can you call me back?', 'Please call me tonight', 'Llámame'],
   talk: ["I'd like to talk to Maria Rivera.", 'Quiero hablar con Maria'],
   outage: ['outage'],

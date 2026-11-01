@@ -199,3 +199,30 @@ depends on other Desk data can change size once when it arrives.
 The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
 at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
 (`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.
+
+## Before the first message
+
+Pass `firstView` only after session history has loaded and while the chat is empty. The shell shows
+“How can {business} help?” and “Try one of these, or ask in your own words.” (with the signed Spanish
+copy when `language="es"`). The business name keeps `data-copy="user"`; the surrounding words are
+app copy. The disclosure and its punctuation stay in their usual head above the invitation.
+
+`starters={{ words, onPick, disabled }}` supplies localized business content to `SuggestionChips`;
+only the first three words entries appear. Omit it, or pass an empty array, for no chips. `onPick`
+must use the same send path as the composer. PublicChat reads `(desk.starters ?? []).slice(0, 3)`
+and sends picks through its ordinary visitor send handler, including in Today and setup previews.
+
+On a wide shell, the invitation and composer sit slightly above the middle of the transcript column,
+with 20 px between the invitation and composer and the chips below. On a narrow shell they sit inline
+under the chat head, before the footer and About cards. The narrow body scrolls with its disclosure
+head sticky and the brand header above it. Existing conversations keep their normal scroll layout.
+
+When `firstView` becomes false, the invitation and chips fade for `motion-fast`. The desktop composer
+moves to its dock using only a transform, for `motion-base + motion-instant` (260 ms) with
+`motion-ease-emphasis`; the transcript can show the visitor's bubble immediately. A narrow shell
+only fades. With reduced motion, the invitation disappears and the composer moves immediately.
+A shell that opens without `firstView` plays none of this motion.
+
+The vision pages use populated, static conversations; they omit `firstView` and retain their existing
+inert composers and suggestions. Stories: `FirstViewEnglish`, `FirstViewSpanish`,
+`FirstViewWithoutStarters`.

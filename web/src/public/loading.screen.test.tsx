@@ -29,8 +29,8 @@ const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'chat-title', page: '.cd-public-shell__chat-title > h2' },
   { name: 'disclosure', page: '.cd-public-shell__disclosure' },
   { name: 'ask-owner', page: '.cd-public-shell__chat-head > button', size: true },
-  { name: 'composer', page: '.cd-composer__box', size: true },
-  { name: 'concept-footer', page: '.cd-public-shell__footer .cd-concept-footer', size: true },
+  // History is unknown while loading. The docked skeleton can land on either an existing chat
+  // or the invitation with its inline composer and phone footer. The disclosure stays in place.
 ];
 
 it('public_chat_opens_in_place_desktop', async () => {
@@ -44,6 +44,7 @@ it('public_chat_opens_in_place_desktop', async () => {
     },
     release: read.release,
   });
+  await expect.element(document.querySelector<HTMLElement>('.cd-public-shell__welcome')).toBeVisible();
   await expectScreenBasics(document.body, { owner: false });
 });
 
@@ -58,6 +59,7 @@ it('public_chat_opens_in_place_phone', async () => {
     },
     release: read.release,
   });
+  await expect.element(document.querySelector<HTMLElement>('.cd-public-shell__welcome')).toBeVisible();
   await expectScreenBasics(document.body, { owner: false });
 });
 
