@@ -45,3 +45,21 @@ it('names a retargeted rule and a turned-on business tool', () => {
   expect(rows.find((row) => row.change === 'turned_on')).toMatchObject({ title: 'Book a free intro call' });
   expect(rows.find((row) => row.change === 'turned_on')?.connector).toBeUndefined();
 });
+
+it('an added rule follows the changed rows of its own tool', () => {
+  // Weekday and Saturday bookings go to the default ask, and a 9-to-5 weekday booking rule comes in
+  // beside them; Payment link's rule is reworded. The added booking rule reads with the booking rows
+  // it replaces, before Payment link's, not after every changed row.
+  const weekdays: NonNullable<RuleCard['hours']> = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' };
+  const bookWeekdays: RuleCard = { ...card('book-weekdays', 'native.book'), hours: weekdays };
+  const bookSaturday: RuleCard = { ...card('book-saturday', 'native.book'), hours: { days: ['sat'], start: '09:00:00', end: '12:00:00' } };
+  const nineToFive: RuleCard = { ...card('book-nine-to-five', 'native.book'), hours: { ...weekdays, start: '09:00:00', end: '17:00:00' } };
+  const link = card('link', 'native.payment_link');
+  const rows = changeRows(draft([bookWeekdays, bookSaturday, link], [nineToFive, { ...link, reason: 'Payment links go through.' }]), null);
+  expect(rows.map((row) => [row.key, row.change, row.title])).toEqual([
+    ['book-weekdays', 'changed', 'Book a visit'],
+    ['book-saturday', 'changed', 'Book a visit'],
+    ['book-nine-to-five', 'added', 'Book a visit'],
+    ['link', 'changed', 'Payment link'],
+  ]);
+});

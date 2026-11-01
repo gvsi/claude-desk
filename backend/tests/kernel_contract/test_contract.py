@@ -1300,8 +1300,8 @@ def tools(seen: SessionContext) -> tuple[set[str], set[str]]:
 
 @pytest.mark.kernel_plan("01b")
 async def test_answering_switch_round_trips(kernel, ro_read):
-    """Answering off leaves visitors only lead capture and a callback (their declared tools unchanged), on gives the
-    rest back; each switch is the owner's, on its own copy's Desk, and ledgered `desk_data`."""
+    """Answering off leaves visitors only lead capture and a callback, urgent or not (their declared tools unchanged),
+    on gives the rest back; each switch is the owner's, on its own copy's Desk, and ledgered `desk_data`."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     desk_id, owner = copy.desk_ids[0], http.owner(copy.owner_token)
@@ -1316,7 +1316,8 @@ async def test_answering_switch_round_trips(kernel, ro_read):
     assert isinstance(off, DeskUpdated) and off.desk_id == desk_id
     assert answering() == [{"answering": False}]
     now, declared = tools(await context(view, session_id))
-    assert now == {"native.capture_lead", "native.request_callback"} and declared == before[1]
+    assert now == {"desk.emergency-callback", "native.capture_lead", "native.request_callback"}
+    assert declared == before[1]
 
     on = await owner.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
     assert on.desk_id == desk_id and on.updated_at >= off.updated_at
@@ -3280,7 +3281,7 @@ async def test_preview_session_needs_the_owner(kernel, ro_read):
     given, _ = tools(await context(preview_view, created.state.session_id))
     assert {"native.quote", "native.find_slots", "native.book"} <= given
     assert tools(await context(http.session(visitor.session_token), visitor.state.session_id))[0] == {
-        "native.capture_lead", "native.request_callback"}
+        "desk.emergency-callback", "native.capture_lead", "native.request_callback"}
     opened = [entry.event for entry in (await ledger_page(owner, desk_id)).entries
               if entry.event.kind == "session" and entry.event.session_id == created.state.session_id]
     assert [event.summary.get("preview") for event in opened] == [True]
