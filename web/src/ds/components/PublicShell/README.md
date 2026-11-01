@@ -98,7 +98,9 @@ On a short shell:
 
 When the shell turns short or tall, the element that scrolls the conversation changes: the scroll region while tall, the shell itself while short. The shell then:
 
-1. keeps the visitor's place: the first message under the chat's head stays where it was under it, on the new scroller;
+1. keeps the visitor's place on the new scroller, even when the width changes too, as when a phone turns. The place is what is first under the chat's head: the about column while it opens the scroll region and still reaches under the head (the chat's start on a narrow shell), and the first message otherwise. It stays where it was under the head; when part of it is above the head's edge, the same share of it stays above, however it has wrapped, so the same part of it is at the edge and it is still what is first under the head. If the about column was the place and has since moved beside the chat, nothing is put back.
+
+   The shell hears of a new size only once the browser has laid the page out at it. At the same width nothing under the chat's head has moved by then, and the shell reads the place there. At a new width the about column, the messages and the chat's head have already wrapped onto other lines, and the browser's scroll anchoring may have moved the conversation to keep some other element still, so the shell puts back the place it read after the last scroll of the conversation, or the last time it laid itself out, at the old width. A scroll at the new width before the shell hears of it isn't taken for the visitor's, so a visitor's own scroll in that very frame is lost with it;
 2. sends one event from its root, once per switch, after the place is kept:
 
 ```ts
