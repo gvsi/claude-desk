@@ -56,6 +56,7 @@ describe('traceLine', () => {
   it('non_handoff_desk_data_keeps_the_kind_line', () => {
     const event = { kind: 'desk_data', origin: 'kernel', summary: { part: 'calendar' } } as const;
     expect(traceLine(event)).toBe(`A change to your Desk's details. ${RECORDED}`);
+    expect(traceLine({ kind: 'business_tools', origin: 'kernel', summary: {} })).toBe(`A change to your Desk's jobs. ${RECORDED}`);
   });
 
   it('unknown_handoff_closing_keeps_the_kind_line', () => {

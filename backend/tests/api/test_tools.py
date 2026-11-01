@@ -171,7 +171,7 @@ async def test_model_tools_are_enabled_sorted_and_end_with_send_reply(visitor):
     tools = model_tools(context)
 
     declared = sorted(context.tools_declared, key=lambda profile: to_api_name(profile.tool))
-    assert len(declared) == 10 and tools[-1] == SEND_REPLY_TOOL
+    assert len(declared) == 11 and tools[-1] == SEND_REPLY_TOOL         # the seed's urgent tool among them
     given = {profile.tool for profile in context.tools}
     assert tools[:-1] == [
         {"name": to_api_name(profile.tool), "description": profile.description_confirmed,
@@ -202,11 +202,13 @@ async def test_tool_delta(visitor, fake):
     fake.verify(visitor.ids.session_id, "dana")
     verified = await session_context(visitor)
     frozen = FrozenTools.from_context(stored(model_tools(unverified)), [])
-    assert frozen.loaded == {"native__book", "native__capture_lead", "native__find_slots", "native__payment_link",
-                             "native__quote", "native__request_callback", "native__start_verification", "send_reply"}
+    assert frozen.loaded == {"desk__emergency-callback", "native__book", "native__capture_lead", "native__find_slots",
+                             "native__payment_link", "native__quote", "native__request_callback",
+                             "native__start_verification", "send_reply"}
 
-    answering_off = unverified.model_copy(update={"tools": [
-        profile for profile in unverified.tools if profile.tool in ("native.capture_lead", "native.request_callback")]})
+    answering_off = unverified.model_copy(update={"tools": [         # the urgent tool stays beside its base callback
+        profile for profile in unverified.tools
+        if profile.tool in ("desk.emergency-callback", "native.capture_lead", "native.request_callback")]})
     reworded = unverified.model_copy(update={"tools": [
         profile.model_copy(update={"description_confirmed": "Quote, now with more words."})
         if profile.tool == "native.quote" else profile for profile in unverified.tools]})

@@ -145,7 +145,10 @@ it('formats a purpose payment in cents with its Stripe setup', () => {
 });
 
 it('describes intake with one question or several', () => {
-  for (const questions of [['Which year?'], ['Which year?', 'For a business?', 'Who is your bookkeeper?']]) {
+  const cases: Extract<BusinessToolDef['config'], { block: 'intake' }>['questions'][] = [
+    ['Which year?'], ['Which year?', 'For a business?', 'Who is your bookkeeper?'],
+  ];
+  for (const questions of cases) {
     const def: BusinessToolDef = { title: 'Intake', description: 'Asks questions.', config: { block: 'intake', questions } };
     expect(businessLine(def)).toBe(`${questions.length} ${questions.length === 1 ? 'question' : 'questions'} before a booking`);
     expect(businessGlyph(def.config)).toBe('person');

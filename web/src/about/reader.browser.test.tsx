@@ -324,9 +324,9 @@ describe('ReaderPage', () => {
   });
 
   it('top_bar_shows_the_apps_lockup', async () => {
-    // The top bar shows the app's lockup (owner, 2026-10-30): the bell with no tile, in its light ink,
-    // then "Claude Desk", 36 px with the Preview badge on the desktop bar, 32 px with the name alone
-    // on the phone bar. The white tile is the article's app icon now, never the bar's.
+    // The top bar shows the app's lockup (owner, 2026-10-30): the bell with no tile, in the drawing's dark
+    // ink on the page's paper, then "Claude Desk", 36 px with the Preview badge on the desktop bar, 32 px with
+    // the name alone on the phone bar. The white tile is the article's app icon now, never the bar's.
     for (const [size, px, badge] of [
       [DESKTOP, '36', 'Preview'],
       [PHONE, '32', null],
@@ -339,7 +339,7 @@ describe('ReaderPage', () => {
       const mark = marks[0] as SVGSVGElement;
       expect([mark.getAttribute('width'), mark.getAttribute('height')], where).toEqual([px, px]);
       expect(mark.querySelector(':scope > rect'), where).toBeNull();
-      expect(getComputedStyle(mark.querySelector(':scope > g > g:last-child') as Element).fill, where).toBe('rgb(250, 249, 245)');
+      expect(getComputedStyle(mark.querySelector(':scope > g > g:last-child') as Element).fill, where).toBe('rgb(20, 20, 19)');
       expect(bar?.querySelector('.cd-type-wordmark')?.textContent, where).toBe('Claude Desk');
       expect(bar?.querySelector('.cd-pill')?.textContent ?? null, where).toBe(badge);
       // The bell 10 px from the name on the desktop bar, as in the sidebar, 8 px on the phone bar,
@@ -1187,10 +1187,11 @@ describe('ReaderPage', () => {
       const bar = screen.container.querySelector('header') as HTMLElement;
       window.scrollTo(0, 2000);
       await expect.poll(() => window.scrollY, { message: where }).toBe(2000);
-      // Part way down, the bar is still at the top of the window, opaque.
+      // Part way down, the bar is still at the top of the window, in the Vision article's bar: its paper, all but
+      // opaque.
       const box = bar.getBoundingClientRect();
       expect(box.top, where).toBe(0);
-      expect(getComputedStyle(bar).backgroundColor, where).toBe(tokenColor('--bg-app'));
+      expect(getComputedStyle(bar).backgroundColor, where).toBe('rgba(244, 242, 236, 0.94)');
       if (size === DESKTOP) {
         // The contents list stays below it.
         const contents = screen.container.querySelector('nav.cd-about-contents:not(.cd-about-contents--compact)');
@@ -1299,16 +1300,16 @@ describe('ReaderPage', () => {
       // Its words in text-primary, the others' in text-secondary.
       const links = [...contents.querySelectorAll<HTMLElement>('ol a')];
       const current = links.find((link) => link.getAttribute('aria-current')) as HTMLElement;
-      expect(getComputedStyle(current).color, name).toBe(tokenColor('--text-primary'));
+      expect(getComputedStyle(current).color, name).toBe(tokenColor('--text-primary', contents));
       for (const link of links.filter((link) => link !== current)) {
-        expect(getComputedStyle(link).color, readText(link)).toBe(tokenColor('--text-secondary'));
+        expect(getComputedStyle(link).color, readText(link)).toBe(tokenColor('--text-secondary', contents));
       }
       // Not by colour alone: one 2 px bar in text-primary, in the gutter 12 px left of the list, beside the row's
       // words.
       expect(bars(), name).toHaveLength(1);
       const bar = bars()[0] as HTMLElement;
       expect(bar.getAttribute('aria-hidden'), name).toBe('true');
-      expect(getComputedStyle(bar).backgroundColor, name).toBe(tokenColor('--text-primary'));
+      expect(getComputedStyle(bar).backgroundColor, name).toBe(tokenColor('--text-primary', contents));
       const box = bar.getBoundingClientRect();
       const words = current.querySelector('span:not([aria-hidden])')?.getBoundingClientRect() as DOMRect;
       const list = contents.querySelector('ol')?.getBoundingClientRect() as DOMRect;
@@ -1330,7 +1331,7 @@ describe('ReaderPage', () => {
     const folded = phone.container.querySelector('nav[aria-label="On this page"]') as HTMLElement;
     expect(folded.querySelectorAll('[data-contents-bar]'), 'at 390').toHaveLength(0);
     for (const link of folded.querySelectorAll('ol a')) {
-      expect(getComputedStyle(link).color, `at 390: ${readText(link)}`).toBe(tokenColor('--text-primary'));
+      expect(getComputedStyle(link).color, `at 390: ${readText(link)}`).toBe(tokenColor('--text-primary', folded));
     }
     await phone.unmount();
   });

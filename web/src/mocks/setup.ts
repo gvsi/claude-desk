@@ -98,6 +98,8 @@ interface Interview {
   ownerName: string | null;
   about: string | null;
   timezone: string;
+  /** Include "search fails" in the description to preview the API's single search failure label. */
+  searchFails: boolean;
   /** The money limit the owner answered, in cents: 0 until then, as the API's default. */
   capCents: number;
   /** The rules draft the interview made, once it has one. */
@@ -859,7 +861,15 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
 
 /** The reads and first question after the owner gives (or declines) consent. */
 function completeConsent(interview: Interview): void {
-  if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
+  if (interview.state.consent) {
+    say(interview, 'tool_label', MEMORY_LABEL);
+    if (interview.searchFails) {
+      say(interview, 'tool_label', "Couldn't search the web just now");
+    } else {
+      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
+      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+    }
+  }
   if (interview.consultant) openConsultant(interview);
   else {
     const first = SETUP_QUESTIONS[0];
@@ -1124,6 +1134,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     ownerName,
     about: aboutOf(text),
     timezone,
+    searchFails: /search fails/i.test(text),
     capCents: 0,
     draftVersion: null,
     holdNext: false,

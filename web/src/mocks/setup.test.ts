@@ -2,7 +2,7 @@
  * The mock's setup interview, driven the way its handlers drive it: the business's name it reads
  * from the owner's description, the way a reader would, and the slug and first question that follow;
  * the unfinished setup the owner's Desks name until the Desk goes live; the situations it tries,
- * titled for the business; and the Desk it makes, handing a visitor off to its own owner.
+ * titled for the business; and the Desk it makes, which speaks for its own owner.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1222,7 +1222,7 @@ describe("a Desk's unfinished setup, in the owner's Desks", () => {
   });
 });
 
-describe('a Desk setup made, asked for its owner', () => {
+describe('a Desk setup made, speaking for its own owner', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -1246,19 +1246,158 @@ describe('a Desk setup made, asked for its owner', () => {
     return slug;
   }
 
-  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
-  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
-    const opened = await mockStore.dispatch('openSession', { params: { slug } });
-    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+  /** The events this browser's chat with the Desk on `slug` gets while `act` runs and its turn plays out. */
+  async function eventsWhile(slug: string, act: () => Promise<unknown>): Promise<SseEvent[]> {
     const events: SseEvent[] = [];
     const stop = mockStore.listen(slug, 0, (_seq, ev) => events.push(ev));
     const before = events.length;
-    const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
-    if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    await act();
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
     stop();
-    return events.slice(before).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+    return events.slice(before);
   }
+
+  /** The events of the Desk's turn answering `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function turnOn(slug: string, text: string): Promise<SseEvent[]> {
+    const opened = await mockStore.dispatch('openSession', { params: { slug } });
+    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+    return eventsWhile(slug, async () => {
+      const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
+      if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    });
+  }
+
+  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
+    return (await turnOn(slug, text)).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+  }
+
+  /** The visitor's status lines in a turn, in order: each decision's, then each reply's. */
+  function linesOf(events: readonly SseEvent[]): string[] {
+    return events.flatMap((ev) => ('visitor_plain' in ev ? [ev.visitor_plain] : []));
+  }
+
+  /** Claude's own words in a turn's replies. */
+  function proseOf(events: readonly SseEvent[]): (string | null)[] {
+    return events.flatMap((ev) => (ev.type === 'message' ? ev.blocks.filter((b) => b.kind === 'prose').map((b) => b.text) : []));
+  }
+
+  it('the_callback_and_booking_cards_name_that_owner', async () => {
+    // The kernel's cards, of the same kinds, facts and shapes, name the Desk's own owner.
+    const slug = await liveDesk(CPA);
+    const callback = (title: string) => cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title });
+    expect(await repliesTo(slug, 'Can you call me back?')).toEqual([callback('Linda will call you back on Monday, between 8:00 am and 9:00 am')]);
+    expect(await repliesTo(slug, 'Please call me tonight')).toEqual([callback('Linda will call you back')]);
+    expect(await repliesTo(slug, 'Llámame, por favor')).toEqual([callback('Linda te llamará el lunes, entre las 8:00 y las 9:00')]);
+
+    expect((await repliesTo(slug, 'Book the first one')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Linda'] }),
+    );
+    expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con Linda'] }),
+    );
+    // Rivera's Desk books with the fixtures' own card.
+    expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);
+    expect((await repliesTo(RIVERA.slug, '¿Me reservas la primera?')).at(-1)).toEqual(rivera.blocks.booking_confirmed.es);
+  });
+
+  /** The Desk's card for the newest payment link once a change to the rules cancels it, as the visitor's chat gets it. */
+  async function linkCancelledOn(slug: string): Promise<SseEvent[]> {
+    const newest = [...mockStore.world.links].at(-1);
+    if (newest === undefined) throw new Error('the Desk issued a payment link');
+    const [token, link] = newest;
+    return eventsWhile(slug, async () => mockStore.world.cancelLink(token, link, 'rules_changed'));
+  }
+
+  it('the_owner_in_the_chat_and_a_cancelled_link_name_that_owner', async () => {
+    // A deposit link Linda's rules cancelled says so in the kernel's words, and her own words in
+    // the chat she took over are marked as hers.
+    const slug = await liveDesk(CPA);
+    await turnOn(slug, 'Can I pay the deposit?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(linesOf(cancelled)).toEqual(["Reply checked against Linda's rules"]);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      "This payment link was cancelled because Linda's rules changed. Ask again if you still want to pay.",
+    ]);
+
+    const chat = mockStore.visitorSession(slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    const { session_id, generation } = chat.state;
+    const said = await eventsWhile(slug, async () => {
+      await mockStore.dispatch('takeover', { params: { session_id }, body: { generation } });
+      await mockStore.dispatch('ownerMessage', { params: { session_id }, body: { text: 'Hi, it is Linda.', kind: 'say' } });
+    });
+    expect(linesOf(said)).toEqual(['Written by Linda']);
+  });
+
+  it('a_name_that_ends_in_a_stop_gets_one', async () => {
+    // Setup names an owner by one word, but a Desk's display name can end in a stop: a sentence
+    // that ends on it never gets a second.
+    const slug = await liveDesk(CPA);
+    const desk = mockStore.world.deskBySlug(slug);
+    if (!desk) throw new Error('setup made the Desk');
+    desk.ownerName = 'Bob Smith Jr.';
+    expect(await repliesTo(slug, PUBLIC_COPY.en.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Bob Smith Jr.', lines: ['Bob Smith Jr. will reply here.'] }),
+    ]);
+    expect(await repliesTo(slug, PUBLIC_COPY.es.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Bob Smith Jr.', lines: ['Bob Smith Jr. te responderá aquí.'] }),
+    ]);
+    await turnOn(slug, '¿Puedo pagar el depósito?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      'Este enlace de pago se canceló porque cambiaron las reglas de Bob Smith Jr. Pídelo de nuevo si todavía quieres pagar.',
+    ]);
+  });
+
+  it('what_only_the_owner_can_answer_names_that_owner', async () => {
+    // Claude's plain answer when nothing more specific fits: Linda can tell, and the visitor can ask
+    // for her by name, as the page's "Ask for Linda" does.
+    const slug = await liveDesk(CPA);
+    expect(proseOf(await turnOn(slug, 'Should we file jointly this year?'))).toEqual([
+      'Linda can tell you after taking a look. You can ask for Linda here anytime.',
+    ]);
+    expect(proseOf(await turnOn(slug, 'Hola'))).toEqual(['Linda te lo puede decir cuando lo vea. Puedes pedir hablar con Linda aquí cuando quieras.']);
+  });
+
+  it('rivera_keeps_her_signed_held_line', async () => {
+    // Rivera's Desk keeps the signed boards' words, in either language.
+    const asked = await turnOn(RIVERA.slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Maria Rivera to approve', "Reply checked against Maria Rivera's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Maria to decide, so I've asked her. Her answer will show up here."]);
+    const pedido = await turnOn(RIVERA.slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Maria Rivera', 'Respuesta revisada con las reglas de Maria Rivera']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+  });
+
+  it('a_held_request_waits_for_that_owner_by_name', async () => {
+    // A discount past the quote card's limit waits for Linda. Claude says so naming her, with no
+    // pronoun the Desk can't know, and her answer comes back naming her too.
+    const slug = await liveDesk(CPA);
+    const asked = await turnOn(slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Linda to approve', "Reply checked against Linda's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Linda to decide, so I've asked. The answer will show up here."]);
+    const pedido = await turnOn(slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Linda', 'Respuesta revisada con las reglas de Linda']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Linda, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)).toEqual(['Linda lo aprobó', 'Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+    const retenido = pedido.find((ev) => ev.type === 'held');
+    if (retenido?.type !== 'held') throw new Error('the discount was held');
+    const denied = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: retenido.decision_id }, body: { answer: 'deny_once' } }));
+    expect(linesOf(denied)).toEqual(['Linda decidió no seguir adelante', 'Pasado a Linda para responder']);
+  });
+
+  it('the_status_lines_name_that_owner', async () => {
+    // As the kernel renders them from the Desk's owner_display_name: on Linda's Desk a quote's
+    // receipt and its reply's check name her, in either language.
+    const slug = await liveDesk(CPA);
+    expect(linesOf(await turnOn(slug, 'How much is it?'))).toEqual(["Quoted from Linda's price list", "Reply checked against Linda's rules"]);
+    expect(linesOf(await turnOn(slug, '¿Cuánto cuesta?'))).toEqual(['Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+  });
 
   it('asking_for_the_owner_hands_off_to_that_owner_by_name', async () => {
     // What the public page's "Ask for Linda" sends, in either language, as the kernel's handoff card
@@ -1275,20 +1414,92 @@ describe('a Desk setup made, asked for its owner', () => {
     expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.es]);
   });
 
-  it('with_no_owner_name_the_handoff_names_the_business', async () => {
-    // Setup's fallback, "Owner", is no one's name, and the page never shows it: what "Ask for a
-    // person" sends is handed to the business, with one stop after a name that ends in one.
+  it('asking_for_the_owner_by_first_name_reaches_the_handoff', async () => {
+    // A visitor's own words, not only the page's button: Linda's first name reaches her on her
+    // Desk, and Maria's reaches Maria only on Rivera's.
+    const slug = await liveDesk(CPA);
+    const toLinda = { en: cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }) };
+    const asked = await turnOn(slug, 'Can I speak with Linda?');
+    expect(asked.flatMap((ev) => (ev.type === 'message' ? ev.blocks : []))).toEqual([toLinda.en]);
+    expect(linesOf(asked)).toEqual(['Passed to Linda to answer']);
+    expect(await repliesTo(slug, '¿Está LINDA?')).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    ]);
+    expect(await repliesTo(slug, 'Can I speak with Maria?')).not.toContainEqual(toLinda.en);
+    expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
+  });
+
+  it('the_verification_code_names_that_business', async () => {
+    // The code the kernel sends to the contact on record names the Desk's own business, as its
+    // public page does, in the chat's language; Rivera's reads as before.
+    const codesFor = async (slug: string, text: string) => {
+      await turnOn(slug, text);
+      const sessionId = mockStore.visitorSession(slug)?.state.session_id;
+      return mockStore.world.inbox.filter((record) => record.sessionId === sessionId).map((record) => record.entry.body).at(-1);
+    };
+    const slug = await liveDesk(CPA);
+    expect(await codesFor(slug, 'Can you send my invoice?')).toBe(
+      "Your Chen & Co. code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(slug, 'Necesito mi factura')).toBe('Tu código de Chen & Co. es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.');
+    expect(await codesFor(RIVERA.slug, 'Can you send my invoice?')).toBe(
+      "Your Rivera Plumbing code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(RIVERA.slug, 'Necesito mi factura')).toBe(
+      'Tu código de Rivera Plumbing es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
+    );
+  });
+
+  it('the_kept_cards_handoff_names_that_owner', async () => {
+    // The demo command whose checked card is kept with Claude's drafted handoff: the handoff is the
+    // Desk's own, and Rivera's Desk still gets the fixtures' card.
+    const slug = await liveDesk(CPA);
+    expect((await repliesTo(slug, 'cards-kept-handoff')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }),
+    );
+    expect((await repliesTo(slug, 'tarjetas-con-traspaso')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    );
+    expect(await repliesTo(RIVERA.slug, 'cards-kept-handoff')).toEqual([rivera.blocks.quote.en, rivera.blocks.handoff.en]);
+    expect(await repliesTo(RIVERA.slug, 'tarjetas-con-traspaso')).toEqual([rivera.blocks.quote.es, rivera.blocks.handoff.es]);
+  });
+
+  it('with_no_owner_name_the_lines_name_the_business_owner', async () => {
+    // Setup's fallback, "Owner", is no one's name, and the page never shows it. The lines that would
+    // name the owner say "the business owner" instead, the words the page's "Ask for a person" uses,
+    // and a visitor can ask for a person in their own words.
     const fenster = await liveDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
-    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Fenster & Fenster.', lines: ['Fenster & Fenster will reply here.'] }),
+    const toTheOwner = {
+      en: cardBlock('handoff', { fact_id: null, title: 'Let me check with the business owner.', lines: ['The business owner will reply here.'] }),
+      es: cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con el dueño del negocio.', lines: ['El dueño del negocio te responderá aquí.'] }),
+    };
+    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, PUBLIC_COPY.es.askForOwner(null))).toEqual([toTheOwner.es]);
+    expect(await repliesTo(fenster, 'Can I speak with a person?')).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, '¿Puedo ver a una persona?')).toEqual([toTheOwner.es]);
+
+    expect(linesOf(await turnOn(fenster, 'How much is it?'))).toEqual(["Quoted from the business owner's price list", "Reply checked against the business owner's rules"]);
+    expect(linesOf(await turnOn(fenster, '¿Cuánto cuesta?'))).toEqual([
+      'Cotizado con la lista de precios del dueño del negocio',
+      'Respuesta revisada con las reglas del dueño del negocio',
     ]);
-    const chen = await liveDesk('Chen & Co. is a two-person CPA firm in San Jose.');
-    expect(await repliesTo(chen, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Chen & Co.', lines: ['Chen & Co. will reply here.'] }),
+    expect(proseOf(await turnOn(fenster, 'Should we go with oak or walnut?'))).toEqual([
+      'The business owner can tell you after taking a look. You can ask for a person here anytime.',
     ]);
-    expect(await repliesTo(chen, PUBLIC_COPY.es.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Chen & Co.', lines: ['Chen & Co. te responderá aquí.'] }),
+    expect(proseOf(await turnOn(fenster, 'Hola'))).toEqual([
+      'El dueño del negocio te lo puede decir cuando lo vea. Puedes pedir hablar con una persona aquí cuando quieras.',
     ]);
+    expect(await repliesTo(fenster, 'Call me tonight')).toEqual([
+      cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'The business owner will call you back' }),
+    ]);
+
+    const asked = await turnOn(fenster, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for the business owner to approve', "Reply checked against the business owner's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for the business owner to decide, so I've asked. The answer will show up here."]);
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(fenster, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)[0]).toBe('The business owner approved this');
   });
 
   it('an_agent_at_a_desk_not_yet_live_is_handed_to_its_owner', async () => {
