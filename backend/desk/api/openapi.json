@@ -9524,7 +9524,8 @@
               "website",
               "upload",
               "setup",
-              "memory_import"
+              "memory_import",
+              "web_search"
             ],
             "title": "Source"
           },
@@ -9591,7 +9592,8 @@
               "website",
               "upload",
               "setup",
-              "memory_import"
+              "memory_import",
+              "web_search"
             ],
             "title": "Source"
           },
@@ -9766,7 +9768,8 @@
               "rate_limit",
               "agent_auth",
               "head_checkpoint",
-              "desk_data"
+              "desk_data",
+              "web_search"
             ],
             "title": "Kind"
           },
@@ -10148,6 +10151,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -12442,6 +12446,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -12859,6 +12864,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -12894,6 +12900,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -13126,7 +13133,7 @@
               "$ref": "#/components/schemas/ToolPin"
             },
             "type": "array",
-            "maxItems": 13,
+            "maxItems": 14,
             "minItems": 1,
             "title": "Tools"
           },
