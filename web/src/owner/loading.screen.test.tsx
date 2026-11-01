@@ -42,6 +42,21 @@ function watchTodayLayers(): () => number {
   return () => layers.size;
 }
 
+/** Count every skeleton layer that mounts from now on, in any state, even one removed before the next frame. */
+function watchLayers(): () => number {
+  const layers = new Set<Element>();
+  const observer = new MutationObserver((records) => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (!(node instanceof Element)) continue;
+      if (node.matches('.cd-skeleton-screen__layer')) layers.add(node);
+      node.querySelectorAll('.cd-skeleton-screen__layer').forEach((layer) => layers.add(layer));
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => observer.disconnect());
+  return () => layers.size;
+}
+
 it('today_reload_after_the_held_request_is_answered', async () => {
   const held = [...mockStore.world.decisions.values()].find((item) => item.decision.reason_plain === rivera.decisions.held.reason_plain)!;
   await mockStore.dispatch('answer', { params: { decision_id: held.decision.decision_id }, body: { answer: 'deny_once' } });
@@ -724,4 +739,154 @@ it('screen_helper_selects_the_region_by_its_status', async () => {
     root.unmount();
     host.remove();
   }
+});
+
+const PEOPLE = `/app/${RIVERA.deskId}/people`;
+const PEOPLE_READ = ROUTES.people.path.replace('{desk_id}', RIVERA.deskId);
+
+/** Customers' parts the skeleton draws: the first section's head and the seed's first and last rows. */
+const CUSTOMERS_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'people-head', page: '.cd-people__head .cd-section-header__heading' },
+  { name: 'person-row-0', page: '.cd-people__rows > li:first-child > .cd-person-row', size: true },
+  { name: 'person-row-1', page: '.cd-people__rows > li:last-child > .cd-person-row', size: true },
+];
+
+/** Today, drawn and at rest: where an in-app load starts, so its region never meets the full-page skeleton. */
+async function openToday(viewport: 'desktop' | 'phone' = 'desktop') {
+  const rendered = await renderRoute(TODAY, { viewport, pollScale: 100 });
+  await expect.element(rendered.screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  return rendered;
+}
+
+it.each(['desktop', 'phone'] as const)('customers_load_in_place at %s', async (viewport) => {
+  const { screen, router } = await openToday(viewport);
+  const people = holdReads(PEOPLE_READ);
+  await expectSkeletonLoad({
+    status: 'Loading your customers',
+    anchors: CUSTOMERS_ANCHORS,
+    stays: ['.cd-owner-layout__footer'],
+    open: async () => {
+      if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
+      else await router.navigate(PEOPLE);
+    },
+    release: people.release,
+  });
+  expectNoHorizontalScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('customers_still_under_reduced_motion', async () => {
+  const { screen } = await openToday();
+  const people = holdReads(PEOPLE_READ);
+  await expectSkeletonStill({
+    status: 'Loading your customers',
+    anchors: CUSTOMERS_ANCHORS,
+    stays: ['.cd-owner-layout__footer'],
+    open: async () => {
+      await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
+    },
+    release: people.release,
+  });
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('customers_failure_ends_the_skeleton', async () => {
+  const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const people = holdReads(PEOPLE_READ);
+  mockStore.inject({ route: 'people', status: 503, times: 2 });
+  await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
+  await vi.waitFor(() => expect(document.querySelector('.cd-people__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  people.release();
+  const failed = screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true });
+  await expect.element(failed).toBeVisible();
+  const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+  await expect.element(retry).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(failed.element().closest('.cd-people__region')).not.toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === 'people')).toHaveLength(2);
+
+  // "Try again" reads it again, and the people land where the failure was, with no skeleton.
+  const layers = watchLayers();
+  await retry.click();
+  await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  expect(mockStore.requests.filter(({ key }) => key === 'people')).toHaveLength(3);
+  expect(failed.query()).toBeNull();
+  expect(layers()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('cached_customers_skip_the_skeleton', async () => {
+  const { screen, router } = await renderRoute(PEOPLE, { pollScale: 100 });
+  const contacts = screen.getByRole('list', { name: 'Contacts on record' });
+  await expect.element(contacts).toBeVisible();
+  await router.navigate(TODAY);
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+
+  // Back to Customers, read before: no layer mounts, not even a waiting one, so the rows draw with
+  // the page in its first commit.
+  const layers = watchLayers();
+  await router.navigate(PEOPLE);
+  await expect.element(contacts).toBeVisible();
+  await nextFrames();
+  expect(layers()).toBe(0);
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+/** The full-page skeleton's layer, which holds the frame and the page as shapes on a reload. */
+const FULL_LAYER = '.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer';
+
+/** Each named shape's box in the full-page skeleton, read once it is shown. */
+function fullPageShapes(names: readonly string[]): DOMRect[] {
+  return names.map((name) => {
+    const shape = document.querySelector(`${FULL_LAYER} [data-skeleton-anchor="${name}"]`);
+    if (shape === null) throw new Error(`The full-page skeleton draws no ${name}`);
+    return shape.getBoundingClientRect();
+  });
+}
+
+/** Each named shape in the page's own region sits within 2 px of the full-page skeleton's, on all four edges. */
+function expectSameShapes(region: string, names: readonly string[], before: readonly DOMRect[]): void {
+  names.forEach((name, i) => {
+    const after = document.querySelector(`${region} [data-skeleton-anchor="${name}"]`);
+    expect(after, `${region} draws ${name}`).not.toBeNull();
+    for (const edge of ['top', 'left', 'width', 'height'] as const) {
+      expect(Math.abs(before[i]![edge] - after!.getBoundingClientRect()[edge]), `${name} ${edge} across the hand-off`).toBeLessThanOrEqual(
+        SKELETON_TOLERANCE_PX,
+      );
+    }
+  });
+}
+
+it.each(['desktop', 'phone'] as const)('customers_reload_hands_off at %s', async (viewport) => {
+  const desks = holdReads(ROUTES.desks.path);
+  const people = holdReads(PEOPLE_READ);
+  const gaps = watchSkeletonGaps('ul.cd-people__rows');
+  const { screen } = await renderRoute(PEOPLE, { viewport, pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  // The full-page skeleton draws Customers' header and rows, as well as the frame.
+  expect(document.querySelector(`${FULL_LAYER} .cd-people .cd-page-header`)).not.toBeNull();
+  const names = CUSTOMERS_ANCHORS.map(({ name }) => name);
+  const before = fullPageShapes(names);
+  await expectSkeletonLoad({
+    status: 'Loading your customers',
+    continues: true,
+    anchors: CUSTOMERS_ANCHORS,
+    stays: ['.cd-owner-layout__footer'],
+    open: async () => {
+      desks.release();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
+      await vi.waitFor(() => expect(document.querySelector('.cd-people__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      expectSameShapes('.cd-people__region', names, before);
+    },
+    release: people.release,
+  });
+  expect(gaps()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
 });
