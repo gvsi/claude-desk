@@ -9,7 +9,7 @@ import type { RouteObject } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
-import { observeRequests, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { observeRequests, OWNER_ERROR_COPY, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
@@ -24,11 +24,19 @@ import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { watchTop } from '../../test/watch.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+
+/** Successful reads whose responses have completed, rather than requests only sent. */
+function finishedReads(): Set<string> {
+  const finished = new Set<string>();
+  onTestFinished(observeRequests(({ key, ok }) => { if (ok) finished.add(key); }));
+  return finished;
+}
 
 /** The mock's main Desk. */
 function desk(): DeskRecord {
@@ -845,7 +853,8 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
-  it('going_back_returns_to_the_place_on_rules', async () => {
+  it.each(['Rivera Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
+    renameBusiness(business);
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
     const limit = () => payments.getByText(LIMIT_500, { exact: true }).element();
@@ -956,6 +965,121 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it('both_opening_reads_share_one_cap_and_cannot_move_sections_when_they_land', async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    const finished = finishedReads();
+    let rulesReadAt = 0;
+    onTestFinished(observeRequests(({ key, ok }) => {
+      if (key === 'rules' && ok) rulesReadAt = performance.now();
+    }));
+    let releaseSuggestions!: () => void;
+    const until = new Promise<void>((resolve) => { releaseSuggestions = resolve; });
+    onTestFinished(() => releaseSuggestions());
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until, times: 10_000 });
+    const connectorTops = watchTop(() => document.querySelector('.cd-connector-list'));
+    let bodyDrawnAt = 0;
+    const observer = new MutationObserver(() => {
+      if (bodyDrawnAt === 0 && document.querySelector('.cd-connector-list') !== null) bodyDrawnAt = performance.now();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100 });
+    await expect.poll(() => rulesReadAt > 0 && requests('suggestions').length > 0 && reads.held() > 0).toBe(true);
+    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+    // Two waits in a row would take at least 6 s; the ceiling leaves a busy runner room under that.
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 5_000 }).toBeVisible();
+    const elapsed = bodyDrawnAt - rulesReadAt;
+    expect(elapsed, 'one three-second cap, measured from the Rules response').toBeGreaterThanOrEqual(2_900);
+    expect(elapsed).toBeLessThan(5_000);
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(screen.container.querySelector('.cd-always-on')).not.toBeNull();
+    await settled(screen.container);
+    const before = connectorTops();
+    expect(before).toHaveLength(1);
+
+    reads.release();
+    releaseSuggestions();
+    await expect.poll(() => finished.has('needsYou') && finished.has('suggestions')).toBe(true);
+    await settled(screen.container);
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(connectorTops(), 'neither late read moves the connectors').toEqual(before);
+
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('suggested_rules_and_connectors_land_together_when_suggestions_are_held at %s', async (viewport) => {
+    const finished = finishedReads();
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until });
+    const connectorTops = watchTop(() => document.querySelector('.cd-connector-list'));
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, viewport });
+    await expect.poll(() => finished.has('needsYou')).toBe(true);
+    await expect.poll(() => finished.has('rules')).toBe(true);
+    await settled(screen.container);
+    const before = connectorTops();
+    release();
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await settled(screen.container);
+    expect(before, 'connectors wait for suggested-rule cards above them').toEqual([]);
+    expect(connectorTops(), 'the connector list lands at one top').toHaveLength(1);
+  });
+
+  it('a_phone_does_not_wait_for_the_hidden_chips_row', async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: { width: 390, height: 844 }, pollScale: 100 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+  });
+
+  it('a_failed_suggestions_read_settles_opening_without_waiting_for_the_cap', async () => {
+    mockStore.inject({ route: 'suggestions', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
+    expect(requests('suggestions').length).toBeGreaterThanOrEqual(2);
+    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+  });
+
+  it('a_kept_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules/all`, { pollScale: 100, retryScale: 0 });
+    await expect.element(screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    const reads = holdNeedsYou();
+    mockStore.inject({ route: 'rules', status: 503, times: 10_000 });
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+  });
+
+  it('a_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    mockStore.inject({ route: 'rules', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+  });
+
   it('another_business_keeps_the_hold_question_beside_a_failed_rules_read', async () => {
     renameBusiness('Acme Accounting');
     mockStore.inject({ route: 'rules', status: 503, times: 2 });
@@ -966,7 +1090,7 @@ describe("Ask Claude's question about a hold", () => {
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
   });
 
-  it.each(['desktop', 'phone'] as const)('another_business_draws_the_body_and_delayed_hold_question_together at %s', async (viewport) => {
+  it('another_business_draws_the_body_and_delayed_hold_question_together', async () => {
     renameBusiness('Acme Accounting');
     const reads = holdNeedsYou();
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS] });
@@ -974,7 +1098,7 @@ describe("Ask Claude's question about a hold", () => {
     onTestFinished(observeRequests((outcome) => {
       if (outcome.key === 'rules' && outcome.ok) rulesRead = true;
     }));
-    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
     await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
@@ -992,8 +1116,7 @@ describe("Ask Claude's question about a hold", () => {
     onTestFinished(() => observer.disconnect());
     reads.release();
     await expect.poll(() => screen.container.querySelector('.cd-suggestion-chips')?.textContent).toContain('Why was this quote held?');
-    // The settled phone layout already hides this row; only desktop draws the chip.
-    if (viewport === 'desktop') await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
     expect(mismatches).toEqual([]);
@@ -1049,6 +1172,9 @@ describe("Ask Claude's question about a hold", () => {
   it('another_business_caps_the_needs_you_wait_at_three_seconds_after_rules_settle', async () => {
     renameBusiness('Acme Accounting');
     const reads = holdNeedsYou();
+    const finished = finishedReads();
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS] });
+    const sectionTops = watchTop(() => document.querySelector('.cd-rules__suggestions'));
     let releaseRules!: () => void;
     const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
     onTestFinished(() => releaseRules());
@@ -1061,7 +1187,7 @@ describe("Ask Claude's question about a hold", () => {
         if (outcome.key === 'rules' && outcome.ok) resolve();
       }));
     });
-    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -1084,7 +1210,18 @@ describe("Ask Claude's question about a hold", () => {
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
 
     vi.useRealTimers();
+    await settled(screen.container);
+    const before = sectionTops();
+    expect(before).toHaveLength(1);
     reads.release();
+    await expect.poll(() => finished.has('needsYou')).toBe(true);
+    await settled(screen.container);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    expect(sectionTops(), 'late Needs you cannot move the first section').toEqual(before);
+
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
   });
 
