@@ -2473,17 +2473,13 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
     _require_step(interview, RULE_STEPS, drafted=True)
     listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
     prices = {row["item_id"]: row["unit_cents"] for row in listed}
-    titles = {row["item_id"]: row["title"] for row in listed}
-    largest = _largest(prices)
-    title = titles[largest[0]] if largest is not None else ""
     name = interview.answers.owner_display_name
     built = safety_probes(interview.answers, prices)
     started = monotonic()
     results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
     seconds = round(monotonic() - started, 1)
     rows = [SafetyRow(label=spec.label,
-                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. ",
-                                              charge_item=title, payment_item=f" for {title}" if title else ""),
+                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. "),
                       result=result,
                       blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
             for (spec, _), result in zip(built, results, strict=True)]

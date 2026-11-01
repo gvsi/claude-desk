@@ -12,6 +12,7 @@ import type { RuleChatOut, RulesDraft } from '../../api/views.ts';
 import { AskClaudePanel, ClaudeMessage, Notice, VisitorMessage, type NoticeTone } from '../../ds/index.ts';
 import { aboveMoneyCapCopy } from '../../lib/format.ts';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
+import { land } from './landing.ts';
 import { RuleDraftReview, rulesQuery } from './RuleDraftReview.tsx';
 
 import './RuleChat.css';
@@ -148,7 +149,8 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
 
 /**
  * The panel and the conversation in it, in order: the owner's words in a bubble, Claude's answer
- * in serif and the change it drafted as an inline review, and any line on what went wrong.
+ * in serif and the change it drafted as an inline review, and any line on what went wrong. Once a
+ * change is confirmed, its receipt takes the review's place, and Rules shows where it landed.
  */
 export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, onSend, onClose, onSettled }, ref) {
   const root = useRef<HTMLDivElement>(null);
@@ -178,7 +180,20 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
               {turn.draft === null ? null : turn.settled === 'kept' ? (
                 <p className="cd-rule-chat__kept cd-type-meta">Nothing changed. Your rules stay as they are.</p>
               ) : (
-                <RuleDraftReview deskId={deskId} draft={turn.draft} inline onDone={(outcome) => onSettled(turn.id, outcome)} />
+                // Confirmed, the receipt takes the review's place, and the change lands on Rules beside it.
+                <RuleDraftReview
+                  deskId={deskId}
+                  draft={turn.draft}
+                  inline
+                  onConfirmed={(change) => land(deskId, change)}
+                  onDone={(outcome) => {
+                    onSettled(turn.id, outcome);
+                    // The receipt has landed where the review's buttons were: focus, left on the
+                    // button pressed, goes to the panel's composer rather than the page.
+                    const box = root.current;
+                    if (outcome === 'confirmed' && box !== null && !box.contains(document.activeElement)) box.querySelector('textarea')?.focus();
+                  }}
+                />
               )}
             </div>
           );

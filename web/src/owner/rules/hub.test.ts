@@ -11,11 +11,12 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { chenBusinessTools } from '../../mocks/businessTools.ts';
 import { describeEffects, type ToolSummaryView } from '../../ds/index.ts';
 import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
-import { RIVERA } from '../../mocks/seed.ts';
+import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
-import { governingRules, holdQuestion, hubSections, parseLimit, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
+import { draftFromDiff } from './drafts.ts';
+import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
 
 /** The mock's main Desk, a fresh Rivera copy for every test. */
 function desk(): DeskRecord {
@@ -521,5 +522,42 @@ describe('the Rules hub', () => {
 
     // No hold, no question.
     expect(holdQuestion([])).toBeNull();
+  });
+});
+
+describe('the rows a confirmed change lands on', () => {
+  /** A draft of Rivera's rules with `add` in place of the cards of the same id, as the review builds it. */
+  function drafted(add: readonly RuleCard[], opts: { cap?: number } = {}) {
+    const stored = opts.cap === undefined ? mockStore.world.draft(desk(), add) : mockStore.world.draftCards(desk(), desk().policy.cards, opts);
+    return draftFromDiff(stored, desk().policy);
+  }
+
+  it('a_tool_rule_lands_on_its_tool_alone', () => {
+    // "Stop quoting on weekends": the quote rule moves to weekdays.
+    const weekdays = { ...rivera.ruleCards['rv-quote'], hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } } satisfies RuleCard;
+    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toEqual({ tools: ['native.quote'], moneyLimit: false });
+  });
+
+  it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
+    // "Ask me first" drops each of Rivera's own rules: every tool one of them governed changes, and
+    // the tools only the starter's cards govern (open times, leads, callbacks, identity checks) don't.
+    const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
+    const changed = rowsChangedBy(draftFromDiff(stored, desk().policy, 'ask_first'), view().tools);
+    expect([...changed.tools].sort()).toEqual(
+      ['native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
+    );
+    expect(changed.moneyLimit).toBe(false);
+  });
+
+  it('a_new_limit_lands_on_its_line_and_the_rules_it_lowers', () => {
+    // Raised to $5,000, no rule changes: the limit's line alone.
+    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toEqual({ tools: [], moneyLimit: true });
+    // Lowered to $100 with Payment link's $300 brought down with it: the line, and Payment link.
+    const lowered = mockStore.world.draftCards(
+      desk(),
+      desk().policy.cards.map((c) => (c.card_id === 'rv-link' ? { ...c, max_amount_cents: 10_000 } : c)),
+      { cap: 10_000 },
+    );
+    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toEqual({ tools: ['native.payment_link'], moneyLimit: true });
   });
 });

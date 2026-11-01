@@ -472,7 +472,8 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
 
 # The Rivera seed's price list as the catalog names it: each item's ID and title, in ID order.
 RIVERA_CATALOG = [("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
-                  ("leak", "Leak repair")]
+                  ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"),
+                  ("short-notice", "Short-notice fee")]
 
 
 def catalog_of(seen: SessionContext) -> Fact:
