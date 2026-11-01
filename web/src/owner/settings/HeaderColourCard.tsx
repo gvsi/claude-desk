@@ -106,7 +106,9 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
               style={{ '--swatch-field': palette === 'none' ? 'var(--bg-panel)' : paletteBrand(palette).primary } as CSSProperties}
               onClick={() => pick(palette)}
               onKeyDown={(event) => move(event, palette)}
-            />
+            >
+              {palette === 'none' ? <span className="cd-header-colour__none-clip" aria-hidden="true" /> : null}
+            </button>
           ))}
         </div>
         <p className="cd-type-caption cd-settings__quiet">{selected === null ? 'Custom colour' : PALETTE_NAMES[selected]}</p>

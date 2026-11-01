@@ -74,9 +74,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-12);
+  --cd-touch-reach-inline: calc(var(--space-12) / 2);
 }
 
 .cd-header-colour__swatch {
+  --swatch-border: 0px;
   position: relative;
   flex: none;
   box-sizing: border-box;
@@ -99,11 +101,20 @@
 }
 
 .cd-header-colour__swatch--none {
+  --swatch-border: 1px;
   border: 1px solid var(--line-card);
-  overflow: hidden;
 }
 
-.cd-header-colour__swatch--none::after {
+/* Clip only the diagonal, leaving the button's invisible touch area free to extend. */
+.cd-header-colour__none-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.cd-header-colour__none-clip::before {
   position: absolute;
   top: 50%;
   left: 0;
@@ -208,8 +219,20 @@
   }
 }
 
+/* The same invisible target as Chip and IconButton, capped at half the swatch gap.
+   The border correction keeps No colour's padding-box target equal to its neighbours'. */
+@media (pointer: coarse) {
+  .cd-header-colour__swatch::after {
+    position: absolute;
+    inset-block: max(-1 * (var(--cd-touch-reach-block, var(--size-touch)) + var(--swatch-border)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * (var(--cd-touch-reach-inline, var(--size-touch)) + var(--swatch-border)), min(0px, (100% - var(--size-touch)) / 2));
+    content: '';
+  }
+}
+
 @media (max-width: 639.98px) {
   .cd-header-colour__swatches {
+    --cd-touch-reach-inline: calc(var(--space-10) / 2);
     gap: var(--space-10);
   }
 

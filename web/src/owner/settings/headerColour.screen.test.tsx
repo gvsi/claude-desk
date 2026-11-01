@@ -1,8 +1,9 @@
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { expect, it, onTestFinished } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { cdp, userEvent } from 'vitest/browser';
 
 import { ROUTES } from '../../api/routes.ts';
+import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../ds/test/touch.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -224,4 +225,30 @@ it('keeps the server pick when an earlier response returns after leaving and com
   await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'desks').length).toBeGreaterThan(reads);
   await expect.element(group.getByRole('radio', { name: 'Plum', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'plum' });
+});
+
+it('takes coarse-pointer taps 4 px outside every drawn phone swatch without overlapping', async () => {
+  const { screen } = await renderRoute(GENERAL, { viewport: 'phone' });
+  const group = screen.getByRole('radiogroup', { name: 'Header colour' });
+  await expect.element(group).toBeVisible();
+  group.element().scrollIntoView({ block: 'center' });
+  const swatches = group.getByRole('radio').elements();
+  const boxes = swatches.map((radio) => radio.getBoundingClientRect().toJSON());
+  // No colour's slash must not share or clip the invisible hit area.
+  expect(getComputedStyle(swatches[1]!, '::after').content).toBe('none');
+  await coarsePointer();
+  expect(swatches.map((radio) => radio.getBoundingClientRect().toJSON())).toEqual(boxes);
+  for (const [index, swatch] of swatches.entries()) {
+    const own = swatch.getBoundingClientRect();
+    const area = hitArea(swatch);
+    expect(area.height).toBe(44);
+    expect(area.width).toBe(38); // 28 px plus half of each 10 px gap.
+    expectHitAreaLands(swatch);
+    expectUnseen(swatch);
+    if (index > 0) expectApart(hitArea(swatches[index - 1]!), area, 'neighbouring swatches');
+    await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: own.right + 4, y: own.top + own.height / 2 }] });
+    await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.element(group.getByRole('radio', { name: swatch.getAttribute('aria-label')!, exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  }
 });
