@@ -591,7 +591,7 @@ def _blocked(violations: list[dict], **timing: int) -> ToolOutcome:
 
 
 CLAUSE_RULE_IDS = frozenset({"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current",
-                            "nothing_to_show", "template_unavailable", "kernel_only_template"})
+                            "nothing_to_show", "template_unavailable", "kernel_only_template", "claims_changed"})
 
 
 def _feedback(verdict: ReplyVerdict, clauses: list[Clause]) -> list[dict]:

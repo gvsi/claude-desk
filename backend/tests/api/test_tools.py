@@ -54,6 +54,22 @@ def test_feedback_omits_clause_references_when_fact_metadata_is_empty(missing_fa
         {"kind": "unknown_fact", "rule_id": "no_such_fact"} for _ in clauses]
 
 
+def test_feedback_names_a_card_whose_claims_changed_at_signing_and_a_callback_claim():
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="hours", fact_id="charter:hours")]
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="stale_fact", rule_id="claims_changed", span="hours", fact_ids=["charter:hours"]),
+        Violation(kind="promise_word", rule_id="lex.es.callback", span="Su llamada está confirmada.")])
+    feedback = tools._feedback(verdict, clauses)
+    assert feedback == [
+        {"kind": "stale_fact", "rule_id": "claims_changed", "clause_index": 0, "template": "hours",
+         "fact_id": "charter:hours"},
+        {"kind": "promise_word", "rule_id": "lex.es.callback"}]
+    assert tools._blocked(feedback).result["diagnostics"] == [
+        tools.REPLY_DIAGNOSTICS["not_current"], tools.REPLY_DIAGNOSTICS["lex.en.callback"]]
+
+
 def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
     from types import SimpleNamespace
 

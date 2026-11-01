@@ -437,8 +437,9 @@ REWRITE_INSTRUCTION = (
     "For template_mismatch, use the registered template for the cited fact. For names_no_fact, omit fact_id for "
     "handoff or verify_prompt. For no_such_fact, use only an ID actually available in current context or successful "
     "results. For not_a_reader, remove the clause; do not guess another record or reveal the inaccessible one. "
-    "For not_current or nothing_to_show, use matching current entitled evidence if available; otherwise omit the "
-    "clause and offer a supported next step. For soft.promise, remove the unsupported outcome or follow-up claim. "
+    "For not_current, nothing_to_show or claims_changed, use matching current entitled evidence if available; "
+    "otherwise omit the clause and offer a supported next step. For soft.promise or soft.jev, remove the unsupported "
+    "outcome or follow-up claim. "
     "For soft.denies_ai, explicitly disclose that you are Claude, an AI. For language_uncertain, write at least one "
     "full sentence in English or Spanish beside the cards, and don't repeat the flagged words. For soft.unavailable, "
     "the checkpoint wasn't available and nothing was flagged: send the reply again as it is, with its cards and no "
@@ -453,15 +454,19 @@ REPLY_DIAGNOSTICS = {
        for rule in ("digit", "currency", "percent_sign", *(
            f"lex.{language}.{category}" for language in ("en", "es")
            for category in ("number", "money", "percent", "date", "promise", "booking")))},
+    **{f"lex.{language}.callback": "Remove the call or callback claim unless a callback_confirmed card shows it."
+       for language in ("en", "es")},
     "names_no_fact": "Omit fact_id for handoff or verify_prompt.",
     "no_such_fact": "Use only a fact ID available in current context or successful results, or remove the clause.",
     "not_a_reader": "Remove the clause; do not guess another record or reveal the inaccessible one.",
     "template_mismatch": "Use the registered template for the cited fact, or remove the clause.",
     "not_current": "Use matching current readable evidence if available; otherwise omit the clause.",
+    "claims_changed": "Use matching current readable evidence if available; otherwise omit the clause.",
     "nothing_to_show": "Use matching current readable evidence if available; otherwise omit the clause.",
     "template_unavailable": "Use a registered template available to send_reply, or remove the clause.",
     "kernel_only_template": "Remove the clause: only the kernel may issue this template.",
     "soft.promise": "Remove the unsupported outcome or follow-up claim.",
+    "soft.jev": "Remove the unsupported outcome or follow-up claim.",
     "soft.denies_ai": "Explicitly disclose that you are Claude, an AI.",
     "soft.handoff_closed": "Remove the unsupported owner follow-up claim; its backing is no longer current.",
     "soft.unavailable": ("The checkpoint wasn't available, so nothing was flagged. Send the reply again as it is, with "

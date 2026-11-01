@@ -517,6 +517,29 @@ def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction()
     assert REPLY_DIAGNOSTICS["language_uncertain"].startswith("Write at least one full sentence")
 
 
+def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
+    """Each rule ID the reply check can give a rewritable violation reaches Claude by name with a fixed line, never as
+    `other`: every lexicon category in either language, and the literal IDs of the scans, clause checks, the signing
+    recheck and the soft check."""
+    from desk.api.prompts import REPLY_DIAGNOSTICS, REPLY_RULE_IDS
+    from desk.api.tools import CLAUSE_RULE_IDS
+    from desk.kernel_service import reply_check
+
+    lexicon = {f"lex.{language}.{category}" for language, entries in reply_check.LEXICONS.items()
+               for category, _ in entries}
+    clauses = {"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current", "nothing_to_show",
+               "template_unavailable", "kernel_only_template", "claims_changed"}
+    literal = {"digit", "currency", "percent_sign", "language_uncertain", "soft.promise", "soft.denies_ai",
+               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, *clauses}
+    assert {"lex.en.callback", "lex.es.callback"} <= lexicon
+    assert lexicon | literal <= REPLY_RULE_IDS
+    assert clauses <= CLAUSE_RULE_IDS
+    assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
+        "Remove the call or callback claim unless a callback_confirmed card shows it.")
+    assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
+    assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
+
+
 def test_reply_prompt_explains_when_only_cards_were_shown():
     text = conversation_system(RIVERA)[0]["text"]
     assert ('If send_reply answers "delivered" with prose_shown false, only the cards were shown; '
