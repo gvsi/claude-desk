@@ -14,8 +14,11 @@ export interface PublicCopy {
   send: string;
   /** The conversation's name for screen readers. */
   conversation: (business: string) => string;
-  /** What "Ask for {owner}" sends as the visitor's message. */
-  askForOwner: (owner: string) => string;
+  /**
+   * What "Ask for {owner}" sends as the visitor's message; with no owner's name (null), it asks for
+   * a person, in the owner's approved words.
+   */
+  askForOwner: (owner: string | null) => string;
   joined: (name: string) => string;
   /** The owner handed the chat back. */
   claudeIsBack: string;
@@ -41,7 +44,7 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     message: (business) => `Message ${business}`,
     send: 'Send',
     conversation: (business) => `Conversation with ${business}`,
-    askForOwner: (owner) => `I'd like to talk to ${owner}${afterName(owner, '.')}`,
+    askForOwner: (owner) => (owner === null ? "I'd like to talk to a person." : `I'd like to talk to ${owner}${afterName(owner, '.')}`),
     joined: (name) => `${name} joined the chat`,
     claudeIsBack: 'Claude is helping again.',
     reconnecting: 'Reconnecting to the chat',
@@ -60,7 +63,7 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     message: (business) => `Mensaje para ${business}`,
     send: 'Enviar',
     conversation: (business) => `Conversación con ${business}`,
-    askForOwner: (owner) => `Me gustaría hablar con ${owner}${afterName(owner, '.')}`,
+    askForOwner: (owner) => (owner === null ? 'Quiero hablar con una persona.' : `Me gustaría hablar con ${owner}${afterName(owner, '.')}`),
     joined: (name) => `${name} se unió al chat`,
     claudeIsBack: 'Claude vuelve a ayudarte.',
     reconnecting: 'Reconectando con el chat',

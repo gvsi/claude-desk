@@ -102,6 +102,7 @@ interface RowProps {
   paymentBlock: (block: RenderedBlock) => RenderedBlock;
   row: ChatRow;
   ownerPreview: boolean;
+  /** `owner_display_name` as served, for the owner's own messages and a card's "{owner} said". */
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => void;
@@ -727,7 +728,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               row={row}
               paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
-              ownerName={ownerName}
+              ownerName={desk.owner_display_name}
               language={language}
               onResend={resend}
               after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
