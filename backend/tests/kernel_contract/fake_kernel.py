@@ -138,6 +138,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route, Router
 
+from desk.public_amenity import offers_amenity
 from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -911,8 +912,8 @@ PUBLIC_POLICY_PATTERNS = (
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
      r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
-    ("lex.en.promise", r"\b(?:free|discounts?|refunds?|guarantees?|no\s+charge)\b"),
-    ("lex.es.promise", r"\b(?:descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.promise", r"\b(?:free|complimentary|discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
     ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
     ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
 )
@@ -949,8 +950,9 @@ def public_policy_rules(text: str) -> list[str]:
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        if re.search(pattern, public_commitment_reading(text)[0]
-                     if rule == "language" or rule.startswith("policy.") else text, re.IGNORECASE):
+        reading = public_commitment_reading(text)[0] if rule == "language" or rule.startswith("policy.") else text
+        if any(not (rule.endswith(".promise") and offers_amenity(reading, match.start(), match.end()))
+               for match in re.finditer(pattern, reading, re.IGNORECASE)):
             rules.add(rule)
     if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
         rules.add("language")
@@ -976,6 +978,11 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
                            else (combined, list(range(len(combined)))))
         for match in re.finditer(pattern, reading, re.IGNORECASE):
             start, end = origin[match.start()], origin[match.end() - 1] + 1
+            # A free amenity passes when its own card holds the word and the amenity ("Free parking.").
+            if rule.endswith(".promise") and any(
+                    key is not None and low <= start and end <= high
+                    and offers_amenity(combined[low:high], start - low, end - low) for key, low, high in ranges):
+                continue
             for key, low, high in ranges:
                 if key is not None and low < end and start < high:
                     fields[key].add(rule)

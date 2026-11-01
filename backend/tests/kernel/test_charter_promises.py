@@ -35,6 +35,10 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     ("This is not an AI.", "policy.ai_denial"),
     ("Soy una persona real.", "policy.ai_denial"),
     ("No soy un bot.", "policy.ai_denial"),
+    ("Consultations are complimentary.", "lex.en.promise"),
+    ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"),
+    ("Consulta gratis.", "lex.es.promise"),
 ])
 async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_reads(app, client, text, rule):
     copy = await rivera(app, client)
@@ -275,6 +279,12 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Habla con una persona real por teléfono.",
     "Una persona real le devolverá la llamada.",
     "Nada que pagar hasta que el trabajo esté hecho.",
+    # Free amenities, never free services.
+    "Complimentary parking.",
+    "Free parking.",
+    "Free wi-fi while you wait.",
+    "Complimentary coffee while you wait.",
+    "Estacionamiento gratis.",
     "We work with small businesses and families.",
     "Tell us what you need and we'll suggest next steps.",
     "Ask about our services.",

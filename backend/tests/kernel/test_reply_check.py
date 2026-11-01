@@ -1850,7 +1850,7 @@ POLICY_FREE_PRICE_CASES = [
     ("Human resources consulting", []),
     ("We treat every customer like a person", []),
     ("Complimentary parking", []),
-    ("Free parking", ["lex.en.promise"]),
+    ("Free parking", []),
     ("Our receptionist will greet you", []),
     ("Atención personalizada", []),
     ("A humanist receptionist", []),
@@ -1873,6 +1873,39 @@ def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
                    for hit in reply_check.scan_prose(text))
     if text == "Complimentary parking":
         assert [hit.rule_id for hit in reply_check.scan_prose(text)] == ["lex.en.promise"]
+
+
+FREE_AMENITY_CASES = [
+    "Complimentary parking.", "Free parking.", "Free wi-fi while you wait.", "Complimentary coffee while you wait.",
+    "Estacionamiento gratis.", "Free parking for every visit.", "Free coffee, tea and water.",
+    "Free Wi‑Fi and snacks.", "A free waiting area.", "Wifi y café gratis.", "Sala de espera gratuita.",
+]
+FREE_SERVICE_CASES = [
+    ("Consultations are complimentary.", "lex.en.promise"), ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"), ("Consulta gratis.", "lex.es.promise"),
+    ("Complimentary inspection with every visit.", "lex.en.promise"),
+    ("Free parking and consultations.", "lex.en.promise"), ("Free parking and your first visit.", "lex.en.promise"),
+    ("Free parking, coffee, tea, water and estimates.", "lex.en.promise"),
+    ("Consulta y estacionamiento gratis.", "lex.es.promise"), ("Presupuesto gratuito.", "lex.es.promise"),
+]
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in FREE_AMENITY_CASES], *[(text, [rule]) for text, rule in FREE_SERVICE_CASES],
+])
+def test_public_policy_free_words_pass_only_before_an_amenity(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": "Ask about our services."}) == (
+        {"policy:a": rules} if rules else {})
+    # Claude's own reply prose keeps refusing every one of these words.
+    assert any(hit.rule_id.endswith(".promise") for hit in reply_check.scan_prose(text))
+
+
+def test_public_policy_free_amenity_is_read_within_one_card():
+    assert reply_check.scan_public_policies({"policy:a": "Free", "policy:b": "parking."}) == {
+        "policy:a": ["lex.en.promise"]}
+    assert reply_check.scan_public_policies({"policy:a": "Estacionamiento", "policy:b": "gratis."}) == {
+        "policy:b": ["lex.es.promise"]}
 
 
 @pytest.mark.parametrize(("left", "right", "rule"), [

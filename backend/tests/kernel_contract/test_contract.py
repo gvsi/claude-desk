@@ -2547,6 +2547,10 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
     ("This is not an AI.", "policy.ai_denial"),
     ("Soy una persona real.", "policy.ai_denial"),
     ("No soy un bot.", "policy.ai_denial"),
+    ("Consultations are complimentary.", "lex.en.promise"),
+    ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"),
+    ("Consulta gratis.", "lex.es.promise"),
 ])
 async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, text, rule):
     http, _, _ = kernel
@@ -2737,6 +2741,11 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
     ("Habla con una persona real por teléfono.",),
     ("Una persona real le devolverá la llamada.",),
     ("Nada que pagar hasta que el trabajo esté hecho.",),
+    ("Complimentary parking.",),
+    ("Free parking.",),
+    ("Free wi-fi while you wait.",),
+    ("Complimentary coffee while you wait.",),
+    ("Estacionamiento gratis.",),
 ])
 async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
     http, schema, _ = kernel

@@ -88,6 +88,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk.public_amenity import offers_amenity
 from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
@@ -506,9 +507,11 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 
 
 def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
-    """Only whole allowed words pass; 'complimentary' alone is too broad for public policies."""
+    """A promise hit in public text passes only as a whole word the owner allowed for this key, or as
+    "free", "complimentary", "gratis" or "gratuito" offering an amenity (`offers_amenity`): "Free parking."
+    passes, "Free estimates." and "Consultations are complimentary." don't. `text` is the key's own text."""
     return (rule.startswith("lex.") and rule.endswith(".promise")
-            and _fold(text[start:end])[0].casefold() in (allow_words | {"complimentary"}))
+            and (_fold(text[start:end])[0].casefold() in allow_words or offers_amenity(text, start, end)))
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:
@@ -592,7 +595,8 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                     break
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
-               and _allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               and _allowed_public_hit(combined[low:high], start - low, match_end - low, rule,
+                                       allow_words.get(key, frozenset()))
                for key, low, high in contributors):
             continue
         for key, low, high in contributors:
