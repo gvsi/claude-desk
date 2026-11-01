@@ -764,9 +764,10 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                    handoff_backed: bool = False, final: bool = True,
                    rendered_claims: Mapping[str, list[Claim]] | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, final}`, the reply
-    receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, dropped,
+    final}`, the reply receipt and the signature, at the session's generation as the request read it.
+    `dropped` names each card refused at signing (`{fact_id, rule_id}`, never text), so a card a
+    prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
     `reply_handed_off` exactly when its blocks include the handoff clause (template `handoff`),
     otherwise `reply_checked`. The receipt, the API's delivered event flag `handoff` and the public
     chat's handling of the "Reply checked" line all follow this same shown-block rule. A blocked
@@ -821,8 +822,10 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+    dropped: list[Violation] = []      # cards refused at signing, whether or not the prose had passed
     if author == "claude":
         blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
+        dropped = refused
         if refused:
             # A passing draft may have relied on a card just withdrawn: none of its prose is safe
             # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
@@ -840,10 +843,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
                "violations": [violation.kind for violation in violations],
                "rule_ids": [violation.rule_id for violation in violations],
-               "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
-                            else ledger.safe_ref(fact_id) for fact_id in fact_ids],
+               "fact_ids": [_ref(fact_id, canaries) for fact_id in fact_ids],
                "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
                "soft_checks": soft_checks,
+               "dropped": [{"fact_id": _ref(fact_id, canaries), "rule_id": violation.rule_id}
+                           for violation in dropped for fact_id in violation.fact_ids],
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
@@ -858,6 +862,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
 
+
+
+def _ref(fact_id: str, canaries: Mapping[str, str]) -> str:
+    """A fact ID as a reply's ledger entry names it: one holding a canary only as its hash's marker."""
+    return ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries) else ledger.safe_ref(fact_id)
 
 # ---- The handoff the card opens -------------------------------------------------------------------
 

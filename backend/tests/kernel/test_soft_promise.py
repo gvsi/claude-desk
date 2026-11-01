@@ -276,6 +276,13 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     else:
         assert_handed_off(verdict)
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+    # Why the card went is ledgered, whether the draft passed or was already blocked for its prose:
+    # the fact and the refusal's rule, never text.
+    [entry] = [entry for entry in await reply_entries(app, copy) if entry.event.ref_id == verdict.message_id]
+    assert entry.event.summary["dropped"] == [
+        {"fact_id": clauses[0]["fact_id"], "rule_id": "not_a_reader" if change == "readers" else "not_current"}]
+    assert entry.event.summary["violations"] == (["soft_promise"] if flagged else [
+        "unentitled_fact" if change == "readers" else "stale_fact"])
 
 
 @pytest.mark.parametrize("part", ["charter", "hours"])
@@ -329,6 +336,8 @@ async def test_signing_rechecks_claims_after_an_owner_replacement(app, client, r
         expected_cards = baseline.blocks[1:] if changed else baseline.blocks
         assert [block for block in verdict.blocks if block.kind == "card"] == expected_cards
         assert any(block.kind == "prose" for block in verdict.blocks) == (not flagged)
+    [entry] = [entry for entry in await reply_entries(app, copy) if entry.event.ref_id == verdict.message_id]
+    assert entry.event.summary["dropped"] == ([{"fact_id": fact_id, "rule_id": "claims_changed"}] if changed else [])
 
 
 async def test_soft_promise_request_shape():
