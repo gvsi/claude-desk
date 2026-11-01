@@ -55,7 +55,7 @@ describe('streamed setup turns', () => {
     const started = await startState();
     const id = started.interview_id;
     await send('setupConsent', id, { allow: true });
-    mockStore.streamSetupTurns();
+    mockStore.streamSetupTurns(true, { answersAtOnce: true });
     const before = await read(id);
     const answered = await send('setupAnswer', id, { question: before.question, text: 'Both, about evenly' });
     expect(answered.status).toBe(202);
@@ -78,6 +78,31 @@ describe('streamed setup turns', () => {
     expect(stream.heard.at(-1)).toEqual(['done', { run }]);
     // No choices, cards or step ever ride on a delta.
     for (const data of named(stream.heard, 'delta')) expect(Object.keys(data).sort()).toEqual(['run', 'text']);
+  });
+
+  it('holds_an_answer_until_its_streamed_turn_lands_then_answers_200_with_it', async () => {
+    const id = (await startState()).interview_id;
+    await send('setupConsent', id, { allow: true });
+    mockStore.streamSetupTurns();
+    const before = await read(id);
+    const answering = send('setupAnswer', id, { question: before.question, text: 'Both, about evenly' });
+    let answered = false;
+    void answering.then(() => {
+      answered = true;
+    });
+    // While the request waits, the interview reads busy with the owner's words.
+    const meanwhile = await read(id);
+    expect(meanwhile.busy).toBe(true);
+    expect(meanwhile.messages.at(-1)).toMatchObject({ role: 'owner', text: 'Both, about evenly' });
+    const stream = follow(id);
+    await vi.waitFor(() => expect(stream.closed()).toBe(true));
+    // The stream says done, then the request answers with the landed turn.
+    expect(stream.heard.at(-1)?.[0]).toBe('done');
+    const { status, state } = await answering;
+    expect(answered).toBe(true);
+    expect(status).toBe(200);
+    expect(state.busy).toBe(false);
+    expect(state).toEqual(await read(id));
   });
 
   it('reads_first_then_writes_after_yes_use_it', async () => {
@@ -146,7 +171,7 @@ describe('streamed setup turns', () => {
     });
     mockStore.streamSetupTurns();
     const question = (await read(id)).question;
-    await send('setupAnswer', id, { question, text: 'Mostly individuals' });
+    const answering = send('setupAnswer', id, { question, text: 'Mostly individuals' });
     const first = follow(id);
     await vi.waitFor(() => expect(named(first.heard, 'delta')).toHaveLength(2));
     const late = follow(id);
@@ -154,6 +179,7 @@ describe('streamed setup turns', () => {
     release();
     await vi.waitFor(() => expect(late.closed()).toBe(true));
     expect(late.heard.at(-1)?.[0]).toBe('done');
+    expect((await answering).status).toBe(200);
   });
 
   it('says_done_with_no_run_when_nothing_runs', async () => {

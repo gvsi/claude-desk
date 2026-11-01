@@ -11,10 +11,14 @@ export interface StreamSettings {
   /** Milliseconds between words. */
   wordMs: number;
   /**
-   * Setup's answers, decisions, consent and suggestions run as streamed turns: the request answers
-   * 202 busy at once and the turn lands when its stream ends. Otherwise they land in their request.
+   * Setup's answers, decisions, consent and suggestions run as streamed turns, which land when their
+   * stream ends. As on the API, an answer's or a decision's request is held until its turn lands
+   * and then answers 200 with it, while consent and "Use your suggestions" answer 202 busy at once.
+   * Otherwise each lands in its request.
    */
   setupTurns: boolean;
+  /** Answers and decisions answer 202 busy at once too, as the API does once a turn outlasts its wait. */
+  answersAtOnce?: boolean;
 }
 
 /** The dev server's: about the pace of a model writing, with every setup turn streamed. */
@@ -41,6 +45,8 @@ export interface OwnerStreamPlan {
   dropAfter?: number;
   /** Sends none of the reply's words, as a turn whose reply the API hides: only its end. */
   quiet?: boolean;
+  /** A setup turn whose request is held: it answers only once this settles, after the turn's `done`. */
+  landAfter?: Promise<unknown>;
 }
 
 /** A read the turn makes before it writes, and the label it ends with. */

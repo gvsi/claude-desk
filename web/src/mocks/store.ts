@@ -477,6 +477,12 @@ export class MockStore {
       if (answered === null) this.recordUnhandled(ROUTES[key].path);
       served = answered ?? failWith(501, 'not_mocked');
       if (reached !== null && !isFailure(reached)) setCookie = reached.setCookie;
+      // A route that holds its answer (a streamed setup turn) answers once its turn lands.
+      const later = (served as { later?: Promise<AnyServed> }).later;
+      if (later !== undefined && injection === null) {
+        served = await later;
+        if (!this.admits(epoch)) return { network: true };
+      }
     }
     if (injection !== null) {
       if (injection.status === 'network') return { network: true };
@@ -515,9 +521,15 @@ export class MockStore {
     this.oneCopy().server.planStream(kind, plan);
   }
 
-  /** For tests: setup's answers, decisions, consent and suggestions run as streamed turns, or land in their requests again. */
-  streamSetupTurns(on = true): void {
-    this.oneCopy().server.streams.setupTurns = on;
+  /**
+   * For tests: setup's answers, decisions, consent and suggestions run as streamed turns, or land in
+   * their requests again. An answer's or a decision's request waits for its turn and answers 200,
+   * unless `answersAtOnce` has it answer 202 busy at once, as consent's does.
+   */
+  streamSetupTurns(on = true, { answersAtOnce = false } = {}): void {
+    const { streams } = this.oneCopy().server;
+    streams.setupTurns = on;
+    streams.answersAtOnce = answersAtOnce;
   }
 
   /**

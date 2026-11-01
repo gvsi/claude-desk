@@ -100,7 +100,8 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
 
   it('follows_a_turn_already_running_when_the_step_opens', async () => {
     const state = await cpaInterview(true);
-    mockStore.streamSetupTurns();
+    // A turn that outlasted its request's wait: the request answered 202, busy.
+    mockStore.streamSetupTurns(true, { answersAtOnce: true });
     const held = gate();
     mockStore.planStream('setup', { pauseAfter: 4, until: held.until });
     const sent = await mockStore.dispatch('setupAnswer', { params: { id: state.interview_id }, query: { cards: '1' }, body: { question: 'what_you_do', text: 'Mostly individuals' } });
@@ -115,7 +116,8 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
   it('keeps_the_saved_turn_when_an_older_read_of_the_busy_interview_answers_after_it', async () => {
     const state = await cpaInterview(true);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
-    mockStore.streamSetupTurns();
+    // A turn that outlasts its request's wait: the request answers 202, and the step reads the busy interview.
+    mockStore.streamSetupTurns(true, { answersAtOnce: true });
     const turn = gate();
     mockStore.planStream('setup', { pauseAfter: 3, until: turn.until });
     await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
@@ -149,6 +151,33 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     expect(screen.container.querySelector('.cd-writing-indicator')).toBeNull();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
     expect(mockStore.requests.filter((r) => r.key === 'setupEvents')).toHaveLength(events);
+  });
+
+  it('shows_the_whole_reply_then_the_saved_turn_once_with_no_bubble_twice', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    // As on the API, the answer's request waits while its turn streams, and answers with it after done.
+    mockStore.streamSetupTurns();
+    const writing = gate();
+    const landing = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: writing.until, landAfter: landing.until });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    const owner = () => log.getByText('Both, about evenly', { exact: true }).elements();
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    writing.release();
+    // Done, while the request is still out: the reply shows whole, its last word too.
+    await expect.poll(() => growing()?.textContent).toBe(CPA_COPY.consult);
+    expect(owner()).toHaveLength(1);
+    await expect.element(log.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Google Calendar', exact: true }).elements()).toHaveLength(0);
+    // The request answers with the saved turn: it takes the growing reply's place, each bubble once.
+    landing.release();
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(growing()).toBeNull();
+    expect(owner()).toHaveLength(1);
+    expect(log.getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
+    expect(log.element().querySelector('.cd-writing-indicator')).toBeNull();
   });
 
   it('keeps_the_writing_dots_through_a_turn_that_streams_no_words', async () => {

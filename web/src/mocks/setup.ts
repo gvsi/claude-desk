@@ -136,6 +136,8 @@ interface SetupRun {
   text: string;
   followers: Set<SetupFollower>;
   stop: () => void;
+  /** Answers the turn's held request, if it has one, with the interview as it stands. */
+  land: () => void;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -1043,9 +1045,17 @@ function endRun(interview: Interview, how: 'done' | 'error' | 'drop'): void {
 /**
  * Runs a turn as a stream: the owner's words are in already; `commit` lands the rest of the turn
  * now, and reads go on seeing the interview busy, as it was, until the turn's reads and reply have
- * streamed. Answers 202 at once with the interview busy, as the API does for a turn still running.
+ * streamed. Answers 202 at once with the interview busy, as the API does for a turn still running;
+ * with `hold`, its request waits instead (`later`) and answers 200 with the landed turn once the
+ * stream has said `done`, as the API answers a turn that ends within its wait.
  */
-function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => void): { status: 202; body: SetupState } {
+function streamTurn(
+  sv: Server,
+  interview: Interview,
+  req: Req,
+  commit: () => void,
+  { hold = false } = {},
+): { status: 202; body: SetupState; later?: Promise<{ status: 200; body: SetupState }> } {
   const view = structuredClone({ ...interview.state, busy: true });
   const before = interview.state.messages.length;
   commit();
@@ -1054,8 +1064,13 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
   // The reply streams; a question with choices is the next message, which docks once the turn lands.
   const text = added.filter((m) => m.role === 'claude' && m.card == null && m.text.trim() !== '' && m.choices.length === 0).map((m) => m.text).join('\n\n');
   interview.view = view;
-  const run: SetupRun = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {} };
+  const run: SetupRun = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
   interview.run = run;
+  const later = hold
+    ? new Promise<{ status: 200; body: SetupState }>((resolve) => {
+        run.land = () => resolve({ status: 200, body: stateOf(interview, req.query) });
+      })
+    : undefined;
   const plan = sv.takePlan('setup');
   // A setup turn that fails is the API's to roll back; the mock's streamed turns only land or break off.
   const played = plan === null ? null : { ...plan, fail: undefined };
@@ -1080,9 +1095,11 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
       // The turn has landed whatever its stream did: a broken connection loses only the display.
       interview.view = null;
       endRun(interview, how === 'error' ? 'done' : how);
+      if (plan?.landAfter) void plan.landAfter.finally(run.land);
+      else run.land();
     },
   });
-  return { status: 202, body: stateOf(interview, req.query) };
+  return { status: 202, body: stateOf(interview, req.query), ...(later === undefined ? {} : { later }) };
 }
 
 /**
@@ -1093,7 +1110,7 @@ function streamTurn(sv: Server, interview: Interview, req: Req, commit: () => vo
 export function followSetupTurn(world: MockWorld, id: string, follower: SetupFollower): () => void {
   const interview = interviewsOf(world).get(id);
   if (interview && interview.run === null && busyOf(interview)) {
-    interview.run = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {} };
+    interview.run = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
   }
   const run = interview?.run ?? null;
   if (run === null) {
@@ -1118,6 +1135,7 @@ export function stopSetupRuns(world: MockWorld): void {
     if (run === null) continue;
     interview.run = null;
     run.stop();
+    run.land();
     for (const follower of run.followers) follower.close();
   }
 }
@@ -1396,7 +1414,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     }
     if (sv.streams.setupTurns) {
       say(interview, 'owner', text.trim());
-      return streamTurn(sv, interview, req, () => applyAnswer(sv.world, interview, text, true));
+      return streamTurn(sv, interview, req, () => applyAnswer(sv.world, interview, text, true), { hold: sv.streams.answersAtOnce !== true });
     }
     applyAnswer(sv.world, interview, text);
     return ok(stateOf(interview, req.query));
@@ -1451,7 +1469,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       interview.state.busy = true;
       return { status: 202, body: stateOf(interview, req.query) };
     }
-    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, apply);
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, apply, { hold: sv.streams.answersAtOnce !== true });
     apply();
     return ok(stateOf(interview, req.query));
   },
