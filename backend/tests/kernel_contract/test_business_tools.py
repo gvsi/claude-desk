@@ -24,6 +24,10 @@ from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_
     ('Tuesday 5pm drop-in', {'block': 'intake', 'questions': ['What?']}, False),
     ('Reply within 24 hours', {'block': 'intake', 'questions': ['What?']}, False),
     ('We will call you back today', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Call \u202eyadot\u202c', {'block': 'intake', 'questions': ['What?']}, False),
+    ('guaran\u200bteed', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Consultation gratuite', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Kostenlose Beratung', {'block': 'intake', 'questions': ['What?']}, False),
 ])
 async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read, title, config, accepted):
     http, schema, _ = kernel

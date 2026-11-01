@@ -424,6 +424,24 @@ async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client
         assert (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256 == original
 
 
+async def test_card_fields_refuse_hidden_characters_and_other_language_commitments(app, client):
+    from desk.kernel_service.business_tools import public_promise_fields
+
+    copy = await rivera(app, client)
+    for title in ('Call \u202eyadot\u202c', 'guaran\u200bteed', 'Consultation gratuite', 'Kostenlose Beratung',
+                  'Consultation offerte', 'sans frais', 'sem custo', 'grátis', 'senza costi', 'umsonst'):
+        assert public_promise_fields({'title': title, 'purpose': 'Retainer'}) == ['title', 'purpose']
+        response = await put(client, copy, [intake(title=title)])
+        assert response.status_code == 422, (title, response.text)
+        assert await business_rows(app, copy) == {}
+    # Use exactly the reply check's unseen predicate, including ignorables beyond Cf.
+    from desk.kernel_service import reply_check
+    for char in ('\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068',
+                 '\u2069', '\u200d', '\u00ad', '\u034f', '\ufe0f'):
+        assert reply_check._unseen(char)
+        assert public_promise_fields({'title': 'Intake', 'purpose': 'Retainer' + char}) == ['title', 'purpose']
+
+
 @pytest.mark.parametrize('title,config,status', [
     ('Book a free intro consult', {'block': 'intake', 'questions': ['What?']}, 200),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}, 200),

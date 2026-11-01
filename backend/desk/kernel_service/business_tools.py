@@ -22,6 +22,17 @@ FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "
 # Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
 CURRENCY_CODE = re.compile(r"\b(?:USD|EUR|GBP|CAD|AUD|MXN|JPY|INR|CHF|CNY|HKD|NZD|SGD|BRL|ZAR|AED|SAR|KRW)\b")
 
+# Mirror B7's policy-only other_promises.txt until its shared scanner is available here.
+# Spanish/Italian "gratis" remains subject to the field-scoped FREE_WORDS exception;
+# Portuguese "grátis" requires its accent and is always refused by this language rule.
+OTHER_PROMISE = re.compile(
+    r"(?<!\w)(?:gratuite?s?|offerte?s?|sans[\s-]+frais|remises?|rabais|garantie?s?"
+    r"|remboursee?s?|remboursements?|sem[\s-]+(?:custos?|taxas?)|descontos?|garantid[oa]s?"
+    r"|senza[\s-]+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimborso|rimborsi"
+    r"|kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)(?!\w)",
+    re.IGNORECASE)
+ACCENTED_PROMISE = re.compile(r"(?<!\w)grátis(?!\w)", re.IGNORECASE)
+
 
 def config_texts(value):
     """Every string in the batch, before JSON escaping can conceal an unstorable character."""
@@ -51,6 +62,9 @@ def public_promise_fields(values: Mapping[str, str], *,
     """Shared real/fake check: one prose scan, preserving field boundaries for narrow exceptions."""
     from desk.kernel_service import reply_check
 
+    # Receipts render the original value, so normalization must not conceal a control.
+    if any(reply_check._unseen(ch) for value in values.values() for ch in value):
+        return list(values)
     pieces, bounds, offset = [], [], 0
     for key, value in values.items():
         text = reply_check.shown(value)
@@ -59,6 +73,10 @@ def public_promise_fields(values: Mapping[str, str], *,
         offset += len(text) + 1
     combined = "\n".join(pieces)
     hits = reply_check.scan_prose(combined)
+    accented = unicodedata.normalize("NFC", "".join(reply_check.LOOKALIKES.get(ch, ch) for ch in combined))
+    if (any(OTHER_PROMISE.search(reading) for reading in reply_check._readings(combined))
+            or ACCENTED_PROMISE.search(accented)):
+        return list(values)
     if CURRENCY_CODE.search(combined) or any(unicodedata.category(ch) == "Sc" for ch in combined):
         return list(values)
     if not hits:
