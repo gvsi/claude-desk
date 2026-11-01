@@ -1076,13 +1076,14 @@ async def named_desk(app, client, tools, states):
     """Rivera with business `tools` written, each row then put in its state of `states` (by tool):
     `enabled`, `needs_review` (as written), `disabled`, `stale` (enabled, its profile pin broken), or
     `drifted` (enabled, its stored definition changed outside the write and its profile pin recomputed
-    to match, so only `adapters.resolve`'s check of the definition can tell); a visitor of it."""
+    to match, so only `adapters.resolve`'s check of the definition can tell); a visitor of it. The seed's
+    urgent tool, which the whole-set write turns off, is left as it is."""
     copy = await rivera(app, client)
     assert (await put(client, copy, tools)).status_code == 200
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
-                Tool.desk_id == copy.desk_id, Tool.source == 'business'))):
+                Tool.desk_id == copy.desk_id, Tool.source == 'business', Tool.tool.in_(states)))):
             state = states[row.tool]
             if state != 'needs_review':
                 row.status, row.review_reason = ('disabled' if state == 'disabled' else 'enabled'), None
@@ -1126,10 +1127,10 @@ async def test_a_business_tool_waiting_for_review_disabled_or_stale_backs_no_fre
 
 async def test_business_free_names_are_enabled_resolving_titles_and_types_never_a_payments(app, client):
     """Desk-wide, in tool order: every enabled tool that resolves lends its title and appointment
-    type, and nothing else does (a block with no adapter yet, a tool waiting for review, a disabled
-    one, one whose profile no longer matches its pin, or one whose definition drifted from its pinned
-    profile). The payment is left out here because its block has no adapter yet; the rule that a
-    payment's title never lends a free word is pinned by `blocks.free_name_fields`'s own test above."""
+    type, and nothing else does (a tool waiting for review, a disabled one, one whose profile no
+    longer matches its pin, or one whose definition drifted from its pinned profile). The enabled
+    payment resolves too, and lends nothing: a payment's title never backs a free word
+    (`blocks.free_name_fields`). The batch leaves out the Rivera seed's urgent tool, which it turns off."""
     from desk.kernel_service import context
 
     tools = [intake(title=INTRO_CALL),
@@ -1149,4 +1150,5 @@ async def test_business_free_names_are_enabled_resolving_titles_and_types_never_
         'desk.drifted': 'drifted'})
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
-        assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL]
+        assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL,
+                                                                         'Urgent support']
