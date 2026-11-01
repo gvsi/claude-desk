@@ -148,7 +148,8 @@ async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str],
               .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
                      MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(kinds))
               .group_by(MESSAGES.c.session_id))
-    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(MESSAGES.c.n.in_(newest)))
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.n.in_(newest)))
     return dict(rows.all())
 
 
