@@ -23,6 +23,7 @@
 - `maxLength` to cap the text (2000 for a chat message). From 90% of it a counter shows ("1800 / 2000"), in numbers only so it reads the same in English and Spanish, and joins the description.
 - `onAttach` and `onSpeak` only when they do something: without a handler there is no button, so no control is dead.
 - `onSend` gets the trimmed text, never empty. The composer clears itself. To keep a message that failed, show it in the transcript with a way to try again, or keep it in the composer with `failed` (below), as the setup interview does with an owner's answer.
+- `sendHeld` while Claude's reply is coming in (waiting for it, its stream, its reveal): typing works and the text box keeps focus, but Send is disabled and Enter does nothing (Shift+Enter still starts a new line). The text stays, and Send works again once the screen lifts it. No words say so; the disabled Send is the visible state. Keep `disabled` for a box nothing may be typed in (no session, a paused chat, a finished step).
 - `inertSend` is for the vision pages only (the phone and Claude account vision pages), which make no requests: typing works and Send keeps its look (disabled while the box is empty), but Send and Enter do nothing, `onSend` is never called, and the text stays. Never on a real chat. The first press shows `VISION_INERT_LINE`, "This is a vision page, so nothing is sent.", once, in a secondary caption 8 px under the composer, in a polite live region (`role="status"`) that is there from the start and takes no room until then; later presses change nothing and announce nothing. While `failed` is set, the failed box shows instead and no vision line is drawn; once it clears, the composer is inert as before.
 
 ## A send that failed
@@ -44,6 +45,7 @@
 | `helper` | `string` | In the controls row (`owner`) or under the box (`visitor`, `whisper`). |
 | `sendLabel` | `string` | "Send" (`owner`, `visitor`) or "Send whisper" (`whisper`) by default. |
 | `disabled` | `boolean` | Nothing can be typed or sent; with `failed`, "Try again" waits. |
+| `sendHeld` | `boolean` | A reply is coming in: typing works and focus stays, but Send and Enter wait. `false` by default. |
 | `maxLength` | `number` | Caps the text; a counter from 90% of it. |
 | `onSend` | `(text: string) => void` | Required. |
 | `onAttach` | `() => void` | Adds "Add a photo or file". |

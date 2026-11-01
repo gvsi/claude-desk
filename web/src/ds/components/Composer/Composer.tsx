@@ -25,6 +25,11 @@ export interface ComposerProps {
   /** The send button's name; "Send" (`owner`, `visitor`) or "Send whisper" (`whisper`) by default. */
   sendLabel?: string;
   disabled?: boolean;
+  /**
+   * A reply is coming in: typing works and the text box keeps focus, but Send is disabled and Enter
+   * does nothing. The text stays.
+   */
+  sendHeld?: boolean;
   /** Caps the text at this many characters, with a counter from 90% of it. */
   maxLength?: number;
   /** Called with the trimmed text, never empty; the composer then clears. */
@@ -87,6 +92,7 @@ export function Composer({
   helper,
   sendLabel,
   disabled = false,
+  sendHeld = false,
   maxLength,
   onSend,
   onAttach,
@@ -113,7 +119,7 @@ export function Composer({
   }
 
   const text = value.trim();
-  const canSend = !disabled && text !== '';
+  const canSend = !disabled && !sendHeld && text !== '';
   const showCounter = maxLength !== undefined && value.length >= maxLength * COUNTER_FROM;
   const inputId = `${id}-input`;
   const helperId = helper ? `${id}-helper` : undefined;

@@ -77,3 +77,36 @@ it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async
   const result = await axe.run(screen.container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } });
   expect(result.violations).toEqual([]);
 });
+
+it('send_held_keeps_typing_and_focus_but_holds_send_and_enter_until_it_lifts', async () => {
+  const sent: string[] = [];
+  const props = { variant: 'owner', label: 'Ask Claude', placeholder: 'Ask Claude', onSend: (text: string) => sent.push(text) } as const;
+  const screen = await render(<Composer {...props} />);
+  const input = screen.getByRole('textbox', { name: 'Ask Claude' });
+  const send = screen.getByRole('button', { name: 'Send' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  // A reply starts coming in while the box has focus: it keeps it, and typing works.
+  await screen.rerender(<Composer {...props} sendHeld />);
+  await expect.element(input).toBeEnabled();
+  expect(document.activeElement).toBe(box);
+  await userEvent.keyboard('Is $500 fine?');
+  expect(box.value).toBe('Is $500 fine?');
+  // Only Send and Enter wait: nothing is sent, and the words stay.
+  await expect.element(send).toBeDisabled();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toEqual([]);
+  expect(box.value).toBe('Is $500 fine?');
+  // Shift+Enter still starts a new line.
+  await userEvent.keyboard('{Shift>}{Enter}{/Shift}Or less?');
+  expect(box.value).toBe('Is $500 fine?\nOr less?');
+  expect(document.activeElement).toBe(box);
+  // The reply has come in: focus stays, and the words typed meanwhile send.
+  await screen.rerender(<Composer {...props} />);
+  expect(document.activeElement).toBe(box);
+  expect(box.value).toBe('Is $500 fine?\nOr less?');
+  await expect.element(send).toBeEnabled();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toEqual(['Is $500 fine?\nOr less?']);
+  expect(box.value).toBe('');
+});
