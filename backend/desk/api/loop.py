@@ -730,7 +730,9 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
                  jobs: procrastinate.App | None = None,
                  limiter: RateLimiter | None = None,
                  resend_since: datetime | None = None) -> tuple[PendingOutcome, int | None]:
-    """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits.
+    """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits. The recovered
+    results get a turn of their own for Claude to read only when no recovered reply showed: a shown reply, a handoff
+    included, had ended the turn, as it does in `_tool_use`.
 
     A turn that hands off with no model call (past the daily budget, or paused) stops the work it answers from waking
     turns (`clear_wake`), so neither this run nor the next request's hands off again for it; work that arrives after
@@ -754,7 +756,7 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
         if (stop := _stop(recovered)) is not None:
             return await _end(conn, caller, model, stop), None
         shown = {outcome.delivered for outcome in recovered} - {None}
-        must_call = not ("reply" in shown or (end_on_reply and shown))     # Claude reads the results, as in a turn
+        must_call = not shown          # any shown reply ended the turn, a handoff included; else Claude reads them
     if session.mode == "owner":
         return "not_ai", None                             # the owner has the conversation: work waits for hand-back
     outcome: PendingOutcome = "idle"

@@ -32,7 +32,7 @@ from desk.api.store import (
     transcript,
 )
 from desk.api.tools import Caller, send_reply
-from desk.contracts import Clause, RenderedBlock, ReplyDraft, ToolCall
+from desk.contracts import Clause, ReplyDraft, ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.events import EvOwnerJoined
 from desk.kernel_api import CheckReplyRequest, DecideRequest, KernelError
@@ -446,12 +446,12 @@ async def test_a_fresh_context_carries_the_results_claude_had_not_read(api_conn,
     assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
 
 
-async def test_a_recovered_turn_whose_reply_showed_only_as_the_handoff_still_waits(
+async def test_a_recovery_whose_reply_showed_only_as_the_handoff_asks_claude_nothing_more(
         api_conn, engine, locks, caller, visitor, fake, monkeypatch):
     """Claude booked and replied in one response; the reply showed only as the handoff (it carried a canary), and the
-    worker stopped before the results row. The next request recovers the calls and asks Claude to read them: that
-    recovery turn runs in the context that made them, on its prompt, though a deploy changed the prompt; the turn after
-    it opens the new one."""
+    worker stopped before the results row. A shown handoff ends a turn as any shown reply does, so recovering the
+    calls runs no turn of its own and nothing shows after the handoff; after a deploy that changed the prompt, the
+    visitor's next message opens a fresh context at once."""
     opened_with = conversation_system(RIVERA)
     await said(api_conn, caller, "Book me the earliest visit.")
     fake.violation("canary")                         # the reply carries a document canary: the handoff in its place
@@ -474,10 +474,14 @@ async def test_a_recovered_turn_whose_reply_showed_only_as_the_handoff_still_wai
         "handoff"]
 
     monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
-    model = ScriptedModel([response(reply("You're booked.", id="toolu_done"))])
-    assert await pending(caller, model, engine, locks) == "done"
-    (request,) = model.requests
-    assert request.system == opened_with and len(thinking_blocks(request)) == 1
+    model = ScriptedModel()
+    assert await pending(caller, model, engine, locks) == "idle"
+    assert model.requests == []
+    *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert [(result["tool_use_id"], json.loads(result["content"])["outcome"]) for result in results] == [
+        ("toolu_book", "done"), ("toolu_say", "delivered_handoff")]
+    assert [blocks[0]["template"] for (blocks,) in await rows(api_conn, caller.session_id, "delivered", "blocks")] == [
+        "handoff"]
     assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0]
 
     await said(api_conn, caller, "Thanks!")
@@ -963,25 +967,28 @@ async def test_new_visitor_message_joins_the_next_call(api_conn, engine, locks, 
     assert not await has_pending(api_conn, caller.session_id)
 
 
-async def test_recovered_cards_plus_handoff_ends_the_request_without_another_call(api_conn, engine, locks, caller, fake):
+@pytest.mark.parametrize("end_on_reply", [True, False], ids=["agent", "visitor"])
+async def test_recovered_cards_plus_handoff_ends_the_request_without_another_call(api_conn, engine, locks, caller, fake,
+                                                                                end_on_reply):
+    # A turn stopped after its final reply was delivered and before the results row: only the prose failed, so the
+    # kernel's verdict keeps the checked hours card and, after it, the handoff clause Claude drafted. Recovery answers
+    # the call from that delivery and asks Claude nothing more, for an agent's request and a visitor's alike.
     await said(api_conn, caller, "Hello")
     assert await pending(caller, ScriptedModel([response(reply("Hello, how can I help?"))]), engine, locks) == "done"
     await said(api_conn, caller, "When are you open?")
     await prepare_model_input(api_conn, caller.session_id)
-    block = reply("Here is $89.", HOURS, id="toolu_crashed")
+    block = reply("Here is $89.", HOURS, {"template": "handoff"}, id="toolu_crashed")
     await append_assistant(api_conn, caller.ids, [block], generation=0)
     await api_conn.commit()
     verdict = await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
         session_id=caller.session_id, generation=0, prose=block["input"]["prose"],
-        clauses=[Clause(**HOURS)])))
-    # Exercise a signed recovery shape that can carry cards above the handoff clause.
-    verdict = verdict.model_copy(update={"blocks": [*verdict.blocks,
-        RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")]})
+        clauses=[Clause(**HOURS), Clause(template="handoff")]), final=True))
+    assert not verdict.ok and [b.template for b in verdict.blocks] == ["hours", "handoff"]
     await deliver(api_conn, caller.ids, Reply(verdict, "claude", "model", call_id=block["id"]),
                   ro_schema=caller.ro_schema)
     await api_conn.commit()
     model = ScriptedModel()
-    assert await pending(caller, model, engine, locks, end_on_reply=True) == "idle"
+    assert await pending(caller, model, engine, locks, end_on_reply=end_on_reply) == "idle"
     assert model.requests == [] and len(fake.called("/check_reply")) == 2
     results = (await rows(api_conn, caller.session_id, "model_tool_results", "model_content"))[-1][0]
     assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
