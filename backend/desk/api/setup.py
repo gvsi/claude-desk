@@ -287,6 +287,7 @@ from desk.contracts import (
 )
 from desk.db.models import SetupInterview
 from desk.kernel_api import (
+    BusinessToolsRequest,
     CreateDeskRequest,
     DecideRequest,
     DeskAnsweringRequest,
@@ -2557,7 +2558,29 @@ def finish(interview: Interview) -> None:
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
-    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+    """Publish accepted configurations as one batch for the owner's tool review."""
+    tools = []
+    used = set()
+    configured = [job for job in accepted_jobs if job.config is not None]
+    if len(configured) > 8:
+        logger.warning("%s accepted setup jobs with configurations were left out of the business tools batch",
+                       len(configured) - 8)
+    for job in configured[:8]:
+        slug = item_slug(job.title)
+        slug = re.sub(r"^[^a-z]+", "", slug) or job.config.block.replace("_", "-")
+        slug = slug[:40].rstrip("-")
+        name, number = slug, 2
+        while name in used:
+            suffix = f"-{number}"
+            name = slug[:40 - len(suffix)].rstrip("-") + suffix
+            number += 1
+        used.add(name)
+        tools.append({"tool": f"desk.{name}", "title": job.title[:60],
+                      "description": " ".join(job.how.split())[:300],
+                      "config": job.config.model_dump(mode="json")})
+    if tools:
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": tools}), path={"id": desk_id})
 
 
 def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
@@ -2619,9 +2642,16 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
         return
-    desk_id = owner.desk(interview.desk_id)
     try:
+        desk_id = owner.desk(interview.desk_id)
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except KernelFailed as failed:
+        if failed.status == 404:
+            logger.warning("setup business tools aren't available (404); keeping words only")
+        elif failed.status == 422:
+            logger.warning("the setup business tools batch was refused (%s); keeping words only", failed.code)
+        else:
+            logger.warning("a setup business tools write failed (%s %s)", failed.status, failed.code)
     except Exception as failed:
         logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 

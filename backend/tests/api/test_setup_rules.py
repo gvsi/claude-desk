@@ -35,6 +35,7 @@ from pydantic import ValidationError
 from sqlalchemy import text as sql
 
 from desk.api import proving, schemas, setup
+from desk.api import setup as desk_setup
 from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
 from desk.api.kernel_client import KernelFailed, KernelUnavailable, KernelView
 from desk.api.main import _install_error_handlers as install_error_handlers
@@ -50,7 +51,9 @@ from desk.api.prompts import (
     DraftedRules,
     DraftedSituations,
     HoursAnswer,
+    JobProposal,
     PriceAnswer,
+    ProposalCard,
     RuleCardDraft,
     SetupAnswers,
     SituationDraft,
@@ -96,9 +99,11 @@ from tests.api.test_setup_questions import (
     cut_short,
     idle_in_transaction,
     new_owner,
+    next_step,
     structured,
     turn,
 )
+from tests.kernel_contract import fake_kernel
 from tests.kernel_contract.fake_kernel import changes_always_on, fake_kernel_app, tool_profile
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
@@ -241,6 +246,162 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
     assert state["step"] == "tools"
     return owner, state
+
+
+async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    jobs = [
+        JobProposal(job="intake", title="Take repair requests!", why="Collect details",
+                    how=" Ask  what\nneeds repair. ", autonomy="ask", can_do_today=True,
+                    config={"block": "intake", "questions": ["What needs repair?"]}),
+        JobProposal(job="urgent", title="Flag urgent help", why="Reach the owner",
+                    how="Tell the owner about urgent requests.", autonomy="ask", can_do_today=True,
+                    config={"block": "urgent", "urgent_when": "An active leak"}),
+        JobProposal(job="schedule", title="Book a visit", why="Arrange visits",
+                    how="Book a visit in opening hours.", autonomy="ask", can_do_today=True,
+                    config={"block": "typed_booking", "appointment_type": "Repair visit", "minutes": 60}),
+        JobProposal(job="answer", title="Answer questions", why="Explain services",
+                    how="Answer service questions.", autonomy="ask", can_do_today=True, config=None),
+    ]
+    cards = [ProposalCard(proposal_id=f"p-{index:012x}", kind="job",
+                          state="declined" if index == 2 else "accepted", job=job, connector=None)
+             for index, job in enumerate(jobs)]
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+        interview.transcript.append(desk_setup.Entry(role="claude", text="", planned=cards))
+        await desk_setup._save(conn, interview)
+    return owner, state, jobs
+
+
+async def finish_business_jobs(owner, state, model):
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk will help with requests."))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    return reply.json()
+
+
+async def test_accepted_jobs_become_business_tools_needing_review(app, browser, kernel_http, model, engine, fake):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    await finish_business_jobs(owner, state, model)
+    writes = [call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]
+    assert len(writes) == 1
+    assert writes[0].path == f"/desks/{state['desk_id']}/business_tools"
+    assert writes[0].body == {"tools": [
+        {"tool": name, "title": job.title, "description": " ".join(job.how.split()),
+         "config": job.config.model_dump(mode="json")}
+        for name, job in zip(["desk.take-repair-requests", "desk.flag-urgent-help"], jobs[:2])
+    ]}
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = [row for row in reply.json()["tools"] if row["source"] == "business"]
+    assert {row["tool"] for row in tools} == {"desk.take-repair-requests", "desk.flag-urgent-help"}
+    assert all(row["status"] == "needs_review" and row["definition_sha256"] for row in tools)
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+
+
+@pytest.mark.parametrize(("titles", "names"), [
+    (["Take, repair: requests!", "123 Requests 45!", "a" * 39 + " " + "b" * 20,
+      "Repair requests", "Repair requests!", "Repair requests-2", "123 !!!", "123 ???", "Ignored"],
+     ["take-repair-requests", "requests-45", "a" * 39,
+      "repair-requests", "repair-requests-2", "repair-requests-2-2", "intake", "intake-2"]),
+    (["Reservar visita técnica", "Cobrar la señal"], ["reservar-visita-tecnica", "cobrar-la-senal"]),
+])
+async def test_business_tool_names_are_built_by_code(titles, names):
+    writes = []
+
+    async def call(route, body, **kwargs):
+        writes.append((route, body, kwargs))
+
+    jobs = [JobProposal(job="intake", title=title, how=" Take\tdetails. ", why="Help visitors",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What do you need?"]}) for title in titles]
+    await desk_setup._put_business_tools(SimpleNamespace(kernel=SimpleNamespace(call=call)), "desk-1", jobs)
+    assert len(writes) == 1
+    route, body, kwargs = writes[0]
+    assert route == "PUT /desks/{id}/business_tools" and kwargs == {"path": {"id": "desk-1"}}
+    assert [tool.tool for tool in body.tools] == [f"desk.{name}" for name in names]
+    assert [tool.title for tool in body.tools] == titles[:8]
+    assert all(tool.description == "Take details." for tool in body.tools)
+
+
+async def test_business_tools_log_only_the_count_left_out(caplog):
+    writes = []
+
+    async def call(route, body, **kwargs):
+        writes.append(body)
+
+    jobs = [JobProposal(job="intake", title=f"Private request {index}", how="Private details",
+                        why="Help visitors", autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What do you need?"]}) for index in range(10)]
+    jobs.insert(0, jobs[0].model_copy(update={"config": None}))
+    await desk_setup._put_business_tools(SimpleNamespace(kernel=SimpleNamespace(call=call)), "desk-1", jobs)
+    assert len(writes[0].tools) == 8
+    assert "2 accepted setup jobs with configurations were left out" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_without_the_business_tools_route_setup_keeps_words_only(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, caplog,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    monkeypatch.setitem(fake_kernel.FAILURE_CODES, "404", "not_found")
+    fake.fail("PUT /desks/{id}/business_tools", "404")
+    await finish_business_jobs(owner, state, model)
+    saved = await stored(engine, state["interview_id"])
+    assert saved["answers"]["how_we_help"] == "\n".join(" ".join(job.how.split()) for job in [*jobs[:2], jobs[3]])
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    assert "404" in caplog.text
+
+
+async def test_a_refused_business_tools_batch_keeps_words_only(
+    app, browser, kernel_http, model, engine, fake, caplog,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    fake.fail("PUT /desks/{id}/business_tools", "422", times=1)
+    await finish_business_jobs(owner, state, model)
+    saved = await stored(engine, state["interview_id"])
+    assert saved["answers"]["how_we_help"] == "\n".join(" ".join(job.how.split()) for job in [*jobs[:2], jobs[3]])
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    assert "invalid" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_other_business_tool_refusals_log_status_and_code(caplog):
+    async def call(*args, **kwargs):
+        raise KernelFailed(409, "conflict")
+
+    job = JobProposal(job="intake", title="Private title", how="Private details", why="Help visitors",
+                      autonomy="ask", can_do_today=True,
+                      config={"block": "intake", "questions": ["What do you need?"]})
+    interview = SimpleNamespace(business_tools_enabled=True, desk_id="desk-1")
+    owner = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=SimpleNamespace(call=call))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(desk_setup, "accepted_jobs", lambda _: [job])
+        await desk_setup.after_finish(owner, interview)
+    assert "409" in caplog.text and "conflict" in caplog.text
+    assert job.title not in caplog.text and job.how not in caplog.text
+
+
+async def test_business_tools_are_not_written_while_disabled(app, browser, kernel_http, model, engine, fake):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, enabled=False)
+    # A stored interview can retain configs from when the setting was on. The runtime gate still wins.
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+    assert any(job.config is not None for job in desk_setup.accepted_jobs(interview))
+    ctx = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=kernel_http.owner(owner.token))
+    desk_setup.finish(interview)
+    await desk_setup.after_finish(ctx, interview)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert not any(call.route == "PUT /desks/{id}/business_tools" for call in fake.calls)
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
 
 
 def policy(state: dict, step: str) -> str:
