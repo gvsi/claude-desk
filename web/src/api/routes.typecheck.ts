@@ -91,6 +91,8 @@ export const ROUTE_MODELS = {
   setupPublicLines: 'SetupPublicLines',
   setupPublicLine: 'SetupPublicLines',
   setupPublicLinesConfirm: 'SetupPublicLines',
+  removePublicLine: 'SetupPublicLines',
+  removePublicPrice: 'SetupPublicLines',
 
   // Public
   publicDesk: 'PublicDesk',
@@ -129,9 +131,6 @@ export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
  * forever. Each entry must be served and called by no route.
  */
 export const NEVER_CALLED = [
-  // Called by the suggested group on board 14's setup web (plan 09), which adds these routes.
-  'DELETE /api/owner/setup/{id}/public_lines/{key}',
-  'DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}',
   // Served for other callers: the document link a visitor opens, and a visiting agent's turn.
   'GET /api/d/{token}',
   'POST /api/a2a/{slug}',

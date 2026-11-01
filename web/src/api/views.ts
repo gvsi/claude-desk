@@ -589,10 +589,14 @@ export interface SetupPublicLine {
   held?: boolean;
 }
 
+export type PublicHoursWindow = HoursWindow;
+
 export interface SetupPublicHours {
   source: 'owner' | 'suggested';
   windows: HoursWindow[];
 }
+
+export type PublicPriceItem = SetupPublicPriceItem;
 
 export interface SetupPublicPriceItem {
   item_id: string;

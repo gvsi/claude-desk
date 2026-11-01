@@ -189,8 +189,10 @@ function notify(outcome: RequestOutcome): void {
 
 type HasKeys<T> = keyof T extends never ? false : true;
 
-/** `params` when the path has placeholders and `body` when the route takes one, each typed. */
-export type RequestOptions<K extends RouteKey> = { query?: RouteQuery } & (HasKeys<RouteParams<K>> extends true
+/** Path params, bodies and required query values are typed by the route. */
+export type RequestOptions<K extends RouteKey> = ({} extends RouteQuery<K>
+  ? { query?: RouteQuery<K> }
+  : { query: RouteQuery<K> }) & (HasKeys<RouteParams<K>> extends true
   ? { params: RouteParams<K> }
   : { params?: undefined }) &
   (RouteBody<K> extends undefined ? { body?: undefined } : { body: RouteBody<K> });
