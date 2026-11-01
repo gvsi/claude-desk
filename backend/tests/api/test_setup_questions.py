@@ -1248,7 +1248,7 @@ async def test_start_writes_the_sample_memory_before_the_consent_read(app, brows
         {"id": "m-service-hours", "title": notes[1]["title"], "topics": ["hours"], "text": notes[1]["text"]}]}
     assert not fake.called("POST /execute")
 
-    await consent(owner, state["interview_id"], True)
+    await consent(owner, state["interview_id"], True, model)
     routes = [call.route for call in fake.calls]
     assert routes.index(written.route) < routes.index("POST /execute")
     transcript = (await stored(engine, state["interview_id"]))["transcript"]
@@ -1285,7 +1285,7 @@ async def test_a_failed_memory_write_reads_an_empty_memory_never_riveras(app, br
     assert [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"] == [
         f"the sample memory couldn't be written ({expected})"]
     assert not fake.desks[reply.json()["desk_id"]].answering
-    await consent(owner, reply.json()["interview_id"], True)
+    await consent(owner, reply.json()["interview_id"], True, model)
     transcript = (await stored(engine, reply.json()["interview_id"]))["transcript"]
     (memory,) = [entry for entry in transcript if entry.get("read") == "memory"]
     assert "Rivera" not in memory["content"] and "Maria" not in memory["content"]
@@ -1311,7 +1311,7 @@ async def test_an_invalid_memory_request_logs_and_start_continues(app, browser, 
         "the sample memory couldn't be written (ValidationError)"]
     assert not fake.called("PUT /desks/{id}/memory")
     assert not fake.desks[reply.json()["desk_id"]].answering
-    await consent(owner, reply.json()["interview_id"], True)
+    await consent(owner, reply.json()["interview_id"], True, model)
     transcript = (await stored(engine, reply.json()["interview_id"]))["transcript"]
     (memory,) = [entry for entry in transcript if entry.get("read") == "memory"]
     assert memory["content"] == ""
