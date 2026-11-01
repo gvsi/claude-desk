@@ -105,6 +105,7 @@ def main():
                 assume_role_policy_document={"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]})["Role"]
             created.append("role")
             aws("iam", "put-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME, policy_document=SESSION_POLICY)
+            created.append("policy")
         policies = aws("iam", "list-attached-role-policies", role_name=role)["AttachedPolicies"]
         inline = aws("iam", "list-role-policies", role_name=role)["PolicyNames"]
         if policies or inline != [SESSION_POLICY_NAME]:
@@ -133,6 +134,7 @@ def main():
             profile_info = aws("iam", "create-instance-profile", instance_profile_name=profile, tags=TAGS)["InstanceProfile"]
             created.append("profile")
             aws("iam", "add-role-to-instance-profile", instance_profile_name=profile, role_name=role)
+            created.append("profile-role")
             time.sleep(10)
         vpcs = aws("ec2", "describe-vpcs", filters=[{"Name": "is-default", "Values": ["true"]}])["Vpcs"]
         if len(vpcs) != 1:
@@ -209,23 +211,28 @@ def main():
     except BaseException:
         # Roll back only resources this invocation created; pre-existing resources are preserved.
         print(f"Provisioning failed. Created in this invocation: {created}", file=sys.stderr)
+        operations = {
+            "instance": [("ec2", "modify-instance-attribute", {"instance_id": instance, "disable_api_termination": {"Value": False}}),
+                         ("ec2", "terminate-instances", {"instance_ids": [instance]}),
+                         ("ec2", "wait", {"instance_terminated": instance})],
+            "group": [("ec2", "delete-security-group", {"group_id": group})],
+            "profile-role": [("iam", "remove-role-from-instance-profile", {"instance_profile_name": profile, "role_name": role})],
+            "profile": [("iam", "delete-instance-profile", {"instance_profile_name": profile})],
+            "policy": [("iam", "delete-role-policy", {"role_name": role, "policy_name": SESSION_POLICY_NAME})],
+            "role": [("iam", "delete-role", {"role_name": role})],
+        }
+        # Association creation can fail. Track it separately and attempt every cleanup even
+        # if an earlier cleanup fails; an absent association must not prevent deletion.
         for resource in reversed(created):
-            try:
-                if resource == "instance":
-                    aws("ec2", "modify-instance-attribute", instance_id=instance, disable_api_termination={"Value": False})
-                    aws("ec2", "terminate-instances", instance_ids=[instance])
-                    subprocess.run(["aws", "--region", args.region, "ec2", "wait", "instance-terminated", "--instance-ids", instance], check=True)
-                elif resource == "group":
-                    aws("ec2", "delete-security-group", group_id=group)
-                elif resource == "profile":
-                    aws("iam", "remove-role-from-instance-profile", instance_profile_name=profile, role_name=role)
-                    aws("iam", "delete-instance-profile", instance_profile_name=profile)
-                elif resource == "role":
-                    aws("iam", "delete-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME)
-                    aws("iam", "delete-role", role_name=role)
-                print(f"Rolled back {resource}", file=sys.stderr)
-            except Exception as cleanup_error:
-                print(f"Cleanup incomplete for {resource}: {cleanup_error}; instance={instance}, group={group}, role/profile={role}", file=sys.stderr)
+            for service, operation, params in operations[resource]:
+                try:
+                    if operation == "wait":
+                        subprocess.run(["aws", "--region", args.region, "ec2", "wait", "instance-terminated", "--instance-ids", instance], check=True)
+                    else:
+                        optional(service, operation, **params)
+                    print(f"Rolled back {resource}: {operation}", file=sys.stderr)
+                except Exception as cleanup_error:
+                    print(f"Cleanup incomplete for {resource}: {cleanup_error}; instance={instance}, group={group}, role/profile={role}", file=sys.stderr)
         raise
 
 

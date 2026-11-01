@@ -119,3 +119,32 @@ def test_exact_session_policy_passes_read_only_live_check(monkeypatch):
     invoke(monkeypatch, fixture, "--check")
     assert "get-role-policy" in fixture.calls
     assert not set(fixture.calls) & {"start-instances", "send-command", "modify-instance-attribute", "put-role-policy", "add-role-to-instance-profile"}
+
+
+@pytest.mark.parametrize('failure', ['get-role', 'create-role', 'put-role-policy', 'list-attached-role-policies', 'list-role-policies', 'get-role-policy', 'get-instance-profile', 'create-instance-profile', 'add-role-to-instance-profile', 'describe-vpcs', 'describe-security-groups', 'create-security-group', 'describe-instances', 'get-parameter', 'describe-subnets', 'describe-instance-type-offerings', 'run-instances', 'describe-instance-information', 'send-command', 'get-command-invocation'])
+def test_partial_creation_rolls_back_every_created_resource(monkeypatch, failure):
+    fixture = AWS(fresh=True, fail=failure)
+    with pytest.raises(RuntimeError, match='Injected failure'):
+        invoke(monkeypatch, fixture)
+    calls = fixture.calls
+    for create, delete in [('create-role', 'delete-role'), ('create-instance-profile', 'delete-instance-profile'), ('create-security-group', 'delete-security-group'), ('run-instances', 'terminate-instances')]:
+        if create in calls and create != failure:
+            assert delete in calls, (failure, calls)
+    if failure == 'put-role-policy':
+        assert 'delete-role-policy' not in calls
+    if failure == 'add-role-to-instance-profile':
+        assert 'remove-role-from-instance-profile' not in calls
+
+
+def test_rollback_continues_deleting_resources_after_association_cleanup_failure(monkeypatch):
+    fixture = AWS(fresh=True, fail='describe-vpcs')
+    original = fixture.__call__
+    def fail_cleanup(command, **kwargs):
+        if command[4] in {'remove-role-from-instance-profile', 'delete-role-policy'}:
+            fixture.calls.append(command[4])
+            return SimpleNamespace(returncode=1, stderr='NoSuchEntity', stdout='')
+        return original(command, **kwargs)
+    with pytest.raises(RuntimeError, match='Injected failure'):
+        invoke(monkeypatch, fail_cleanup)
+    assert 'delete-instance-profile' in fixture.calls
+    assert 'delete-role' in fixture.calls
