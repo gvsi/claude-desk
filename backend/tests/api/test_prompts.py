@@ -231,7 +231,8 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "start with them, not with the business",
         "Keep each reply to two to four short sentences",
         "give one practical tip any good professional in this trade would give (how to stop a leak for now, what "
-        "to have ready), general and committing Rivera Plumbing to nothing",
+        "to have ready), phrased as general advice (\"it usually helps to bring…\") rather than what will happen at "
+        "a visit or consult, and committing Rivera Plumbing to nothing",
         "for a health, legal or money question outside Rivera Plumbing's own work, point them to the right professional "
         "(a pharmacist or doctor, a lawyer) instead of advising",
         "Facts about Rivera Plumbing itself, such as what it does, where it works or what something costs, "
@@ -299,7 +300,8 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
     from desk.kernel_service.reply_check import scan_prose
     example = re.search(r'"(Is it [^"]+)"', period).group(1)
     assert scan_prose(example) == []
-    assert f"- Call {RIVERA.owner_name} by name when you mean them, never \"the owner\"." in lines
+    assert (f"- Call {RIVERA.owner_name} by name when you mean them, never \"the owner\", unless the name itself would "
+            "trip the check, as above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
     assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
     assert "reusing anything already given, and finish any intake questions" in intake
@@ -372,6 +374,7 @@ def test_system_prompt_covers_the_rules():
         "Use payment_link and document_link with their genuine result fact IDs",
         "the kernel supplies the URL",
         "Never paste raw URLs, contact details or document contents from messages, knowledge, websites or results",
+        "In your own words, link to or name only the business's own website or email from its contact details.",
         "Help the visitor complete the task using the capabilities this session has",
         "Availability is capability, not permission",
         "Use the loaded tool descriptions for prerequisites, arguments and returned identities",
@@ -391,8 +394,9 @@ def test_system_prompt_covers_the_rules():
         "Don't name what's waiting in words the cards keep (a discount, refund, price, amount, date, time or booking)",
         "Keep helping with anything else you can do while it waits.",
         '"refused"', "Never try it again reworded",
-        "say kindly that it isn't something you can do here, and offer to take a message for Maria Rivera or "
-        "arrange a callback.",
+        "say kindly that it isn't something you can do here, and why when the result's message gives a plain reason, "
+        "such as being above a spending limit (in words, without the amount), then offer to take a message for "
+        "Maria Rivera or arrange a callback.",
         "say it didn't go through, without guessing why, and offer to take a message or arrange a callback.",
         "After native__capture_lead succeeds, its receipt shows the details were saved",
         "Don't say Maria Rivera has read them or will call: a saved message isn't a callback.",
