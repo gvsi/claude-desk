@@ -250,9 +250,14 @@ function focusInAbout(shell: HTMLElement): (() => void) | null {
 }
 
 /**
- * Where the visitor is reading: the first message under the chat's head, and how far under it.
- * Returns a way to put that message back at the same place, whichever element scrolls the
- * conversation by then. `null` when no message is under the chat's head.
+ * Where the visitor is reading: what is first under the chat's head, and how far under it. That is
+ * the about column while it opens the scroll region and still reaches under the head (the chat's
+ * start on a narrow shell), and the first message otherwise. Returns a way to put it back at the
+ * same place, whichever element scrolls the conversation by then; `null` when nothing is under the
+ * chat's head. Partly above the head, the same share of it goes back above, so the same part of it
+ * is at the head's edge however it has wrapped since, and it is still what is first under the head.
+ * Nothing is put back once the element that now scrolls the conversation no longer holds it, as
+ * when the about column has moved beside the chat.
  *
  * Read it while the page stands as the visitor sees it, not once a new width has laid it out: by
  * then the about column, the messages and the chat's head have wrapped onto other lines, and the
@@ -262,16 +267,24 @@ function readingPlace(shell: HTMLElement): (() => void) | null {
   const { head } = partsOf(shell);
   if (!head) return null;
   const line = head.getBoundingClientRect().bottom;
+  const about = aboutInRegion(shell);
   const rows = [...shell.querySelectorAll<HTMLElement>('.cd-public-shell__conversation .cd-transcript-row')];
-  const row = rows.find((candidate) => candidate.getBoundingClientRect().bottom > line);
-  if (!row) return null;
-  const offset = row.getBoundingClientRect().top - line;
+  const anchor =
+    about && about.getBoundingClientRect().bottom > line
+      ? about
+      : rows.find((candidate) => candidate.getBoundingClientRect().bottom > line);
+  if (!anchor) return null;
+  const { top, height } = anchor.getBoundingClientRect();
+  const offset = top - line;
   return () => {
     // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
     for (let pass = 0; pass < 2; pass += 1) {
       const scroller = scrollerOf(shell);
-      const drift = row.getBoundingClientRect().top - head.getBoundingClientRect().bottom - offset;
-      if (!scroller || !row.isConnected || Math.abs(drift) < 0.5) return;
+      if (!scroller || !anchor.isConnected || !scroller.contains(anchor)) return;
+      const now = anchor.getBoundingClientRect();
+      const wanted = offset < 0 && height > 0 ? (offset * now.height) / height : offset;
+      const drift = now.top - head.getBoundingClientRect().bottom - wanted;
+      if (Math.abs(drift) < 0.5) return;
       scroller.scrollTop += drift;
     }
   };
@@ -347,8 +360,8 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * When the shell or a pinned part changes size, it lays out again at once, before the browser paints
  * and before the page's own observers measure the conversation. If the about column moves with
  * focus in it, focus goes to the same place in the moved column. If the shell turns short or tall,
- * the message the visitor was reading stays where it was under the chat's head, and the shell sends
- * `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
+ * what the visitor was reading stays where it was under the chat's head (`readingPlace`), and the
+ * shell sends `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
  */
 export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
@@ -401,23 +414,22 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     let beside = fitsBeside();
     setAboutBeside(beside);
     // Where the visitor is reading, as they last saw it at the width the shell was laid out at
-    // (`laidOutWidth`): read after each scroll, and each time the shell has laid itself out. The
-    // observer below hears of a new size only once the browser has laid the page out at it. At the
-    // same width nothing under the chat's head has moved by then, and the place is read there; at a
-    // new width, as when a phone turns, the about column, the messages and the chat's head have
-    // wrapped onto other lines, and the place put back is this one. A scroll at a new width the
-    // observer hasn't heard of yet isn't read: it may be the browser's, keeping some other element
+    // (`laidOutWidth`): read after each scroll of the conversation, and each time the shell has laid
+    // itself out. The observer below hears of a new size only once the browser has laid the page out
+    // at it. At the same width nothing under the chat's head has moved by then, and the place is read
+    // there; at a new width, as when a phone turns, the about column, the messages and the chat's
+    // head have wrapped onto other lines, and the place put back is this one. A scroll at a new width
+    // the observer hasn't heard of yet isn't read: it may be the browser's, keeping some other element
     // still. The trade-off: a visitor's own scroll in that very frame is taken for the browser's.
     let laidOutWidth = el.offsetWidth;
     let place = readingPlace(el);
-    const notePlace = () => {
-      if (el.offsetWidth === laidOutWidth) place = readingPlace(el);
-    };
     // The column's line steps aside near the head rather than the chat landing past it: the page lands a chat wherever its end falls.
     // Scroll events don't bubble, so the shell listens in the capture phase, for its region and itself.
-    const onScroll = () => {
+    // Only the conversation's scrolling moves the place: not the about column's beside the chat, nor
+    // the composer's text box.
+    const onScroll = (event: Event) => {
       markAboutUnderHead(el);
-      notePlace();
+      if (event.target === scrollerOf(el) && el.offsetWidth === laidOutWidth) place = readingPlace(el);
     };
     el.addEventListener('scroll', onScroll, { capture: true, passive: true });
     const stopScroll = () => el.removeEventListener('scroll', onScroll, { capture: true });
