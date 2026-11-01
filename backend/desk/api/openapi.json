@@ -11333,6 +11333,14 @@
                 "type": "null"
               }
             ]
+          },
+          "starters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Starters",
+            "default": []
           }
         },
         "type": "object",
