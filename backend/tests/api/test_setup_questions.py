@@ -2009,6 +2009,26 @@ async def test_exhausted_homework_and_stalled_understanding_still_ask_the_first_
     assert not any("suggested" in entry for entry in row["transcript"])
 
 
+def test_each_consent_read_deadline_outlasts_what_it_waits_for():
+    from desk.api.kernel_client import DEFAULT_TIMEOUT_S
+    # The kernel's search deadline: this process can't import it, so the test holds the two together.
+    from desk.kernel_service.decisions import WEB_SEARCH_TIMEOUT_S
+
+    execute, budget, run = (desk_setup.WEB_SEARCH_EXECUTE_TIMEOUT_S, desk_setup.HOMEWORK_BUDGET_S,
+                            desk_setup.TURN_RUN_TIMEOUT_S)
+    # A search's /execute waits past the kernel's own deadline, so the kernel's fail-closed answer arrives first.
+    assert DEFAULT_TIMEOUT_S < WEB_SEARCH_TIMEOUT_S < execute
+    # The margins setup.py documents, each pinned at its floor so neither can quietly shrink to nothing: three
+    # seconds for the owner's context and the decisions before a search's execute starts, and ten for clock skew.
+    assert budget - execute >= desk_setup.HOMEWORK_DECIDE_S >= 3
+    # After the reads, the run keeps the whole understanding call, ten seconds to finish and five for a retry.
+    assert run >= (budget + desk_setup.UNDERSTAND_TIMEOUT_S + desk_setup.TURN_FINISH_S
+                   + desk_setup.UNDERSTAND_RETRY_MIN_S)
+    # A run and its cleanup end before another process may recover the row as abandoned, with room for the clocks.
+    assert (desk_setup.TURN_ABANDONED_S - (run + desk_setup.TURN_ROLLBACK_TIMEOUT_S)
+            >= desk_setup.TURN_CLOCK_SLACK_S >= 10)
+
+
 async def test_a_search_execute_can_outlast_the_default_kernel_timeout(
     app, browser, fake, kernel_http, model, monkeypatch,
 ):
@@ -2027,7 +2047,7 @@ async def test_a_search_execute_can_outlast_the_default_kernel_timeout(
             decision_id = json.loads(request.content)["decision_id"]
             if fake.decisions[decision_id].tool == "native.web_search":
                 execute_timeouts.append(request.extensions["timeout"])
-                await asyncio.sleep(0.05)  # Scaled 6 s default < search < 22 s execute deadline.
+                await asyncio.sleep(0.05)  # Scaled 6 s default < search < 32 s execute deadline.
         return await send(request, **kwargs)
 
     monkeypatch.setattr(kernel, "_timeout_s", 0.02)

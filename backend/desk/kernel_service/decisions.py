@@ -54,7 +54,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 WEB_SEARCH_MODEL = "claude-sonnet-5-5"
-WEB_SEARCH_TIMEOUT_S = 20
+# The SDK call's timeout and the wait around it, no retry. The API's `setup.WEB_SEARCH_EXECUTE_TIMEOUT_S` waits
+# for the search's `POST /execute` just above it, so the kernel's fail-closed answer arrives first.
+WEB_SEARCH_TIMEOUT_S = 30
 WEB_SEARCH_MAX_TOKENS = 2048
 WEB_SEARCH_MAX_CITED_CHARS = 20_000
 WEB_SEARCH_SYSTEM = (
