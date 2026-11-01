@@ -75,7 +75,7 @@ async def test_fixed_quote_link_card_receipts_ledger_and_checkout(app, client):
         if lang == 'en':
             assert (await read(client, visitor.headers, allowed)).visitor_plain == receipt
         definition = (await business_rows(app, copy))[TOOL].profile.business
-        assert render.executed_status(TOOL, lang, owner='Maria Rivera', business=definition) == receipt
+        assert render.executed_status(TOOL, lang, owner='Mike Turner', business=definition) == receipt
     assert link.token not in result.model_dump_json()
     assert all(link.token not in row.event.model_dump_json() for row in await ledger_rows(app, copy))
     paid = await client.post(f'/payment_links/{link.token}/complete', json={})

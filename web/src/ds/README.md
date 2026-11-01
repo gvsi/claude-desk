@@ -5,13 +5,13 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Write in sentence case everywhere: page titles, buttons, labels and menus. Never set words in all caps; acronyms such as AI, PDF and SMS stay as they are.
 - Be plain, literal and specific. No wordplay, no exclamation marks, and no "→" or other arrows on buttons.
 - Make buttons say exactly what happens: "Allow this time", "Open payment page", "Download". Never "Continue" or "OK" when a verb can say more.
-- Let Claude speak in the first person, in serif (`reply`, `summary`, `greeting`): "These times are open on Maria's calendar. Which of them works for you?" People speak in sans (`message`).
+- Let Claude speak in the first person, in serif (`reply`, `summary`, `greeting`): "These times are open on Mike's calendar. Which of them works for you?" People speak in sans (`message`).
 - Never let Claude's prose say that something is booked, paid, refunded, discounted or what it costs, or that Claude did something no receipt records. The typed card and its receipt say it; the prose only leads into them: "Here are the details."
 - Separate facts with commas or separate lines, never with "A · B · C" strings.
 - Set off a name someone chose (a visitor's, an agent's) as user text: its own `.cd-user-name` element marked `data-copy="user"`, first in its line, and never joined to a status or a trust word in one run of text. A status sits beside it in its own `Pill`, as "Signed" or "Not signed" does on an agent's request.
 - Write English and Spanish wherever a visitor reads.
 - Call the product Claude Desk: one is "your Desk", several are "Desks". Every surface carries the footer "Concept prototype by Giovanni Alcantara, not an Anthropic product" in `caption`.
-- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." While the owner is in the chat, the public page's chat head says instead: "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back." Both forms name Claude as an AI, and neither can be turned off.
+- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime." While the owner is in the chat, the public page's chat head says instead: "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back." Both forms name Claude as an AI, and neither can be turned off.
 
 ## Visual foundations
 
@@ -158,7 +158,7 @@ On Share's printable card, the QR code's `qr-ink` modules read 13.8 on its `qr-t
 - Waiting: show it, don't say it, when Claude is writing: three clay dots that bounce gently where its reply will appear, with "Claude is writing" for screen readers only. Other waits say what is happening in plain words, "Sending your answer". Never show draft text.
 - Loading: a page, or a part of one, whose first read is out draws its own shapes (`SkeletonScreen`). For 200 ms it shows nothing, so a fast load goes straight to the page; then its shapes sweep under one band of light while a visually hidden status says the existing loading words; then the page fades in over them on `motion-fast`, where they were. A skeleton draws no words and states nothing: no prices, dates, names, messages or statuses. A few loaders keep `LoadingLine` (its README lists them), and an action at work stays a busy `Button`.
 - Error: say what happened and the next step, never a code. "We couldn't confirm your answer. Try again, or reload to see where it stands."
-- Refusal: be kind and specific, and offer a way forward. "I can't share that here, but I can ask Maria to get back to you." Never scold or lecture.
+- Refusal: be kind and specific, and offer a way forward. "I can't share that here, but I can ask Mike to get back to you." Never scold or lecture.
 
 ## What not to do
 

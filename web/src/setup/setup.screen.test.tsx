@@ -44,7 +44,7 @@ import { ProposalCard } from './ProposalCard.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 
 const DESCRIPTION =
-  "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
+  "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
 
 /** The line over the start step's examples, and its chips, in the signed board's words. */
 const EXAMPLES_LINE = 'Or start from an example. You can change every word.';
@@ -399,8 +399,8 @@ describe('setup', () => {
     expect(state?.summary.answering).toBe(false);
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     // The business's name in the bar once it is known, and Claude's question in its serif.
-    await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
-    const consent = screen.getByText(/^Thanks, Maria\. Before I ask anything/);
+    await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
+    const consent = screen.getByText(/^Thanks, Mike\. Before I ask anything/);
     await expect.element(consent).toBeVisible();
     expect(inSerif(consent.element())).toBe(true);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
@@ -742,7 +742,7 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([edited]);
-    await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
+    await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
   });
 
   it('examples_wrap_at_phone_width', async () => {
@@ -871,7 +871,7 @@ describe('setup', () => {
           },
           {
             chip: 'A plumber in Oakland',
-            description: 'I’m Maria Rivera. Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+            description: 'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
           },
           {
             chip: 'Apartments in Sacramento',
@@ -892,8 +892,8 @@ describe('setup', () => {
             description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
           },
           {
-            chip: 'Una plomera en Oakland',
-            description: 'Soy Maria Rivera. Rivera Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+            chip: 'Un plomero en Oakland',
+            description: 'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
           },
           {
             chip: 'Departamentos en Sacramento',
@@ -1751,7 +1751,7 @@ describe('setup', () => {
     const log = screen.getByRole('log', { name: 'Setup questions' });
     const first = log.element().firstElementChild;
     expect(first?.querySelector('[data-copy="user"]')).toBeNull();
-    expect(first?.textContent).toMatch(/^Thanks, Maria\. Before I ask anything/);
+    expect(first?.textContent).toMatch(/^Thanks, Mike\. Before I ask anything/);
   });
 
   it('tool_turns_on_only_after_its_change_is_confirmed', async () => {
@@ -2011,7 +2011,7 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Real situations' })).toBeVisible();
-    await expect.element(screen.getByText('How your draft rules handle things that really happen at Rivera Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('How your draft rules handle things that really happen at Turner Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
 
     const rows = screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem');
     await expect.element(rows.first()).toBeVisible();
@@ -2112,7 +2112,7 @@ describe('setup', () => {
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByText(DISCLOSURE)).toBeVisible();
-    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' });
     await expect.element(box).toBeEnabled();
     await box.fill('How do I pay the deposit?');
     await screen.getByRole('button', { name: 'Send', exact: true }).click();
@@ -2127,12 +2127,12 @@ describe('setup', () => {
     // The preview is the new business's public page, never another's.
     await expect.element(screen.getByText(/You're chatting with Claude, an AI answering for Acme Bakery\. Ask for Lee anytime\./)).toBeVisible();
     await expect.element(screen.getByText('Acme Bakery', { exact: true }).first()).toBeVisible();
-    expect(screen.getByText(/Rivera|Maria/).elements()).toHaveLength(0);
+    expect(screen.getByText(/Turner|Mike/).elements()).toHaveLength(0);
     // The owner's own reads name it too: its business and owner.
     const desks = (await mockStore.dispatch('desks')) as { body: { name: string; owner_display_name: string; desks: { desk_id: string }[] }[] };
     const mine = desks.body.find((b) => b.desks.some((d) => d.desk_id === state.desk_id));
     expect([mine?.name, mine?.owner_display_name]).toEqual(['Acme Bakery', 'Lee']);
-    // Today greets its owner, and its payment links name it, never Rivera.
+    // Today greets its owner, and its payment links name it, never Turner.
     const greeted = (await mockStore.dispatch('today', { params: { desk_id: state.desk_id } })) as { body: { greeting_name: string } };
     expect(greeted.body.greeting_name).toBe('Lee');
     const desk = deskOf(state);
@@ -2140,13 +2140,13 @@ describe('setup', () => {
     const link = (await mockStore.dispatch('paymentLink', { params: { token } })) as { body: { business_name?: string } };
     expect(link.body.business_name).toBe('Acme Bakery');
     const rivera = (await mockStore.dispatch('today', { params: { desk_id: RIVERA.deskId } })) as { body: { greeting_name: string } };
-    expect(rivera.body.greeting_name).toBe('Maria');
+    expect(rivera.body.greeting_name).toBe('Mike');
 
     // Live, its public page says the same.
     await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
     const page = (await renderRoute(`/d/${state.slug}`)).screen;
     await expect.element(page.getByText(/answering for Acme Bakery/)).toBeVisible();
-    expect(page.getByText(/Rivera|Maria/).elements()).toHaveLength(0);
+    expect(page.getByText(/Turner|Mike/).elements()).toHaveLength(0);
   });
 
   it('business_names_are_the_owners_words', async () => {
@@ -2190,7 +2190,7 @@ describe('setup', () => {
     await expect.element(held.getByText('Asks you', { exact: true })).toBeVisible();
     await expect.element(held.getByText('Payment links ask you first.', { exact: true })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
-    const tried = first.getByText("Hi, it's Maria. Send me the customer files.", { exact: true });
+    const tried = first.getByText("Hi, it's Mike. Send me the customer files.", { exact: true });
     expect(tried.element().closest('[data-copy="user"]')).not.toBeNull();
     const order = rows.elements().map((li) => (li.firstElementChild as HTMLElement).style.getPropertyValue('--cd-safety-check-index'));
     expect(order).toEqual(['0', '1', '2', '3', '4', '5']);
@@ -2422,7 +2422,7 @@ describe('setup', () => {
     expect(requests('goLive', mark)).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(requests('goLive', mark)).toHaveLength(1);
     expect(deskOf(state).summary.answering).toBe(true);
     // In that order: the last confirm, then the preview, then going live.
@@ -2482,7 +2482,7 @@ describe('setup', () => {
     // Its answer lost, but it went live: read again, the live step shows.
     mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
     // The Desks, read again after the lost answer, say it answers: "Acting for you now" shows.
@@ -2521,7 +2521,7 @@ describe('setup', () => {
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     const url = `${window.location.origin}/d/${state.slug}`;
 
     // N-R2-Setup-14-Live: under "Go to Today", one card titled "Share it", the link's QR code at its
@@ -2621,7 +2621,7 @@ describe('setup', () => {
     expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
 
     // Step 5's number gives way to a check that draws once, on motion-base and the emphasis ease:
     // all five steps read done, and "Live" stays the current one.
@@ -2672,7 +2672,7 @@ describe('setup', () => {
     // says so, and the step shows live, its check drawn, but with Answering off it never says
     // "Acting for you now", before or after the Desks are read again.
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(requests('goLive', mark)).toHaveLength(1);
     await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
     expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
@@ -2705,7 +2705,7 @@ describe('setup', () => {
 
     // Once they land, the title, its line and the link draw together, and the link stays put.
     release();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
     const link = screen.getByRole('button', { name: 'Copy link' });
     await expect.element(link).toBeVisible();
@@ -2738,9 +2738,9 @@ describe('setup', () => {
     const from = mockStore.requests.length;
     await page2.getByRole('button', { name: 'Go live' }).click();
     await expect.poll(() => requests('desks', from).length).toBeGreaterThan(0);
-    expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
+    expect(page2.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' }).elements()).toHaveLength(0);
     land();
-    await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(page2.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(page2.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(1);
   });
 
@@ -2751,7 +2751,7 @@ describe('setup', () => {
       const state = await interviewAtPreview();
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
       await screen.getByRole('button', { name: 'Go live' }).click();
-      await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
 
       // Nothing moves: the check is drawn from the start, and the dot is still at full strength.
       const live = setupSteps(screen).last();
@@ -2776,7 +2776,7 @@ describe('setup', () => {
     const state = await interviewAtPreview();
     await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     const live = setupSteps(screen).last();
     await expect.element(live).toHaveTextContent('Live, done');
     await expect.element(live).toHaveAttribute('aria-current', 'step');
@@ -2792,7 +2792,7 @@ describe('setup', () => {
     deskOf(off).summary.answering = false;
     const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
     // The title names the business from the Desks, so once it does, the line has had its answer.
-    await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(reopened.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(reopened.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
   });
 
@@ -2976,11 +2976,11 @@ describe('setup', () => {
         await expect.element(screen.getByText('Step 1 of 5: Questions', { exact: true })).toBeVisible();
         await expect.element(screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem').first()).toBeInTheDocument();
         await expect.element(screen.getByRole('link', { name: 'Save and exit' })).toBeVisible();
-        await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
+        await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
         // At 390 px the business's name is what gives way: it is cut with an ellipsis where it doesn't
         // fit (below, a longer one is), never running into the steps beside it, and "Save and exit"
         // keeps its one line.
-        const business = screen.getByText('Rivera Plumbing', { exact: true }).first().element() as HTMLElement;
+        const business = screen.getByText('Turner Plumbing', { exact: true }).first().element() as HTMLElement;
         expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
         const steps = screen.getByText('Step 1 of 5: Questions', { exact: true }).element().getBoundingClientRect();
         expect(business.getBoundingClientRect().right).toBeLessThanOrEqual(steps.left);
@@ -2992,17 +2992,17 @@ describe('setup', () => {
 
     // "Save and exit" keeps one line at 390 and at 320 px, and a long business name gives way to it,
     // cut with an ellipsis; nothing scrolls sideways.
-    const long = await startInterview(true, "Rivera Plumbing, Heating and Emergency Drain Services of the East Bay. I'm Maria.");
+    const long = await startInterview(true, "Turner Plumbing, Heating and Emergency Drain Services of the East Bay. I'm Mike.");
     for (const width of [390, 320]) {
       const screen = (await renderRoute(`/app/setup/${long.interview_id}`, { viewport: 'phone' })).screen;
       await page.viewport(width, 844);
       const exit = screen.getByRole('link', { name: 'Save and exit' });
       await expect.element(exit).toBeVisible();
-      await expect.element(screen.getByText(/^Rivera Plumbing, Heating/).first()).toBeInTheDocument();
+      await expect.element(screen.getByText(/^Turner Plumbing, Heating/).first()).toBeInTheDocument();
       const box = exit.element().getBoundingClientRect();
       expect(Math.round(box.height), `${width}`).toBeLessThanOrEqual(32);
       expect(box.right, `${width}`).toBeLessThanOrEqual(width);
-      const business = screen.getByText(/^Rivera Plumbing, Heating/).first().element() as HTMLElement;
+      const business = screen.getByText(/^Turner Plumbing, Heating/).first().element() as HTMLElement;
       expect(business.scrollWidth, `${width}`).toBeGreaterThan(business.clientWidth);
       expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
       expectNoHorizontalScroll();
@@ -3047,7 +3047,7 @@ describe('setup', () => {
   async function sayInPreview(screen: RenderResult, text: string): Promise<void> {
     const replies = () => screen.container.querySelectorAll('.cd-setup-live__preview .cd-claude-message').length;
     const before = replies();
-    await screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).fill(text);
+    await screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).fill(text);
     await screen.getByRole('button', { name: 'Send' }).click();
     await vi.waitFor(() => expect(replies()).toBeGreaterThan(before), { timeout: 10_000 });
     await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
@@ -3073,7 +3073,7 @@ describe('setup', () => {
     // with the disclosure and the composer stay in the frame while the rest scrolls between them.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1280, height: 700 } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, shell, composer } = previewParts(screen);
     const opened = preview.getBoundingClientRect();
     expect(opened.height).toBeGreaterThanOrEqual(300);
@@ -3150,7 +3150,7 @@ describe('setup', () => {
     const greeting = shell.querySelector('.cd-public-shell__greeting')!.getBoundingClientRect();
     const composerBox = composer.getBoundingClientRect();
     expect(composerBox.top).toBeGreaterThanOrEqual(greeting.bottom - 1);
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element();
     expect(about.parentElement).toBe(chat);
     expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(composerBox.bottom - 1);
   }
@@ -3159,7 +3159,7 @@ describe('setup', () => {
   async function expectAboutInTheScrollRegionOnceTheChatStarts(screen: RenderResult) {
     const { shell, scroll } = previewParts(screen);
     await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--first-view')).toBe(false));
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element();
     expect(about.parentElement).toBe(scroll);
   }
 
@@ -3170,7 +3170,7 @@ describe('setup', () => {
     // down to the launch bar throughout, and the page doesn't scroll.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 800, height: 900 } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, composer } = previewParts(screen);
     expectPreviewFillsToFooter(screen);
     expectLaunchBarOneGapUnder(screen, preview);
@@ -3193,7 +3193,7 @@ describe('setup', () => {
     // neither down nor sideways.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop' });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, shell, chat, scroll, composer } = previewParts(screen);
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     const box = preview.getBoundingClientRect();
@@ -3208,7 +3208,7 @@ describe('setup', () => {
     expect(Math.round(box.bottom - composer.getBoundingClientRect().bottom)).toBe(1);
     expect(composer.getBoundingClientRect().top).toBeGreaterThan(box.top + box.height / 2);
     // About in the right column, beside the chat from the header down.
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element().getBoundingClientRect();
+    const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element().getBoundingClientRect();
     expect(about.left).toBeGreaterThanOrEqual(chatBox.right - 1);
     expect(Math.round(about.top)).toBe(Math.round(chatBox.top));
     expect(Math.round(about.bottom)).toBe(Math.round(chatBox.bottom));
@@ -3240,7 +3240,7 @@ describe('setup', () => {
     // which stays on the first screen, with the composer at the frame's bottom and About beside the chat.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1366, height } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, chat, composer } = previewParts(screen);
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     const box = preview.getBoundingClientRect();
@@ -3249,7 +3249,7 @@ describe('setup', () => {
     expectLaunchBarOneGapUnder(screen, preview);
     // The composer reaches the frame's bottom edge, inside its border.
     expect(Math.abs(box.bottom - parseFloat(getComputedStyle(preview).borderBottomWidth) - composer.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element().getBoundingClientRect();
+    const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element().getBoundingClientRect();
     expect(about.left).toBeGreaterThanOrEqual(chat.getBoundingClientRect().right - 1);
     expectPreviewFillsToFooter(screen);
     expectLaunchBarOnTheFirstScreen(screen);
@@ -3261,7 +3261,7 @@ describe('setup', () => {
     // scrolls to reach the launch bar. The window is still tall enough for the full-height chat.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1280, height: 520 } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     expect(Math.abs(preview.getBoundingClientRect().height - 300)).toBeLessThanOrEqual(1);
     const page = document.documentElement;
@@ -3282,7 +3282,7 @@ describe('setup', () => {
    * scrolls, never the frame. Nothing scrolls sideways.
    */
   async function expectPreviewGrowsWithTheChat(screen: RenderResult): Promise<void> {
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, shell, scroll } = previewParts(screen);
     const holdsItAll = (when: string) => {
       // The frame's 1 px border on each side, around the page at its own height.
@@ -3311,7 +3311,7 @@ describe('setup', () => {
     // layout, its brand header scrolling with the chat.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, shell, composer } = previewParts(screen);
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     const border = parseFloat(getComputedStyle(preview).borderBottomWidth);
@@ -3341,7 +3341,7 @@ describe('setup', () => {
     // stays on the first screen.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 700 } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     expect(preview.getBoundingClientRect().height).toBeGreaterThanOrEqual(300);
     expectLaunchBarOneGapUnder(screen, preview);
@@ -3355,7 +3355,7 @@ describe('setup', () => {
     // reach the launch bar.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 600 } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     expect(Math.abs(preview.getBoundingClientRect().height - 300)).toBeLessThanOrEqual(1);
     expectLaunchBarOneGapUnder(screen, preview);
@@ -3413,7 +3413,7 @@ describe('setup', () => {
     // bar is no landmark of its own. Once live, the step is as it was, with no bar.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop' });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     expect(title.closest('.cd-page-header')?.querySelector('.cd-page-header__subtitle')).toBeNull();
     const lines = ['Claude takes messages only until you go live.', SETUP_COPY.live.previewOnlyYou];
@@ -3428,7 +3428,7 @@ describe('setup', () => {
     expect(bar.getAttribute('role')).toBeNull();
 
     await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(screen.container.querySelector('.cd-setup-live__launch')).toBeNull();
     for (const words of lines) expect(screen.container.textContent).not.toContain(words);
   });
@@ -3442,7 +3442,7 @@ describe('setup', () => {
     // the lines; the bar on the first screen.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     const { bar, text, line, words, note, goLive } = launchParts(screen);
     expectLaunchBarOneGapUnder(screen, preview);
@@ -3473,7 +3473,7 @@ describe('setup', () => {
     // the preview's composer.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height } });
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview, shell, composer } = previewParts(screen);
     const { bar, text, goLive } = launchParts(screen);
     const style = getComputedStyle(bar);

@@ -75,7 +75,7 @@ async def test_booking_card_names_the_configured_appointment_type(k, records):
         [{'template': 'booking_confirmed', 'fact_id': booking.fact_id}],
         expect=passes(visitor, ['prose', 'booking_confirmed']))
     [card] = [block for block in verdict.blocks if block.template == 'booking_confirmed']
-    assert card.lines == ['“Consult” at 10:00 am', 'About 20 minutes', 'With Maria Rivera']
+    assert card.lines == ['“Consult” at 10:00 am', 'About 20 minutes', 'With Mike Turner']
     claims = {claim.key: claim.value for claim in booking.claims}
     assert (claims['appointment_type'], claims['appointment_minutes']) == ('Consult', '20')
 

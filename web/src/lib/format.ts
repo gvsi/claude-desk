@@ -1,6 +1,6 @@
 /**
  * How owner screens write times, amounts and the few lines built from them. Every time is read in
- * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Maria's
+ * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Mike's
  * morning is Los Angeles' morning wherever the reviewer sits. Visitor surfaces never use this file;
  * they show the kernel's text. The one exception is the mock checkout's amount, which the page
  * writes from the link's `amount_cents` with `formatMoneyExact`.

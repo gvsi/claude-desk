@@ -21,7 +21,7 @@ const ownerName = rivera.business.ownerName;
 
 /** A fixture part the stories need, or a thrown error naming what the fixture lost. */
 function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`the Rivera fixture has no ${what}`);
+  if (value === undefined) throw new Error(`the Turner fixture has no ${what}`);
   return value;
 }
 
@@ -66,7 +66,7 @@ function DanaOpening({ onOpenTrace, live = false }: { onOpenTrace: (ledgerSeq: n
   return (
     <Transcript label={`Conversation with ${dana.name}`}>
       <TranscriptHeader
-        left="Today at 12:04, web chat from the Rivera Plumbing page"
+        left="Today at 12:04, web chat from the Turner Plumbing page"
         right="Notes from the checks. Select one for the full trace."
       />
       <TranscriptRow>
@@ -402,7 +402,7 @@ const COTIZADO = executedLine('native.quote', 'es', ownerName);
 function NotSentUnderAReceipt({ onRetry }: { onRetry: () => void }) {
   return (
     <div lang="es">
-      <Transcript label="Conversación con Rivera Plumbing">
+      <Transcript label="Conversación con Turner Plumbing">
         <TranscriptRow
           margin={[
             <MarginReceipt key="quote" source={{ kind: 'decision', state: 'executed' }} plain={COTIZADO} ledgerSeq={41} />,

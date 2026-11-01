@@ -51,7 +51,7 @@ it('button_ref_lets_go_while_the_button_is_on_the_page', () => {
     held.button = element;
   };
   try {
-    act(() => root.render(<Button variant="secondary" buttonRef={ref}>Ask for Maria Rivera</Button>));
+    act(() => root.render(<Button variant="secondary" buttonRef={ref}>Ask for Mike Turner</Button>));
     held.button?.focus();
     act(() => root.render(null));
     expect(calls).toEqual([{ element: 'button' }, { element: 'null', connected: true, focused: true }]);

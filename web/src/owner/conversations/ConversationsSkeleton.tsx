@@ -9,7 +9,7 @@ import { TRANSCRIPT_NOTE } from './copy.ts';
 import './Conversations.css';
 
 /** The fresh copy's link, as Today's skeleton measures it: the slug isn't known before the read lands. */
-const FRESH_LINK = publicLink('rivera-plumbing-abc123').replace(/^https?:\/\//, '');
+const FRESH_LINK = publicLink('turner-plumbing-abc123').replace(/^https?:\/\//, '');
 
 /** The fresh copy's held chat is with a visitor who gave no name, so the page calls them this. */
 const VISITOR = { text: 'Visitor', className: 'cd-user-name' } as const;
@@ -205,7 +205,7 @@ function ControlsRoom() {
             <div className="cd-conversation-skeleton__button" />
           </div>
           <MeasuredLines
-            parts={[VISITOR, ' sees “Maria Rivera joined the chat.”']}
+            parts={[VISITOR, ' sees “Mike Turner joined the chat.”']}
             className="cd-take-over__line cd-type-caption"
             text="caption"
             fallback={1}

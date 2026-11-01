@@ -62,6 +62,27 @@ def test_an_exception_note_on_a_list_price_quote_still_expects_a_pass():
     assert case.gate == "pass"
 
 
+# Public facts the seed has reworded since the recorded reviewer run, each reviewed: key → (recorded, live).
+RENAMED: dict[str, tuple[str, str]] = {
+    "policy:arrival": ("Maria texts before she arrives.", "Mike texts before he arrives."),   # the demo owner's rename
+}
+
+
+def test_the_recorded_facts_are_the_seeds_but_for_reviewed_renames():
+    """The reviewer calibration reads the public facts its recorded run saw, so the seed can't drift
+    from them unnoticed: same keys in the same order, every value equal but a reviewed rename's."""
+    recorded = [(fact.key, fact.value) for fact in reviewer.public_facts()]
+    live = [(fact.key, fact.value) for fact in reviewer.seed_public_facts()]
+    redo = ("re-record the reviewer calibration (owner-approved, paid) or add a reviewed rename pair to "
+            "RENAMED")
+    assert [key for key, _ in recorded] == [key for key, _ in live], f"the seed's public facts changed: {redo}"
+    for (key, was), (_, now) in zip(recorded, live, strict=True):
+        if key in RENAMED:
+            assert (was, now) == RENAMED[key], f"{key}: {was!r} → {now!r} isn't the reviewed rename: {redo}"
+        else:
+            assert was == now, f"{key}: {was!r} → {now!r}: {redo}"
+
+
 def test_the_pinned_prompt_has_accepted_current_schema_valid_measurements(monkeypatch):
     from desk.kernel_service import decisions
 

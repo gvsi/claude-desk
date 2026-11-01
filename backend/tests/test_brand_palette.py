@@ -31,7 +31,7 @@ def test_the_palette_is_eight_keys_in_display_order():
     assert tuple(BRAND_PALETTE) == keys
     assert DEFAULT_BRAND_PALETTE == "teal"
     assert BRAND_PALETTE["none"] == {}                                             # the web's neutral header
-    assert BRAND_PALETTE["teal"] == {"primary": "#1F4E4A", "accent": "#B87333"}   # Rivera's colours
+    assert BRAND_PALETTE["teal"] == {"primary": "#1F4E4A", "accent": "#B87333"}   # Turner's colours
     assert BRAND_PALETTE["clay"] == {"primary": "#773624", "accent": "#D97757"}
     for key in COLOURED:
         assert set(BRAND_PALETTE[key]) == {"primary", "accent"}, key
@@ -39,7 +39,7 @@ def test_the_palette_is_eight_keys_in_display_order():
     assert len({BRAND_PALETTE[key]["primary"] for key in COLOURED}) == len(COLOURED)
 
 
-NAMES = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles"}
+NAMES = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles"}
 
 
 def test_a_business_write_picks_a_key_or_passes_a_brand_not_both():

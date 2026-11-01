@@ -63,7 +63,7 @@ export const RiveraConnectors: Story = {
 
     // Connected: Stripe, with its Mock badge, connected in words beside a dot, and the account.
     const connected = group(canvasElement, 'Connected');
-    const stripe = within(connected.section).getByRole('link', { name: /^Stripe Mock .* Connected · Rivera Plumbing, test mode \(mock\) 2 tools$/ });
+    const stripe = within(connected.section).getByRole('link', { name: /^Stripe Mock .* Connected · Turner Plumbing, test mode \(mock\) 2 tools$/ });
     await expect(stripe).toHaveAttribute('href', '/connectors/stripe');
     await expect(stripe.querySelector('.cd-status-dot--handled')).not.toBeNull();
 
@@ -109,7 +109,7 @@ export const GoogleCalendarAdded: Story = {
         connector: rivera.googleCalendar.view,
         tools: 1,
         href: '/connectors/google-calendar',
-        connection: 'Rivera Plumbing jobs (mock)',
+        connection: 'Turner Plumbing jobs (mock)',
       },
     ],
     available: [],
@@ -126,7 +126,7 @@ export const GoogleCalendarAdded: Story = {
     await expect(connected.rows).toHaveLength(2);
     await expect(
       within(connected.section).getByRole('link', {
-        name: /^Google Calendar Mock .* Connected · Rivera Plumbing jobs \(mock\) · Added just now 1 tool$/,
+        name: /^Google Calendar Mock .* Connected · Turner Plumbing jobs \(mock\) · Added just now 1 tool$/,
       }),
     ).toBeVisible();
     // just_added_is_quiet: the words follow the account in its secondary ink, and the row's only

@@ -12,8 +12,8 @@ function lineText(props: DisclosureLineProps): string {
 
 describe('DisclosureLine', () => {
   it('disclosure_line_en_es', () => {
-    expect(lineText({ language: 'en', businessName: 'Rivera Plumbing' })).toBe('Rivera Plumbing answers with Claude, an AI.');
-    expect(lineText({ language: 'es', businessName: 'Rivera Plumbing' })).toBe('Rivera Plumbing responde con Claude, una IA.');
+    expect(lineText({ language: 'en', businessName: 'Turner Plumbing' })).toBe('Turner Plumbing answers with Claude, an AI.');
+    expect(lineText({ language: 'es', businessName: 'Turner Plumbing' })).toBe('Turner Plumbing responde con Claude, una IA.');
     // Without a name, as on the checkout.
     expect(lineText({ language: 'en' })).toBe('This page is part of a chat with Claude, an AI.');
     expect(lineText({ language: 'es' })).toBe('Esta página es parte de un chat con Claude, una IA.');

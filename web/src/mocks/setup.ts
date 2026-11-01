@@ -252,7 +252,7 @@ const SCHEDULE = new RegExp(
 
 /**
  * Where a name in a phrase ends: before " in ", " with ", " since " and the like, or before an "and"
- * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Rivera Plumbing and Heating").
+ * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Turner Plumbing and Heating").
  */
 const NAME_END = /\s(?:in|on|at|near|with|for|since|from|out\s+of)\s|,?\s+and\s+(?:I|[Ww]e|[Mm]y|[Oo]ur)\b/;
 /** The same in Spanish: before " en ", " con ", " desde ", " para " or " cerca ". */
@@ -280,7 +280,7 @@ function namedIn(sentence: string): string | null {
  * reader would, kept as the API keeps it (`nameAsKept`). The sentences are read in order, and the
  * first that names the business gives its name: with a phrase naming it ("I'm Ana. I run Ana's
  * Bakery in Oakland." or "Ana's Bakery is my shop" → "Ana's Bakery"), or as a sentence that is only
- * the name ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing"). The owner's introduction and a
+ * the name ("Turner Plumbing. I'm Mike, …" → "Turner Plumbing"). The owner's introduction and a
  * sentence about the owner or the work ("I run a small bakery") name nothing, so "I'm Ana." alone
  * gives "Your business".
  */
@@ -334,7 +334,7 @@ function naming(sentences: readonly string[]): { at: number; name: string } | nu
   return null;
 }
 
-/** The owner's first name, from "I'm Maria", "My name is Maria", "Soy Maria" and the like in the description; null when it gives none. */
+/** The owner's first name, from "I'm Mike", "My name is Mike", "Soy Mike" and the like in the description; null when it gives none. */
 function ownerNameOf(description: string): string | null {
   return OWNER.exec(description)?.[1] ?? null;
 }
@@ -466,7 +466,7 @@ interface SituationWords {
   searches: readonly [string, string];
 }
 
-/** Rivera Plumbing's words: the situations as the mock always told them. */
+/** Turner Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
   bookings: 'Books weekday visits in your hours.',
@@ -960,7 +960,7 @@ const SENTENCE_END = /[;!?\n]|\.(?=\s|$)/g;
 const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
 const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
 const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
-/** A name just before a contact ("Ana at …", "Maria: …") or as a possessive ("Ana's email is …"). */
+/** A name just before a contact ("Ana at …", "Mike: …") or as a possessive ("Ana's email is …"). */
 const NAMED = /(\p{L}[\p{L}'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$/u;
 const POSSESSIVE = /(\p{L}[\p{L}-]*)'s\b/gu;
 /** The capitalized words that are never a person's name: a contact's labels and other common words (setup.py `_NOT_NAMES`). */
@@ -1829,7 +1829,7 @@ export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
 
 /**
  * Which words the built-in agent's tasks take on the Desk (`GET …/agent_tasks`): its setup business
- * type for a Desk setup made, else null (the copy's own Desk, Rivera's, whose set is `rivera`).
+ * type for a Desk setup made, else null (the copy's own Desk, Turner's, whose set is `rivera`).
  */
 export function setupTaskSet(world: MockWorld, deskId: string): BusinessType | null {
   return interviewForDesk(world, deskId)?.businessType ?? null;

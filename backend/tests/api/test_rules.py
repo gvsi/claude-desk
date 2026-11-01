@@ -155,7 +155,7 @@ async def test_rules_view_lists_each_tools_covering_cards(app, browser, fake, ke
     reply = await owner.browser.get(f"/api/owner/desks/{desk_id}/rules")
     assert reply.status_code == 200, reply.text
     view = RulesView.model_validate(reply.json())
-    assert view.active == active and view.preset is None          # Rivera's rules are neither preset
+    assert view.active == active and view.preset is None          # Turner's rules are neither preset
     rows = {row.tool: row for row in view.tools}
     assert list(rows) == sorted(desk.tools)
 
@@ -625,7 +625,7 @@ async def test_card_above_the_money_cap_is_refused_with_the_limit(app, browser, 
                     reason="Takes payments up to $600 on its own.")
     model.add(chatted("I'll take payments up to $600 without asking you.", *kept, over))
     reply = await owner.browser.post(rules_path(owner, "chat"), json={"text": "Take payments up to $600 yourself"})
-    # Rivera's money cap is $500: nothing reaches the kernel, and the owner is told the limit to raise first.
+    # Turner's money cap is $500: nothing reaches the kernel, and the owner is told the limit to raise first.
     assert (reply.status_code, reply.json()) == (422, {"error": "above_money_cap", "cap_cents": 50_000})
     assert "$500" in model.requests[0].messages[0]["content"][0]["text"].split("\n")[0]
     assert fake.called("POST /policy/draft") == []
@@ -643,7 +643,7 @@ async def test_card_above_the_money_cap_is_refused_with_the_limit(app, browser, 
 
 
 async def test_money_cap_change_drafts_through_the_kernel(app, browser, fake, kernel_http):
-    # Rivera's money cap is $500, with an auto payment link card up to $300 (`rv-link`) and agent payments up to $20.
+    # Turner's money cap is $500, with an auto payment link card up to $300 (`rv-link`) and agent payments up to $20.
     owner = await new_owner(app, browser, fake, kernel_http)
     desk, path = fake.desks[owner.desk_id], rules_path(owner, "money_cap")
     active, rivera = desk.policy_version, owner_cards(fake, owner.desk_id)
@@ -1047,7 +1047,7 @@ async def test_preset_drafts_the_shipped_cards_when_a_desks_hours_dont_read(app,
 
 
 async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, browser, fake, kernel_http):
-    # Rivera's Desk keeps 8 to 6 on weekdays and 9 to 1 on Saturdays: its "Recommended rules" book weekdays 8 to 6,
+    # Turner's Desk keeps 8 to 6 on weekdays and 9 to 1 on Saturdays: its "Recommended rules" book weekdays 8 to 6,
     # and Saturday bookings ask first.
     owner = await new_owner(app, browser, fake, kernel_http)
     assert fake.desks[owner.desk_id].hours == [EIGHT_TO_SIX, SATURDAY]
@@ -1063,10 +1063,10 @@ async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, brows
     (booking,) = booking_cards(sent)
     assert (booking.card_id, booking.hours, booking.review, booking.reason) == (
         "preset-book-weekday", EIGHT_TO_SIX, True, OPENING_HOURS_REASON)
-    # It is Rivera's own weekday rule in everything but its ID.
+    # It is Turner's own weekday rule in everything but its ID.
     (rivera_weekday,) = [each for each in owner_cards(fake, owner.desk_id) if each.card_id == "rv-book-wk"]
     assert booking == rivera_weekday.model_copy(update={"card_id": "preset-book-weekday"})
-    # Rivera's own 8 to 6 weekday rule goes to the preset's, and her Saturday rule goes, to ask first.
+    # Turner's own 8 to 6 weekday rule goes to the preset's, and his Saturday rule goes, to ask first.
     assert {each.card_id for each in draft.diff.removed} >= {"rv-book-wk", "rv-book-sat"}
     assert booking in draft.diff.added
     assert await preset() is None

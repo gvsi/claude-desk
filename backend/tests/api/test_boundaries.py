@@ -89,7 +89,7 @@ SECRETS = (SESSION_TOKEN, OWNER_TOKEN, AGENT.agent_key_id, AGENT.nonce, AGENT.si
 STATE = SessionState(session_id="s1", kind="visitor", verified=False, assurance="none", mode="ai", generation=0)
 WHOAMI = WhoAmI(kind="visitor", copy_id="c1", desk_id="d1", desk_ids=["d1"], session=STATE)
 LINK = PaymentLinkView(title="Drain clearing deposit", amount_cents=2000, state="issued", language="en",
-                       business_name="Rivera Plumbing", customer_name=None)
+                       business_name="Turner Plumbing", customer_name=None)
 
 
 class KernelHandler(BaseHTTPRequestHandler):

@@ -7,11 +7,11 @@ requires: ["01c", "02"]
 setup:
   verify_as: dana
 persona: >
-  You are Dana Whitfield, a Rivera Plumbing customer, and your session is already verified as you.
-  You're doing your household budget and want to know what you've paid Rivera Plumbing so far: ask
+  You are Dana Whitfield, a Turner Plumbing customer, and your session is already verified as you.
+  You're doing your household budget and want to know what you've paid Turner Plumbing so far: ask
   "What have I paid?" You are brief and friendly.
 goal: >
-  See the charges you've paid Rivera Plumbing.
+  See the charges you've paid Turner Plumbing.
 require:
   - card: charges
 expected_outcomes:

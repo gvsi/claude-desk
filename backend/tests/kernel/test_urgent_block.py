@@ -124,7 +124,7 @@ async def test_urgent_opens_native_callback_and_alerts_without_notification_pref
     verdict = await checked(client, visitor, 'I passed your request on.', [clause('callback_confirmed', fact.fact_id)])
     assert verdict.ok, verdict.violations
     assert verdict.blocks[-1].template == 'callback_confirmed'
-    assert verdict.blocks[-1].text == 'Maria Rivera will call you back'      # no time promised for an urgent call
+    assert verdict.blocks[-1].text == 'Mike Turner will call you back'      # no time promised for an urgent call
 
 
 async def test_urgent_and_native_callback_each_alert_once_and_replace_the_open_handoff(app, client):
@@ -161,8 +161,8 @@ async def test_urgent_and_native_callback_each_alert_once_and_replace_the_open_h
 
 
 @pytest.mark.parametrize('language,line', [
-    ('en', '“Urgent help”: urgent request sent to Maria Rivera'),
-    ('es', '“Urgent help”: solicitud urgente enviada a Maria Rivera'),
+    ('en', '“Urgent help”: urgent request sent to Mike Turner'),
+    ('es', '“Urgent help”: solicitud urgente enviada a Mike Turner'),
 ])
 async def test_urgent_receipt_names_the_title_and_owner_alert_is_never_in_the_session_view(app, client, language, line):
     copy, visitor = await configured(app, client)

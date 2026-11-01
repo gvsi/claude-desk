@@ -8,7 +8,7 @@ import { expectComputed } from '../test/expectComputed.ts';
 import { EMERGENCIES, MAIN_LINE, TodayNeedsYou } from './parts.tsx';
 import { expectOwnerFrame, expectTabOrder } from './spec.ts';
 
-/** Maria's businesses: Rivera Plumbing with its two Desks, and her own, with one. */
+/** Mike's businesses: Turner Plumbing with its two Desks, and his own, with one. */
 const BUSINESSES: SwitcherBusiness[] = [
   { id: 'biz-rivera', name: rivera.business.name, desks: [MAIN_LINE, EMERGENCIES] },
   { id: 'biz-maria', name: rivera.business.ownerName, desks: [{ id: 'desk-maria-main', name: 'Main line' }] },
@@ -38,7 +38,7 @@ const meta = {
     canvas: 'N-Switcher-Run1',
     canvasNote: [
       'Signed at sign-off: the menu lists businesses only, the current one checked, and “New business” last; the board’s Desks under the current business and its Desk rows are in the sidebar’s Desk picker.',
-      'Behind the menu is the signed Today (N-Today-Run1) with both of Rivera’s Desks, where the board shows Today from before that sign-off, with “This week”. Where the web app (plan 04) anchors the menu is its own; here it opens beside the business row.',
+      'Behind the menu is the signed Today (N-Today-Run1) with both of Turner’s Desks, where the board shows Today from before that sign-off, with “This week”. Where the web app (plan 04) anchors the menu is its own; here it opens beside the business row.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -58,8 +58,8 @@ export const Board: Story = {
     expectComputed(menu, { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '12px' });
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')];
     await expect(items).toEqual([
-      within(menu).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' }),
-      within(menu).getByRole('menuitemradio', { name: 'Maria Rivera 1 Desk' }),
+      within(menu).getByRole('menuitemradio', { name: 'Turner Plumbing 2 Desks' }),
+      within(menu).getByRole('menuitemradio', { name: 'Mike Turner 1 Desk' }),
       within(menu).getByRole('menuitem', { name: 'New business' }),
     ]);
     await expect(items[0]).toHaveAttribute('aria-checked', 'true');
@@ -85,6 +85,6 @@ export const Board: Story = {
 
     // The business row opens it again, on the current business, as the board shows it.
     await userEvent.click(opener);
-    await expect(within(canvas.getByRole('menu', { name: 'Switch business' })).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' })).toHaveFocus();
+    await expect(within(canvas.getByRole('menu', { name: 'Switch business' })).getByRole('menuitemradio', { name: 'Turner Plumbing 2 Desks' })).toHaveFocus();
   },
 };

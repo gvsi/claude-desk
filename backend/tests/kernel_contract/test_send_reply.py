@@ -130,7 +130,7 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
 
 
 OFFER = {"en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"}
-RECEIPT = {"en": "Reply checked against Maria Rivera's rules", "es": "Respuesta revisada con las reglas de Maria Rivera"}
+RECEIPT = {"en": "Reply checked against Mike Turner's rules", "es": "Respuesta revisada con las reglas de Mike Turner"}
 
 
 @pytest.mark.kernel_plan("01b")

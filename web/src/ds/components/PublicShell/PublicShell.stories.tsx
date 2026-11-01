@@ -26,8 +26,8 @@ const ownerName = rivera.business.ownerName;
 const desk = rivera.publicDesk;
 const ACCENT = 'rgb(184, 115, 51)';
 const DISCLOSURE = {
-  en: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.",
-  es: 'Estás hablando con Claude, una IA que responde por Rivera Plumbing. Puedes pedir hablar con Maria Rivera cuando quieras.',
+  en: "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime.",
+  es: 'Estás hablando con Claude, una IA que responde por Turner Plumbing. Puedes pedir hablar con Mike Turner cuando quieras.',
 };
 
 /** The public page's brand, as the screen maps `PublicDesk` to it: the seed's field and accent, the text tokens as inks. */
@@ -45,7 +45,7 @@ function brandOf(publicDesk: PublicDesk): PublicBrand {
 
 /** A fixture part the stories need, or a thrown error naming what the fixture lost. */
 function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`the Rivera fixture has no ${what}`);
+  if (value === undefined) throw new Error(`the Turner fixture has no ${what}`);
   return value;
 }
 
@@ -66,7 +66,7 @@ function Conversation({ language }: { language: 'en' | 'es' }) {
     `${language} quote reply`,
   );
   return (
-    <Transcript label={language === 'en' ? 'Conversation with Rivera Plumbing' : 'Conversación con Rivera Plumbing'}>
+    <Transcript label={language === 'en' ? 'Conversation with Turner Plumbing' : 'Conversación con Turner Plumbing'}>
       <TranscriptRow>
         <VisitorMessage text={question} />
       </TranscriptRow>
@@ -82,12 +82,12 @@ function Conversation({ language }: { language: 'en' | 'es' }) {
 }
 
 const composer = {
-  en: <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />,
+  en: <Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />,
   es: (
     <Composer
       variant="visitor"
-      label="Escribe a Rivera Plumbing"
-      placeholder="Escribe a Rivera Plumbing"
+      label="Escribe a Turner Plumbing"
+      placeholder="Escribe a Turner Plumbing"
       sendLabel="Enviar"
       maxLength={2000}
       onSend={fn()}
@@ -185,11 +185,11 @@ export const Rivera: Story = {
       borderBottomWidth: '2px',
       borderBottomColor: ACCENT,
     });
-    const name = within(header).getByRole('heading', { level: 1, name: 'Rivera Plumbing' });
+    const name = within(header).getByRole('heading', { level: 1, name: 'Turner Plumbing' });
     const tagline = within(header).getByText('Main line');
     const monogram = header.querySelector('.cd-public-shell__monogram');
     await expect(monogram).toHaveAttribute('aria-hidden', 'true');
-    await expect(monogram).toHaveTextContent('R');
+    await expect(monogram).toHaveTextContent('T');
 
     // brand_text_meets_contrast: both inks keep 4.5:1 over the field (axe checks the same).
     for (const text of [name, tagline]) {
@@ -206,30 +206,30 @@ export const Rivera: Story = {
 
     // public_shell_always_discloses_ai: under the chat's title, in words.
     const main = canvas.getByRole('main');
-    await expect(within(main).getByRole('heading', { level: 2, name: 'Chat with Rivera Plumbing' })).toBeVisible();
+    await expect(within(main).getByRole('heading', { level: 2, name: 'Chat with Turner Plumbing' })).toBeVisible();
     await expect(lineReading(main, DISCLOSURE.en)).toBeVisible();
-    await expect(main).toHaveTextContent('an AI answering for Rivera Plumbing');
+    await expect(main).toHaveTextContent('an AI answering for Turner Plumbing');
 
     // ask_for_owner_calls_back. Its words are one run of text, so the button's gap can't open up
     // between "Ask for" and the name.
-    const ask = within(main).getByRole('button', { name: 'Ask for Maria Rivera' });
-    await expect([...ask.childNodes].map((node) => node.textContent)).toEqual(['Ask for Maria Rivera']);
+    const ask = within(main).getByRole('button', { name: 'Ask for Mike Turner' });
+    await expect([...ask.childNodes].map((node) => node.textContent)).toEqual(['Ask for Mike Turner']);
     await userEvent.click(ask);
     await expect(args.onAskForOwner).toHaveBeenCalledTimes(1);
     // A real page has no vision line, before or after asking.
     await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
 
     // The conversation, then the composer and the footer under it.
-    const log = within(main).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
-    const input = within(main).getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const log = within(main).getByRole('log', { name: 'Conversation with Turner Plumbing' });
+    const input = within(main).getByRole('textbox', { name: 'Message Turner Plumbing' });
     await expect(input.getBoundingClientRect().top).toBeGreaterThan(log.getBoundingClientRect().bottom);
     const footer = within(main).getByText('Concept prototype by Giovanni Alcantara, not an Anthropic product');
     await expect(footer.getBoundingClientRect().top).toBeGreaterThan(input.getBoundingClientRect().bottom);
     await expect(within(main).getByText('Claude Desk')).toBeVisible();
 
     // The about column at the right: the charter's cards, in order, in the page's language.
-    const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
-    await expect(within(about).getByRole('heading', { level: 2, name: 'About Rivera Plumbing' })).toBeVisible();
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    await expect(within(about).getByRole('heading', { level: 2, name: 'About Turner Plumbing' })).toBeVisible();
     const cards = [...about.querySelectorAll<HTMLElement>('.cd-reply-card')];
     await expect(cards).toHaveLength(desk.en.charter.length);
     for (const [index, card] of cards.entries()) {
@@ -265,7 +265,7 @@ export const Tablet: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByTestId('tablet').getBoundingClientRect().width).toBe(TABLET);
-    const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
     await expectAboutAtopTheConversation(canvasElement, about, TABLET);
     await expectRowsFillTheChat(canvasElement);
   },
@@ -286,12 +286,12 @@ export const RiveraEs: Story = {
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
     const main = canvas.getByRole('main');
     // public_shell_always_discloses_ai, in Spanish.
-    await expect(within(main).getByRole('heading', { level: 2, name: 'Chatea con Rivera Plumbing' })).toBeVisible();
+    await expect(within(main).getByRole('heading', { level: 2, name: 'Chatea con Turner Plumbing' })).toBeVisible();
     await expect(lineReading(main, DISCLOSURE.es)).toBeVisible();
-    await expect(main).toHaveTextContent('una IA que responde por Rivera Plumbing');
-    await userEvent.click(within(main).getByRole('button', { name: 'Pedir hablar con Maria Rivera' }));
+    await expect(main).toHaveTextContent('una IA que responde por Turner Plumbing');
+    await userEvent.click(within(main).getByRole('button', { name: 'Pedir hablar con Mike Turner' }));
     await expect(args.onAskForOwner).toHaveBeenCalledTimes(1);
-    const about = canvas.getByRole('complementary', { name: 'Sobre Rivera Plumbing' });
+    const about = canvas.getByRole('complementary', { name: 'Sobre Turner Plumbing' });
     for (const card of about.querySelectorAll('.cd-reply-card')) await expect(card).toHaveAttribute('lang', 'es');
     await expect(canvasElement).not.toHaveTextContent('Chat with');
   },
@@ -327,7 +327,7 @@ export const Compact: Story = {
     await expect(lineReading(main, DISCLOSURE.en)).toBeVisible();
     // The about column opens the conversation's scroll region, the phone's full width, with the
     // gutters inside it.
-    const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
     await expectAboutAtopTheConversation(canvasElement, about, PHONE);
     expectComputed(about, { paddingLeft: '16px', paddingRight: '16px' });
   },
@@ -356,9 +356,9 @@ export const Embedded: Story = {
     await expect(canvas.queryByRole('heading', { level: 1 })).toBeNull();
     // The disclosure can't be left out.
     await expect(lineReading(canvasElement, DISCLOSURE.en)).toBeVisible();
-    await expect(canvas.getByRole('heading', { level: 2, name: 'Chat with Rivera Plumbing' })).toBeVisible();
-    await expect(canvas.getByRole('button', { name: 'Ask for Maria Rivera' })).toBeVisible();
-    await expect(canvas.getByRole('region', { name: 'About Rivera Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('heading', { level: 2, name: 'Chat with Turner Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Ask for Mike Turner' })).toBeVisible();
+    await expect(canvas.getByRole('region', { name: 'About Turner Plumbing' })).toBeVisible();
     const panel = canvas.getByTestId('panel');
     await expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
   },
@@ -402,7 +402,7 @@ export const InertAsk: Story = {
     // inert_ask_sends_nothing: a click and a key press each leave the page as it was.
     const main = canvas.getByRole('main');
     const head = canvasElement.querySelector<HTMLElement>('.cd-public-shell__chat-head')!;
-    const ask = within(main).getByRole('button', { name: 'Ask for Maria Rivera' });
+    const ask = within(main).getByRole('button', { name: 'Ask for Mike Turner' });
     await expect(head).toContainElement(ask);
     expectComputed(ask, { height: '32px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
     // A polite live region waits in the chat's pinned head, empty and taking no room until the first
@@ -448,7 +448,7 @@ export const WithAgentLinks: Story = {
     canvasNote: 'The board has no agent links; they sit under the charter cards in the about column, under their own heading.',
   },
   play: async ({ canvas }) => {
-    const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
     const heading = within(about).getByRole('heading', { level: 3, name: 'For AI agents' });
     // list_role_survives_unstyled_markers: Safari announces the links' list only with role="list".
     await expect(about.querySelector('.cd-public-shell__link-list')).toHaveAttribute('role', 'list');
@@ -786,7 +786,7 @@ export const HalfWidth: Story = {
     expectComputed(canvas.getByRole('main'), { paddingLeft: '16px', paddingRight: '16px' });
     // From 640 px up the open status stays on the name's line, at the right; only a phone wraps it.
     const status = within(header).getByText(OPEN_EN.text);
-    const name = within(header).getByRole('heading', { level: 1, name: 'Rivera Plumbing' });
+    const name = within(header).getByRole('heading', { level: 1, name: 'Turner Plumbing' });
     await expect(status.getBoundingClientRect().left).toBeGreaterThan(name.getBoundingClientRect().right);
     await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().bottom);
     await expect(canvas.getByTestId('half').scrollWidth).toBeLessThanOrEqual(HALF);
@@ -795,10 +795,10 @@ export const HalfWidth: Story = {
 
 // The owner in the chat: take-over option A, signed on 2026-10-30.
 
-/** The chat head's line while Maria is in the chat, in place of the disclosure. */
+/** The chat head's line while Mike is in the chat, in place of the disclosure. */
 const OWNER_IN_CHAT = {
-  en: 'Maria Rivera is in this chat. Claude, an AI, is paused until Maria Rivera hands it back.',
-  es: 'Maria Rivera está en este chat. Claude, una IA, está en pausa hasta que Maria Rivera le devuelva el chat.',
+  en: 'Mike Turner is in this chat. Claude, an AI, is paused until Mike Turner hands it back.',
+  es: 'Mike Turner está en este chat. Claude, una IA, está en pausa hasta que Mike Turner le devuelva el chat.',
 };
 
 /**
@@ -808,9 +808,9 @@ const OWNER_IN_CHAT = {
 const JOINED = { en: (name: string) => `${name} joined the chat`, es: (name: string) => `${name} se unió al chat` };
 
 /**
- * Maria in the chat, from the Rivera fixture. In English: Dana asks for her, the kernel's handoff
- * card, then the take-over's events as the stream delivers them, less her hand-back. In Spanish:
- * Lucía's chat from her ask for Maria to Maria's words.
+ * Mike in the chat, from the Turner fixture. In English: Dana asks for him, the kernel's handoff
+ * card, then the take-over's events as the stream delivers them, less his hand-back. In Spanish:
+ * Lucía's chat from her ask for Mike to Mike's words.
  */
 const TAKE_OVER: Record<'en' | 'es', TranscriptTurn[]> = {
   en: [
@@ -823,16 +823,16 @@ const TAKE_OVER: Record<'en' | 'es', TranscriptTurn[]> = {
   ],
   es: (() => {
     const turns = rivera.conversations.lucia.turns;
-    const ask = turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.includes('hablar con Maria'));
+    const ask = turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.includes('hablar con Mike'));
     const said = turns.findIndex((turn) => turn.kind === 'event' && turn.event.type === 'message' && turn.event.author === 'owner');
-    if (ask < 0 || said < ask) throw new Error("the Rivera fixture has no Spanish take-over in Lucía's chat");
+    if (ask < 0 || said < ask) throw new Error("the Turner fixture has no Spanish take-over in Lucía's chat");
     return turns.slice(ask, said + 1);
   })(),
 };
 
 /**
- * The take-over's rows, as the public page draws them: the visitor's words, Claude's and Maria's
- * messages with their receipts under them, and the line that says Maria joined; the chat's end is
+ * The take-over's rows, as the public page draws them: the visitor's words, Claude's and Mike's
+ * messages with their receipts under them, and the line that says Mike joined; the chat's end is
  * kept above the composer. Not the boards' `TurnRows`: that is for the `Boards/*` stories only, and
  * writes the joined line in English only.
  */
@@ -877,17 +877,17 @@ function TakeOverConversation({ language }: { language: 'en' | 'es' }) {
   });
   return (
     <>
-      <Transcript label={language === 'en' ? 'Conversation with Rivera Plumbing' : 'Conversación con Rivera Plumbing'}>{rows}</Transcript>
+      <Transcript label={language === 'en' ? 'Conversation with Turner Plumbing' : 'Conversación con Turner Plumbing'}>{rows}</Transcript>
       <FollowTheChat />
     </>
   );
 }
 
 /**
- * owner_in_chat_line: the chat's head says Maria is in the chat and Claude, an AI, is paused, on the
- * disclosure's own line and in its type, both of her names marked as written by someone; the usual
- * disclosure and "Ask for Maria Rivera" aren't there. Under the head, the line that says she joined,
- * then her words, in view above the composer.
+ * owner_in_chat_line: the chat's head says Mike is in the chat and Claude, an AI, is paused, on the
+ * disclosure's own line and in its type, both of his names marked as written by someone; the usual
+ * disclosure and "Ask for Mike Turner" aren't there. Under the head, the line that says he joined,
+ * then his words, in view above the composer.
  */
 async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Promise<void> {
   const head = root.querySelector<HTMLElement>('.cd-public-shell__chat-head');
@@ -902,7 +902,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
     (status) => status.querySelector('.cd-system-line__text')?.textContent === JOINED[language](ownerName),
   );
   const said = root.querySelector<HTMLElement>('.cd-person-message');
-  if (!joined || !said) throw new Error('no line that says Maria joined, or no words of hers');
+  if (!joined || !said) throw new Error('no line that says Mike joined, or no words of his');
   await expect(joined.getBoundingClientRect().top).toBeGreaterThanOrEqual(head.getBoundingClientRect().bottom);
   await expect(said.getBoundingClientRect().top).toBeGreaterThan(joined.getBoundingClientRect().bottom);
   await expect(said).toHaveTextContent(ownerName);
@@ -912,7 +912,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
 }
 
 const ownerInChatNote =
-  'The chat head of take-over option A: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown. Built from the signed option; its render and the by-eye comparison are tracked in issue #230. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
+  'The chat head of take-over option A: while Mike is in the chat it says so and that Claude, an AI, is paused until he hands it back, and Ask for Mike isn’t shown. Built from the signed option; its render and the by-eye comparison are tracked in issue #230. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
 
 export const OwnerInChat: Story = {
   args: { ownerInChat: true, openStatus: OPEN_EN, children: <TakeOverConversation language="en" /> },
@@ -921,10 +921,10 @@ export const OwnerInChat: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(1512);
     await expectOwnerInChat(canvas.getByRole('main'), 'en');
-    await expect(canvas.queryByRole('button', { name: 'Ask for Maria Rivera' })).toBeNull();
+    await expect(canvas.queryByRole('button', { name: 'Ask for Mike Turner' })).toBeNull();
     // The rest of the page is as ever: the about column beside the chat, the composer at its foot.
-    await expect(canvas.getByRole('complementary', { name: 'About Rivera Plumbing' })).toBeVisible();
-    await expect(canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('complementary', { name: 'About Turner Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'en');
   },
 };
@@ -954,7 +954,7 @@ export const OwnerInChatEs: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
     await expectOwnerInChat(canvas.getByRole('main'), 'es');
-    await expect(canvas.queryByRole('button', { name: 'Pedir hablar con Maria Rivera' })).toBeNull();
+    await expect(canvas.queryByRole('button', { name: 'Pedir hablar con Mike Turner' })).toBeNull();
     await expect(canvasElement).not.toHaveTextContent('is in this chat');
   },
 };
@@ -967,12 +967,12 @@ export const OwnerInChatEs: Story = {
  */
 const NO_NAME = {
   en: {
-    disclosure: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for a person anytime.",
+    disclosure: "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for a person anytime.",
     ask: 'Ask for a person',
     ownerInChat: 'The business owner is in this chat. Claude, an AI, is paused until they hand it back.',
   },
   es: {
-    disclosure: 'Estás hablando con Claude, una IA que responde por Rivera Plumbing. Puedes pedir hablar con una persona cuando quieras.',
+    disclosure: 'Estás hablando con Claude, una IA que responde por Turner Plumbing. Puedes pedir hablar con una persona cuando quieras.',
     ask: 'Pedir hablar con una persona',
     ownerInChat: 'El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat.',
   },
@@ -988,11 +988,11 @@ const noNameNote =
 async function expectAskForAPerson(main: HTMLElement, language: 'en' | 'es'): Promise<HTMLElement> {
   const line = lineReading(main, NO_NAME[language].disclosure);
   await expect(line).toBeVisible();
-  await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Rivera Plumbing']);
+  await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Turner Plumbing']);
   const ask = within(main).getByRole('button', { name: NO_NAME[language].ask });
   await expect([...ask.childNodes].map((node) => node.textContent)).toEqual([NO_NAME[language].ask]);
   await expect(ask.querySelector('[data-copy="user"]')).toBeNull();
-  await expect(main.querySelector('.cd-public-shell__chat-head')).not.toHaveTextContent(/Owner|Maria/);
+  await expect(main.querySelector('.cd-public-shell__chat-head')).not.toHaveTextContent(/Owner|Mike/);
   return ask;
 }
 
@@ -1122,11 +1122,11 @@ export const FirstViewEnglish: Story = {
     firstView: true,
     openStatus: OPEN_EN,
     starters: { words: desk.en.starters, onPick: fn() },
-    children: <Transcript label="Conversation with Rivera Plumbing">{null}</Transcript>,
+    children: <Transcript label="Conversation with Turner Plumbing">{null}</Transcript>,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
     await expect(canvas.getByText('Try one of these, or ask in your own words.')).toBeVisible();
     await expect(within(canvas.getByRole('group', { name: 'Suggestions' })).getAllByRole('button')).toHaveLength(3);
   },
@@ -1140,11 +1140,11 @@ export const FirstViewSpanish: Story = {
     openStatus: { ...OPEN_EN, text: 'Abierto ahora, hasta las 18:00' },
     composer: composer.es,
     starters: { words: desk.es.starters, onPick: fn() },
-    children: <Transcript label="Conversación con Rivera Plumbing">{null}</Transcript>,
+    children: <Transcript label="Conversación con Turner Plumbing">{null}</Transcript>,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole('heading', { name: '¿En qué te puede ayudar Rivera Plumbing?' })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: '¿En qué te puede ayudar Turner Plumbing?' })).toBeVisible();
     await expect(canvas.getByText('Prueba una de estas o pregunta con tus palabras.')).toBeVisible();
     await expect(within(canvas.getByRole('group', { name: 'Sugerencias' })).getAllByRole('button')).toHaveLength(3);
   },
@@ -1154,7 +1154,7 @@ export const FirstViewWithoutStarters: Story = {
   args: { ...FirstViewEnglish.args, starters: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
     await expect(canvas.queryByText('Try one of these, or ask in your own words.')).not.toBeInTheDocument();
     await expect(canvas.queryByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
   },

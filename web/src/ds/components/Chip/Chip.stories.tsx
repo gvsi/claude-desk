@@ -31,7 +31,7 @@ const OPTIONS = ['Call', 'Text', 'Email'] as const;
 function RadioChips({ onClick, initial }: { onClick: ChipProps['onClick']; initial?: (typeof OPTIONS)[number] }) {
   const [chosen, setChosen] = useState<string | undefined>(initial);
   return (
-    <div role="radiogroup" aria-label="How Maria should reach you" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-8)' }}>
+    <div role="radiogroup" aria-label="How Mike should reach you" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-8)' }}>
       {OPTIONS.map((option) => (
         <Chip
           key={option}

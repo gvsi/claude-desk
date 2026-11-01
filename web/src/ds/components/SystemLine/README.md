@@ -4,7 +4,7 @@
 
 ## When to use
 
-- When the owner joins: "Maria Rivera joined the chat", from `EvOwnerJoined.name`.
+- When the owner joins: "Mike Turner joined the chat", from `EvOwnerJoined.name`.
 - When the owner hands back: "Claude is helping again.", for `EvOwnerLeft`.
 - When a visitor confirms it's them. The verification form's `VerifiedLine` builds on it and adds the simulated label for every session but the owner's own.
 - Not for checkpoint results. Those are margin receipts.

@@ -25,7 +25,7 @@ import './AppShell.css';
 export interface AppShellProps {
   /** The `Sidebar`: a column at the left, or a sheet behind "Menu" on a narrow screen. */
   sidebar: ReactNode;
-  /** The current business's name, for the top bar on a narrow screen: "Rivera Plumbing". */
+  /** The current business's name, for the top bar on a narrow screen: "Turner Plumbing". */
   business: string;
   /** A full-width line above everything, such as the `ReviewerBar`. */
   banner?: ReactNode;

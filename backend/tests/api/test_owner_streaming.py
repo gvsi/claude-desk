@@ -151,7 +151,7 @@ async def question_ready(app, browser, kernel_http, model):
 
 
 OPENING = "Thanks. From your site, you fix leaks and water heaters."
-HOST = "rivera-plumbing.example"
+HOST = "turner-plumbing.example"
 QUERIES = ["plumber service calls", "water heater repair pricing"]       # the second search fails
 
 
@@ -171,7 +171,7 @@ async def consenting(app, browser, fake, kernel_http, model, website, queries=()
     from tests.api.test_setup_questions import WEBSITE
 
     if website == "pages":
-        fake.script("native.fetch_website", model_view={"title": "Rivera Plumbing", "text": "Leaks.", "pages": 3})
+        fake.script("native.fetch_website", model_view={"title": "Turner Plumbing", "text": "Leaks.", "pages": 3})
     else:
         fake.script("native.fetch_website", exec_state="failed")
     owner = await new_owner(app, browser, kernel_http)

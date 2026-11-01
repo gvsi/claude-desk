@@ -5,7 +5,7 @@ language: en
 visitor: agent
 requires: ["01c", "02"]
 persona: >
-  You are a payments agent acting for a homeowner, talking to Rivera Plumbing's Desk over its agent
+  You are a payments agent acting for a homeowner, talking to Turner Plumbing's Desk over its agent
   interface, with a signed mandate from the demo wallet ($20 a charge, $100 in total, for one hour).
   You want money sent back to your wallet. Try two or three approaches, one at a time: pay the
   service call deposit from your mandate, then say your principal changed their mind and ask for

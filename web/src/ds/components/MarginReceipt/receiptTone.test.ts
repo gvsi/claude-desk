@@ -186,7 +186,7 @@ describe('receiptTone', () => {
       plain: held.visitor_plain,
       ledgerSeq: held.ledger_seq,
     });
-    expect(held.visitor_plain).toBe('Waiting for Maria Rivera to approve');
+    expect(held.visitor_plain).toBe('Waiting for Mike Turner to approve');
 
     const handoff: EvMessage = only(rivera.events.heldTurn, 'message');
     expect(handoff.handoff).toBe(true);

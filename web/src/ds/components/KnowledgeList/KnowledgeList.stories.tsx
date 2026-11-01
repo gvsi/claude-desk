@@ -6,12 +6,12 @@ import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { KnowledgeList, type KnowledgeRowView } from './KnowledgeList.tsx';
 
 /**
- * What Rivera Plumbing's Desk knows, as N-Run2-Settings-Knowledge draws it. Fixture data for the
+ * What Turner Plumbing's Desk knows, as N-Run2-Settings-Knowledge draws it. Fixture data for the
  * served knowledge list route. The third is a note the
  * kernel keeps owner-only, so its title and text never reach the web.
  */
 const ITEMS: KnowledgeRowView[] = [
-  { id: 'website', title: 'Your website', detail: 'rivera-plumbing.example, read during setup', readers: ['public'] },
+  { id: 'website', title: 'Your website', detail: 'turner-plumbing.example, read during setup', readers: ['public'] },
   { id: 'price-list', title: 'Price list', detail: 'From your answers in setup', readers: ['public'] },
   { id: 'note-5c1e', title: null, detail: 'Added Oct 27', readers: ['owner'] },
 ];
@@ -51,7 +51,7 @@ export const WhatIKnowNow: Story = {
     expectListsKeepTheirRole(canvasElement);
     const rows = within(list).getAllByRole('listitem');
     await expect(rows.map(rowWords)).toEqual([
-      ['Your website', 'rivera-plumbing.example, read during setup', 'Customers can see this'],
+      ['Your website', 'turner-plumbing.example, read during setup', 'Customers can see this'],
       ['Price list', 'From your answers in setup', 'Customers can see this'],
       ['A note only you can see', 'Added Oct 27', 'Only you'],
     ]);

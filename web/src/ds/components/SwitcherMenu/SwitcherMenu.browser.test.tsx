@@ -21,7 +21,7 @@ const BUSINESSES: SwitcherBusiness[] = [
   { id: 'biz-bayview', name: LONG_NAME, desks: [{ id: 'desk-bayview-main', name: 'Main line' }] },
   {
     id: 'biz-rivera',
-    name: 'Rivera Plumbing',
+    name: 'Turner Plumbing',
     desks: [
       { id: 'desk-rivera-main', name: 'Main line' },
       { id: 'desk-rivera-emergencies', name: 'Emergencies' },
@@ -41,7 +41,7 @@ it('long_business_name_carries_its_title', async () => {
     const menu = page.getByRole('menu', { name: 'Switch business' });
     // Each row keeps its name and Desk count as its name for screen readers, the title adding nothing to it.
     const bayview = menu.getByRole('menuitemradio', { name: `${LONG_NAME} 1 Desk`, exact: true });
-    const rivera = menu.getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks', exact: true });
+    const rivera = menu.getByRole('menuitemradio', { name: 'Turner Plumbing 2 Desks', exact: true });
     await expect.element(bayview).toBeVisible();
     await expect.element(rivera).toBeVisible();
 
@@ -59,7 +59,7 @@ it('long_business_name_carries_its_title', async () => {
     // A name that fits carries its title too, as every business name the owner app cuts does.
     const short = nameOf(rivera.element() as HTMLElement);
     expect(short.scrollWidth).toBeLessThanOrEqual(short.clientWidth);
-    expect(short.title).toBe('Rivera Plumbing');
+    expect(short.title).toBe('Turner Plumbing');
   } finally {
     act(() => root.unmount());
     container.remove();

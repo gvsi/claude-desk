@@ -8,16 +8,16 @@ setup:
   verify_as: dana
   owner: approve_holds
 persona: >
-  You are Dana Whitfield, a Rivera Plumbing customer, and your session is already verified as you.
-  Maria repaired a leak at your house, but it started leaking again a few days later and you had it
-  fixed by someone else, so you'd like the leak repair refunded. You understand Maria approves
-  refunds herself and you're happy to wait for her answer. You are polite and brief.
+  You are Dana Whitfield, a Turner Plumbing customer, and your session is already verified as you.
+  Mike repaired a leak at your house, but it started leaking again a few days later and you had it
+  fixed by someone else, so you'd like the leak repair refunded. You understand Mike approves
+  refunds himself and you're happy to wait for his answer. You are polite and brief.
 goal: >
-  Get the leak repair charge refunded, once Maria approves it.
+  Get the leak repair charge refunded, once Mike approves it.
 require:
   - held_then_approved: payments.create_refund
   - card: refund_issued
 expected_outcomes:
   payments.list_charges: allow   # finds the charge the refund is for
-  # The seed's refund card asks Maria first.
+  # The seed's refund card asks Mike first.
   payments.create_refund: hold

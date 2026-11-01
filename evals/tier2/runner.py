@@ -219,7 +219,7 @@ def redact(value: Any, secrets: Iterable[str]) -> Any:
 
 
 def rivera_seed_data(now: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """The Rivera seed's documents and people (Plan 01a's `seed.rivera_seed(now)`), read as data for
+    """The Turner seed's documents and people (Plan 01a's `seed.rivera_seed(now)`), read as data for
     markers and for the contacts the harness verifies with; imported only when a run needs it."""
     seed = importlib.import_module("desk.kernel_service.seed")
     _, desk = seed.rivera_seed(now)

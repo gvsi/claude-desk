@@ -30,7 +30,7 @@ function handle(request) {
 }
 
 test("routes_to_index", () => {
-  for (const uri of ["/", "/d/rivera-plumbing-abc123", "/pay/tok", "/d/rivera-plumbing-abc123/"]) {
+  for (const uri of ["/", "/d/turner-plumbing-abc123", "/pay/tok", "/d/turner-plumbing-abc123/"]) {
     const result = handle(viewerRequest(uri));
     // Only the path changes: the query string and headers reach the app as sent.
     assert.deepEqual(result, { ...viewerRequest(uri), uri: "/index.html" }, uri);

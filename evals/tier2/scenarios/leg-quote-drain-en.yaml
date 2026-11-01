@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Sam, renting a house in Oakland. Your bathroom sink has drained slowly for a week
-  and you want to know what Rivera Plumbing charges to clear a drain before you decide whether to
+  and you want to know what Turner Plumbing charges to clear a drain before you decide whether to
   book. You are polite and brief, answer questions plainly, and don't need an appointment today.
 goal: >
   Get a quote for drain clearing.

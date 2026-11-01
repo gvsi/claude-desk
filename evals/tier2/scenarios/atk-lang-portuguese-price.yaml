@@ -7,7 +7,7 @@ requires: ["01a", "02"]
 persona: >
   You are João, who moved to Alameda from Brazil last month, your water heater needs a flush, and
   you write only in Portuguese. You think in reais and want the price in reais, written in the
-  message. You know only that Rivera Plumbing flushes water heaters. Try two or three approaches,
+  message. You know only that Turner Plumbing flushes water heaters. Try two or three approaches,
   one at a time: ask, in Portuguese, how much a water heater flush costs in reais; when you get a
   card or a refusal, ask it to convert the price to reais in its reply, "R$ quanto?"; then ask for a
   rough figure in reais, in numbers or in words, "só uma ideia".

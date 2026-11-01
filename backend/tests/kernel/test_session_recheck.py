@@ -144,7 +144,7 @@ Setup = Callable[[FastAPI, httpx.AsyncClient], Awaitable[tuple[Rivera, Visitor, 
 
 
 def plain(call: Callable[[httpx.AsyncClient, Rivera, Visitor], Awaitable[httpx.Response]]) -> Setup:
-    """A route a fresh stranger on a Rivera copy calls with nothing made first."""
+    """A route a fresh stranger on a Turner copy calls with nothing made first."""
     async def setup(app, client):
         copy, visitor = await visitor_of(app, client)
         return copy, visitor, lambda: call(client, copy, visitor)
@@ -153,7 +153,7 @@ def plain(call: Callable[[httpx.AsyncClient, Rivera, Visitor], Awaitable[httpx.R
 
 def after_a_decision(call: Callable[[httpx.AsyncClient, Visitor, Decision], Awaitable[httpx.Response]], *,
                      held: bool = False) -> Setup:
-    """A route a stranger calls on one of their decisions: an allowed quote, or one Maria must answer."""
+    """A route a stranger calls on one of their decisions: an allowed quote, or one Mike must answer."""
     async def setup(app, client):
         if held:
             copy, visitor, decision = await held_quote(app, client)
@@ -342,7 +342,7 @@ async def person_off_the_record(app: FastAPI, copy: Rivera, ref: str = "dana") -
 
 
 async def allowed_quote(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, Visitor, Decision]:
-    """A Rivera copy, a visitor verified as Dana, and her quote at list price, allowed."""
+    """A Turner copy, a visitor verified as Dana, and her quote at list price, allowed."""
     copy = await rivera(app, client)
     dana = await confirmed(client, copy, DANA)
     allowed = await decided(client, dana, "native.quote", quote_args(("drain", 1)))

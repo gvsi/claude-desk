@@ -18,7 +18,7 @@ const INTAKE_RULE: RuleCard = {
   reason: 'New clients answer three questions before they book.',
 };
 
-/** The main Desk, without the urgent job every Rivera copy has, so only the jobs a test gives it show. */
+/** The main Desk, without the urgent job every Turner copy has, so only the jobs a test gives it show. */
 function deskWithoutJobs() {
   const desk = mockStore.world.desk(RIVERA.deskId);
   if (!desk) throw new Error('The mock has the main Desk');
@@ -89,7 +89,7 @@ it('draws no jobs section without an on or changed business tool on either page'
       const desk = seedJobs();
       seedBusinessTools(desk, chenBusinessTools.map((row) => ({ ...row, status: 'disabled' })));
     } else {
-      // Rivera's own urgent job, turned off.
+      // Turner's own urgent job, turned off.
       const desk = mockStore.world.desk(RIVERA.deskId);
       if (!desk) throw new Error('The mock has the main Desk');
       desk.tools = desk.tools.map((row) => (row.source === 'business' ? { ...row, status: 'disabled', review_reason: null } : row));

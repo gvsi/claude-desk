@@ -1,5 +1,5 @@
-// Fixtures for stories and tests: contract-shaped data for Rivera Plumbing (the demo business,
-// following the master plan's Rivera seed), Chen & Co. CPA (the verification board and the
+// Fixtures for stories and tests: contract-shaped data for Turner Plumbing (the demo business,
+// following the master plan's Turner seed), Chen & Co. CPA (the verification board and the
 // business switcher) and Meridian Bay Permits (the public Desk on the city office's vision page).
 // Everything a visitor would read is what the kernel would send: cards carry kernel-rendered text,
 // and prose and status lines hold nothing a reply check would block. The one exception is two lines

@@ -1,11 +1,11 @@
 /**
- * The scripted Desk: how Rivera Plumbing's Claude answers in the mock API. A visitor's message
+ * The scripted Desk: how Turner Plumbing's Claude answers in the mock API. A visitor's message
  * picks the first rule with one of its words, as a word of its own, in the lowercased text (so
  * "offer" never reads as "off"), and that rule's steps run
  * 150 ms apart. Each turn starts as the API's turns do, with Claude writing before anything it
  * does, and ends with `turn_end`; a session's turns run one at a time, as under the API's turn
  * lock (served.ts `Server.runTurn`). Cards, prose and status lines are the design
- * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
+ * system's Turner fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
  */
 import {
@@ -59,7 +59,7 @@ export interface DeskOwner {
   readonly business: string;
 }
 
-/** Maria Rivera, whom Rivera Plumbing's seeded Desks name, in the fixtures' signed words. */
+/** Mike Turner, whom Turner Plumbing's seeded Desks name, in the fixtures' signed words. */
 export const RIVERA_OWNER: DeskOwner = { name: rivera.business.ownerName, business: rivera.business.name };
 
 /**
@@ -151,7 +151,7 @@ function visitorLines(language: Language, owner: DeskOwner): Record<VisitorLine,
 }
 
 /**
- * The visitor status lines on Maria Rivera's Desk, as the Rivera fixtures write them (a store test
+ * The visitor status lines on Mike Turner's Desk, as the Turner fixtures write them (a store test
  * holds each one to the fixtures).
  */
 export const VISITOR_PLAIN: Record<Language, Record<VisitorLine, string>> = {
@@ -175,7 +175,7 @@ function hasExecutedLine(tool: string): tool is ExecutedTool {
 }
 
 /**
- * The visitor's line for a decision in `state` on a Desk whose owner is `owner` (Rivera's unless
+ * The visitor's line for a decision in `state` on a Desk whose owner is `owner` (Turner's unless
  * given): an executed one names what its tool did, in the signed per-tool words the design
  * system's fixtures carry, never a bare "Done".
  */
@@ -207,7 +207,7 @@ function discountedCents(listCents: number, discountBp: number): number {
 }
 
 /**
- * The quote card for a drain clearing at a discount Maria allowed, as the kernel renders its quote
+ * The quote card for a drain clearing at a discount Mike allowed, as the kernel renders its quote
  * fact: the price, the job, the discount off the list price (only when there is one) and how long
  * the quote holds. At 15% it is the fixtures' card.
  */
@@ -258,7 +258,7 @@ const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
   es: { title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con {owner}'] },
 };
 
-/** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Rivera's Desk, the fixtures' card. */
+/** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Turner's Desk, the fixtures' card. */
 function bookedCard(language: Language, owner: DeskOwner): CardBlock {
   const { title, lines } = BOOKED[language];
   return cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title, lines: lines.map((line) => withOwner(line, language, owner)) });
@@ -275,14 +275,14 @@ interface OwnerProse {
   held: string;
 }
 
-/** Rivera's words, as the signed boards write them, `{owner}` for Maria. */
+/** Turner's words, as the signed boards write them, `{owner}` for Mike. */
 const RIVERA_PROSE: Record<Language, OwnerProse> = {
   en: {
-    help: '{Owner} can tell you once she sees it. You can ask for her here anytime.',
-    held: "That's for {owner} to decide, so I've asked her. Her answer will show up here.",
+    help: '{Owner} can tell you once he sees it. You can ask for him here anytime.',
+    held: "That's for {owner} to decide, so I've asked him. His answer will show up here.",
   },
   es: {
-    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.',
+    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con él aquí cuando quieras.',
     held: 'Eso lo decide {owner}, así que ya le pregunté. Su respuesta aparecerá aquí.',
   },
 };
@@ -300,8 +300,8 @@ const PRONOUN_FREE_PROSE: Record<Language, OwnerProse> = {
 };
 
 /**
- * Claude's words for a named owner other than Maria Rivera, by first name. Proposed here for the
- * project owner's sign-off. Should he decline, set this to `RIVERA_PROSE`: Rivera's sentences with
+ * Claude's words for a named owner other than Mike Turner, by first name. Proposed here for the
+ * project owner's sign-off. Should he decline, set this to `RIVERA_PROSE`: Turner's sentences with
  * the owner's name in them, pronouns kept.
  */
 export const NAMED_OWNER_PROSE: Record<Language, OwnerProse> = PRONOUN_FREE_PROSE;
@@ -321,14 +321,14 @@ const NO_NAME_PROSE: Record<Language, OwnerProse> = {
   },
 };
 
-/** An owner's first name, the one Claude's words call them by: "Maria" for Maria Rivera. */
+/** An owner's first name, the one Claude's words call them by: "Mike" for Mike Turner. */
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
 /**
- * Claude's words `line` on a Desk whose owner is `owner`, in `language`: Rivera's signed words on
- * her Desk (setup names an owner by one word, so no Desk it makes has her name), else
+ * Claude's words `line` on a Desk whose owner is `owner`, in `language`: Turner's signed words on
+ * his Desk (setup names an owner by one word, so no Desk it makes has his name), else
  * `NAMED_OWNER_PROSE` by first name, else `NO_NAME_PROSE`.
  */
 function ownerProse(language: Language, owner: DeskOwner, line: keyof OwnerProse): string {
@@ -342,7 +342,7 @@ export function heldProse(language: Language, owner: DeskOwner): string {
   return ownerProse(language, owner, 'held');
 }
 
-/** Claude's checked words after a request is held for Maria, on Rivera's Desk. */
+/** Claude's checked words after a request is held for Mike, on Turner's Desk. */
 export const HELD_PROSE: Record<Language, string> = {
   en: heldProse('en', RIVERA_OWNER),
   es: heldProse('es', RIVERA_OWNER),
@@ -367,7 +367,7 @@ function linkCancelledLine(language: Language, owner: DeskOwner): string {
   return withOwner(LINK_CANCELLED_TEMPLATES[language], language, owner);
 }
 
-/** The kernel's `link_cancelled` line on Rivera's Desk. */
+/** The kernel's `link_cancelled` line on Turner's Desk. */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: linkCancelledLine('en', RIVERA_OWNER),
   es: linkCancelledLine('es', RIVERA_OWNER),
@@ -375,7 +375,7 @@ export const LINK_CANCELLED: Record<Language, string> = {
 
 /**
  * The `link_cancelled` card as the kernel renders it from the cancelled link's own `payment_link`
- * fact, in the chat's language, on a Desk whose owner is `owner` (Rivera's unless given): the
+ * fact, in the chat's language, on a Desk whose owner is `owner` (Turner's unless given): the
  * link's amount as its title, then what the link was for and the kernel's line. It cites the
  * deposit card's fact, as the script's payment link card does.
  */
@@ -573,7 +573,7 @@ export function askedDiscountBp(text: string): number {
 
 /**
  * The held quote for a discount the visitor asked for: the percent they named (15% when none), the
- * drain clearing's price at it, and Maria's line, in the fixtures' words, naming the verified
+ * drain clearing's price at it, and Mike's line, in the fixtures' words, naming the verified
  * person when the chat has one ("Dana Whitfield, verified with a code,"), else "A visitor not on
  * record". At 15% from a visitor not on record it is the fixtures' seeded hold.
  */
@@ -721,7 +721,7 @@ const HANDOFF: Record<Language, { title: string; line: string }> = {
 
 /**
  * The kernel's handoff card in `language`, handing the visitor to the Desk's owner (`owner`). For
- * Maria Rivera it is the fixtures' own card.
+ * Mike Turner it is the fixtures' own card.
  */
 export function handoffBlock(language: Language, owner: DeskOwner): CardBlock {
   const { title, line } = HANDOFF[language];
@@ -954,7 +954,7 @@ function askWords(owner: DeskOwner): string[] {
 
 /**
  * The first rule with one of its words, whole, in the lowercased text, else the last rule; on a
- * Desk whose owner is `owner` (Rivera's unless given), asking for them is one of the talk rule's
+ * Desk whose owner is `owner` (Turner's unless given), asking for them is one of the talk rule's
  * words. A discount asked at 0% is a question about the list price (the price rule), and one over
  * 100% is no discount anyone can give (the last rule's plain answer).
  */
@@ -979,7 +979,7 @@ export const TOOLS_WHILE_NOT_ANSWERING: ReadonlySet<ToolName> = new Set<ToolName
 /**
  * A turn that calls `tools`, as the session may run it: as written when the session has every tool
  * (`allTools`: its Desk is answering, or it is the owner's preview) or needs only the ones it keeps
- * while the Desk isn't; otherwise Claude hands the visitor to Maria, as the "talk" rule does, and
+ * while the Desk isn't; otherwise Claude hands the visitor to Mike, as the "talk" rule does, and
  * nothing is decided.
  */
 export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[], allTools: boolean): readonly Step[] {
@@ -1036,7 +1036,7 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved
   if (decision.action?.tool === 'payments.create_refund') {
     return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
-  // The quote at the discount Maria allowed, the one the visitor asked for.
+  // The quote at the discount Mike allowed, the one the visitor asked for.
   const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
   const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
   const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
@@ -1144,7 +1144,7 @@ export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
 };
 
 /**
- * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
+ * How Turner's Claude answers the owner on Rules, in place of the API's model turn: the Rules
  * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rules for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
  * quote rule up to that amount; "Send payment links on your own up to $800" an automatic payment

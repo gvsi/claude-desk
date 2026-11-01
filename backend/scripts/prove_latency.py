@@ -1,11 +1,11 @@
-"""Time `desk-prove` on the Rivera rules and a 30-card set inside the kernel image.
+"""Time `desk-prove` on the Turner rules and a 30-card set inside the kernel image.
 
     uv run python -m scripts.prove_latency           # p50 and p95 per set, in milliseconds
     uv run python -m scripts.prove_latency --json    # {rivera: {p50_ms, p95_ms}, cards_30: {p50_ms, p95_ms}}
 
 The proof inputs are written here with `activation.write_prove_files`, over a profile for every
 native tool the schema declares (what a Desk with all its native tools enabled proves), at the
-money cap the Rivera seed is proved at (`activation.SHIPPED_CAPS`, as `make proofs` uses), and
+money cap the Turner seed is proved at (`activation.SHIPPED_CAPS`, as `make proofs` uses), and
 mounted read-only into the image (`desk-kernel:dev` by default, built as `kernel/Dockerfile`
 says; it holds no backend code). Inside it, `desk-prove` runs on each set `--runs` times in a row,
 timed by the image's own Python, so container start-up isn't counted. A run that doesn't prove
