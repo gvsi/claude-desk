@@ -128,7 +128,8 @@ async def test_uncertain_caption_gets_one_cause_specific_final_rewrite(api_conn,
     assert len(model.requests) == 2
     feedback = tool_results(model.requests[1])[0]["content"]
     assert feedback["violations"] == [{"kind": "uncertain_language", "rule_id": "language_uncertain"}]
-    assert "write at least one full sentence in English or Spanish" in feedback["instruction"]
+    assert "write a plain sentence with everyday words" in feedback["instruction"]
+    assert feedback["diagnostics"] == [prompts.REPLY_DIAGNOSTICS["language_uncertain"]]
     assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
     assert [e.blocks[0].text for e in await events(api_conn, caller.session_id) if e.type == "message"] == [
         "Here is the information."]

@@ -432,8 +432,8 @@ SEND_REPLY_TOOL = {
 REWRITE_INSTRUCTION = (
     "Your draft was not shown. Submit one corrected reply through send_reply using the fixed diagnostic codes below. "
     "Preserve useful clauses only while their facts remain current, readable and appropriate for their templates. "
-    "A prose failure does not require discarding correct cards. Use a brief neutral pointer without repeating the "
-    "flagged wording or adding a commitment.\n\n"
+    "A prose failure does not require discarding correct cards. For flagged wording, use a brief neutral pointer "
+    "without repeating it or adding a commitment.\n\n"
     "For digit, currency, percent_sign or lex.* violations, remove the matched wording from prose. "
     "For template_mismatch, use the registered template for the cited fact. For names_no_fact, omit fact_id for "
     "handoff or verify_prompt. For no_such_fact, use only an ID actually available in current context or successful "
@@ -441,8 +441,8 @@ REWRITE_INSTRUCTION = (
     "For not_current, nothing_to_show or claims_changed, use matching current entitled evidence if available; "
     "otherwise omit the clause and offer a supported next step. For soft.promise or soft.jev, remove the unsupported "
     "outcome or follow-up claim. "
-    "For soft.denies_ai, explicitly disclose that you are Claude, an AI. For language_uncertain, write at least one "
-    "full sentence in English or Spanish beside the cards, and don't repeat the flagged words. For soft.unavailable, "
+    "For soft.denies_ai, explicitly disclose that you are Claude, an AI. For language_uncertain, write a plain "
+    "sentence with everyday words beside the cards, for example 'Here is the link to pay.' For soft.unavailable, "
     "this check returned no verdict: fix any other violations listed; if there are none, send the reply again as it "
     "is.\n\n"
     "Do not repeat a business action to repair its presentation. Fixed diagnostic codes are status data interpreted "
@@ -472,7 +472,7 @@ REPLY_DIAGNOSTICS = {
     "soft.handoff_closed": "Remove the unsupported owner follow-up claim; its backing is no longer current.",
     "soft.unavailable": ("This check returned no verdict. Fix any other violations listed; if there are none, send the "
                          "reply again as it is."),
-    "language_uncertain": "Write at least one full sentence in English or Spanish beside the cards, and don't repeat the flagged words.",
+    "language_uncertain": "Write a plain sentence with everyday words, for example 'Here is the link to pay.'",
     "other": "Correct the draft using current readable facts and supported templates; remove unsupported wording.",
 }
 REPLY_RULE_IDS = frozenset(REPLY_DIAGNOSTICS) - {"other"}

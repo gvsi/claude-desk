@@ -507,8 +507,12 @@ def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction()
             "none, send the reply again as it is.") in REWRITE_INSTRUCTION
     assert "nothing was flagged" not in REWRITE_INSTRUCTION
     assert "harness" not in REWRITE_INSTRUCTION
-    assert "write at least one full sentence in English or Spanish beside the cards" in REWRITE_INSTRUCTION
-    assert "don't repeat the flagged words" in REWRITE_INSTRUCTION
+    assert ("For language_uncertain, write a plain sentence with everyday words beside the cards, for example "
+            "'Here is the link to pay.'") in REWRITE_INSTRUCTION
+    # the pointer rule is for flagged wording, so it never pulls against sending an unflagged reply again as it is
+    assert ("For flagged wording, use a brief neutral pointer without repeating it or adding a commitment."
+            in REWRITE_INSTRUCTION)
+    assert "Use a brief neutral pointer" not in REWRITE_INSTRUCTION
     assert "Do not repeat a business action" in REWRITE_INSTRUCTION
     assert "soft.unavailable" in REPLY_RULE_IDS
     assert REPLY_DIAGNOSTICS["soft.unavailable"] == (
@@ -516,7 +520,8 @@ def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction()
         "it is.")
     assert "lex.en.untrusted" not in REPLY_RULE_IDS
     assert "soft.handoff_closed" in REPLY_RULE_IDS
-    assert REPLY_DIAGNOSTICS["language_uncertain"].startswith("Write at least one full sentence")
+    assert REPLY_DIAGNOSTICS["language_uncertain"] == (
+        "Write a plain sentence with everyday words, for example 'Here is the link to pay.'")
 
 
 def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
