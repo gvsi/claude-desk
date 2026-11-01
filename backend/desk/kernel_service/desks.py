@@ -435,24 +435,27 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
                                 allow_words: Mapping[str, frozenset[str]] = {}) -> None:
     """Refuse public prose the reply check would reject, before writing any of it.
 
-    Detail and the post-rollback ledger entry name only refused keys and sorted rule IDs.
+    Detail names only refused keys and sorted rule IDs. The post-rollback ledger entry
+    also records keys, counts and a reason for cap refusals, never rejected text.
     A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
     order, so the owner can audit the attempt without creating a row for refused input.
     """
+    count, total_characters = len(values), sum(map(len, values.values()))
     limit = None
-    if len(values) > reply_check.PUBLIC_POLICY_MAX_COUNT:
+    if count > reply_check.PUBLIC_POLICY_MAX_COUNT:
         limit = "policy_count_limit"
-    elif sum(map(len, values.values())) > reply_check.PUBLIC_POLICY_MAX_CHARS:
+    elif total_characters > reply_check.PUBLIC_POLICY_MAX_CHARS:
         limit = "policy_text_limit"
-    if limit is not None:
-        raise KernelFailure(422, "invalid", limit, detail={"charter": [limit]})
-    fields = reply_check.scan_public_policies(values, allow_words=allow_words)
+    fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(values, allow_words=allow_words)
     if not fields:
         return
     desk_ids = [desk_id] if desk_id is not None else list(await ctx.db.scalars(ctx.repo.scoped(
         select(Desk.desk_id).order_by(Desk.desk_id))))
     summary = {"part": part, "refused": "promise", "fields": fields}
-    raise KernelFailure(422, "invalid", "public_promise", detail=fields, persist=partial(
+    if limit is not None:
+        summary.update(keys=[ledger.safe_ref(key) for key in sorted(values)], policy_count=count,
+                       total_characters=total_characters, reason=limit)
+    raise KernelFailure(422, "invalid", limit or "public_promise", detail=fields, persist=partial(
         _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
 
 

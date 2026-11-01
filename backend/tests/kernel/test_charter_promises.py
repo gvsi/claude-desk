@@ -420,6 +420,7 @@ async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monk
     copy = await rivera(app, client)
     before = await facts_of(app, copy, "charter")
     desk_ids = set(await desks_of(app, copy))
+    entries = len(await entries_of(app, copy))
     claims = [{"key": f"policy:{index:02d}", "kind": "text", "value": "x" * length} for index in range(count)]
 
     def unexpected_scan(values):
@@ -437,6 +438,33 @@ async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monk
     assert set(await desks_of(app, copy)) == desk_ids
     assert {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()} == {
         key: fact.claims for key, fact in before.items()}
+    [entry] = (await entries_of(app, copy))[entries:]
+    assert entry.event.summary == {
+        "part": "desk" if create else "charter", "refused": "promise", "fields": {"charter": [code]},
+        "keys": sorted(claim["key"] for claim in claims), "policy_count": count,
+        "total_characters": count * length, "reason": code,
+    }
+    assert "x" * length not in entry.event.model_dump_json()
+    page = await client.get(f"/ledger/{copy.desk_id}", headers=copy.owner)
+    assert page.status_code == 200, page.text
+    assert page.json()["chain_ok"] is True
+
+
+@pytest.mark.parametrize(("count", "length"), [(41, 40), (40, 201)])
+async def test_policy_cap_refusal_fails_closed_when_ledger_write_fails(app, client, monkeypatch, count, length):
+    copy = await rivera(app, client)
+    before = {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()}
+    entries = len(await entries_of(app, copy))
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(desks, "_ledger_refusal", unavailable)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": f"policy:{index:02d}", "kind": "text", "value": "x" * length} for index in range(count)]})
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()} == before
+    assert len(await entries_of(app, copy)) == entries
 
 
 @pytest.mark.parametrize("hidden", ["private", "expired", "canary"])

@@ -2510,6 +2510,30 @@ def quote_card(**limits) -> RuleCard:
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("count", "length", "reason"), [
+    (41, 40, "policy_count_limit"), (40, 201, "policy_text_limit"),
+])
+async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, reason):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    claims = [Claim(key=f"policy:{index:02d}", kind="text", value="x" * length) for index in range(count)]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.detail) == (422, {"charter": [reason]})
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert entry.event.summary == {
+        "part": "charter", "refused": "promise", "fields": {"charter": [reason]},
+        "keys": sorted(claim.key for claim in claims), "policy_count": count,
+        "total_characters": count * length, "reason": reason,
+    }
+    assert "x" * length not in entry.event.model_dump_json()
+
+
+@pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rule"), [
     ("You are chatting with a human receptionist.", "policy.ai_denial"),
     ("Está hablando con una persona.", "policy.ai_denial"),

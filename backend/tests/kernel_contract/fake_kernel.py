@@ -3255,16 +3255,18 @@ class FakeKernelState:
             raise Refusal(422, "invalid", {"contact": ["contact_format"]})
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
-        if len(values) > 40:
-            raise Refusal(422, "invalid", {"charter": ["policy_count_limit"]})
-        if sum(map(len, values.values())) > 8_000:
-            raise Refusal(422, "invalid", {"charter": ["policy_text_limit"]})
-        fields = public_policy_fields(sorted(values.items()))
+        count, total_characters = len(values), sum(map(len, values.values()))
+        limit = "policy_count_limit" if count > 40 else "policy_text_limit" if total_characters > 8_000 else None
+        fields = {"charter": [limit]} if limit else public_policy_fields(sorted(values.items()))
         if fields:
             targets = [desk] if desk is not None else sorted(
                 (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+            summary = {"part": part, "refused": "promise", "fields": fields}
+            if limit:
+                summary.update(keys=[safe_ref(key) for key in sorted(values)], policy_count=count,
+                               total_characters=total_characters, reason=limit)
             for target in targets:
-                self.append(target, "desk_data", {"part": part, "refused": "promise", "fields": fields})
+                self.append(target, "desk_data", summary)
             raise Refusal(422, "invalid", fields)
 
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
