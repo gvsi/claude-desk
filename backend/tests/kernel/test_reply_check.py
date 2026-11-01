@@ -1976,3 +1976,32 @@ def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch)
 def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
     monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
     assert "language" not in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
+    "Contact: https://example.com/contact",
+    "Contact: www.example.com",
+    "Contact: info+help@example.com",
+    "Contact: EXAMPLE.COM",
+    "Non‐emergency plumbing",
+])
+def test_public_policy_language_ignores_addresses_and_english_non_compounds(text):
+    assert not lang.positive_other_language(text)
+    assert reply_check.scan_public_text(text) == []
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": text}) == {}
+    # Policy evidence changes independently of the conservative reply language detector.
+    assert lang.detect(text) == ("en" if "+help@" in text else "other")
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("com carinho info@example.com", ["language"]),
+    ("non merci", ["language"]),
+    ("Contact: info@example.com free", ["lex.en.promise"]),
+    ("Non-free plumbing", ["lex.en.promise"]),
+    ("Garantimos o serviço. https://example.com", ["language"]),
+])
+def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
+    assert reply_check.scan_public_text(text) == rules

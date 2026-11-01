@@ -472,6 +472,9 @@ async def test_other_commitment_policy_refused_on_write_public_read_and_reply(ap
 
 
 @pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
     "Cash, card, Venmo accepted",
     "Service area: Portland, Beaverton, Hillsboro, Tigard",
     "Pour-over coffee available",

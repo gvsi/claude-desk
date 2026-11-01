@@ -86,9 +86,18 @@ def detect(text: str) -> Detected:
     return _detect(text, unmarked_is_other=True)
 
 
+# Addresses supply no policy-language evidence; their contents still undergo lexical scans.
+POLICY_ADDRESS = re.compile(
+    r"\b(?:[a-z][a-z\d+.-]*://[^\s<>]+|"
+    r"(?:[\w.+%-]+@)?(?:[\w-]+\.)+[^\W\d_]{2,}(?::\d+)?(?:[/?#][^\s<>]*)?)", re.IGNORECASE)
+POLICY_NON_PREFIX = re.compile(r"\bnon[-‐‑‒–—−](?=[^\W\d_])", re.IGNORECASE)
+
+
 def positive_other_language(text: str) -> bool:
-    """Another script or leading other-language markers, without guessing from unmarked words."""
-    return _detect(text, unmarked_is_other=False) == "other"
+    """Policy evidence without address tokens, English non- prefixes or unmarked-word guesses."""
+    evidence = POLICY_ADDRESS.sub(" ", unicodedata.normalize("NFKC", text))
+    evidence = POLICY_NON_PREFIX.sub("", evidence)
+    return _detect(evidence, unmarked_is_other=False) == "other"
 
 
 def _detect(text: str, *, unmarked_is_other: bool) -> Detected:
