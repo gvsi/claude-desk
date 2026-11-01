@@ -108,7 +108,8 @@ it('cards_with_no_words_before_them_fade_in_at_once', async () => {
     { visibility: 'visible', delay: '0s' },
     { visibility: 'visible', delay: '0.12s' },
   ]);
-  expect(message.getAttribute('aria-busy')).toBeNull();
+  // Busy until the cards are in.
+  expect(message.getAttribute('aria-busy')).toBe('true');
 });
 
 it('prose_blocks_are_revealed_one_after_another', async () => {
@@ -177,14 +178,23 @@ it('drawn_whole_it_is_never_revealed_later', async () => {
   expect(arrivals(message).map(({ visibility, name }) => ({ visibility, name }))).toEqual([{ visibility: 'visible', name: 'none' }]);
 });
 
-it('while_its_words_come_in_the_message_is_busy', async () => {
+it('until_everything_has_come_in_the_message_is_busy', async () => {
   await motion();
   vi.useFakeTimers();
   const message = mount(<ClaudeMessage blocks={[proseBlock(WORDS), QUOTE]} language="en" ownerName={OWNER} reveal />);
   // Assistive technology may wait for the whole reply rather than read it out word by word.
   expect(message.getAttribute('aria-busy')).toBe('true');
+  // The words are whole, but the card is still coming in and the words are drawn once more after
+  // they settle: still busy, so the reply isn't read out twice or in pieces.
   await pass(700);
+  expect(words(message)).toEqual([WORDS]);
+  expect(message.getAttribute('aria-busy')).toBe('true');
+  // The browser's own clock plays the settle and the fade from here, outside act().
+  vi.useRealTimers();
+  globalThis.IS_REACT_ACT_ENVIRONMENT = false;
+  await vi.waitFor(() => expect(message.classList.contains('cd-claude-message--following')).toBe(false));
   expect(message.getAttribute('aria-busy')).toBeNull();
+  expect(message.querySelectorAll('[data-sd-animate]')).toHaveLength(0);
 });
 
 it('the_cards_fade_in_once', async () => {

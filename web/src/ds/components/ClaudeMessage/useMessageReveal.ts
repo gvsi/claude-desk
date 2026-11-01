@@ -85,8 +85,9 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
     revealed,
     root: {
       className,
-      // Assistive technology may wait for the whole reply rather than read it out word by word.
-      'aria-busy': revealing && !wordsIn ? true : undefined,
+      // Assistive technology may wait for the whole reply rather than read it out word by word, or
+      // twice: its words are drawn once more after they settle, and its cards come in after them.
+      'aria-busy': revealing && !settled ? true : undefined,
       style: revealing ? ({ '--cd-follow-from': from } as CSSProperties) : undefined,
     },
   };
