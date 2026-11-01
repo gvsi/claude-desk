@@ -9,10 +9,11 @@ import type { RouteObject } from 'react-router';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
-import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { observeRequests, RULES_UNAVAILABLE_COPY, TIMEOUT_MS } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
+import { retryDelayMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
@@ -956,6 +957,100 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it.each(['desktop', 'phone'] as const)('another_business_draws_the_body_and_delayed_hold_question_together at %s', async (viewport) => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS] });
+    let rulesRead = false;
+    onTestFinished(observeRequests((outcome) => {
+      if (outcome.key === 'rules' && outcome.ok) rulesRead = true;
+    }));
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport });
+    await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+
+    // Observe every committed DOM state, so separate renders cannot pass merely by finishing fast.
+    const mismatches: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      const body = screen.container.querySelector('.cd-connector-list') !== null;
+      const chip = screen.container.querySelector('.cd-suggestion-chips') !== null;
+      if (body !== chip) mismatches.push(true);
+    });
+    observer.observe(screen.container, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    reads.release();
+    await expect.poll(() => screen.container.querySelector('.cd-suggestion-chips')?.textContent).toContain('Why was this quote held?');
+    // The settled phone layout already hides this row; only desktop draws the chip.
+    if (viewport === 'desktop') await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+    expect(mismatches).toEqual([]);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+    expectNoHorizontalScroll();
+  });
+
+  it('another_business_opens_the_body_without_chips_after_needs_you_fails', async () => {
+    renameBusiness('Acme Accounting');
+    const failures = failNeedsYou();
+    const reads = holdNeedsYou();
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    reads.release();
+    await expect.poll(() => failures.failed()).toBe(2);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('rivera_draws_the_body_and_fixed_chips_while_needs_you_is_still_reading', async () => {
+    const reads = holdNeedsYou();
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    reads.release();
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
+  });
+
+  it('another_business_opens_on_an_offline_pause_and_stays_open_on_reconnect', async () => {
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules/all`, { pollScale: 100 });
+    await expect.element(screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    const reads = holdNeedsYou();
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+
+    onlineManager.setOnline(true);
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+  });
+
+  it('another_business_opens_when_an_unanswered_needs_you_read_times_out', { timeout: 30_000 }, async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    // Reuse the request layer's real deadline and one retry; never release the held response.
+    const giveUpMs = 2 * TIMEOUT_MS.default + retryDelayMs(0);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' }), { timeout: giveUpMs + 1_000 }).toBeVisible();
+    expect(reads.held()).toBe(2);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
+  });
+
   it('rivera_keeps_both_fixed_chips_without_a_hold', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const group = screen.getByRole('group', { name: 'Suggestions' });

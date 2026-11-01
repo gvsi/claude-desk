@@ -94,15 +94,21 @@ export function RulesPage() {
   // worked and none waiting for the network, so a hold answered or expired since never shows. The
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
+  // Open once this visit's read settles, including failure at the existing request timeout or an
+  // offline pause. Later reads must not put the body back on its loading line.
+  const [needsYouSettled, setNeedsYouSettled] = useState(false);
+  const firstNeedsYouSettled = needsYouSettled || needsYou.isFetchedAfterMount || needsYou.isPaused;
+  if (firstNeedsYouSettled && !needsYouSettled) setNeedsYouSettled(true);
+  const waitingForNeedsYou = fixedChips.length === 0 && !firstNeedsYouSettled;
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
-  const chips = question === null ? fixedChips : [...fixedChips, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
+  const chips = question === null || (fixedChips.length === 0 && active === undefined) ? fixedChips : [...fixedChips, question];
 
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
@@ -162,7 +168,7 @@ export function RulesPage() {
         {ownerErrorCopy(rules.error)}
       </Notice>
     );
-  } else if (rules.data === undefined || active === undefined) {
+  } else if (rules.data === undefined || active === undefined || waitingForNeedsYou) {
     body = <LoadingLine>Reading your rules</LoadingLine>;
   } else {
     const cap = capOf(active);
@@ -244,7 +250,7 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
-      {active === undefined ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+      {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {body}
       <AlwaysOnList />
     </div>
