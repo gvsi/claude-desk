@@ -4,6 +4,7 @@ import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
 import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
+import { publicLineLimit } from '../setup/publicLineLimit.ts';
 
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
@@ -16,11 +17,11 @@ const CPA_LINES = [
   ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
 ] as const;
 
-/** Only an explicit after-hours clause is known; contact details and ambiguous answers stay out. */
+/** Only customer-facing after-hours statements are known; private instructions stay out. */
 function afterHoursOf(answer: string | undefined): string | undefined {
   const clauses = answer?.split(/(?<=[.!?])\s+|[;\n]+/)
     .map((clause) => clause.trim())
-    .filter((clause) => /^(?:after[ -]hours|outside business hours)\b/i.test(clause));
+    .filter((clause) => /^(?:after[ -]hours|outside business hours)[,:]?\s+(?:you (?:can|may)\b|we (?:(?:always|never)\s+)?(?:reply|respond|take|are|charge|help|accept)\b|the (?:desk|office|team) (?:takes|replies|responds|is)\b)/i.test(clause));
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 
@@ -74,11 +75,14 @@ export const PUBLIC_LINES_ROUTES = {
     const body = typeof req.body === 'object' && req.body !== null ? req.body as Record<string, unknown> : {};
     const { key, text } = body;
     const line = found.lines.find((line) => line.key === key);
-    if (req.malformed || !line || typeof text !== 'string' || !text.trim() || Array.from(text).length > 500) {
+    if (req.malformed || !line || typeof text !== 'string' || !text.trim() || Array.from(text).length > publicLineLimit(line.key)) {
       return { status: 422, body: { error: 'invalid' } };
     }
     if (!line.editable) return { status: 422, body: { error: 'not_editable', key: line.key } };
-    if (publicLineRefused(text)) return { status: 422, body: { error: 'line_refused', key: line.key, reason: ['mock_scan'] } };
+    const refused = found.lines.find((candidate) =>
+      (candidate === line || candidate.source === 'owner') && publicLineRefused(candidate === line ? text.trim() : candidate.text),
+    );
+    if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     line.text = text.trim();
     line.source = 'owner';
     return { status: 200, body: structuredClone(found) };
@@ -91,6 +95,7 @@ export const PUBLIC_LINES_ROUTES = {
     }
     const refused = found.lines.find((line) => publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
+    for (const line of found.lines) line.source = 'owner';
     return { status: 200, body: structuredClone(found) };
   },
 } satisfies ServedRoutes;
