@@ -1562,14 +1562,24 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     return _user("\n\n".join(parts))
 
 
+def _singular(word: str) -> str:
+    """A word of four or more letters without a regular plural ending: "es" after s, x, z, ch or sh, else "s"."""
+    if len(word) < 4:
+        return word
+    if re.search(r"(?:s|x|z|ch|sh)es$", word):
+        return word[:-2]
+    return word[:-1] if word.endswith("s") else word
+
+
 def _title(title: str) -> str:
-    return " ".join(title.split()).casefold()
+    """A price title's key: case, spacing and regular plurals ignored, as `owner_supports` backs titles."""
+    return re.sub(r"[^\W\d_]{4,}", lambda match: _singular(match.group()), " ".join(title.split()).casefold())
 
 
 def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> list[dict]:
     """The price list with the prices a limit turn named (`LIMIT_TURN_FACTS`): each updates the price of the item
-    listed with the same title (ignoring case and spacing), else is added at the end; no item is removed. A new item
-    past the list's `PRICE_ITEMS_MAX` is dropped and logged."""
+    listed with the same title (`_title`), else is added at the end; no item is removed. A new item past the list's
+    `PRICE_ITEMS_MAX` is dropped and logged."""
     prices = [dict(item) for item in listed]
     at = {_title(item["title"]): index for index, item in enumerate(prices)}
     for price in named:
@@ -1644,18 +1654,13 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
             ) and _contact_words(contact) <= set(re.findall(r"\w+", folded))
         return contact in folded
     if field == "price_items":
-        def singular(word: str) -> str:
-            if re.search(r"(?:s|x|z|ch|sh)es$", word):
-                return word[:-2]
-            return word[:-1] if word.endswith("s") else word
-
-        title_text = re.sub(r"[^\W\d_]{4,}", lambda match: singular(match.group()), folded)
+        title_text = re.sub(r"[^\W\d_]{4,}", lambda match: _singular(match.group()), folded)
         sign = r"\$\s?" if stated else r"\$?"
         amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
                    for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
                                             owner_text)}
         return all(item.unit_cents in amounts
-                   and (not stated or all(singular(word) in title_text
+                   and (not stated or all(_singular(word) in title_text
                                           for word in re.findall(r"[^\W\d_]{4,}", item.title.casefold())))
                    for item in cast(list[PriceAnswer], value))
 

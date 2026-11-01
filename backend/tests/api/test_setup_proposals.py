@@ -699,7 +699,9 @@ async def test_off_topic_price_correction_keeps_other_items_and_provenance(
     assert len(parts.prices) == (0 if stays_held else 3)
 
 
-async def test_off_topic_plural_price_title_accepts_singular_owner_correction(proposals, model, engine):
+# The model may title the correction either way; it updates the stored item, never adds a second price for it.
+@pytest.mark.parametrize("patch_title", ["Repairs", "Repair", "repair"])
+async def test_off_topic_plural_price_title_accepts_singular_owner_correction(proposals, model, engine, patch_title):
     from tests.api.test_setup_questions import answer, turn
 
     owner, state, _ = proposals
@@ -710,7 +712,7 @@ async def test_off_topic_plural_price_title_accepts_singular_owner_correction(pr
         await setup._save(conn, interview)
     await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
     reply = await answer(owner, model, interview_id, "A repair is $175 now", turn(
-        price_items=[{"title": "Repairs", "unit_cents": 17500}]), question="contact_and_after_hours")
+        price_items=[{"title": patch_title, "unit_cents": 17500}]), question="contact_and_after_hours")
     assert reply.status_code == 200, reply.text
     record = await stored(engine, interview_id)
     answers = SetupAnswers.model_validate(record["answers"])
