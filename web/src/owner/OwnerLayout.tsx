@@ -39,6 +39,8 @@ import {
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
+import { InboxOpenContext } from './inbox/inboxOpen.ts';
+import { OwnerInbox } from './inbox/OwnerInbox.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
@@ -47,8 +49,10 @@ import {
   desksQuery,
   dropTheOldInbox,
   findDesk,
+  FRESH_MS,
   invalidateCopy,
   lastOrFirst,
+  ownerInboxQuery,
   todayPath,
   useDesks,
   useToday,
@@ -161,7 +165,8 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
 const onOff = (on: boolean) => (on ? 'on' : 'off');
 
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with the Demo
+ * inbox and Start over,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.
@@ -182,6 +187,12 @@ export function OwnerLayout() {
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
+  // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
+  // waits for it, and the bar's own read finds it read, or on its way.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    void queryClient.prefetchQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS });
+  }, [queryClient]);
   const location = useLocation();
   const found = desks.data ? findDesk(desks.data, deskId) : null;
   const [held, setHeld] = useState<ShownDesk | null>(null);
@@ -293,6 +304,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const reachPlace = useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Whether the bar's Demo inbox sheet is open, as it says each time it opens or closes.
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The Desk the owner is on is the one to come back to.
@@ -412,7 +425,13 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   return (
     <AppShell
       business={business.name}
-      banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />}
+      banner={
+        <ReviewerBar
+          ownerName={business.owner_display_name}
+          onStartOver={() => setConfirming(true)}
+          actions={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />}
+        />
+      }
       sidebar={sidebar}
       fill={fill}
       panel={askClaude.panel}
@@ -425,7 +444,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
           <OwnerDeskProvider value={deskContext}>
-            <Outlet />
+            <InboxOpenContext.Provider value={inboxOpen}>
+              <Outlet />
+            </InboxOpenContext.Provider>
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (

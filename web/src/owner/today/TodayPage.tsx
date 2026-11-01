@@ -8,7 +8,7 @@ import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { customerLink, publicLink } from '../customerLink.ts';
-import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
+import { useInboxOpen } from '../inbox/inboxOpen.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, isLive, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
@@ -51,7 +51,7 @@ export const COPIED_FOR_MS = 1_600;
  * 7 days. Today opens no visitor chat itself, and
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
  * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
- * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
+ * into view and focus, once the demo bar's Demo inbox sheet, whose link it may be, has closed. Until what the page first shows is read, it holds its own shapes, so it
  * opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {
@@ -81,8 +81,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   const cards = useRef(new Map<string, HTMLElement>());
-  // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
-  const [inboxOpen, setInboxOpen] = useState(false);
+  // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
+  const inboxOpen = useInboxOpen();
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
@@ -255,7 +255,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} openHandoffs={handoffs} /> : null}
             <SinceLastNight sectionRef={sinceLastNight} />
           </div>
-          <TodayAside deskId={deskId} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
+          <TodayAside deskId={deskId} />
         </div>
       </SkeletonScreen>
     </>

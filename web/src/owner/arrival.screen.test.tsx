@@ -201,9 +201,12 @@ describe('Arrival', () => {
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    // Each of Today's reads had been answered, once and successfully, before it started to leave.
-    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
+    // Each of Today's reads had been answered, once and successfully, before it started to leave. The
+    // Demo inbox is the demo bar's, read once the frame draws, not ahead with Today.
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 0 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(1);
   });
 
   it('returning_owner_opens_today_drawn', async () => {
@@ -608,9 +611,8 @@ describe('Arrival', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today keeps its own skeleton while that read is out (plan 08c, decision 7): the frame lands at
-    // the read ahead's deadline, and Today's sections wait for the inbox.
-    await expectTodayHoldsForItsInbox();
+    // Today opens without it; the demo bar draws the inbox once its read is in.
+    await expectTodayOpensWithoutItsInbox();
     mockStore.reset('rivera', { signedIn: false });
     await expect.poll(() => router.state.location.pathname).toBe('/');
     await expect.element(introDialog(screen)).toBeVisible();
@@ -629,7 +631,7 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    // Time for a read on mount to go out, had Today sent one: the new copy's inbox was read once, ahead.
+    // Time for another read to go out, had anything sent one: the new copy's bar read its inbox once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(1);
   });
@@ -1150,8 +1152,8 @@ describe('OwnerLayout', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today keeps its own skeleton while that read is out (plan 08c, decision 7).
-    await expectTodayHoldsForItsInbox();
+    // Today opens without it; the demo bar draws the inbox once its read is in.
+    await expectTodayOpensWithoutItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
     const newInbox = holdReads(ROUTES.ownerInbox.path);
@@ -1174,12 +1176,12 @@ describe('OwnerLayout', () => {
     newInbox.release();
     newDesks.release();
 
-    // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
-    // entry counted, never with the inbox still opening.
+    // The new copy's bar reads its own inbox, and draws it with its one entry counted, never with the
+    // inbox still opening.
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
     expect(sawItOpening()).toBe(false);
-    // Time for a read on mount to go out, had Today sent one: the old copy's read and the new one's.
+    // Time for another read to go out, had anything sent one: the old copy's read and the new one's.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
 
@@ -2148,10 +2150,10 @@ function mainLinePath(key: 'conversations' | 'ledger'): string {
  * Today's frame is up (after the read ahead's deadline) with Today still on its own skeleton, its
  * sections waiting for the copy's Demo inbox.
  */
-async function expectTodayHoldsForItsInbox(): Promise<void> {
-  await vi.waitFor(() => expect(document.querySelector('nav[aria-label="Main"]')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
-  expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).not.toBeNull();
-  expect(document.querySelector('.cd-needs-you')).toBeNull();
+/** Today opens with the copy's Demo inbox read still out: the demo bar draws no inbox button meanwhile. */
+async function expectTodayOpensWithoutItsInbox(): Promise<void> {
+  await vi.waitFor(() => expect(document.querySelector('.cd-needs-you')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
+  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
 }
 
 function watchListAnimations(): () => string[] {

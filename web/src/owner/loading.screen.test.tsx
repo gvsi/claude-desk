@@ -23,7 +23,7 @@ import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSk
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
+import { needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { SUGGESTION_EXAMPLE } from './rules/copy.ts';
@@ -209,18 +209,42 @@ it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
   expect(card.element().isConnected).toBe(true);
 });
 
-it('reload_waits_for_the_demo_inbox', async () => {
+it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
+  // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
+  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
+  onTestFinished(inbox.release);
+  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+  await vi.waitFor(() => expect(inbox.held()).toBe(1));
+  await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
+  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
+  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  inbox.release();
+  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
+  await expect.element(button).toBeVisible();
+  expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
+});
+
+/** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
+const INBOX_ANCHOR: SkeletonAnchor = { name: 'inbox', page: '.cd-reviewer-bar .cd-owner-inbox > .cd-button', size: true };
+
+it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_shape at %s', async (viewport) => {
+  // The inbox is read with the Desks, so once it is in before them, the bar draws it with the frame,
+  // where the frame's shapes drew it.
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...WIDE_ANCHORS, ...TODAY_ANCHORS],
+    anchors: [...(viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS), INBOX_ANCHOR],
     open: async () => {
-      await renderRoute(TODAY, { pollScale: 100 });
-      await vi.waitFor(() => expect(inbox.held()).toBe(1));
+      await renderRoute(TODAY, { viewport, pollScale: 100 });
+      await vi.waitFor(() => expect(desks.held()).toBe(1));
+      await vi.waitFor(() => expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     },
-    release: inbox.release,
+    release: desks.release,
   });
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -242,7 +266,6 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
   { name: 'since-card', page: '.cd-today__main > .cd-today__section:last-child > .cd-card', size: true },
-  { name: 'inbox', page: '.cd-owner-inbox > .cd-button', size: true },
   { name: 'week-title', page: '.cd-week__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
@@ -454,7 +477,7 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
  */
 const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'inbox', 'week-title', 'week-bar-0'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
   const ticked = ['thing-tile-3', 'thing-action-3', 'thing-go-3'];
@@ -647,30 +670,7 @@ it.each(['desktop', 'phone'] as const)('deadline_hands_off_to_todays_skeleton at
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('deadline_waits_for_the_demo_inbox', { timeout: 10_000 }, async () => {
-  const inbox = holdReads(ROUTES.ownerInbox.path);
-  const sawInboxLoader = watchFor('Opening your Demo inbox');
-  const gaps = watchSkeletonGaps('.cd-greeting__title');
-  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-owner-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  await nextFrames();
-  await expectSkeletonLoad({
-    status: 'Opening your Desk', continues: true, anchors: TODAY_CONTENT_ANCHORS,
-    open: async () => {
-      await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
-      expect(inbox.held()).toBe(1);
-      expect(document.querySelector('.cd-greeting__title')).toBeNull();
-    },
-    release: inbox.release,
-  });
-  await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
-  expect(sawInboxLoader()).toBe(false);
-  expect(gaps()).toBe(0);
-  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
-  await expectScreenBasics(document.body, { owner: true });
-});
-
-it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_their_own_errors before %s starts', async (route) => {
+it.each(['today', 'needsYou'] as const)('paused_today_reads_land_their_own_errors before %s starts', async (route) => {
   const mounted = vi.spyOn(QueryClient.prototype, 'mount');
   onTestFinished(() => mounted.mockRestore());
   const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
@@ -679,7 +679,7 @@ it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_t
   const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
   await router.navigate(`/app/${RIVERA.deskId}/conversations`);
   await expect.element(screen.getByRole('heading', { name: 'Conversations', exact: true })).toBeVisible();
-  const key = route === 'today' ? todayKey(RIVERA.deskId) : route === 'needsYou' ? needsYouKey(RIVERA.deskId) : OWNER_INBOX_KEY;
+  const key = route === 'today' ? todayKey(RIVERA.deskId) : needsYouKey(RIVERA.deskId);
   queryClient.removeQueries({ queryKey: key });
   const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
   onTestFinished(read.release);
@@ -688,8 +688,8 @@ it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_t
   onTestFinished(() => onlineManager.setOnline(true));
   await router.navigate(TODAY);
   await vi.waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe('paused'));
-  const section = screen.getByRole('region', { name: route === 'today' ? 'Since last night' : route === 'needsYou' ? 'Needs you' : 'Demo inbox', exact: true });
-  const line = route === 'ownerInbox' ? `Couldn't open your Demo inbox. ${OWNER_ERROR_COPY.network}` : OWNER_ERROR_COPY.network;
+  const section = screen.getByRole('region', { name: route === 'today' ? 'Since last night' : 'Needs you', exact: true });
+  const line = OWNER_ERROR_COPY.network;
   await expect.element(section.getByRole('alert').getByText(line, { exact: true }), { timeout: 2_000 }).toBeVisible();
   const retry = section.getByRole('button', { name: 'Try again', exact: true });
   await expect.element(retry).toBeVisible();
@@ -958,17 +958,28 @@ it('desks_failure_ends_the_skeleton', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('failed_demo_inbox_read_lands_its_own_error_once', async () => {
-  const inbox = holdReads(ROUTES.ownerInbox.path);
+it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
+  // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
+  // and its sheet holds the line with Try again, never an inbox that looks empty.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
   const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  inbox.release();
-  await expect.element(screen.getByText(/Couldn't open your Demo inbox/)).toBeVisible();
+  const button = screen.getByRole('button', { name: 'Demo inbox', exact: true });
+  await expect.element(button).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2);
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  // The sheet's own read as it opens fails too.
+  mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+  await button.click();
+  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+  await expect.element(sheet.getByRole('alert').getByText(/^Couldn't open your Demo inbox\./), { timeout: 4_000 }).toBeVisible();
+  expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
+  await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(sheet.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(sheet.getByRole('list')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
 });
 
 it('screen_helper_selects_the_region_by_its_status', async () => {

@@ -315,7 +315,6 @@ export function TodaySkeleton() {
         </div>
       </div>
       <div className="cd-today-aside">
-        <Skeleton shape="block" measure={{ label: 'Demo inbox', className: BUTTON, contentClassName: 'cd-demo-inbox-sheet__button', suffix: { label: '1', className: 'cd-count-pill cd-type-count' } }} height="var(--size-control)" anchor="inbox" />
         <SkeletonCard padding={16} anchor="week-card">
           <div className="cd-week">
             <div className="cd-week__head">
