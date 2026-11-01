@@ -132,6 +132,10 @@ function HandoffCardShape({ anchor }: { anchor?: string }) {
  * then Allow and Deny at the answers' own heights (`cd-conversation-skeleton__answer`).
  */
 function HeldCardShape({ anchor }: { anchor?: string }) {
+  const answers = useRef<HTMLDivElement>(null);
+  // Probe inside the answers' container so ApprovalCard's own narrow-card rule sets the height.
+  const { height: allowHeight } = useTextBox(answers, { parts: ['Allow this time'], className: 'cd-button cd-button--secondary cd-button--main cd-type-control' }, 1);
+  const { height: denyHeight } = useTextBox(answers, { parts: ['Deny this time'], className: 'cd-button cd-button--danger cd-button--main cd-type-control' }, 1);
   return (
     <div className="cd-conversation__held" data-skeleton-anchor={anchor}>
       <SkeletonCard>
@@ -145,15 +149,17 @@ function HeldCardShape({ anchor }: { anchor?: string }) {
           <MeasuredLines parts={[HELD_CHAT.heldBy]} className="cd-type-meta" text="meta" boxClassName="cd-conversation-skeleton__rule" />
         </div>
         <div className="cd-approval-card__answers">
-          <div className="cd-approval-card__row">
+          <div ref={answers} className="cd-approval-card__row">
             <Skeleton
               shape="block"
               className="cd-conversation-skeleton__answer"
+              height={allowHeight}
               measure={{ label: 'Allow this time', className: 'cd-button cd-button--secondary cd-button--main cd-type-control' }}
             />
             <Skeleton
               shape="block"
               className="cd-conversation-skeleton__answer"
+              height={denyHeight}
               measure={{ label: 'Deny this time', className: 'cd-button cd-button--danger cd-button--main cd-type-control' }}
             />
           </div>

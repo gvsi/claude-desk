@@ -360,15 +360,9 @@
   width: 85%;
 }
 
-/* Allow and Deny at a main button's height, and in a narrow card, as ApprovalCard draws them there,
-   equal halves 4 px taller. */
-.cd-conversation-skeleton__answer {
-  height: var(--size-control-main);
-}
-
+/* In a narrow card, Allow and Deny share the line. Their heights are measured in the real CSS. */
 @container cd-approval-answers (max-width: 437.98px) {
   .cd-approval-card__row > .cd-conversation-skeleton__answer {
     flex: 1 1 0;
-    height: calc(var(--size-control-main) + var(--space-4));
   }
 }

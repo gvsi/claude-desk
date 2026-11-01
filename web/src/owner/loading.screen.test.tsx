@@ -950,18 +950,18 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
-  name: { name: 'conversation-name', page: '.cd-conversation__name' },
-  head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height'] },
-  visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height'] },
-  reply: { name: 'reply-card', page: '.cd-conversation .cd-transcript .cd-reply-card', dimensions: ['height'] },
-  receipt0: { name: 'receipt-0', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :first-child', dimensions: ['height'] },
-  receipt1: { name: 'receipt-1', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :nth-child(2)', dimensions: ['height'] },
-  held: { name: 'held-card', page: '.cd-conversation .cd-transcript > .cd-conversation__held', dimensions: ['height'] },
+  name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
+  head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
+  visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
+  reply: { name: 'reply-card', page: '.cd-conversation .cd-transcript .cd-reply-card', dimensions: ['height', 'bottom'] },
+  receipt0: { name: 'receipt-0', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :first-child', dimensions: ['height', 'bottom'] },
+  receipt1: { name: 'receipt-1', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :nth-child(2)', dimensions: ['height', 'bottom'] },
+  held: { name: 'held-card', page: '.cd-conversation .cd-transcript > .cd-conversation__held', dimensions: ['height', 'bottom'] },
 } as const satisfies Record<string, SkeletonAnchor>;
 
 /**
  * In a wide window a fresh copy's held chat fits its region and opens at its top: every part of it
- * is in view as it lands, so each one's top and bottom (its top and height) and each receipt line
+ * is in view as it lands, so each one's top, bottom and height and each receipt line
  * is anchored to its shape.
  */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
@@ -985,11 +985,11 @@ const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PAR
  * From the moment the pane's shapes start to leave, each anchored part of the chat, every frame
  * until it has settled, against where its shape was at that moment: Take over and the whisper box
  * arrive with the chat and the transcript settles at its end, and nothing moves from its shape by
- * more than 2 px on its top, left or height. `expectStill` checks every frame it saw.
+ * more than 2 px on its top, bottom, left or height. `expectStill` checks every frame it saw.
  */
 function watchPaneLanding(anchors: readonly SkeletonAnchor[]) {
   let shapes: DOMRect[] | null = null;
-  const worst = anchors.map(() => ({ top: 0, left: 0, height: 0 }));
+  const worst = anchors.map(() => ({ top: 0, left: 0, height: 0, bottom: 0 }));
   let frames = 0;
   const look = () => {
     const layer = document.querySelector<HTMLElement>('.cd-conversation-pane .cd-skeleton-screen__layer');
@@ -1005,7 +1005,7 @@ function watchPaneLanding(anchors: readonly SkeletonAnchor[]) {
       const real = landedElement(page);
       if (real === null) return;
       const box = real.getBoundingClientRect();
-      for (const edge of ['top', 'left', 'height'] as const) worst[i]![edge] = Math.max(worst[i]![edge], Math.abs(box[edge] - shapes![i]![edge]));
+      for (const edge of ['top', 'left', 'height', 'bottom'] as const) worst[i]![edge] = Math.max(worst[i]![edge], Math.abs(box[edge] - shapes![i]![edge]));
     });
     frames += 1;
   };
@@ -1028,8 +1028,9 @@ function watchPaneLanding(anchors: readonly SkeletonAnchor[]) {
       stop();
       expect(shapes, 'the shapes were read as they started to leave').not.toBeNull();
       expect(frames).toBeGreaterThan(1);
-      anchors.forEach(({ name }, i) => {
-        for (const edge of ['top', 'left', 'height'] as const) {
+      anchors.forEach(({ name, page }, i) => {
+        expect(landedElement(page), `${name} landed`).not.toBeNull();
+        for (const edge of ['top', 'left', 'height', 'bottom'] as const) {
           expect(worst[i]![edge], `${name} ${edge}, at its furthest from its shape while the pane landed`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
       });
@@ -1076,6 +1077,25 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversation_shapes_follow_the_answer_buttons_height', async () => {
+  // Change the real answer rule only. Shapes must measure it rather than repeat its height.
+  const style = document.createElement('style');
+  style.textContent = '.cd-approval-card__row .cd-button { min-height: 60px !important; }';
+  document.head.append(style);
+  onTestFinished(() => style.remove());
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  const landing = watchPaneLanding(PHONE_PANE_ANCHORS);
+  await expectSkeletonLoad({
+    status: 'Opening the conversation',
+    anchors: PHONE_PANE_ANCHORS,
+    open: async () => {
+      await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: 'phone', pollScale: 100 });
+    },
+    release: chat.release,
+  });
+  await landing.expectStill();
 });
 
 const NEEDS_YOU_READ = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
