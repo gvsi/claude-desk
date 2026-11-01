@@ -414,6 +414,30 @@ describe('a preset or a new payment limit', () => {
     expect(updatedRows(root).sort()).toEqual([...changed].sort());
   });
 
+  it('a_preset_lands_only_on_the_rows_its_review_listed', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    // The tools its review lists by name, each once: its quote and document rules replace Rivera's
+    // with ones that differ only in their ids, so it lists neither.
+    const listed = [...new Set([...root.querySelectorAll('.cd-change-review__title')].map((title) => title.firstChild?.textContent ?? ''))].sort();
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed).not.toContain('Quote');
+    expect(listed).not.toContain('Share a document');
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Back on Rules, exactly those rows say "Updated" and light up; Quote and Share a document don't.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => updatedRows(root).sort()).toEqual(listed);
+    for (const name of listed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    for (const name of ['Quote', 'Share a document']) {
+      expect(saysUpdated(toolRow(root, name)), name).toBe(false);
+      expect(fillOf(toolRow(root, name)), name).toBe('none');
+    }
+  });
+
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
     // All rules, then Rules, then a preset's review, whose confirm is held.
     const { screen, router } = await renderRoute(`${DESK}/rules/all`);
