@@ -245,6 +245,26 @@ def test_retry_cannot_hide_an_unsafe_sample(deps, tmp_path):
     assert second["attempts"][1]["acceptance"]["unsafe_or_unmeasured"] == ["promise-sort"]
 
 
+def test_attempt_staleness_requires_every_arm_to_be_stale():
+    from evals.calibration import soft_promise_experiment as exp
+
+    measured = {"baseline_sha": "0" * 40, "case_manifest": [],
+                "arms": {"new": "first wording", "sonnet": "shipped wording"}}
+    current = {**measured, "arms": {"new": "revised wording", "sonnet": "shipped wording"}}
+    revision = exp.digest(measured)
+    history = {"experiment": current, "revisions": [{"identity_sha256": revision, "experiment": measured}],
+               "attempts": [{"identity_sha256": revision, "arms": {name: {} for name in names}}
+                            for names in [("sonnet",), ("new", "sonnet"), ("new",)]]}
+    exp.refresh_evidence(history)
+    assert [attempt["stale"] for attempt in history["attempts"]] == [False, False, True]
+    assert history["attempts"][1]["arms"]["new"]["stale"]
+    assert not history["attempts"][1]["arms"]["sonnet"]["stale"]
+    # Removing the current Sonnet arm makes its evidence stale too.
+    del current["arms"]["sonnet"]
+    exp.refresh_evidence(history)
+    assert all(attempt["stale"] for attempt in history["attempts"])
+
+
 def test_both_arms_use_the_recorded_cases_and_prompts_during_edits(deps, tmp_path, monkeypatch):
     import yaml
     from evals.calibration import soft_promise_experiment as exp
@@ -284,6 +304,22 @@ def test_different_output_cannot_reset_the_experiment_budget(deps, tmp_path, mon
     assert len(deps.client.client.requests) == count
     canonical = deps.root / exp.LEDGER_PATH
     assert json.loads(canonical.read_text())["cumulative_spend_usd"] == history["cumulative_spend_usd"]
+
+
+def test_every_ledger_load_refreshes_the_cap_without_changing_spend(tmp_path, monkeypatch):
+    from evals.calibration import soft_promise_experiment as exp
+
+    ledger = tmp_path / "experiment.json"
+    baseline = "0" * 40
+    original = {"experiment": {"baseline_sha": baseline}, "attempts": [],
+                "total_cap_usd": 1.70, "cumulative_spend_usd": 1.20}
+    for cap in (3.20, 3.40):
+        ledger.write_text(json.dumps(original))
+        monkeypatch.setattr(exp, "TOTAL_USD", cap)
+        loaded = exp.load_history(ledger, tmp_path / "unused.json", baseline)
+        assert loaded["total_cap_usd"] == cap
+        assert loaded["cumulative_spend_usd"] == original["cumulative_spend_usd"]
+        assert loaded["frozen_baseline_sha"] == baseline
 
 
 def test_frozen_baseline_cannot_be_replaced_to_reset_cap(deps, tmp_path, monkeypatch):
@@ -378,7 +414,7 @@ def test_experiment_records_both_requests_and_cumulative_budget(deps, tmp_path, 
     assert len(deps.client.client.requests) == count
 
 
-def test_a_prompt_revision_keeps_the_budget_and_marks_prior_evidence_stale(deps, tmp_path, monkeypatch):
+def test_a_prompt_revision_keeps_the_budget_and_marks_only_revised_arms_stale(deps, tmp_path, monkeypatch):
     from evals.calibration import soft_promise_experiment as exp
     write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
     baseline = commit(deps.root, "freeze the baseline")
@@ -388,7 +424,9 @@ def test_a_prompt_revision_keeps_the_budget_and_marks_prior_evidence_stale(deps,
     second = asyncio.run(exp.experiment(config, deps))
     assert second["cumulative_spend_usd"] == pytest.approx(first["cumulative_spend_usd"] * 2)
     assert len(second["revisions"]) == 2
-    assert second["attempts"][0]["stale"]
+    assert second["attempts"][0]["arms"]["new"]["stale"]
+    assert not second["attempts"][0]["arms"]["old"]["stale"]
+    assert not second["attempts"][0]["stale"]
     assert not second["attempts"][1]["stale"]
     assert second["revisions"][0]["identity_sha256"] != second["revisions"][1]["identity_sha256"]
 

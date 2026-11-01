@@ -114,7 +114,7 @@ def refresh_evidence(history: dict) -> None:
         for name, arm in attempt["arms"].items():
             arm["identity_sha256"] = arm_identity(measured, name)
             arm["stale"] = name not in current["arms"] or arm["identity_sha256"] != arm_identity(current, name)
-        attempt["stale"] = attempt["arms"].get("new", {}).get("stale", True)
+        attempt["stale"] = all(arm["stale"] for arm in attempt["arms"].values())
 
 
 def arm_runs(history: dict, name: str) -> list[sp.RunResult]:
