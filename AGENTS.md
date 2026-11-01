@@ -10,14 +10,14 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 
 - **Spec:** `docs/specs/` (design, decisions, threat model).
 - **Plans:** `docs/plans/`. The master plan owns the architecture, shared contracts, kernel API and schedule; part plans consume them.
-- **Designs:** the Claude Desk design canvas (link in the spec).
+- **Designs:** the Claude Desk design canvas (private, not linked from the repo) is the source of truth; its signed boards are reproduced as stories in [`web/src/ds/boards/`](web/src/ds/boards/), with the design system in [`web/src/ds/`](web/src/ds/) and its [README](web/src/ds/README.md).
 - **Constitution:** `.local/constitution.md` (local only, never committed) sets the quality bar every plan, build step and review is held to. Read it first when it exists, and never quote it in anything committed or published.
 
 ## Architecture (exact contracts in the master plan)
 
 - `kernel/`: Rust crate `desk_kernel` (PyO3 + maturin): Cedar decisions, SymCC proofs, ledger hashing and Ed25519 signing.
 - `backend/desk/kernel_service/`: the kernel process (127.0.0.1:8701, never exposed). Owns sessions, verification, policies, facts, approvals and the ledger, and holds every business credential. Gateway, tool profiles and pinning, reply checker, data labels, decisions.
-- `backend/desk/api/`: the API process (port 8700). Agent loop on the Anthropic SDK, visitor and owner APIs, SSE, approvals queue, setup interview, demo copies. Holds only the Anthropic API key and passes session IDs, never identities, to the kernel.
+- `backend/desk/api/`: the API process (port 8700). Agent loop on the Anthropic SDK, visitor and owner APIs, SSE, approvals queue, setup interview, demo copies. Holds no business credential: only the Anthropic API key, its own database login and the passcode hash. Passes session IDs, never identities, to the kernel.
 - `web/`: React + Vite + TypeScript (owner app, public page, setup).
 - `evals/`: hostile-visitor attack suite, legitimate-task suite, calibration, latency. `infra/`: AWS CDK.
 
