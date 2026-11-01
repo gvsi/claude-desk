@@ -13086,7 +13086,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13570,7 +13571,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13623,7 +13625,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end\nwaits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's\nconsent question: the owner's opening description isn't shown back to them."
       },
       "SetupSuggestionsIn": {
         "properties": {},

@@ -842,6 +842,7 @@ export interface SetupAnswerIn {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   card?: string | null;
@@ -936,9 +937,9 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
- * conversation so far. Its messages start at Claude's consent
- * question: the owner's opening description isn't shown back to them.
+ * before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+ * waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+ * consent question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
   interview_id: string;
@@ -955,6 +956,7 @@ export interface SetupState {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   pending_card?: string | null;

@@ -18,7 +18,7 @@ import contextlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
@@ -97,6 +97,7 @@ from tests.api.test_setup_questions import (
     cut_short,
     idle_in_transaction,
     new_owner,
+    next_step,
     structured,
     turn,
 )
@@ -223,10 +224,13 @@ def unparseable() -> object:
     return response(text_block('{"cards": [{"applies_to": "native.quote"}]}'))
 
 
-async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_type: str = "trade",
-                owner_display_name: str | None = "Maria Rivera", **changes) -> tuple[Owner, dict]:
-    """An owner whose setup answered every question (consent declined): the state at step `tools`. `changes` replace
-    a patched field's value (None leaves it unanswered)."""
+async def answered(app, browser, kernel_http, model: ScriptedModel, *, business_type: str = "trade",
+                   owner_display_name: str | None = "Maria Rivera", said: dict[str, str] | None = None,
+                   **changes) -> tuple[Owner, dict]:
+    """An owner whose setup answered every question (consent declined), and the state as it then stands: waiting on
+    the test-client offer when the owner typed their own contact on the contact question, else at step `tools`.
+    `changes` replace a patched field's value (None leaves it unanswered); `said` replaces what the owner typed on
+    the questions it names."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type=business_type, owner_display_name=owner_display_name)
     await consent(owner, state["interview_id"], False, model)
@@ -236,12 +240,28 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
         typed = [f"About {key}.", patch.get("public_contact") or ""]
         typed += [f"{window.start} to {window.end}" for window in patch.get("hours") or []]
         typed += [f"{item.title}: {dollars(item.unit_cents)}" for item in patch.get("price_items") or []]
-        reply = await answer(owner, model, state["interview_id"], " ".join(typed),
+        reply = await answer(owner, model, state["interview_id"], (said or {}).get(key, " ".join(typed)),
                              turn(**{name: value for name, value in patch.items() if value is not None}))
         assert reply.status_code == 200, reply.text
-    state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    return owner, (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+
+
+async def ready(app, browser, kernel_http, model: ScriptedModel, **kwargs) -> tuple[Owner, dict]:
+    """An owner whose setup answered every question (consent declined) and, when it was offered, said "Not now" to
+    adding themselves as a test client: the state at step `tools`. Takes `answered`'s arguments."""
+    owner, state = await answered(app, browser, kernel_http, model, **kwargs)
+    if state["question"] == "test_client":
+        declined = await say(owner, state, setup.TEST_CLIENT_NO)
+        assert declined.status_code == 200, declined.text
+        state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
     assert state["step"] == "tools"
     return owner, state
+
+
+async def say(owner: Owner, state: dict, text: str) -> httpx.Response:
+    """The owner's answer to the test-client offer: a click on one of its choices sends the choice's text."""
+    return await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer",
+                                    json={"question": "test_client", "text": text})
 
 
 def policy(state: dict, step: str) -> str:
@@ -263,6 +283,304 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
     reply = await owner.browser.post(policy(state, "rules"))
     assert reply.status_code == 200, reply.text
     return RulesDraft.model_validate(reply.json())
+
+
+# The test-client offer: at the plan's end, setup offers to put the owner on record as a client, with the contact they
+# typed themselves, so they can try verification as a client would. Code asks it and reads the answer.
+
+OWNER_EMAIL = "maria@rivera-plumbing.example"
+CONTACT_SAID = f"Maria Rivera. Email {OWNER_EMAIL} or call (510) 555-0142, and take a message after hours."
+CLOSING_PLAN = {"role": "claude", "text": "Your Desk will take customer requests.", "choices": [], "card": None}
+OFFER = {"role": "claude", "text": setup.TEST_CLIENT_OFFER,
+         "choices": [{"text": setup.TEST_CLIENT_YES, "recommended": True},
+                     {"text": setup.TEST_CLIENT_NO, "recommended": False}], "card": None}
+ADDED = {"role": "claude", "text": setup.TEST_CLIENT_ADDED, "choices": [], "card": None}
+
+
+def owner_line(text: str) -> dict:
+    return {"role": "owner", "text": text, "choices": [], "card": None}
+
+
+def kernel_writes(fake) -> list[tuple[str, object]]:
+    """The fake kernel's calls since it was last cleared, but its reads (the owner's `GET /whoami` on each request)."""
+    return [(call.path, call.body) for call in fake.calls if not call.route.startswith("GET ")]
+
+
+async def offered(app, browser, kernel_http, model: ScriptedModel) -> tuple[Owner, dict]:
+    """An owner who typed their own contact on the contact question: setup waits on the test-client offer."""
+    owner, state = await answered(app, browser, kernel_http, model, said={"contact_and_after_hours": CONTACT_SAID})
+    assert (state["step"], state["question"], state["busy"]) == ("questions", "test_client", False)
+    return owner, state
+
+
+def contact_interview(*said: str, owner_name: str | None = "Maria Rivera") -> setup.Interview:
+    """An interview whose owner gave `said` as their answers to the contact question, Claude replying between them."""
+    transcript = [setup.Entry(role="owner", text="Rivera Plumbing fixes leaks around Oakland."),
+                  setup.Entry(role="claude", text=setup.CONSENT_QUESTION, question="consent"),
+                  setup.Entry(role="owner", text=setup.CONSENT_ANSWERS[False]),
+                  setup.Entry(role="claude", text="Which contact should customers see?",
+                              question="contact_and_after_hours")]
+    for text in said:
+        transcript += [setup.Entry(role="owner", text=text), setup.Entry(role="claude", text="Got it.")]
+    answers = SetupAnswers(summary="Plumbing.", business_name="Rivera Plumbing", owner_display_name=owner_name)
+    return setup.Interview(interview_id="setup-test", copy_id="copy-test", desk_id="desk-test", business_type="trade",
+                           step="questions", consent=False, answers=answers, transcript=transcript)
+
+
+@pytest.mark.parametrize("said, contact", [
+    (["maria@example.test"], "maria@example.test"),
+    # Someone else's address, or one the owner rejects, is never theirs.
+    (["For customers use my assistant Ana at ana@example.test. My own email is maria@example.test."],
+     "maria@example.test"),
+    (["Do not use old@example.test. My contact is maria@example.test"], "maria@example.test"),
+    (["Ana: ana@example.test, Maria: maria@example.test"], "maria@example.test"),
+    (["Bookings go to our team at team@example.test, or reach me at maria@example.test."], "maria@example.test"),
+    # Two addresses with neither marked as the owner's, or both: no offer.
+    (["hello@example.test or bookings@example.test"], None),
+    (["My email is maria@example.test and my email for work is m.rivera@example.test"], None),
+    (["Use my assistant Ana at ana@example.test."], None),
+    (["Ana: ana@example.test"], None),
+    # Another person's, or a rejected, contact carries over to the alternatives after it in its sentence, until the
+    # owner marks one as theirs; a possessive name is another person's too.
+    (["Call my assistant Ana at (510) 555-0142 or email ana@example.test."], None),
+    (["Do not use old@example.test or 510-555-0142."], None),
+    (["Ana's email is ana@example.test"], None),
+    (["Ana’s email is ana@example.test, and my own is maria@example.test."], "maria@example.test"),
+    (["Ana handles bookings. My own email is maria@example.test."], "maria@example.test"),
+    (["Don't call 510-555-0199, email me at maria@example.test."], "maria@example.test"),
+    # An email beside a phone is the one taken, and the latest answer's correction counts.
+    (["Email maria@example.test or call (510) 555-0142."], "maria@example.test"),
+    (["old@example.test", "Not old@example.test any more. My email is maria@example.test now."],
+     "maria@example.test"),
+    # In Spanish.
+    (["Para clientes, mi asistente Ana en ana@example.test. Mi correo es maria@example.test."], "maria@example.test"),
+    (["Ya no uso viejo@example.test, ahora mi correo es maria@example.test"], "maria@example.test"),
+    # A correction with no mark of the owner's own leaves the pick unclear: no offer.
+    (["Ya no uso viejo@example.test, ahora maria@example.test"], None),
+])
+def test_the_test_client_contact_is_the_owners_own(said, contact):
+    assert setup._owner_contact(contact_interview(*said)) == contact
+
+
+@pytest.mark.parametrize("said, contact", [
+    ("Call 510-555-0142 9 to 5", "510-555-0142"),
+    ("(510) 555-0142 (9-5 weekdays)", "(510) 555-0142"),
+    ("Mobile 0412 345 678 24/7", "0412 345 678"),
+    ("We are open 8.00-17.00", None),
+    ("Call or text 510-555-0142, weekdays 9am-5pm and Saturdays 9-1.", "510-555-0142"),
+    ("Maria, 510.555.0142, open 8:00 to 17:00", "510.555.0142"),
+])
+def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
+    assert setup._owner_contact(contact_interview(said)) == contact
+
+
+@pytest.mark.parametrize("yes", [True, False])
+async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, fake, kernel_http, model, engine, yes):
+    owner, state = await offered(app, browser, kernel_http, model)
+    # Asked once, right after the closing plan, with code's two choices, the yes recommended and first.
+    assert state["messages"][-2:] == [CLOSING_PLAN, OFFER]
+    assert [message["text"] for message in state["messages"]].count(setup.TEST_CLIENT_OFFER) == 1
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    fake.calls.clear()
+    asked = len(model.requests)
+
+    said = setup.TEST_CLIENT_YES if yes else setup.TEST_CLIENT_NO
+    reply = await say(owner, state, said)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    assert (done["step"], done["question"]) == ("tools", None)
+    assert len(model.requests) == asked                   # code reads the answer: Claude isn't asked
+    if yes:
+        # The owner on record as a client, with the email they typed (preferred over their phone), in their name.
+        assert kernel_writes(fake) == [(f"/desks/{state['desk_id']}/people", {
+            "upsert": [{"ref": "test-client", "display_name": "Maria Rivera", "contact": OWNER_EMAIL, "notes": ""}],
+            "remove": []})]
+        assert [(person.ref, person.contact) for person in fake.desks[state["desk_id"]].people.values()] == [
+            ("test-client", OWNER_EMAIL)]
+        assert done["messages"][-3:] == [OFFER, owner_line(said), ADDED]
+    else:
+        assert kernel_writes(fake) == [] and not fake.desks[state["desk_id"]].people
+        assert done["messages"][-2:] == [OFFER, owner_line(said)]
+    # A person on record, nothing else: no limit, rule, fact or public line changes, and no document is added.
+    assert (await stored(engine, state["interview_id"]))["answers"] == answers
+    # Answered once: the offer isn't waiting any more.
+    again = await say(owner, state, said)
+    assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+
+
+@pytest.mark.parametrize("typed, read", [
+    ("yes", "yes"), ("Yes please!", "yes"), ("Sure, go ahead", "yes"), ("OK, add me", "yes"),
+    ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
+    ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
+    ("what does that mean?", "again"), ("Can you change my hours first?", "again"),
+    # A question, or a yes only on a condition, is no yes, whatever words it holds.
+    ("What does add me as a test client mean?", "again"), ("What happens if I say yes?", "again"),
+    ("If it's free, yes", "again"),
+])
+async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
+                                                                       typed, read):
+    owner, state = await offered(app, browser, kernel_http, model)
+    fake.calls.clear()
+    asked = len(model.requests)
+    reply = await say(owner, state, typed)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    assert len(model.requests) == asked                   # read word by word by code, a "no" word winning
+    assert len(fake.called("PUT /desks/{id}/people")) == int(read == "yes")
+    if read == "again":
+        # Neither a yes nor a no: the same offer again, with its choices, and nothing written.
+        assert (done["step"], done["question"]) == ("questions", "test_client")
+        assert done["messages"][-3:] == [OFFER, owner_line(typed), OFFER]
+        assert (await say(owner, state, setup.TEST_CLIENT_YES)).json()["messages"][-1] == ADDED
+        assert len(fake.called("PUT /desks/{id}/people")) == 1
+    else:
+        assert done["step"] == "tools"
+        assert done["messages"][-2:] == ([owner_line(typed), ADDED] if read == "yes" else [OFFER, owner_line(typed)])
+
+
+@pytest.mark.parametrize("failure", ["422", "500", "connect"])
+async def test_a_failed_test_client_write_is_logged_without_the_contact_and_setup_goes_on(
+        app, browser, fake, kernel_http, model, caplog, failure):
+    owner, state = await offered(app, browser, kernel_http, model)
+    caplog.set_level(logging.WARNING)
+    fake.fail("PUT /desks/{id}/people", failure)
+    reply = await say(owner, state, setup.TEST_CLIENT_YES)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    assert done["step"] == "tools" and done["messages"][-2:] == [OFFER, owner_line(setup.TEST_CLIENT_YES)]
+    assert not fake.desks[state["desk_id"]].people
+    (logged,) = [record for record in caplog.records if "test client" in record.getMessage()]
+    assert logged.name == setup.__name__ and logged.levelno == logging.WARNING
+    assert OWNER_EMAIL not in caplog.text and "555" not in caplog.text
+    # The yes stays saved, with no "Done".
+    reloaded = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert reloaded["step"] == "tools" and reloaded["messages"][-2:] == [OFFER, owner_line(setup.TEST_CLIENT_YES)]
+    fake.fail("PUT /desks/{id}/people", None)
+    await drafted_rules(owner, model, done)               # setup goes on to its rules
+
+
+def failing_commits(monkeypatch, failing: Callable[[int], bool]) -> list[int]:
+    """Make setup's interview saves fail with 409 `conflict` where `failing(n)` holds for the n-th save from now (the
+    first of a turn is its busy save, the second its own); the list counts them."""
+    commit, commits = setup._commit, []
+
+    async def counted(*args, **kwargs):
+        commits.append(len(commits) + 1)
+        if failing(len(commits)):
+            raise ApiProblem(409, "conflict")
+        await commit(*args, **kwargs)
+
+    monkeypatch.setattr(setup, "_commit", counted)
+    return commits
+
+
+async def test_the_owners_yes_is_saved_before_the_test_client_write(app, browser, fake, kernel_http, model,
+                                                                    monkeypatch):
+    owner, state = await offered(app, browser, kernel_http, model)
+    fake.calls.clear()
+    failing_commits(monkeypatch, lambda n: n == 2)
+    reply = await say(owner, state, setup.TEST_CLIENT_YES)
+    # The answer's own save failed: nothing was written, and the offer still waits.
+    assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
+    assert kernel_writes(fake) == [] and not fake.desks[state["desk_id"]].people
+    waiting = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert waiting["question"] == "test_client" and waiting["messages"][-1] == OFFER
+    monkeypatch.undo()
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
+    assert kernel_writes(fake) == [] and not fake.desks[state["desk_id"]].people
+
+
+async def test_a_second_run_of_the_test_client_write_adds_no_one(app, browser, fake, kernel_http, model, engine,
+                                                                 monkeypatch):
+    from desk.api.deps import owner_context
+
+    owner, state = await offered(app, browser, kernel_http, model)
+    commits = failing_commits(monkeypatch, lambda n: n > 2)
+    reply = await say(owner, state, setup.TEST_CLIENT_YES)
+    assert reply.status_code == 200, reply.text
+    # On record after the saved yes, but the outcome's save and its one retry failed: no "Done".
+    assert commits == [1, 2, 3, 4] and reply.json()["messages"][-1] == owner_line(setup.TEST_CLIENT_YES)
+    assert len(fake.desks[state["desk_id"]].people) == 1
+    monkeypatch.undo()
+    async with owner_context(app.state.runtime, owner.token) as ctx:
+        for _ in range(2):
+            interview = await setup._read(engine, ctx, state["interview_id"])
+            await setup._put_test_client(ctx, engine, interview)
+    # The next run puts the same person again, by its ref, and saves "Done"; the one after writes nothing.
+    assert len(fake.called("PUT /desks/{id}/people")) == 2
+    assert [(person.ref, person.contact) for person in fake.desks[state["desk_id"]].people.values()] == [
+        ("test-client", OWNER_EMAIL)]
+    reloaded = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert reloaded["messages"][-3:] == [OFFER, owner_line(setup.TEST_CLIENT_YES), ADDED]
+
+
+@pytest.mark.parametrize("said", [
+    {"contact_and_after_hours": "The same as on my website, and take a message after hours."},
+    {"contact_and_after_hours": "rivera-plumbing.example/contact"},
+    # A contact typed on another question isn't the one the owner gave as theirs.
+    {"what_you_do": f"Plumbing around Oakland. Reach me at {OWNER_EMAIL}.",
+     "contact_and_after_hours": "The same as on my website."},
+])
+async def test_no_test_client_offer_without_a_contact_the_owner_typed(app, browser, fake, kernel_http, model, said):
+    owner, state = await answered(app, browser, kernel_http, model, said=said)
+    assert (state["step"], state["question"]) == ("tools", None)
+    assert setup.TEST_CLIENT_OFFER not in [message["text"] for message in state["messages"]]
+    assert not fake.called("PUT /desks/{id}/people")
+
+
+async def test_a_reload_shows_the_test_client_offer_then_the_answer(app, browser, fake, kernel_http, model):
+    owner, state = await offered(app, browser, kernel_http, model)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    for query in ("", "?cards=1"):
+        waiting = (await owner.browser.get(path + query)).json()
+        assert waiting["question"] == "test_client" and waiting["messages"][-2:] == [CLOSING_PLAN, OFFER]
+    assert (await say(owner, state, setup.TEST_CLIENT_YES)).status_code == 200
+    for query in ("", "?cards=1"):
+        reloaded = (await owner.browser.get(path + query)).json()
+        assert (reloaded["step"], reloaded["question"]) == ("tools", None)
+        assert reloaded["messages"][-4:] == [CLOSING_PLAN, OFFER, owner_line(setup.TEST_CLIENT_YES), ADDED]
+
+
+async def test_using_the_suggestions_while_the_offer_waits_adds_no_test_client(app, browser, fake, kernel_http, model):
+    owner, state = await offered(app, browser, kernel_http, model)
+    fake.calls.clear()
+    asked = len(model.requests)
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    # The plan is already closed: no second closing plan, no model call and nothing written.
+    assert (done["step"], done["question"]) == ("tools", None)
+    assert done["messages"][-3:] == [CLOSING_PLAN, OFFER, owner_line("Use your suggestions")]
+    assert len(model.requests) == asked and kernel_writes(fake) == []
+
+
+async def test_using_the_suggestions_runs_the_post_finish_work_once_the_offer_is_answered(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    async with engine.begin() as conn:                    # the contact question comes up before the others
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+        interview.transcript.append(setup.Entry(role="claude", text="Which contact should customers see?",
+                                                question="contact_and_after_hours"))
+        await setup._save(conn, interview)
+    reply = await answer(owner, model, state["interview_id"], CONTACT_SAID, turn(),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    finished = []
+
+    async def after_finish(ctx, interview):
+        finished.append(interview.step)
+
+    monkeypatch.setattr(setup, "after_finish", after_finish)
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan=CLOSING_PLAN["text"]))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    # The suggestions close the plan and bring up the offer: the post-finish work waits for its answer.
+    assert reply.json()["question"] == "test_client" and reply.json()["messages"][-2:] == [CLOSING_PLAN, OFFER]
+    assert finished == []
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
+    assert finished == ["tools"]
 
 
 @pytest.mark.parametrize("reenable", [False, True])

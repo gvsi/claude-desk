@@ -493,6 +493,12 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/**
+ * What setup can wait on: one of its questions, then, once its plan is closed, whether to add the
+ * owner as a test client (`test_client`), which the API asks and reads by code alone.
+ */
+export type SetupQuestion = QuestionKey | 'test_client';
+
 /** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
 export type Choice = { text: string; recommended: boolean };
 
@@ -566,8 +572,11 @@ export interface SetupState {
    * reply yet. Absent means false on older APIs.
    */
   busy?: boolean;
-  /** The question waiting for an answer; null before consent and after the last one. */
-  question: QuestionKey | null;
+  /**
+   * The question waiting for an answer, `test_client` while the test-client offer at the plan's
+   * end waits; null before consent and after the last one.
+   */
+  question: SetupQuestion | null;
   /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
   pending_card?: string | null;
 }
@@ -847,7 +856,7 @@ export interface StartSetupBody {
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
 export type SetupAnswerBody = { text: string } & (
-  | { question: QuestionKey; card?: never }
+  | { question: SetupQuestion; card?: never }
   | { question: null; card: string }
 );
 

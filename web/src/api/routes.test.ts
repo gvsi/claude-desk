@@ -6,7 +6,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { MoneyCapIn } from './openapi.gen.ts';
 import { ROUTES, apiPath, type RouteBody, type RouteKey, type RouteQuery } from './routes.ts';
-import type { AnyToolName, QuestionKey, SetupPublicLine, SetupPublicLineIn, SetupPublicLines, SetupPublicLinesConfirmIn } from './views.ts';
+import type { AnyToolName, SetupPublicLine, SetupPublicLineIn, SetupPublicLines, SetupPublicLinesConfirmIn, SetupQuestion } from './views.ts';
 import { ROUTE_MODELS } from './routes.typecheck.ts';
 import type { RequestOptions } from './http.ts';
 
@@ -127,8 +127,9 @@ describe('ROUTES', () => {
     // Bodies the web types by hand ahead of the API, checked by `npm run typecheck`: confirmTool's
     // batch body, a whole connector in one action and one tool a list of one (plan 02b Task 7).
     expectTypeOf<RouteBody<'confirmTool'>>().toEqualTypeOf<{ tools: { tool: AnyToolName; definition_sha256: string }[]; enable: boolean }>();
-    // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6).
-    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ text: string } & ({ question: QuestionKey; card?: never } | { question: null; card: string })>();
+    // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6): a
+    // topic, or the test-client offer at the plan's end.
+    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ text: string } & ({ question: SetupQuestion; card?: never } | { question: null; card: string })>();
     // draftMoneyCap's body, the payment limit a draft changes to, is the API's own model, from its
     // document (`MoneyCapIn`, openapi.gen.ts), not typed by hand.
     expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<MoneyCapIn>();
