@@ -42,7 +42,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, 
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo, available_timezones
 
 import desk_kernel
@@ -681,8 +681,13 @@ CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row anot
 NEW_DESK_PRESET = "ask_first"
 
 
+class SlotStart(Protocol):
+    slot_id: str
+    starts_at: datetime
+
+
 def later_slots(hours: Sequence[HoursWindow], timezone: str, now: datetime,
-                rows: Collection[CalendarSlot]) -> list[CalendarSlotSeed]:
+                rows: Collection[SlotStart]) -> list[CalendarSlotSeed]:
     """The slots `calendar_slots` gives from `hours` on the 14 days after `now`'s day in the
     business's time zone, keeping only the days after the latest of the Desk's slots `rows` (all
     of them when it has none), and none whose ID one of `rows` already has."""
@@ -714,11 +719,12 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
 
     It only inserts: a booked slot, one a request still names, and every change the owner made
     to the calendar stay exactly as they are. In the caller's transaction, bound to the Desk's
-    copy, it takes the rows an owner's calendar write takes, in the same order (`repo.py`): the
-    Desk row `FOR UPDATE`, read afresh, then the Desk's slots `FOR UPDATE` in ID order, so a
-    booking of one either commits first or waits, and the ledger head for the entry an owner's
-    write leaves, `desk_data` `{part: "calendar", refs}`, with `extended_from: "hours"` saying the
-    kernel added them from the hours."""
+    copy, it holds the Desk row `FOR UPDATE`, read afresh, as an owner's calendar write does, so
+    the two take turns (`repo.py`). Every write that changes or deletes a slot holds that row
+    first, so the Desk's slots are read without a lock, and a booking holding its slot `FOR SHARE`
+    neither waits for the refresh nor holds it up. The new slots go in under fresh keys, then the
+    ledger head is taken for the entry an owner's write leaves, `desk_data` `{part: "calendar",
+    refs}`, with `extended_from: "hours"` saying the kernel added them from the hours."""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one_or_none()
     if (desk_row is None or desk_row.deleted_at is not None or not desk_row.answering or not desk_row.hours
@@ -726,8 +732,8 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
         return []
     timezone = (await ctx.db.scalars(ctx.repo.scoped(select(Business.timezone).where(
         Business.business_id == desk_row.business_id)))).one()
-    rows = (await ctx.db.scalars(ctx.repo.scoped(select(CalendarSlot).where(CalendarSlot.desk_id == desk_id)
-                                                 .order_by(CalendarSlot.slot_id).with_for_update()))).all()
+    rows = (await ctx.db.execute(ctx.repo.scoped(select(CalendarSlot.slot_id, CalendarSlot.starts_at).where(
+        CalendarSlot.desk_id == desk_id)))).all()
     added = later_slots(desk_row.hours, timezone, ctx.clock.now(), rows)
     if not added:
         return []

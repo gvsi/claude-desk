@@ -11,6 +11,8 @@ at Friday 2026-10-30, 12:04 in Chicago, two days before the clocks there go back
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -78,6 +80,16 @@ async def head_of(app: FastAPI, desk: SetupDesk) -> tuple[int, str]:
     return last.seq, last.hash
 
 
+@asynccontextmanager
+async def held(copy_id: str, statement: str, **params: str) -> AsyncIterator[None]:
+    """`statement`, a `SELECT ... FOR UPDATE` or `FOR SHARE`, run as the kernel in a transaction of
+    `copy_id` on a connection of its own, which holds the rows it locks until the block ends."""
+    async with await psycopg.AsyncConnection.connect(libpq_url(database_url("KERNEL"))) as conn:
+        await conn.execute("SELECT set_config('desk.copy_id', %(copy_id)s, true)", {"copy_id": copy_id})
+        assert (await conn.execute(statement, params)).rowcount == 1
+        yield
+
+
 async def setup_desk(app: FastAPI, client: httpx.AsyncClient, copy: Rivera, slots: list[CalendarSlot], *,
                      hours: list[HoursWindow] = HOURS, answering: bool = True) -> SetupDesk:
     """A Desk in `copy` as setup leaves it: made through `POST /desks` with `hours`, then given the
@@ -136,6 +148,18 @@ async def test_the_refresh_never_touches_a_slot_it_finds(app, client):
     [booking] = await rows_of(app, copy.copy_id, select(Booking).where(Booking.desk_id == desk.desk_id))
     assert (booking.slot_id, booking.status) == ("S-20261102-1000", "confirmed")
 
+
+
+async def test_a_booking_holding_its_slot_doesnt_hold_up_the_refresh(app, client, monkeypatch):
+    """A booking's T2 holds its slot `FOR SHARE` while it books it; the refresh only adds slots, so
+    it neither waits for that nor makes the booking wait."""
+    monkeypatch.setattr(desks, "CALENDAR_REFRESH_LOCK_S", 0.5)
+    copy = await rivera(app, client)
+    desk = await setup_desk(app, client, copy, setup_calendar(days_ago=11))
+    async with held(copy.copy_id, "SELECT 1 FROM kernel.calendar_slots WHERE desk_id = %(desk_id)s"
+                                  " AND slot_id = %(slot_id)s FOR SHARE", desk_id=desk.desk_id, slot_id="S-20261102-1000"):
+        added = await asyncio.wait_for(desks.extend_calendars(app.state.kernel), timeout=5)
+    assert len(added[desk.desk_id]) == 72
 
 async def test_a_second_refresh_adds_nothing(app, client):
     copy = await rivera(app, client)

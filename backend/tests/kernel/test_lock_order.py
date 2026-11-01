@@ -605,10 +605,25 @@ async def test_a_calendar_write_runs_in_the_lock_order(app, client):
 
 async def test_a_calendar_refresh_runs_in_the_lock_order(app, client):
     desk = await setup_desk(app, client, await rivera(app, client), setup_calendar(days_ago=11))
-    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
-        assert list(await desks.extend_calendars(app.state.kernel)) == [desk.desk_id]
-    # the rows an owner's calendar write takes, in the same order
-    assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
+    on_slots: list[str] = []
+
+    def slot_statement(conn, cursor, statement: str, parameters, context, executemany) -> None:
+        if "kernel.calendar_slots" in statement:
+            on_slots.append(" ".join(statement.split()))
+
+    engine = app.state.kernel.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", slot_statement)
+    try:
+        with lock_log(app, ("desks", *(table for table in LOCK_ORDER if table != "calendar_slots"))) as log:
+            assert list(await desks.extend_calendars(app.state.kernel)) == [desk.desk_id]
+    finally:
+        event.remove(engine, "before_cursor_execute", slot_statement)
+    # the Desk row, as an owner's calendar write takes it, then the ledger head
+    assert log.transactions == [["desks", "ledger_heads"]], log.transactions
+    # the Desk's slots are only read, and the new ones inserted under fresh keys: no slot is locked
+    read, *inserts = on_slots
+    assert read.startswith("SELECT") and " FOR " not in read, read
+    assert inserts and all(statement.startswith("INSERT") for statement in inserts), inserts
 
 
 # ---- Plan 01c's payment paths ---------------------------------------------------------------------
