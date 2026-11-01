@@ -160,12 +160,90 @@ const RECOMMENDED_CARDS: RuleCard[] = [
  * The presets' cards, as the master plan's `desk.presets.PRESETS` has them (`backend/desk/presets.py`):
  * "Ask me first" lets Claude show open times, take leads and callbacks, start verifications and read
  * the owner's material on its own; "Recommended rules" adds quotes at list price, weekday bookings,
- * customers' own documents and an ask before money moves. Read-only: copy a card before changing it.
+ * customers' own documents and an ask before money moves. Its booking card here books Monday to
+ * Friday, 9 to 5, the fallback for a Desk with no hours: a draft of the preset gives it the Desk's
+ * own weekday hours (`presetCards`). Read-only: copy a card before changing it.
  */
 export const PRESETS: Readonly<Record<RulesPreset, readonly RuleCard[]>> = {
   ask_first: STARTER_CARDS,
   auto: [...STARTER_CARDS, ...RECOMMENDED_CARDS],
 };
+
+/** The days "Recommended rules" books on its own, in week order. */
+const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri'] as const;
+type Weekday = (typeof WEEKDAYS)[number];
+const isWeekday = (day: string): day is Weekday => (WEEKDAYS as readonly string[]).includes(day);
+
+/** "Recommended rules"'s weekday booking card, which `presetCards` gives the Desk's own hours. */
+const PRESET_BOOKING_CARD = 'preset-book-weekday';
+/** The reason of a booking card in the Desk's own hours: the example Desk's own weekday rule's words, naming no hours. */
+const OPENING_HOURS_REASON = 'Weekday bookings in opening hours, checked by the reviewer.';
+
+/** Seconds since midnight of a contract time ("08:00:00"); an end at 00:00 is midnight, the day's end. */
+function secondsOf(time: string, end = false): number {
+  const [h = '0', m = '0', s = '0'] = time.split(':');
+  const total = Number(h) * 3600 + Number(m) * 60 + Number(s);
+  return end && total === 0 ? 24 * 3600 : total;
+}
+
+/**
+ * The weekday part of a Desk's opening hours, as the API's `weekday_windows` reads it: each window's
+ * days cut to Monday to Friday, a window left with none dropped (a Saturday's, say), and windows with
+ * the same start and end merged, their days in week order; an end of 00:00 stays midnight. They come
+ * by their first day, then their start, then their end (midnight last), however the Desk keeps them.
+ */
+export function weekdayWindows(hours: readonly HoursWindow[]): HoursWindow[] {
+  const merged = new Map<string, { start: string; end: string; days: Set<Weekday> }>();
+  for (const window of hours) {
+    const weekdays = window.days.filter(isWeekday);
+    if (weekdays.length === 0) continue;
+    const key = `${window.start}-${window.end}`;
+    const entry = merged.get(key) ?? { start: window.start, end: window.end, days: new Set<Weekday>() };
+    for (const day of weekdays) entry.days.add(day);
+    merged.set(key, entry);
+  }
+  const windows = [...merged.values()].map(({ start, end, days }) => {
+    const [first, ...rest] = WEEKDAYS.filter((day) => days.has(day));
+    if (first === undefined) throw new Error('a weekday window has a weekday');
+    return { days: [first, ...rest], start, end } satisfies HoursWindow;
+  });
+  const firstDay = (window: HoursWindow) => WEEKDAYS.indexOf(window.days[0] as Weekday);
+  return windows.sort(
+    (a, b) => firstDay(a) - firstDay(b) || secondsOf(a.start) - secondsOf(b.start) || secondsOf(a.end, true) - secondsOf(b.end, true),
+  );
+}
+
+/** Whether two windows name the same days, in the same order, and the same start and end. */
+function sameWindow(a: HoursWindow, b: HoursWindow | null | undefined): boolean {
+  return b != null && a.start === b.start && a.end === b.end && a.days.length === b.days.length && a.days.every((day, i) => day === b.days[i]);
+}
+
+/**
+ * The preset's cards for a Desk with these opening hours, as the API's `preset_cards` drafts them:
+ * "Recommended rules" books weekdays in the Desk's own hours, its weekday booking card giving way to
+ * one card per weekday window (`weekdayWindows`), in that order and in its place, each the preset's
+ * card in all but its hours, its reason (`OPENING_HOURS_REASON`) and, for several windows, its id,
+ * numbered `-1`, `-2` and on. Hours with
+ * none on a weekday give no booking card, so weekday bookings ask first. No hours at all, or exactly
+ * the card's own (Monday to Friday, 9 to 5), give the preset's cards as they are, as does "Ask me
+ * first", which books nothing.
+ */
+export function presetCards(preset: RulesPreset, hours: readonly HoursWindow[]): RuleCard[] {
+  const cards = [...PRESETS[preset]];
+  const at = cards.findIndex((card) => card.card_id === PRESET_BOOKING_CARD);
+  const booking = cards[at];
+  if (booking === undefined || hours.length === 0) return cards;
+  const windows = weekdayWindows(hours);
+  const [only] = windows;
+  if (only !== undefined && windows.length === 1 && sameWindow(only, booking.hours)) return cards;
+  const bookings = windows.map((window, i) => ({
+    ...booking,
+    card_id: windows.length === 1 ? booking.card_id : `${booking.card_id}-${i + 1}`,
+    hours: window,
+    reason: OPENING_HOURS_REASON,
+  }));
+  return [...cards.slice(0, at), ...bookings, ...cards.slice(at + 1)];
+}
 
 /**
  * The active rules: version 7, proved, with the starter preset's cards the seed keeps, as the
@@ -233,10 +311,10 @@ export function riveraTools(): ToolRecord[] {
       resource_kind: 'document',
       description_confirmed: 'Send a verified customer a link to one of their own documents.',
     }),
-    nativeTool('native.payment_link', { effects: ['charge'], reversible: true, resource_kind: 'quote', description_confirmed: 'Make a one-time payment link for a quote.' }),
+    nativeTool('native.payment_link', { effects: ['charge'], reversible: false, resource_kind: 'quote', description_confirmed: 'Make a one-time payment link for a quote.' }),
     nativeTool('native.charge_mandate', {
       effects: ['charge'],
-      reversible: true,
+      reversible: false,
       resource_kind: 'quote',
       description_confirmed: "Charge a visiting agent within its owner's signed limit.",
     }),

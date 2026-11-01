@@ -211,7 +211,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A7: keep a setup Desk's calendar open (1.5 h, could)
 
-**Files:** `backend/desk/api/jobs.py`, `setup.py` (`calendar_slots`). A daily job PUTs the next 14 days of slots from the Desk's hours for every setup-made live Desk. Test `test_jobs.py`: `test_the_calendar_is_refreshed_from_the_hours`.
+**Files:** `backend/desk/calendar.py` (new: `calendar_slots`, moved from `setup.py` so the kernel can share it), `backend/desk/kernel_service/desks.py` (`extend_calendar`, `extend_calendars`, `keep_calendars_open`), `app.py` (the lifespan task), `repo.py` (`limit_lock_waits`, the lock order). The kernel's lifespan runs a pass at its start and then daily, beside the kernel and cancelled at shutdown. Each live Desk with hours that setup made (its version 1 came from the `ask_first` preset, which `POST /desks` activates; Rivera's seed starts from `rivera`) gets, in a transaction of its own under its Desk row, the slots its hours give for the days after its latest slot, up to 14 days ahead in the business's time zone. It only inserts: booked slots, slots a waiting request names and the owner's changes inside the covered days stay as they are, while a trimmed tail or a cleared calendar is filled again (wish #596). Each extension is ledgered as the owner's calendar write is, `desk_data` `{part: "calendar", refs, extended_from: "hours"}`. An API job was rejected because API jobs hold no credential and never call the kernel. Test `backend/tests/kernel/test_calendar_refresh.py`: `test_the_calendar_is_refreshed_from_the_hours`.
 
 ### Task A8: the run's fixes (in flight)
 

@@ -49,6 +49,7 @@ EXECUTED: dict[str, str] = {
     "purpose_payment": "{title}: enlace de pago creado",
     "urgent": "{title}: solicitud urgente enviada a {owner}",
     "intake": "{title}: datos guardados para {owner}",
+    "typed_booking": "{title}: reservado en el calendario de {owner}",
     "native.quote": "Cotizado con la lista de precios de {owner}",
     "native.find_slots": "Horarios tomados del calendario de {owner}",
     "native.book": "Reservado en el calendario de {owner}",
@@ -146,6 +147,12 @@ def hours(fact: Fact | None, desk: DeskInfo) -> Card:
 def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
     """`{date}` / `Llegada de {start} a {end}` / `Con {owner}`; sin el ID de la reserva."""
     start, end = booking_window(fact, desk)
+    found = claims(fact)
+    if "appointment_type" in found:
+        from desk.kernel_service.adapters.base import quoted
+        return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} a las {clock(start)}",
+                                              f"Unos {found['appointment_minutes']} minutos",
+                                              f"Con {desk.owner_display_name}"))
     return Card(title=date(start), lines=(f"Llegada de {clock(start)} a {clock(end)}",
                                           f"Con {desk.owner_display_name}"))
 

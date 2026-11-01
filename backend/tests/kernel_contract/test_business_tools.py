@@ -2,12 +2,14 @@
 
 import hashlib
 import json
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from desk.api.schemas import ToolRow
-from desk.contracts import BusinessTool, RuleCard, ToolCall
-from desk.kernel_api import (BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest,
+from desk.contracts import BusinessTool, Clause, HoursWindow, ReplyDraft, RuleCard, ToolCall
+from desk.kernel_api import (BusinessToolsRequest, CheckReplyRequest, PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest,
                              Probe, ToolPin, ToolsConfirmRequest)
 from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision, refused
 
@@ -501,3 +503,62 @@ async def test_reviewed_purpose_payment_asked_again_answers_with_its_open_link(k
     assert [fact.kind for fact in answered.facts] == ['payment_link']
     assert len(ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.quotes')) == 1
     assert len(ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.payment_links')) == 1
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_reviewed_typed_booking_books_its_slot_and_keeps_its_note_owner_only(kernel, ro_read):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner = copy.desk_ids[0], http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.consult', title='Book a consult', description='Book an introduction.',
+                        config={'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 20})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    confirmed = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    assert confirmed.draft.status == 'proved'
+    active = await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
+    slots = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.calendar_slots WHERE desk_id = %s ORDER BY starts_at', (desk_id,))
+    slot = slots[0]
+    local = slot['starts_at'].astimezone(ZoneInfo('America/Los_Angeles'))
+    hours = HoursWindow(days=[local.strftime('%a').lower()], start=local.time().replace(tzinfo=None),
+                        end=(local + timedelta(minutes=slot['minutes'])).time().replace(tzinfo=None))
+    draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
+        desk_id=desk_id, expected_parent=active.version, cards=[RuleCard(
+            card_id='consult-auto', applies_to=tool.tool, mode='auto', who='anyone', hours=hours,
+            reason='Book consultations during this window.')]))
+    assert draft.status == 'proved'
+    await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    session = http.session(visitor.session_token)
+    args = {'slot_id': slot['slot_id'], 'note': 'Use the side entrance.'}
+    allowed = await decide(session, visitor.state.session_id, visitor.state.generation, 'consult', tool.tool, args)
+    assert allowed.outcome == 'allow'
+    assert allowed.action.resource.kind == 'slot' and allowed.action.resource.id == slot['slot_id']
+    assert allowed.action.starts_at == slot['starts_at']
+    result = await execute(session, allowed, visitor.state.generation)
+    assert result.state == 'succeeded'
+    [fact] = result.facts
+    claims = {claim.key: claim.value for claim in fact.claims}
+    assert (claims['appointment_type'], claims['appointment_minutes']) == ('Free consult', '20')
+    assert 'note' not in claims and 'Use the side entrance.' not in result.model_dump_json()
+    [note] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.facts WHERE fact_id = %s',
+                     ('booking_note:' + result.model_view['booking_id'],))
+    assert note['readers'] == ['owner']
+    assert {claim['key']: claim['value'] for claim in note['claims']}['note'] == args['note']
+    assert (await read_decision(session, allowed.decision_id)).visitor_plain == (
+        '“Book a consult”: booked on Maria Rivera\'s calendar')
+    checked = await session.call('POST /check_reply', CheckReplyRequest(draft=ReplyDraft(
+        session_id=visitor.state.session_id, generation=visitor.state.generation, prose='Here are the details.',
+        clauses=[Clause(template='booking_confirmed', fact_id=fact.fact_id)])))
+    assert checked.ok
+    [card] = [block for block in checked.blocks if block.template == 'booking_confirmed']
+    assert '“Free consult”' in card.text and 'About 20 minutes' in card.text
+    seen = await session.call('GET /context/{session_id}?desk_id=', path={'session_id': visitor.state.session_id})
+    assert 'note' in next(profile for profile in seen.tools if profile.tool == 'native.book').input_schema['properties']
+    assert note['fact_id'] not in {visible.fact_id for visible in seen.facts}
+    for index, extra in enumerate(({'appointment_type': 'Other'}, {'type': 'Other'}, {'minutes': 15},
+                                    {'config': {'block': 'intake'}}, {'block': 'intake'}, {'note': 'x' * 201})):
+        blocked = await decide(session, visitor.state.session_id, visitor.state.generation,
+                               f'bad-consult-{index}', tool.tool, {**args, **extra})
+        assert blocked.outcome == 'refuse' and blocked.action is None
