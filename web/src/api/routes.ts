@@ -52,6 +52,9 @@ import type {
   PasscodeBody,
   PaymentLinkOut,
   PeopleOut,
+  SetupPublicLines,
+  SetupPublicLineIn,
+  SetupPublicLinesConfirmIn,
   PolicyVersionOut,
   PresetBody,
   Reports,
@@ -155,6 +158,9 @@ export const ROUTES = {
   setupSuggestions: { method: 'POST', path: '/api/owner/setup/{id}/suggestions', owner: true, model: true },
   setupTools: { method: 'GET', path: '/api/owner/setup/{id}/tools', owner: true },
   setupConnect: { method: 'POST', path: '/api/owner/setup/{id}/tools/connect', owner: true },
+  setupPublicLines: { method: 'GET', path: '/api/owner/setup/{id}/public_lines', owner: true },
+  setupPublicLine: { method: 'PUT', path: '/api/owner/setup/{id}/public_lines', owner: true },
+  setupPublicLinesConfirm: { method: 'POST', path: '/api/owner/setup/{id}/public_lines/confirm', owner: true },
 
   // Public: the visitor cookie (set by openSession) on all but publicDesk, openSession and agentCard
   publicDesk: { method: 'GET', path: '/api/public/{slug}', owner: false },
@@ -239,6 +245,9 @@ interface RouteShapes {
   setupSuggestions: { body: SetupSuggestionsBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
+  setupPublicLines: { body: undefined; response: SetupPublicLines };
+  setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
+  setupPublicLinesConfirm: { body: SetupPublicLinesConfirmIn; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };

@@ -52,6 +52,13 @@ const EXAMPLE_CHIPS = ['A hair salon in Oakland', 'A plumber in Oakland', 'Apart
 /** The requests a route got, by key, from the `from`th request on. */
 const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
 
+/** The public lines are now reviewed between Real situations and Safety check. */
+async function reviewPublicLines(screen: RenderResult): Promise<void> {
+  await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+}
+
 /** A new interview in the mock, made the way the start page makes one; with consent given unless `consent` is false. */
 async function startInterview(consent: boolean | null = true, description = DESCRIPTION): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() } });
@@ -1967,6 +1974,7 @@ describe('setup', () => {
     await expect.element(refused.getByText('Never', { exact: true })).toBeVisible();
 
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety check' })).toBeVisible();
   });
 
@@ -2138,6 +2146,7 @@ describe('setup', () => {
     const counts = watchCount();
     const spoken = watchCount('spoken');
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
 
@@ -2183,6 +2192,7 @@ describe('setup', () => {
     const drawn = watchRows('Tricks tried');
     const counts = watchCount();
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
 
@@ -2193,12 +2203,15 @@ describe('setup', () => {
     expect(counts()).toEqual(['6 of 6 stopped']);
   });
 
-  /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
+  /** An interview opened at Real situations, now at public lines with "Looks right" ready. */
   async function openedAtSituations(): Promise<RenderResult> {
     const { state } = await interviewAtRules();
     await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
     return screen;
   }
 

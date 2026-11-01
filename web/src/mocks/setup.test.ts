@@ -722,7 +722,8 @@ describe("setup's examples", () => {
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.'],
         ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
         ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.'],
-        ['Chen & Co.', 'Linda', 'chen-co-setup1', 'New clients start with a free 20-minute consult, and we price each engagement after it.'],
+        // The raw description states free and a duration, so it stays private before public lines are seeded.
+        ['Chen & Co.', 'Linda', 'chen-co-setup1', null],
       ],
       es: [
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.'],
