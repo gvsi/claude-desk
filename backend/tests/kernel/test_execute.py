@@ -1,6 +1,6 @@
 """POST /execute: an allowed action runs once, intent first, as its own session.
 
-Decisions come from `/decide` as the API sends them, on a Rivera Plumbing copy (the native quote
+Decisions come from `/decide` as the API sends them, on a Turner Plumbing copy (the native quote
 and booking adapters) or on a Desk of scripted adapters (`FakeAdapter`). Each test then calls
 `/execute` and reads the decision back through `GET /decisions/{decision_id}`, which settles an
 orphaned intent as a read does.
@@ -74,7 +74,7 @@ async def test_an_allow_executes_once_within_a_minute(app, client, frozen_clock)
 
     # the decision is executed, ledgered and signed again
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Mike Turner's price list")
     assert decision.ledger_seq > allowed.ledger_seq
     verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
@@ -103,7 +103,7 @@ async def test_an_allow_expires_after_sixty_seconds(app, client, frozen_clock):
 async def test_an_allow_from_an_old_generation_expires(app, client):
     copy, visitor = await visitor_of(app, client)
     allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
-    assert (await set_mode(client, copy, visitor.session_id, "owner", 0))["generation"] == 1   # Maria takes over
+    assert (await set_mode(client, copy, visitor.session_id, "owner", 0))["generation"] == 1   # Mike takes over
     for generation in (0, 1):            # the API's old generation, or the new one: the allow is from generation 0
         response = await post_execute(client, visitor, allowed, generation=generation)
         assert (response.status_code, response.json()) == (409, {"code": "stale_generation"})
@@ -151,7 +151,7 @@ async def test_a_bookings_owner_alert_reaches_only_the_owners_inbox(app, client,
     the owner reads it from `GET /demo_inbox`."""
     reviewer.answer = PASS
     copy, visitor = await visitor_of(app, client)
-    async with kernel_ctx(app) as ctx:                                          # Maria wants bookings at once
+    async with kernel_ctx(app) as ctx:                                          # Mike wants bookings at once
         ctx.bind(copy.copy_id)
         prefs = (await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))).one()
         prefs.now = [*prefs.now, "booking"]
@@ -189,7 +189,7 @@ async def activate(app: FastAPI, copy: Rivera, cards) -> None:
 async def test_rules_changed_refuses_at_execution(app, client):
     copy, visitor = await visitor_of(app, client)
     allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
-    # Maria stops quotes between the decision and its execution
+    # Mike stops quotes between the decision and its execution
     await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
                    + [card("no-quotes", "native.quote", mode="never")])
     response = await post_execute(client, visitor, allowed)
@@ -326,7 +326,7 @@ async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client
     assert await committed(app, rows.copy_id, allowed.action.action_id) == ("intent", "allowed")
     frozen_clock.advance(31)
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Mike Turner's price list")
     expected = ExecResult(action_id=allowed.action.action_id, state="succeeded", facts=[], model_view={"ok": True})
     assert await executed(client, visitor, allowed) == expected                 # rebuilt as the session may see it
     assert effects == [allowed.action.action_id] and "on_failed" not in quote.calls
@@ -613,7 +613,7 @@ async def test_on_failed_is_never_kept_without_its_failed_record(app, client, re
         {**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True}]
 
 
-NOTE = "Call me back at maria@riverapl.example"     # what a visitor typed, which no log may carry
+NOTE = "Call me back at mike@riverapl.example"     # what a visitor typed, which no log may carry
 
 
 def echoes_the_note(*args) -> None:
@@ -641,13 +641,13 @@ async def test_a_failure_log_carries_no_visitor_text(app, client, registry, froz
         else:
             assert (await executed(client, visitor, allowed)).state == "unknown"
     assert f"{logged} action_id={allowed.action.action_id} kind=RuntimeError\n" in caplog.text
-    assert "maria@riverapl.example" not in caplog.text
+    assert "mike@riverapl.example" not in caplog.text
 
 
 async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registry, monkeypatch):
     quote, rows, visitor, allowed = await fake_quote_desk(app, client)
 
-    async def take_over() -> None:                                  # Maria takes over as the intent commits
+    async def take_over() -> None:                                  # Mike takes over as the intent commits
         await set_mode(client, rows, visitor.session_id, "owner", 0)
 
     monkeypatch.setattr(execute, "_after_intent", take_over)
@@ -673,7 +673,7 @@ async def put_people(client: httpx.AsyncClient, rows: CopyRows, body: dict) -> N
 
 
 async def test_a_session_closed_after_the_intent_runs_nothing(app, client, registry, monkeypatch):
-    """Maria removes Dana after an allow's intent commits in a session verified as her, and before
+    """Mike removes Dana after an allow's intent commits in a session verified as her, and before
     its side effect: the removal closes that session, and the Desk still stands. T2 reads the
     session afresh once it holds the row and finds it closed, so nothing runs: the decision ends
     `refused_at_execution`, its intent `failed` after `on_failed`, and its `execute` entry names
@@ -688,7 +688,7 @@ async def test_a_session_closed_after_the_intent_runs_nothing(app, client, regis
     allowed = await decided(client, visitor, "native.quote", {"qty": 1})
     assert allowed.outcome == "allow", allowed.reason_plain
 
-    async def remove_dana() -> None:                                # Maria removes Dana as the intent commits
+    async def remove_dana() -> None:                                # Mike removes Dana as the intent commits
         await put_people(client, rows, {"remove": ["dana"]})
 
     monkeypatch.setattr(execute, "_after_intent", remove_dana)

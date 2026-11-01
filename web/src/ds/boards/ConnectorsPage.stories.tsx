@@ -11,7 +11,7 @@ import { CONNECTORS_SPEC, SPEC, expectFooter, expectOwnerFrame, expectTabOrder, 
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 
 /**
- * Rivera's Connectors page as the board draws it, its apps to connect each with "Connect". In the
+ * Turner's Connectors page as the board draws it, its apps to connect each with "Connect". In the
  * demo Google Calendar is coming soon, with no "Connect" (`rivera.directory`).
  */
 const RIVERA: ConnectorsPageProps['directory'] = {
@@ -28,7 +28,7 @@ const GCAL_ADDED: ConnectorsPageProps['directory'] = {
       connector: rivera.googleCalendar.view,
       tools: 1,
       href: '/connectors/google-calendar',
-      connection: 'Rivera Plumbing jobs (mock)',
+      connection: 'Turner Plumbing jobs (mock)',
     },
   ],
   available: [],

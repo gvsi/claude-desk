@@ -24,7 +24,7 @@ The choices that shape Claude Desk, each with the alternatives considered and wh
 
 **Alternatives.** A model deciding each action: it can be talked around, and nothing can be proved about it. Owner policies written by hand or by a model: nothing guarantees they match what the owner confirmed. Open Policy Agent or a rules engine of our own: no SMT-backed analysis of the policies. Cedar's command-line analysis: it exits 0 on a failed proof, so it can't gate anything.
 
-**Consequences.** The owner confirms cards in plain words and never sees Cedar. A rule change waits for its proof, and when the prover can't run, the kernel falls back to bounded checks and no new owner rules go live. Starter presets and the Rivera seed are proved in CI and ship with their proof reports. The [kernel feasibility spike](spikes/2026-10-28-kernel-feasibility.md) confirmed the toolchain before the plans relied on it.
+**Consequences.** The owner confirms cards in plain words and never sees Cedar. A rule change waits for its proof, and when the prover can't run, the kernel falls back to bounded checks and no new owner rules go live. Starter presets and the Turner seed are proved in CI and ship with their proof reports. The [kernel feasibility spike](spikes/2026-10-28-kernel-feasibility.md) confirmed the toolchain before the plans relied on it.
 
 ## 3. Reviewer scores only as AND conditions on auto rules
 

@@ -43,7 +43,7 @@ export const Board: Story = {
     // The bar's link is the first stop, then the app as on the Channels page.
     await expectTabOrder(userEvent, [
       within(bar).getByRole('link', { name: 'Back to Vision' }),
-      canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' }),
+      canvas.getByRole('button', { name: 'Switch business, current: Turner Plumbing' }),
       canvas.getByRole('switch', { name: 'Claude acts for you' }),
     ]);
   },

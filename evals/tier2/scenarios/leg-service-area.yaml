@@ -6,10 +6,10 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Theo, who just moved into a house in the Rockridge neighborhood of Oakland. Before asking
-  about anything else, you want to know whether Rivera Plumbing works in your area: ask "Do you cover
+  about anything else, you want to know whether Turner Plumbing works in your area: ask "Do you cover
   my neighborhood? I'm in Rockridge." Once you know, thank the assistant and finish.
 goal: >
-  Find out whether Rivera Plumbing works in your neighborhood.
+  Find out whether Turner Plumbing works in your neighborhood.
 require:
   - card: policy
 expected_outcomes: {}

@@ -44,7 +44,7 @@ from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 EVENT = TypeAdapter(SseEvent)
 HOURS = {"template": "hours", "fact_id": "charter:hours"}
-RIVERA = DeskIdentity(business_name="Rivera Plumbing", desk_name="Main line", owner_name="Maria Rivera",
+RIVERA = DeskIdentity(business_name="Turner Plumbing", desk_name="Main line", owner_name="Mike Turner",
                       kind="visitor")
 
 
@@ -109,7 +109,7 @@ def reply(prose: str, *clauses: dict, id: str | None = None) -> dict:
 
 
 async def test_a_passed_reply_citing_the_handoff_clause_ends_the_turn(api_conn, caller, fake):
-    await said(api_conn, caller, "Can Maria help me?")
+    await said(api_conn, caller, "Can Mike help me?")
     model = ScriptedModel([response(reply("", {"template": "handoff"}, id="toolu_handoff"))])
     assert await run_turn(api_conn, caller, model) == "handoff"
     assert len(model.requests) == 1
@@ -172,7 +172,7 @@ async def test_a_prose_failure_shows_the_kept_cards_then_the_drafted_handoff_and
     # Only the prose fails, twice: the final verdict keeps the checked hours card and, after it, the handoff clause
     # Claude drafted. That one shown handoff opens the owner's item and ends the turn: no further model call, no
     # further reply check, and no handoff of the API's own.
-    await said(api_conn, caller, "When are you open? I'd also like Maria to look at this.")
+    await said(api_conn, caller, "When are you open? I'd also like Mike to look at this.")
     drafted = reply("It's $89 for the visit.", HOURS, {"template": "handoff"})
     model = ScriptedModel([response(drafted), response(drafted)])
     assert await run_turn(api_conn, caller, model) == "handoff"
@@ -989,7 +989,7 @@ async def test_optional_callback_offer_records_work_only_when_accepted(api_conn,
                                             prompts.STATUS_LINES["reply_wait"]["en"]))])
     assert await run_turn(api_conn, caller, offer) == "done"
     assert fake.called("/decide") == [] and fake.handoffs == {}
-    assert "Ask before you bring Maria Rivera in for something optional" in offer.requests[0].system[0]["text"]
+    assert "Ask before you bring Mike Turner in for something optional" in offer.requests[0].system[0]["text"]
     assert "If they'd rather not, say what you can still do and keep going." in offer.requests[0].system[0]["text"]
     args = {"name": "Alex Kim", "contact": "alex@example.com", "reason": "Help describing a leak"}
     if accepted:
@@ -1048,7 +1048,7 @@ async def test_an_emergency_offer_makes_no_call_and_the_yes_makes_one(api_conn, 
     assert await run_turn(api_conn, caller, offer) == "done"
     assert fake.called("/decide") == [] and fake.handoffs == {}
     system = offer.requests[0].system[0]["text"]
-    assert ('Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a callback?" / es: '
+    assert ('Ask before you bring Mike Turner in: ask en: "Would you like me to arrange a callback?" / es: '
             '"¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests.') in system
     assert "Only on their yes, ask for what's missing of their name, a phone number or email and the reason" in system
 
@@ -1169,7 +1169,7 @@ async def assert_handed_off(conn, fake, caller: Caller, checks: int = 1) -> None
     assert (message.type, end.type) == ("message", "turn_end")
     assert [block.template for block in message.blocks] == ["handoff"]
     assert message.handoff
-    assert message.blocks[0].text == "Let me check with Maria Rivera."
+    assert message.blocks[0].text == "Let me check with Mike Turner."
     assert (await rows(conn, caller.session_id, "delivered", "author", "call_id"))[-1] == ("claude", None)
 
 
@@ -1440,8 +1440,8 @@ async def test_a_context_sends_the_prompt_it_opened_with_and_a_new_template_star
     assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, renders_now)]
 
 
-NEW_NAMES = {"business_name": "Rivera Plumbing & Sons", "desk_name": "Evenings line",
-             "owner_name": "Maria Rivera Ortiz"}
+NEW_NAMES = {"business_name": "Turner Plumbing & Sons", "desk_name": "Evenings line",
+             "owner_name": "Mike Turner Ortiz"}
 
 
 def rename(fake, desk_id: str, renamed: str) -> None:
@@ -1798,7 +1798,7 @@ async def test_a_turn_sends_its_newest_message_before_any_tool(api_conn, caller,
     routes = [call.route for call in fake.calls]
     assert routes.index(TURN) < routes.index(CONTEXT) < routes.index("POST /decide")
     receipts = [event.visitor_plain for event in await events(api_conn, caller.session_id) if event.type == "receipt"]
-    assert receipts[-1] == "Horarios tomados del calendario de Maria Rivera"
+    assert receipts[-1] == "Horarios tomados del calendario de Mike Turner"
 
 
 async def test_a_turn_with_no_new_visitor_message_sends_nothing(api_conn, caller, fake):
@@ -1876,8 +1876,8 @@ async def test_a_message_sent_mid_turn_goes_to_the_kernel_before_claude_reads_it
         if event.type == "receipt":
             receipts.setdefault(event.decision_id, []).append(event.visitor_plain)
     friday, tomorrow = receipts.values()
-    assert (friday[-1], tomorrow[-1]) == ("Times read from Maria Rivera's calendar",
-                                          "Horarios tomados del calendario de Maria Rivera")
+    assert (friday[-1], tomorrow[-1]) == ("Times read from Mike Turner's calendar",
+                                          "Horarios tomados del calendario de Mike Turner")
 
 
 @pytest.mark.parametrize("stop", ["paused", "over_budget"])
@@ -1918,7 +1918,7 @@ async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_
     assert routes.index(TURN) < routes.index("POST /check_reply") and model.requests == []
     *_, message, end = await events(api_conn, caller.session_id)
     assert (message.type, end.type) == ("message", "turn_end")
-    assert [block.text for block in message.blocks] == ["Déjame consultarlo con Maria Rivera."]
+    assert [block.text for block in message.blocks] == ["Déjame consultarlo con Mike Turner."]
     assert annotated == []
 
 

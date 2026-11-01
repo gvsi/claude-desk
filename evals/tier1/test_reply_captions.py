@@ -11,7 +11,7 @@ from evals.tier1.golden_desk import golden_desk, open_caller
 from evals.tier1.test_reply_golden import ReplyRow, check_reply, cite_facts
 
 
-RIVERA_NAMES = ("Rivera Plumbing", "Main line", "Maria Rivera")
+RIVERA_NAMES = ("Turner Plumbing", "Main line", "Mike Turner")
 RIVERA = prompts.DeskIdentity(business_name=RIVERA_NAMES[0], desk_name=RIVERA_NAMES[1],
                              owner_name=RIVERA_NAMES[2], kind="visitor")
 
@@ -50,7 +50,7 @@ def test_prompt_captions_read_as_their_language_and_scan_clean(result, language,
 
 @pytest.mark.requires("01a")
 @pytest.mark.white_box
-@pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])
+@pytest.mark.parametrize("owner", ["Mike Turner", "June Park"])
 @pytest.mark.parametrize(("status", "language", "caption"), [
     (status, language, caption)
     for status, captions in prompts.STATUS_LINES.items()
@@ -70,7 +70,7 @@ def test_status_lines_read_as_their_language_and_scan_clean(owner, status, langu
 @pytest.mark.white_box
 @pytest.mark.parametrize(("prose", "names"), [
     ("I've asked June about this.", ()),
-    ("Maria will call you back tomorrow.", RIVERA_NAMES),
+    ("Mike will call you back tomorrow.", RIVERA_NAMES),
 ])
 def test_named_status_and_timing_controls_stay_blocked(prose, names):
     from desk.kernel_service import reply_check

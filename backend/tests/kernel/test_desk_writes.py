@@ -6,7 +6,7 @@ documents (`POST /documents`) and deletes it (`DELETE /desks/{id}`); every write
 Desk's ledger as a `desk_data` entry that names what changed and never a contact or a body. A
 removed person is no longer on record, a person given another contact keeps none of the
 sessions verified at the old one, and a deleted Desk's sessions close while its ledger stays.
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
 """
 
 import asyncio
@@ -94,12 +94,12 @@ async def test_owner_creates_a_desk_in_its_copy(app, client):
         ("policy", {"version": 1, "status": "active", "preset": "ask_first", "activated": True, "from": None,
                     "auto_money_cap_cents": 0})]
 
-    # a second Desk for Rivera Plumbing itself, named after the stored business
-    [rivera_business] = await rows_of(app, copy.copy_id, select(Business).where(Business.name == "Rivera Plumbing"))
+    # a second Desk for Turner Plumbing itself, named after the stored business
+    [rivera_business] = await rows_of(app, copy.copy_id, select(Business).where(Business.name == "Turner Plumbing"))
     response = await post_desk(client, copy, new_desk(name="Ignored", existing_business_id=rivera_business.business_id))
     assert response.status_code == 200, response.text
     second = DeskCreated.model_validate(response.json())
-    assert re.fullmatch(r"rivera-plumbing-[a-z0-9]{6}", second.slug)
+    assert re.fullmatch(r"turner-plumbing-[a-z0-9]{6}", second.slug)
     assert (await desks_of(app, copy))[second.desk_id].business_id == rivera_business.business_id
 
     # another copy's business isn't found; connections come through /tools/connect; neither writes anything
@@ -154,7 +154,7 @@ async def test_an_uncached_preset_is_503(app, client, monkeypatch):
     assert (response.status_code, response.json()) == (503, {"code": "seed_unproved"})
     # nothing was created: no Desk, business, tools, version or ledger entry
     assert set(await desks_of(app, copy)) == {copy.desk_id}
-    assert [b.name for b in await rows_of(app, copy.copy_id, select(Business))] == ["Rivera Plumbing"]
+    assert [b.name for b in await rows_of(app, copy.copy_id, select(Business))] == ["Turner Plumbing"]
     assert {t.desk_id for t in await rows_of(app, copy.copy_id, select(Tool))} == {copy.desk_id}
     assert {v.desk_id for v in await rows_of(app, copy.copy_id, select(PolicyVersion))} == {copy.desk_id}
     assert {e.desk_id for e in await rows_of(app, copy.copy_id, select(LedgerEntry))} == {copy.desk_id}
@@ -189,7 +189,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     new_slot = {"slot_id": "S-20261116-0800", "starts_at": "2026-11-16T08:00:00-08:00", "minutes": 120}
     hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "07:00:00", "end": "15:00:00"}]
     parts = [   # (part, body, refs in its desk_data entry)
-        ("business", {"name": "Rivera Plumbing and Drains", "owner_display_name": "Maria Rivera",
+        ("business", {"name": "Turner Plumbing and Drains", "owner_display_name": "Mike Turner",
                       "timezone": "America/Denver", "brand": {"primary": "#22524D"}}, [business.business_id]),
         ("charter", {"charter": [{"key": "contact", "kind": "text", "value": "(510) 555-0199"},
                                  {"key": "policy:service_area", "kind": "text", "value": "We work in Oakland."}]}, []),
@@ -215,7 +215,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
 
     [business] = await rows_of(app, copy.copy_id, select(Business))
     assert (business.name, business.owner_display_name, business.timezone, business.brand) == (
-        "Rivera Plumbing and Drains", "Maria Rivera", "America/Denver", {"primary": "#22524D"})
+        "Turner Plumbing and Drains", "Mike Turner", "America/Denver", {"primary": "#22524D"})
     charter = await facts_of(app, copy, "charter")
     # the rest replaced, and the seed's starters kept, as the hours are
     assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours",
@@ -603,11 +603,11 @@ async def test_a_booking_decided_during_a_calendar_write_waits_for_it_and_finds_
 
 async def test_business_and_charter_validate(app, client):
     copy = await rivera(app, client)
-    business = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles",
+    business = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles",
                 "brand": {}}
     charter = [{"key": "contact", "kind": "text", "value": "(510) 555-0142"}]
     refused = [("business", business | {"owner_display_name": name})
-               for name in ("M4ria", "Maria <Rivera>", "Maria\nRivera", "", "M" * 41)]
+               for name in ("M4ria", "Mike <Turner>", "Mike\nTurner", "", "M" * 41)]
     refused += [("business", business | {"timezone": tz})        # only a zone the time zone database lists
                 for tz in ("Mars/Olympus", "america/los_angeles", "America/Los_Angeles/", "")]
     refused += [("charter", {"charter": [*charter, {"key": "hours", "kind": "text", "value": "Open 8 to 6"}]}),
@@ -631,11 +631,11 @@ async def test_business_and_charter_validate(app, client):
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), fields
     assert set(await desks_of(app, copy)) == {copy.desk_id}
     # an apostrophe, a hyphen and an accent are a name
-    await updated(client, copy, "business", business | {"owner_display_name": "María O'Neil-Rivera",
+    await updated(client, copy, "business", business | {"owner_display_name": "Mike O'Neil-Turner",
                                                          "timezone": "America/Chicago"})
 
 
-RIVERA_NAMES = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles"}
+RIVERA_NAMES = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles"}
 
 
 def picked(key: str) -> dict[str, str]:

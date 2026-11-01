@@ -129,7 +129,7 @@ async def test_owner_typing_shows_dots_to_the_visitor(api, browser, fake, kernel
         events = await stream.until(lambda events: "owner_typing" in types(events))
         assert (typed.status_code, typed.content) == (204, b"")
         # The kernel's name for the owner and when the dots stop: nothing the owner typed.
-        assert events[-1][1].model_dump() == {"type": "owner_typing", "name": "Maria Rivera",
+        assert events[-1][1].model_dump() == {"type": "owner_typing", "name": "Mike Turner",
                                               "until": clock.now + timedelta(seconds=5)}
         # Within two seconds, another signal sends nothing; it is never refused.
         clock.advance(1.999)
@@ -164,7 +164,7 @@ async def test_owner_typing_whose_name_read_failed_holds_back_no_signal(api, bro
                                  base_url="https://desk.test", cookies=chat.owner.cookies) as owner:
         failed = await owner.post(chat.path("typing"), json={"generation": 1})
     assert (failed.status_code, failed.json()) == (500, {"error": "internal"})
-    assert await stored_events(engine, chat.session_id) == [EvOwnerJoined(type="owner_joined", name="Maria Rivera")]
+    assert await stored_events(engine, chat.session_id) == [EvOwnerJoined(type="owner_joined", name="Mike Turner")]
 
     # The name reads again: the next signal, within two seconds of the failed one, sends the dots.
     db.execute(hide, (business_id, f"{business_id}.hidden"))
@@ -211,7 +211,7 @@ async def test_owner_typing_whose_event_failed_holds_back_no_signal(failing, api
             failed = await owner.post(chat.path("typing"), json={"generation": 1})
     assert raised == [failing]                           # it failed where this case says, and only there
     assert (failed.status_code, failed.json()) == (500, {"error": "internal"})
-    assert await stored_events(engine, chat.session_id) == [EvOwnerJoined(type="owner_joined", name="Maria Rivera")]
+    assert await stored_events(engine, chat.session_id) == [EvOwnerJoined(type="owner_joined", name="Mike Turner")]
 
     clock.advance(1)
     assert (await owner_typing(chat, 1)).status_code == 204

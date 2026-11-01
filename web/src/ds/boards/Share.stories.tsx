@@ -13,13 +13,13 @@ import { expectComputed } from '../test/expectComputed.ts';
 import { PUBLIC_LINK, RiveraFrame } from './parts.tsx';
 import { SPEC, expectFooter, expectOwnerFrame, expectTabOrder, one } from './spec.ts';
 
-/** Share's ready-made words for Rivera Plumbing, as the board writes them. */
+/** Share's ready-made words for Turner Plumbing, as the board writes them. */
 const WORDS = [
-  { title: 'Google profile', text: 'Questions, quotes and bookings, any time: desk.example/rivera. Answered by Claude, an AI, under Maria Rivera’s rules.' },
-  { title: 'Email signature', text: 'Need a plumber? Ask Rivera Plumbing any time at desk.example/rivera (answered by Claude, an AI).' },
+  { title: 'Google profile', text: 'Questions, quotes and bookings, any time: desk.example/rivera. Answered by Claude, an AI, under Mike Turner’s rules.' },
+  { title: 'Email signature', text: 'Need a plumber? Ask Turner Plumbing any time at desk.example/rivera (answered by Claude, an AI).' },
   {
     title: 'Voicemail',
-    text: 'You’ve reached Rivera Plumbing. For quotes and bookings, visit desk.example slash rivera, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.',
+    text: 'You’ve reached Turner Plumbing. For quotes and bookings, visit desk.example slash rivera, where Claude, an AI, answers any time. For an emergency, leave a message and Mike Turner will call you back.',
   },
 ];
 

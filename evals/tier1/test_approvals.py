@@ -65,7 +65,7 @@ CONFLICT = Expect(status=409, fields={"code": "conflict"})   # a decision not in
 
 BOOKING_PROSE = "Here is your booking."
 ASK_BOOK = RuleCard(card_id="a-ask-book", applies_to="native.book", mode="ask", who="anyone",
-                    reason="Maria confirms every booking.")
+                    reason="Mike confirms every booking.")
 NEVER_QUOTE = RuleCard(card_id="a-never-quote", applies_to="native.quote", mode="never", who="anyone",
                        reason="No quotes here for now.")
 FIND_SLOTS_CARD = RuleCard(card_id="a-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",

@@ -36,7 +36,7 @@ export const Board: Story = {
     // focus_order_is_logical: the sidebar, then Settings' sections; Channels has nothing to tab to.
     const nav = within(canvas.getByRole('main')).getByRole('navigation', { name: 'Settings' });
     const reached = await expectTabOrder(userEvent, [
-      canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' }),
+      canvas.getByRole('button', { name: 'Switch business, current: Turner Plumbing' }),
       canvas.getByRole('switch', { name: 'Claude acts for you' }),
       ...within(nav).getAllByRole('link'),
     ]);

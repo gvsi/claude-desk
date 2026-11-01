@@ -2,7 +2,7 @@
 
 An owner setup tool: only an owner session is given it (`decide.OWNER_TOOLS`), and it is decided
 and executed like any other tool. There is no real memory to read: setup writes simulated notes
-for this Desk through the kernel's owner route. Only the Rivera seed falls back to
+for this Desk through the kernel's owner route. Only the Turner seed falls back to
 `fixtures/memory.json`; other Desks without notes read nothing. The result
 says so (`simulated: true`). An item matches when a word of the query is one of its title's words
 or topics, compared case-folded; the items keep their stored order.
@@ -52,7 +52,7 @@ PROFILE = ToolProfile(
 
 @cache
 def memory() -> Memory:
-    """The Rivera seed's simulated memory, read once from `MEMORY_FILE`."""
+    """The Turner seed's simulated memory, read once from `MEMORY_FILE`."""
     return Memory.model_validate(json.loads(MEMORY_FILE.read_text(encoding="utf-8")))
 
 

@@ -14,21 +14,21 @@ import { SPEC, expectConversationType, expectFooter, expectReceiptsUnderMessages
 
 const OWNER = rivera.business.ownerName;
 
-/** The chat head's line while Maria is in the chat, in place of the disclosure. */
+/** The chat head's line while Mike is in the chat, in place of the disclosure. */
 const OWNER_IN_CHAT = `${OWNER} is in this chat. Claude, an AI, is paused until ${OWNER} hands it back.`;
 
-/** The handoff: the kernel passed Dana's ask to Maria, and the visitor gets the handoff card. */
+/** The handoff: the kernel passed Dana's ask to Mike, and the visitor gets the handoff card. */
 const handoff = rivera.events.heldTurn.find((event: SseEvent): event is EvMessage => event.type === 'message');
-if (!handoff) throw new Error('the Rivera fixture has no handoff reply');
+if (!handoff) throw new Error('the Turner fixture has no handoff reply');
 
-/** Dana asks for Maria, then Maria joins and writes, as the take-over stream delivers it; she hasn't handed back. */
+/** Dana asks for Mike, then Mike joins and writes, as the take-over stream delivers it; he hasn't handed back. */
 const TURNS: TranscriptTurn[] = [
   { kind: 'visitor', text: `I'd like to talk to ${OWNER}.` },
   { kind: 'event', event: handoff },
   ...rivera.events.takeOver.flatMap((event): TranscriptTurn[] => (event.type === 'owner_left' ? [] : [{ kind: 'event', event }])),
 ];
 
-/** Dana's public page while Maria is in the chat. */
+/** Dana's public page while Mike is in the chat. */
 function PublicTakeOver() {
   return (
     <PublicShell
@@ -39,9 +39,9 @@ function PublicTakeOver() {
       ownerInChat
       onAskForOwner={fn()}
       about={rivera.publicDesk.en.charter}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+      composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />}
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <TurnRows turns={TURNS} />
       </Transcript>
       <FollowTheChat />
@@ -50,14 +50,14 @@ function PublicTakeOver() {
 }
 
 const meta = {
-  title: 'Boards/Maria in the chat',
+  title: 'Boards/Mike in the chat',
   render: () => <PublicTakeOver />,
   parameters: {
     layout: 'fullscreen',
     canvasNote: [
-      'Take-over option A, signed on 2026-10-30: while Maria is in the chat, the chat head says so and that Claude, an AI, is paused until she hands it back, on the disclosure’s line, and Ask for Maria isn’t shown.',
+      'Take-over option A, signed on 2026-10-30: while Mike is in the chat, the chat head says so and that Claude, an AI, is paused until he hands it back, on the disclosure’s line, and Ask for Mike isn’t shown.',
       'Built from the signed option; its render and the by-eye comparison are tracked in issue #230.',
-      'The conversation is the Rivera fixture’s: Dana asks for Maria, the kernel’s handoff card with its receipt, then the take-over’s events (Maria joins, and her words under her name), with its end kept above the composer as the page keeps it; the about column shows the charter’s cards, and the header the kernel’s open status.',
+      'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it; the about column shows the charter’s cards, and the header the kernel’s open status.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -67,9 +67,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * The public page at the board's window while Maria is in the chat: the chat head's line in place of
- * the disclosure, both names marked as written by someone, no Ask for Maria, the line that says she
- * joined and her words under the head, receipts under their messages, and Tab going from the
+ * The public page at the board's window while Mike is in the chat: the chat head's line in place of
+ * the disclosure, both names marked as written by someone, no Ask for Mike, the line that says he
+ * joined and his words under the head, receipts under their messages, and Tab going from the
  * conversation to the composer.
  */
 async function expectMariaInTheChat(root: HTMLElement, user: { tab: () => Promise<void> }, [width, height]: readonly [number, number]): Promise<void> {
@@ -89,12 +89,12 @@ async function expectMariaInTheChat(root: HTMLElement, user: { tab: () => Promis
   await expect(within(root).queryByRole('button', { name: `Ask for ${OWNER}` })).toBeNull();
   await expect(head.querySelectorAll('button')).toHaveLength(0);
 
-  // Under the head: the line that says Maria joined, with her initials and no time, then her words.
-  const log = within(main).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+  // Under the head: the line that says Mike joined, with his initials and no time, then his words.
+  const log = within(main).getByRole('log', { name: 'Conversation with Turner Plumbing' });
   const joined = within(log)
     .getAllByRole('status')
     .find((status) => status.textContent?.includes(`${OWNER} joined the chat`));
-  if (!joined) throw new Error('no line that says Maria joined');
+  if (!joined) throw new Error('no line that says Mike joined');
   await expect(joined.textContent).not.toMatch(/\d/);
   const said = one(log, '.cd-person-message');
   await expect(joined.getBoundingClientRect().top).toBeGreaterThanOrEqual(head.getBoundingClientRect().bottom);
@@ -107,10 +107,10 @@ async function expectMariaInTheChat(root: HTMLElement, user: { tab: () => Promis
   expectComputed(one(main, '.cd-composer__box'), SPEC.composer);
   await expectFooter(root);
 
-  // focus_order_is_logical: the conversation, then the composer, and never an Ask for Maria.
+  // focus_order_is_logical: the conversation, then the composer, and never an Ask for Mike.
   const reached = await expectTabOrder(user, [
-    within(main).getByRole('group', { name: 'Chat with Rivera Plumbing' }),
-    within(main).getByRole('textbox', { name: 'Message Rivera Plumbing' }),
+    within(main).getByRole('group', { name: 'Chat with Turner Plumbing' }),
+    within(main).getByRole('textbox', { name: 'Message Turner Plumbing' }),
   ]);
   await expect(reached.filter((stop) => stop.textContent?.startsWith('Ask for'))).toEqual([]);
 }
@@ -122,7 +122,7 @@ export const Laptop: Story = {
   play: async ({ canvasElement, userEvent }) => {
     await expectMariaInTheChat(canvasElement, userEvent, [1512, 982]);
     // The about column at the right of the chat, as ever.
-    await expect(within(canvasElement).getByRole('complementary', { name: 'About Rivera Plumbing' })).toBeVisible();
+    await expect(within(canvasElement).getByRole('complementary', { name: 'About Turner Plumbing' })).toBeVisible();
   },
 };
 

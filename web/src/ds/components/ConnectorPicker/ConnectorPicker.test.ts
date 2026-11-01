@@ -12,7 +12,7 @@ it('does not double a business name’s sentence stop in the introduction', () =
     ['Chen & Co.', 'Add what fits Chen & Co.'],
     ['Acme!', 'Add what fits Acme!'],
     ['Who?', 'Add what fits Who?'],
-    ['Rivera Plumbing', 'Add what fits Rivera Plumbing.'],
+    ['Turner Plumbing', 'Add what fits Turner Plumbing.'],
     ['<b>Chen</b> & Co.', 'Add what fits <b>Chen</b> & Co.'],
   ] as const;
   for (const [business, lead] of cases) {

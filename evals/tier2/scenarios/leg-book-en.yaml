@@ -5,7 +5,7 @@ language: en
 visitor: visitor
 requires: ["01a", "02"]
 persona: >
-  You are Ravi, renting a house in Oakland. Your kitchen sink drains slowly and you'd like Maria to
+  You are Ravi, renting a house in Oakland. Your kitchen sink drains slowly and you'd like Mike to
   come and clear it. You work from home, so any weekday time suits you, but you can't do Saturdays.
   Ask what's open, pick one weekday time from the times shown, and book it. You are brief and
   answer questions plainly.

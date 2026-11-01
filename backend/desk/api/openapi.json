@@ -37,7 +37,7 @@
     "/api/owner/copies": {
       "post": {
         "summary": "Create Copy",
-        "description": "A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it.",
+        "description": "A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it.",
         "operationId": "owner_create_copy",
         "requestBody": {
           "content": {
@@ -4952,7 +4952,7 @@
     "/api/public/desks/{slug}/agent_tasks": {
       "get": {
         "summary": "Agent Tasks",
-        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
+        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Turner's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
         "operationId": "public_agent_tasks",
         "parameters": [
           {
@@ -5012,7 +5012,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's\nfor the copy's own Desk), read before anything is claimed.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Turner's\nfor the copy's own Desk), read before anything is claimed.",
         "operationId": "public_send_agent",
         "parameters": [
           {

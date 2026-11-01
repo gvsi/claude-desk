@@ -119,7 +119,7 @@ export const ComingSoon: Story = {
   parameters: {
     canvas: 'N-Conn-07b-Add-Picker-ComingSoon',
     canvasNote: [
-      'Chen & Co. CPA’s picker as the board draws it, over Chen’s Connectors page with its three built-in connectors, where the redrawn board puts Rivera Plumbing’s page and sidebar behind Chen’s picker.',
+      'Chen & Co. CPA’s picker as the board draws it, over Chen’s Connectors page with its three built-in connectors, where the redrawn board puts Turner Plumbing’s page and sidebar behind Chen’s picker.',
       'Verification is never listed, since every Desk has it, where the board lists it as “Always on”; the mock line also shows under the coming-soon note; the picker has a Close button the board doesn’t draw.',
       SIDEBAR_NOTE,
     ].join(' '),
@@ -292,7 +292,7 @@ export const ReviewGoogleCalendar: Story = {
     canvas: 'N-Conn-09-GCal-Review',
     canvasNote: [
       'Google Calendar is catalog-only in the demo, so this shows its review once it works.',
-      'Every new tool starts at Ask me first, with the rules that cover it shown; none of Maria’s covers this one yet, as the board says.',
+      'Every new tool starts at Ask me first, with the rules that cover it shown; none of Mike’s covers this one yet, as the board says.',
       SIDEBAR_NOTE,
     ].join(' '),
   },

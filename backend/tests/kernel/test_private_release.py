@@ -45,12 +45,12 @@ from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
 SECRET = "Dana Whitfield, account 4471"                 # what a misdeclared adapter returns
-QUOTED = "Quoted from Maria Rivera's price list"        # the stand-in's executed line, its tool being the quote's
+QUOTED = "Quoted from Mike Turner's price list"        # the stand-in's executed line, its tool being the quote's
 CHECKED = {"policy_version": 1, "auto_money_cap_cents": 50_000}   # the rules a stand-in Desk's step 6 ran under
 
 
 async def held_release(app, client):
-    """A Rivera copy whose owner asks before any document goes out, Dana verified in a session, and
+    """A Turner copy whose owner asks before any document goes out, Dana verified in a session, and
     her request for her invoice, held."""
     copy = await rivera(app, client)
     async with kernel_ctx(app) as ctx:
@@ -351,7 +351,7 @@ async def test_a_link_for_another_conversations_quote_is_refused_before_anything
     assert [entry.event.summary for entry in entries if entry.event.kind == "decide"
             and entry.event.session_id == later.session_id and entry.event.summary.get("outcome") == "refuse"] == [
         {"outcome": "refuse", "tool": "native.payment_link", "reason": "adapter_refused", "check": "no_such_quote",
-         "policy_version": 1, "auto_money_cap_cents": 50_000}]      # the Rivera seed's rules and money cap
+         "policy_version": 1, "auto_money_cap_cents": 50_000}]      # the Turner seed's rules and money cap
     assert not [entry for entry in entries if "violation" in entry.event.summary]
     assert await rows_of(app, copy.copy_id, select(PaymentLink)) == [] and checkouts(copy) == []
     reviewer.answer = LINK_PASS

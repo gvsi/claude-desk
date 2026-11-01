@@ -14,18 +14,18 @@ import { SPEC, expectConversationType, expectReceiptsUnderMessages, expectTabOrd
 
 const OWNER = rivera.business.ownerName;
 const ASK = `I'd like to talk to ${OWNER}.`;
-/** The chat head's line while Maria is in the chat, in place of the disclosure (take-over option A). */
+/** The chat head's line while Mike is in the chat, in place of the disclosure (take-over option A). */
 const OWNER_IN_CHAT = `${OWNER} is in this chat. Claude, an AI, is paused until ${OWNER} hands it back.`;
 
-/** The handoff: the kernel passed Dana's ask to Maria, and the visitor gets the handoff card. */
+/** The handoff: the kernel passed Dana's ask to Mike, and the visitor gets the handoff card. */
 const handoff = rivera.events.heldTurn.find((event: SseEvent): event is EvMessage => event.type === 'message');
-/** Maria joins and writes, as the take-over stream delivers it. */
+/** Mike joins and writes, as the take-over stream delivers it. */
 const takeOver = rivera.events.takeOver.flatMap((event): TranscriptTurn[] => (event.type === 'owner_left' ? [] : [{ kind: 'event', event }]));
-if (!handoff) throw new Error('the Rivera fixture has no handoff reply');
+if (!handoff) throw new Error('the Turner fixture has no handoff reply');
 
 const STATES = {
   joins: {
-    label: 'If Maria can join',
+    label: 'If Mike can join',
     ownerInChat: true,
     turns: [
       { kind: 'visitor', text: ASK },
@@ -35,7 +35,7 @@ const STATES = {
     ],
   },
   busy: {
-    label: 'If Maria is busy',
+    label: 'If Mike is busy',
     ownerInChat: false,
     turns: [
       { kind: 'visitor', text: ASK },
@@ -53,7 +53,7 @@ const STATES = {
 
 /**
  * One state of Dana's page: the public page, embedded so the two states share one document, with
- * Maria in the chat or not.
+ * Mike in the chat or not.
  */
 function State({ label, ownerInChat, turns }: { label: string; ownerInChat: boolean; turns: readonly TranscriptTurn[] }) {
   return (
@@ -70,12 +70,12 @@ function State({ label, ownerInChat, turns }: { label: string; ownerInChat: bool
           // Embedded, the shell leaves out its footer and landmarks, so two pages can share one
           // document; the footer goes where the whole page has it, under the composer.
           <>
-            <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />
+            <Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />
             <ConceptFooter poweredBy />
           </>
         }
       >
-        <Transcript label="Conversation with Rivera Plumbing">
+        <Transcript label="Conversation with Turner Plumbing">
           <TurnRows turns={turns} />
         </Transcript>
       </PublicShell>
@@ -86,7 +86,7 @@ function State({ label, ownerInChat, turns }: { label: string; ownerInChat: bool
 function PublicHandoff() {
   return (
     <main className="board-handoff">
-      <h1 className="cd-sr-only">Ask for Maria</h1>
+      <h1 className="cd-sr-only">Ask for Mike</h1>
       <State {...STATES.joins} />
       <State {...STATES.busy} />
     </main>
@@ -94,17 +94,17 @@ function PublicHandoff() {
 }
 
 const meta = {
-  title: 'Boards/Ask for Maria',
+  title: 'Boards/Ask for Mike',
   render: () => <PublicHandoff />,
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-Public-Handoff-Run1',
     canvasNote: [
-      'Both states side by side, as on the board: Maria joins and answers, or she is busy and Claude sets a callback.',
+      'Both states side by side, as on the board: Mike joins and answers, or he is busy and Claude sets a callback.',
       'One document can’t hold two pages’ landmarks, so each state is the public page embedded (PublicShell footer={false}), each as tall as the window, with its concept footer under its composer, as the page draws it.',
-      'The board’s first exchange about the water heater is left out; each state starts with Dana asking for Maria, and the handoff card is the kernel’s, with its receipt. Maria’s message is the fixture’s, where the board has her greet Dana first.',
+      'The board’s first exchange about the water heater is left out; each state starts with Dana asking for Mike, and the handoff card is the kernel’s, with its receipt. Mike’s message is the fixture’s, where the board has him greet Dana first.',
       'The board labels each state in its header; here each is a region named for its state, and the header keeps the kernel’s open status.',
-      'The chat head follows take-over option A (N-R2-TakeOver-A-1512-EN), signed after this board: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown.',
+      'The chat head follows take-over option A (N-R2-TakeOver-A-1512-EN), signed after this board: while Mike is in the chat it says so and that Claude, an AI, is paused until he hands it back, and Ask for Mike isn’t shown.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -117,10 +117,10 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     for (const state of Object.values(STATES)) {
       const page = canvas.getByRole('region', { name: state.label });
-      // The disclosure (while Maria is in the chat, the line that says so, and that Claude, an AI, is
+      // The disclosure (while Mike is in the chat, the line that says so, and that Claude, an AI, is
       // paused), the brand header's height, and the visitor's read-only receipts under each message.
       await expect(one(page, '.cd-public-shell__disclosure')).toHaveTextContent(
-        state === STATES.joins ? OWNER_IN_CHAT : 'Claude, an AI answering for Rivera Plumbing',
+        state === STATES.joins ? OWNER_IN_CHAT : 'Claude, an AI answering for Turner Plumbing',
       );
       // Each state is the board's 640 px and the window's height: the header 76 px high with 16 px
       // gutters and the open status at the right, then the chat, the composer and the footer at its foot.
@@ -132,14 +132,14 @@ export const Board: Story = {
       await expect(composer.left - page.getBoundingClientRect().left).toBe(16);
       await expect(footer.top).toBeGreaterThan(composer.bottom);
       await expect(page.getBoundingClientRect().bottom - footer.bottom).toBeLessThanOrEqual(24);
-      const log = within(page).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+      const log = within(page).getByRole('log', { name: 'Conversation with Turner Plumbing' });
       expectConversationType(log);
       await expect(await expectReceiptsUnderMessages(log)).toBeGreaterThanOrEqual(1);
       await expect(log.querySelector('.cd-transcript-row__margin button')).toBeNull();
       expectComputed(one(page, '.cd-composer__box'), SPEC.composer);
     }
 
-    // Maria joins: a status line with her initials and no time, then her words under her name.
+    // Mike joins: a status line with his initials and no time, then his words under his name.
     const joins = canvas.getByRole('region', { name: STATES.joins.label });
     const joined = within(joins)
       .getAllByRole('status')
@@ -148,18 +148,18 @@ export const Board: Story = {
     await expect(joined?.textContent).not.toMatch(/\d/);
     await expect(joins.querySelector('.cd-person-message')).not.toBeNull();
 
-    // She is busy: Claude asks for a name and number, and the callback arrives as its card.
+    // He is busy: Claude asks for a name and number, and the callback arrives as its card.
     const busy = canvas.getByRole('region', { name: STATES.busy.label });
     await expect(busy).toHaveTextContent(rivera.blocks.callback_confirmed.en.title ?? '');
     await expect(canvasElement.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(2);
 
-    // focus_order_is_logical: the composer where Maria is in the chat, which has no Ask for her; then
-    // where she is busy, Ask for Maria Rivera, then the composer.
-    await expect(within(joins).queryByRole('button', { name: 'Ask for Maria Rivera' })).toBeNull();
+    // focus_order_is_logical: the composer where Mike is in the chat, which has no Ask for him; then
+    // where he is busy, Ask for Mike Turner, then the composer.
+    await expect(within(joins).queryByRole('button', { name: 'Ask for Mike Turner' })).toBeNull();
     await expectTabOrder(userEvent, [
-      within(joins).getByRole('textbox', { name: 'Message Rivera Plumbing' }),
-      within(busy).getByRole('button', { name: 'Ask for Maria Rivera' }),
-      within(busy).getByRole('textbox', { name: 'Message Rivera Plumbing' }),
+      within(joins).getByRole('textbox', { name: 'Message Turner Plumbing' }),
+      within(busy).getByRole('button', { name: 'Ask for Mike Turner' }),
+      within(busy).getByRole('textbox', { name: 'Message Turner Plumbing' }),
     ]);
   },
 };

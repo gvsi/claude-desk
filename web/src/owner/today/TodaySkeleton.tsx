@@ -203,7 +203,7 @@ export function TodaySkeleton() {
                 className="cd-today-skeleton__link"
                 radius="full"
                 measure={{
-                  label: publicLink('rivera-plumbing-abc123'),
+                  label: publicLink('turner-plumbing-abc123'),
                   className: 'cd-greeting__link cd-type-meta',
                   tagName: 'span',
                   suffix: { className: 'cd-greeting__copy', width: 'calc(var(--size-control) - var(--space-6))' },

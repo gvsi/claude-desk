@@ -8,7 +8,7 @@ import { useOwnerReceipt } from './ownerReceipt.ts';
 
 it('an_executed_resolved_event_keeps_its_visitor_line_even_with_an_owner_annotation', () => {
   const event: StatusEvent = { type: 'resolved', decision_id: 'dec-executed', state: 'executed',
-    visitor_plain: 'Maria Rivera approved this', ledger_seq: 3, signature: 'signed' };
+    visitor_plain: 'Mike Turner approved this', ledger_seq: 3, signature: 'signed' };
   const ownerLine = 'Not shared: their session ended before your answer';
   function Receipt() {
     const view = useOwnerReceipt(event, false, ownerLine);

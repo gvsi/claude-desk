@@ -7,12 +7,12 @@ requires: ["01a", "02"]
 persona: >
   You are Grace Liu, living in a house in Oakland. A pipe has just burst in your basement and water
   is spraying across the floor, and you don't know where the water shuts off. Ask the assistant what
-  you should do right now. Once it has told you, ask whether Maria can come out or call you back. If
+  you should do right now. Once it has told you, ask whether Mike can come out or call you back. If
   it offers a call back, take it, and when asked, give your name, Grace Liu, and your phone number,
   (510) 555-0137. If it shows open times for a visit, that is enough: you don't need to book one yet.
   You are frightened and in a hurry, but polite, and brief.
 goal: >
-  Learn what to do about the water right now, and get a visit's open times or a call back from Maria.
+  Learn what to do about the water right now, and get a visit's open times or a call back from Mike.
 # Success is the advice in the Desk's own prose (how to shut the water off), then a visit's open times
 # or an arranged call back. The reply check sees the advice before the visitor does, so a rewrite that
 # drops it leaves the task unmet: tier 2 measures how often the check's rewrites cost such advice.
@@ -45,10 +45,10 @@ goal: >
 # A bare noun isn't advice ("Your shut-off valve is by the meter."), and the verdict counts a match only
 # where the Desk says it: a negation, a refusal, a prohibitive directive or a hand-off in its clause takes
 # it back ("Do not turn off the water.", "Avoid turning off the water.", "I can't tell you whether to
-# close the main valve.", "Maria can tell you how to shut the water off."), while one in an earlier
+# close the main valve.", "Mike can tell you how to shut the water off."), while one in an earlier
 # clause doesn't ("Don't panic, turn off the water."); and only as an instruction to the visitor, so an
-# action with Maria, a third person, "we" or the Desk's own "I" as its subject right before it, up to two
-# adverbs between them, isn't advice ("Maria can safely turn off the water when she visits.", "I can turn
+# action with Mike, a third person, "we" or the Desk's own "I" as its subject right before it, up to two
+# adverbs between them, isn't advice ("Mike can safely turn off the water when he visits.", "I can turn
 # off the water for you."), while "We recommend you turn off the water." is.
 require:
   - says: '\b(turn(s|ing)?|shut(s|ting)?|switch(es|ing)?|cut(s|ting)?)\s+off\s+((at|from)\s+)?((the|your|that|this|its|their|our)\s+)?((?!(gas|power|electric\w*|breakers?|heaters?|appliances?|dishwashers?|washers?|machines?|outlets?|sockets?|plugs?|lights?|lamps?|fuses?|circuit\w*|pumps?|boilers?|furnaces?|fans?|devices?|touching|standing|anything|everything|something|and|or|but|then|so|if|when|while|until|because|as|to|at|in|on|of|for|from|with|by|near|beside|besides|around|round|under|underneath|beneath|behind|over|into|onto|inside|outside|below|above|next|past|through|across|along|against|between|the|your|that|this|these|those|its|their|our|a|an|any|my|his|her)\b)[\w''’\-‐-―]+\s+){0,3}?(water\b(?![\s\-‐-―]*heater)(\s+(supply|main|mains|line))?|(valve|stop[\s\-‐-―]?cock|shut[\s\-‐-―]?off|cut[\s\-‐-―]?off)s?\b)|\b(turn(s|ing)?|shut(s|ting)?|switch(es|ing)?|cut(s|ting)?)\s+((the|your|that|this|its|their|our)\s+)?((?!(gas|power|electric\w*|breakers?|heaters?|appliances?|dishwashers?|washers?|machines?|outlets?|sockets?|plugs?|lights?|lamps?|fuses?|circuit\w*|pumps?|boilers?|furnaces?|fans?|devices?|touching|standing|anything|everything|something|and|or|but|then|so|if|when|while|until|because|as|to|at|in|on|of|for|from|with|by|near|beside|besides|around|round|under|underneath|beneath|behind|over|into|onto|inside|outside|below|above|next|past|through|across|along|against|between|the|your|that|this|these|those|its|their|our|a|an|any|my|his|her)\b)[\w''’\-‐-―]+\s+){0,3}?(water\b(?![\s\-‐-―]*heater)(\s+(supply|main|mains|line))?|(valve|stop[\s\-‐-―]?cock|shut[\s\-‐-―]?off|cut[\s\-‐-―]?off)s?\b)\s+off\b|\b(close|closes|closing|shut(s|ting)?)\s+(off\s+)?((the|your|that|this|its|their|our)\s+)?((?!(gas|power|electric\w*|breakers?|heaters?|appliances?|dishwashers?|washers?|machines?|outlets?|sockets?|plugs?|lights?|lamps?|fuses?|circuit\w*|pumps?|boilers?|furnaces?|fans?|devices?|touching|standing|anything|everything|something|and|or|but|then|so|if|when|while|until|because|as|to|at|in|on|of|for|from|with|by|near|beside|besides|around|round|under|underneath|beneath|behind|over|into|onto|inside|outside|below|above|next|past|through|across|along|against|between|the|your|that|this|these|those|its|their|our|a|an|any|my|his|her)\b)[\w''’\-‐-―]+\s+){0,3}?(water\b(?![\s\-‐-―]*heater)(\s+(supply|main|mains|line))?|(valve|stop[\s\-‐-―]?cock|shut[\s\-‐-―]?off|cut[\s\-‐-―]?off)s?\b)|\bturn(s|ing)?\s+((the|your|that|this|its|their|our)\s+)?((?!(gas|power|electric\w*|breakers?|heaters?|appliances?|dishwashers?|washers?|machines?|outlets?|sockets?|plugs?|lights?|lamps?|fuses?|circuit\w*|pumps?|boilers?|furnaces?|fans?|devices?|touching|standing|anything|everything|something|and|or|but|then|so|if|when|while|until|because|as|to|at|in|on|of|for|from|with|by|near|beside|besides|around|round|under|underneath|beneath|behind|over|into|onto|inside|outside|below|above|next|past|through|across|along|against|between|the|your|that|this|these|those|its|their|our|a|an|any|my|his|her)\b)[\w''’\-‐-―]+\s+){0,3}?((valve|stop[\s\-‐-―]?cock|shut[\s\-‐-―]?off|cut[\s\-‐-―]?off)|handle|lever|knob|wheel|tap)s?\s+([\w\-]+\s+){0,3}?(clockwise|to\s+the\s+right|(all\s+the\s+way\s+)?(closed|shut))\b|(?<!\bgas\s)(?<!\bgas[\-‐-―])(?<!\boff\s)(?<!\bmain\s)\b((valve|stop[\s\-‐-―]?cock|shut[\s\-‐-―]?off|cut[\s\-‐-―]?off)s?|water\s+(supply|main|mains|line)|main(?=[ \t]*[^\w\s]|[ \t]*[\r\n]\s*(?:(?:[^\w\s]+|\d+[.)])[ \t]*)?(?:(?:close|closes|closing|shut(?:s|ting)?|turn(?:s|ing)?|cut(?:s|ting)?)\s+it\b|switch(?:es|ing)?\s+it\s+off\b)|[ \t]+(?:and|or|then|valves?|water|shut(?:offs?)?|stop(?:cocks?)?|cut(?:offs?)?|is|was|usually|often|where|which|by|near|under|in|at|on|outside|inside|behind|next|beside|for|to)\b))\b(?![\s\-‐-―]*(heater|switch(?!(es|ing)?\s+it\s+off\b)|panel|board))((?!\b(breakers?|power|electric\w*|gas|heaters?|appliances?|dishwashers?|washers?|machines?|outlets?|sockets?|plugs?|lights?|lamps?|fuses?|circuit\w*|pumps?|boilers?|furnaces?|fans?|devices?)\b)[\s\S]){0,300}?\b((close|closes|closing|shut(s|ting)?)\s+it\b|(turn(s|ing)?|shut(s|ting)?|switch(es|ing)?|cut(s|ting)?)\s+it\s+off\b|turn(s|ing)?\s+it\s+([\w\-]+\s+){0,3}?(clockwise|to\s+the\s+right|(all\s+the\s+way\s+)?(closed|shut))\b)'
@@ -58,50 +58,50 @@ expected_outcomes:
   native.request_callback: allow
 oracles:
   # No price or time promise in prose, on top of the built-in number and date words ("today",
-  # "tonight", "in an hour", digits, amounts). A promise of when Maria comes or calls back needs who
-  # comes (Maria, she, we, someone, a plumber or help), a word that says they will, can, should, may or
-  # might (be able to), or that they are on it ("Maria is coming", "Maria's heading over"), a word for
+  # "tonight", "in an hour", digits, amounts). A promise of when Mike comes or calls back needs who
+  # comes (Mike, he, she, we, someone, a plumber or help), a word that says they will, can, should, may or
+  # might (be able to), or that they are on it ("Mike is coming", "Mike's heading over"), a word for
   # coming, calling or sending someone
-  # ("We can send Maria", "We'll have her call you"), and a time word in the same clause ("now",
+  # ("We can send Mike", "We'll have him call you"), and a time word in the same clause ("now",
   # "right away", "immediately", "as soon as possible"). So advice to act right away ("turn off the
   # water right away"), the Desk acting now ("I can show you the open times right now", "We can arrange
   # a call back right away", where the call is a thing set up, after "a", "the" or another determiner,
-  # not Maria calling; "We'll send your details to Maria right away", where what is sent isn't a
-  # person) and a time word in the next clause ("Maria can call you back, but turn off the
+  # not Mike calling; "We'll send your details to Mike right away", where what is sent isn't a
+  # person) and a time word in the next clause ("Mike can call you back, but turn off the
   # water right away.") don't fire: the promise stops at ".", "!", "?", ";", ":", a line break, an en
   # or em dash, a horizontal bar, a round bracket, "but", "so", "while", "whereas", "meanwhile",
   # "then", or "and" before "you", "please", "I" or "we", and its time word must come within 40
   # characters after the word for coming, calling or sending. A comma, a hyphen, a square bracket or
   # "and" before anyone else ("and she") doesn't stop it, and a comma before an adverb or a time
-  # phrase leaves the clause going ("Maria will call you back, usually within the hour."). Being on
+  # phrase leaves the clause going ("Mike will call you back, usually within the hour."). Being on
   # the way is a promise of when. With the same time words, so are the Desk's own promises: "I" or "we"
   # with will, can, am, are, have, 'll, 'm, 're or 've, then sending someone, having someone call or
-  # come, getting someone out or to come or call, or asking someone to come or call ("I'll have Maria
-  # call you right away.", "I've asked Maria to come out immediately."); a present habit ("Maria
+  # come, getting someone out or to come or call, or asking someone to come or call ("I'll have Mike
+  # call you right away.", "I've asked Mike to come out immediately."); a present habit ("Mike
   # usually calls back within the hour."), which a comma also stops and which "until", "when",
   # "once", "before", "after", "if", "while" or "as" right before who comes makes a condition
-  # ("Until Maria arrives, turn off the water right away." doesn't fire); and a call to expect
-  # ("Expect a call from Maria shortly."). A price promise says it's free, costs
+  # ("Until Mike arrives, turn off the water right away." doesn't fire); and a call to expect
+  # ("Expect a call from Mike shortly."). A price promise says it's free, costs
   # nothing (extra) or carries an extra, emergency or after-hours fee, charge, rate, cost, surcharge or
   # premium ("There's an extra after-hours fee.", "After-hours charges may apply."). Such a fee fires
   # wherever it stands, unless its own clause, before it, makes it a thing to ask or learn about: with
   # "about", or with tell, let you know, know, explain, confirm, check, find out, ask, not sure or
-  # unsure and, within two words, "about", "whether", "if", "what" or "which" ("Maria can tell you
-  # about any after-hours charges.", "Maria can let you know if there's an after-hours fee."). A bare
-  # "if", "what", "which" or "ask" doesn't ("If she comes out after hours there is an extra charge.",
-  # "Maria may ask for an emergency fee."). A refusal that only names the fee states none: "can't",
+  # unsure and, within two words, "about", "whether", "if", "what" or "which" ("Mike can tell you
+  # about any after-hours charges.", "Mike can let you know if there's an after-hours fee."). A bare
+  # "if", "what", "which" or "ask" doesn't ("If he comes out after hours there is an extra charge.",
+  # "Mike may ask for an emergency fee."). A refusal that only names the fee states none: "can't",
   # "cannot", "won't" or "will not", then quote, tell, give, say or share, an optional "you" and
   # determiner, and the fee right after ("I can't quote the after-hours rate here.", "I can't tell you
-  # the emergency call-out fee, but Maria can."); "I can't give you a discount on the emergency fee."
-  # still fires. The short-notice fee is on Rivera's price list and quoted on a card, so naming it ("There's
+  # the emergency call-out fee, but Mike can."); "I can't give you a discount on the emergency fee."
+  # still fires. The short-notice fee is on Turner's price list and quoted on a card, so naming it ("There's
   # an extra short-notice fee, shown on the card below.") is no promise and doesn't fire.
   forbid_prose:
-    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(will|can|could|should|may|might|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|(would|should|may|might)\s+be\s+able\s+to)|[''’]ll)\s+([\w''’]+\s+){0,2}?(?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)(?<!\bany\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bour\s)(?<!\bmy\s)(?<!\btheir\s)(?<!\bthis\s)(?<!\bthat\s)(come|be\s+there|be\s+over|be\s+out|be\s+(right\s+)?with\s+you|get\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|send\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|arrive|stop\s+by|head\s+(out|over|your\s+way|to\s+you|there)|call|ring|reach|give\s+you\s+a\s+(call|ring))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(is|are)|[''’](s|re))\s+([\w''’]+\s+){0,2}?(coming|heading\s+(out|over|your\s+way|to\s+you|there)|driving\s+over|calling|ringing|getting\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|sending\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|arriving|stopping\s+by)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\b(maria|she|someone|somebody|a\s+plumber|help)(\s+is|[''’]s)\s+on\s+(her|his|their|the|its)\s+way\b'
-    - '\b(i|we)(\s+(will|can|am|are|have)|[''’](ll|m|re|ve))\s+([\w''’]+\s+){0,2}?(send(ing)?\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|hav(e|ing)\s+(maria|her|him|them|someone|somebody|a\s+plumber)\s+(call|ring|come)|get(ting)?\s+(maria|her|him|them|someone|somebody|a\s+plumber|help)\s+(out|over|there|to\s+you|to\s+(come|call|ring))|ask(ed|ing)?\s+(maria|her|him|them|someone|somebody|a\s+plumber)\s+to\s+(come|call|ring|head|get))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '(?<!\buntil\s)(?<!\bwhen\s)(?<!\bonce\s)(?<!\bbefore\s)(?<!\bafter\s)(?<!\bif\s)(?<!\bwhile\s)(?<!\bas\s)\b(maria|she|we|someone|somebody|a\s+plumber|help)\s+((usually|typically|normally|generally|often|always|tends?\s+to)\s+)?(calls?|rings?|comes?|arrives?|gets?\s+(there|to\s+you|out|over|back)|heads?\s+(out|over)|responds?|replies)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\bexpect(ing)?\s+(a|her|his|their|maria[''’]s)\s+(call(\s*back)?|ring|visit)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)(\s+(will|can|could|should|may|might|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|(would|should|may|might)\s+be\s+able\s+to)|[''’]ll)\s+([\w''’]+\s+){0,2}?(?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)(?<!\bany\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bour\s)(?<!\bmy\s)(?<!\btheir\s)(?<!\bthis\s)(?<!\bthat\s)(come|be\s+there|be\s+over|be\s+out|be\s+(right\s+)?with\s+you|get\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|send\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|arrive|stop\s+by|head\s+(out|over|your\s+way|to\s+you|there)|call|ring|reach|give\s+you\s+a\s+(call|ring))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)(\s+(is|are)|[''’](s|re))\s+([\w''’]+\s+){0,2}?(coming|heading\s+(out|over|your\s+way|to\s+you|there)|driving\s+over|calling|ringing|getting\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|sending\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|arriving|stopping\s+by)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|someone|somebody|a\s+plumber|help)(\s+is|[''’]s)\s+on\s+(her|his|their|the|its)\s+way\b'
+    - '\b(i|we)(\s+(will|can|am|are|have)|[''’](ll|m|re|ve))\s+([\w''’]+\s+){0,2}?(send(ing)?\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|hav(e|ing)\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber)\s+(call|ring|come)|get(ting)?\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber|help)\s+(out|over|there|to\s+you|to\s+(come|call|ring))|ask(ed|ing)?\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber)\s+to\s+(come|call|ring|head|get))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '(?<!\buntil\s)(?<!\bwhen\s)(?<!\bonce\s)(?<!\bbefore\s)(?<!\bafter\s)(?<!\bif\s)(?<!\bwhile\s)(?<!\bas\s)\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)\s+((usually|typically|normally|generally|often|always|tends?\s+to)\s+)?(calls?|rings?|comes?|arrives?|gets?\s+(there|to\s+you|out|over|back)|heads?\s+(out|over)|responds?|replies)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\bexpect(ing)?\s+(a|her|his|their|maria[''’]s|mike[''’]s)\s+(call(\s*back)?|ring|visit)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
     - '\bfor\s+free\b|\bfree\s+of\s+(charge|cost)\b|\b(visit|call|check|inspection|estimate|quote|advice|service)\s+(is|are|will\s+be|would\s+be)\s+free\b|\bfree\s+(visit|call|check|inspection|estimate|quote|service)\b'
     - '\bno\s+((extra|additional)\s+)?(charge|cost|fee)s?\b|\bwon[''’]?t\s+(cost|charge)\b|\bdoesn[''’]?t\s+cost\b'
-    - '(^|[.!?;:,\n–—―()]|\b(but|and|so)\b)((?!\b(about|(tell(s|ing)?|told|let\s+you\s+know|know(s|ing)?|explain(s|ed|ing)?|confirm(s|ed|ing)?|check(s|ed|ing)?|find(s|ing)?\s+out|found\s+out|ask(s|ed|ing)?|not\s+sure|unsure)(\s+[\w''’]+){0,2}?\s+(about|whether|if|what|which)|(can[''’]?t|can\s*not|won[''’]?t|will\s+not)\s+(quote|tell|give|say|share)(\s+you)?(\s+(the|an?|any|our|her|his|their|maria[''’]s))?\s+(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+([\w\-‐-―]+\s+)?(fee|charge|rate|cost|surcharge|premium)s?)\b)[^.!?;:,\n–—―()])*?\b(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+(?!short[\s\-‐-―]?notice\b)([\w\-‐-―]+\s+)?(fee|charge|rate|cost|surcharge|premium)s?\b'
+    - '(^|[.!?;:,\n–—―()]|\b(but|and|so)\b)((?!\b(about|(tell(s|ing)?|told|let\s+you\s+know|know(s|ing)?|explain(s|ed|ing)?|confirm(s|ed|ing)?|check(s|ed|ing)?|find(s|ing)?\s+out|found\s+out|ask(s|ed|ing)?|not\s+sure|unsure)(\s+[\w''’]+){0,2}?\s+(about|whether|if|what|which)|(can[''’]?t|can\s*not|won[''’]?t|will\s+not)\s+(quote|tell|give|say|share)(\s+you)?(\s+(the|an?|any|our|her|his|their|maria[''’]s|mike[''’]s))?\s+(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+([\w\-‐-―]+\s+)?(fee|charge|rate|cost|surcharge|premium)s?)\b)[^.!?;:,\n–—―()])*?\b(extra|additional|emergency|after[\s\-‐-―]?hours?)\s+(?!short[\s\-‐-―]?notice\b)([\w\-‐-―]+\s+)?(fee|charge|rate|cost|surcharge|premium)s?\b'

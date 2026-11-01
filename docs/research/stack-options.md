@@ -16,7 +16,7 @@ Inputs: the Claude Desk design decisions and design system as they stood then, `
 |---|---|---|
 | Vercel Functions max duration (Fluid compute) | Hobby 300 s (default and maximum). Pro and Enterprise: 300 s default, 800 s maximum, 1800 s beta | A visitor turn plus the reviewer and reply check fits easily. A turn that *waits for the owner* does not, so held approvals can't be "a function that waits". |
 | Vercel WebSockets | Public beta since 2026-06-22. Same 300/800 s caps. A connection is pinned to one instance, so cross-instance fan-out needs Redis or a similar external store | Possible, but it adds Redis. A hosted pub/sub service is simpler for "the owner clicks Allow and the visitor sees it live". |
-| Vercel Workflows (Workflow SDK `workflow` 5.2.3) | `'use workflow'` / `'use step'`, `createHook` + `resumeHook(token, payload)`, no limit on sleep or run duration. Hobby includes 50k events/month; on-demand $0.02 per 1k events | A durable "wait for Maria" primitive on Vercel. It's optional: the park-and-resume design below doesn't need it. |
+| Vercel Workflows (Workflow SDK `workflow` 5.2.3) | `'use workflow'` / `'use step'`, `createHook` + `resumeHook(token, payload)`, no limit on sleep or run duration. Hobby includes 50k events/month; on-demand $0.02 per 1k events | A durable "wait for Mike" primitive on Vercel. It's optional: the park-and-resume design below doesn't need it. |
 | Vercel cron | Hobby: once per day, ±59 min. Pro: once per minute | An hourly demo reset needs Pro, or a manual "Reset demo" button. |
 | Claude Agent SDK runtime (`@anthropic-ai/claude-agent-sdk` 0.3.312, published 2026-10-27) | Spawns a `claude` CLI **subprocess** per session, with local disk for transcripts. Needs Node 18.14+. Docs suggest "1 GiB RAM, 5 GiB disk, and 1 CPU per agent" as a starting point. Durable cross-host resume needs a `SessionStore`. On Vercel, Claude Code runs only inside a Vercel Sandbox via `durable-harness/claude-code`, which is **experimental** | It doesn't fit plain serverless. Realistically it needs a container worker (Fly or Railway) or an experimental Vercel Sandbox path. |
 | Agent SDK `PreToolUse` → `"defer"` | Ends the turn with `stop_reason: "tool_deferred"`. Resume later with no prompt and the hook decides. **Only works when Claude makes a single tool call in the turn**: with parallel calls, defer "is ignored with a warning and the tool proceeds through the normal permission flow". If the MCP server isn't connected on resume, you get `tool_deferred_unavailable` | A real gotcha for held approvals. The safer pattern is deny-with-"held" plus your own resume (see Option B). |
@@ -52,7 +52,7 @@ Inputs: the Claude Desk design decisions and design system as they stood then, `
    - It can only *tighten*: an allow from Cedar can become hold or block, never the reverse.
    - It runs on "unusual" calls (no exact rule match, first-time patterns, high value) and on every reply that carries a commitment.
 5. **Reply checkpoint.** Visitor-facing text goes only through a `send_reply(text, claims[])` tool. Because forced tool choice isn't allowed on Opus 5.5, any plain final text is routed through the same check before it's shown.
-   - Deterministic step: every money amount, percentage, date or time, and promise phrase in `text` must match a declared claim. Each claim must reference a ledger entry (a quote tool result, a booked slot, a rule). Anything else is blocked and rewritten to "Let me check with Maria."
+   - Deterministic step: every money amount, percentage, date or time, and promise phrase in `text` must match a declared claim. Each claim must reference a ledger entry (a quote tool result, a booked slot, a rule). Anything else is blocked and rewritten to "Let me check with Mike."
    - The reviewer then gets the claims only.
 6. **Owner loop.** An approvals row moves through pending, allowed, denied or expired. The four answers work like this: "Allow only for this person" and "Deny always" write Cedar rules, and every decision is written to the ledger.
 
@@ -62,7 +62,7 @@ Inputs: the Claude Desk design decisions and design system as they stood then, `
 
 Either way, the owner's live view can stream raw output, because the owner is trusted.
 
-**Held approvals ("park and resume"), the recommended pattern, which works on plain serverless.** When Cedar says hold, the loop **stops without sending a tool_result**. It stores the pending `tool_use` block plus an approvals row and tells the visitor via an app-rendered card (not Claude): "Waiting for Maria. You can stay or leave; we'll text or email you."
+**Held approvals ("park and resume"), the recommended pattern, which works on plain serverless.** When Cedar says hold, the loop **stops without sending a tool_result**. It stores the pending `tool_use` block plus an approvals row and tells the visitor via an app-rendered card (not Claude): "Waiting for Mike. You can stay or leave; we'll text or email you."
 - When the owner answers, a server action records the decision, executes the tool deterministically if allowed, appends the real `tool_result`, and runs one more model turn whose output streams to the visitor's channel. The history stays append-only (preserved-thinking safe), and **no process waits**.
 - If the visitor types while the approval is pending, the app closes the parked call with an interim "pending owner" result so the conversation can continue. When the decision lands, it's delivered as a mid-conversation system message after the next visitor message, or as an app-rendered outcome card. This edge case needs a short design pass (UNVERIFIED that the API accepts every placement; test on day 1).
 
@@ -74,7 +74,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 
 **Payments.** Stripe test mode. The app creates server-priced Payment Links or Checkout Sessions. The `checkout.session.completed` webhook updates the ledger and drives the "check draws once" moment. Card data never reaches the model.
 
-**MCP (one real server).** The candidates are Stripe's hosted MCP with an agent API key (realistic, but exposes generic `stripe_api_write`) or a small self-hosted MCP server the app owns (e.g. "Rivera calendar", reliable and resettable). Either way the app is the MCP client, lists tools at connect time, drafts profiles and pins hashes (Decision 4).
+**MCP (one real server).** The candidates are Stripe's hosted MCP with an agent API key (realistic, but exposes generic `stripe_api_write`) or a small self-hosted MCP server the app owns (e.g. "Turner calendar", reliable and resettable). Either way the app is the MCP client, lists tools at connect time, drafts profiles and pins hashes (Decision 4).
 
 **A2A.**
 - Each Desk serves a card at `/d/{slug}/.well-known/agent-card.json`. A root card at `/.well-known/agent-card.json` lists the Desks, but spec support for per-path cards is UNVERIFIED, so this should be checked.
@@ -83,7 +83,7 @@ Either way, the owner's live view can stream raw output, because the owner is tr
 - The built-in "send an agent" panel is a Haiku-driven A2A client calling the real endpoint.
 - "Connect your own Claude" would mean also exposing the Desk as a remote MCP server for claude.ai custom connectors. Whether authless connectors are allowed is UNVERIFIED (Decision 4).
 
-**Multi-tenant and demo.** Tenancy runs business → desks. Rivera Plumbing is seeded by an idempotent script. Reset options are a per-user copy (clone Rivera on passcode entry) or one shared demo that resets on a button, nightly on Hobby or hourly on Pro (Decision 5).
+**Multi-tenant and demo.** Tenancy runs business → desks. Turner Plumbing is seeded by an idempotent script. Reset options are a per-user copy (clone Turner on passcode entry) or one shared demo that resets on a button, nightly on Hobby or hourly on Pro (Decision 5).
 
 ---
 
@@ -236,12 +236,12 @@ Write a short ADR explaining why A rather than B or C, citing the `defer` single
 
 1. **Agent runtime:** own loop (A), Agent SDK worker (B), or Managed Agents (C). Also decide whether to use Managed Agents just for the owner setup interview. This trades control, speed and robustness against building on Anthropic's harness.
 2. **Hosting tier and providers:** Vercel Hobby ($0, 300 s, daily cron, non-commercial use) or Pro ($20/seat, 800 s, per-minute cron). Supabase (database plus realtime, but the free tier pauses after about 7 days) or Neon plus Ably or Pusher. Whether to pay for about a month of Pro tiers so the demo link never sleeps.
-3. **Streaming vs the reply checkpoint UX:** progressive release (streams, and only risky sentences pause) or check-then-reveal (simpler, slightly slower). This also settles whether visitors can keep chatting while an approval is pending, or see a "Waiting for Maria" state.
+3. **Streaming vs the reply checkpoint UX:** progressive release (streams, and only risky sentences pause) or check-then-reveal (simpler, slightly slower). This also settles whether visitors can keep chatting while an approval is pending, or see a "Waiting for Mike" state.
 4. **The one real MCP server and "connect your own Claude":**
    - Stripe hosted MCP (real third party; generic `stripe_api_write` needs argument-level profiles; needs an agent API key before the December cutoff) or a self-hosted demo MCP server (reliable, resettable).
    - Also whether to expose each Desk as a remote MCP server so people can add it to claude.ai (an extra 0.5–1 day).
 5. **Demo isolation and verification channels:**
-   - Per-user copies of Rivera Plumbing or one shared demo with a reset.
+   - Per-user copies of Turner Plumbing or one shared demo with a reset.
    - Real email OTP plus SMS in labelled test mode (recommended), or chasing real SMS (needs Twilio number registration with an uncertain timeline).
    - The project owner also has to create the accounts (Vercel, Supabase, Anthropic Console with a spend limit, Stripe sandbox and agent key, Resend domain, Twilio, optionally Upstash and Fly). I created none.
 

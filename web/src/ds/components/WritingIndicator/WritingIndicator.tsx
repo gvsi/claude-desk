@@ -34,7 +34,7 @@ export interface TypingBubbleProps extends WritingIndicatorBase {
  */
 export interface PersonTypingProps extends WritingIndicatorBase {
   variant: 'person';
-  /** Their name as their messages show it ("Maria Rivera"). A blank name shows nothing. */
+  /** Their name as their messages show it ("Mike Turner"). A blank name shows nothing. */
   who: string;
 }
 

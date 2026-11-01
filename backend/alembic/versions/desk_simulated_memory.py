@@ -1,7 +1,7 @@
 """Private simulated setup memory on each Desk.
 
 The nullable JSON column is written only through the kernel's owner route. Existing Desks keep
-NULL; only the Rivera seed falls back to its fixture. No kernel_ro view or column grant changes.
+NULL; only the Turner seed falls back to its fixture. No kernel_ro view or column grant changes.
 ALTER TABLE runs as the table's admin owner without SUPERUSER or BYPASSRLS.
 
 Revision ID: desk_simulated_memory

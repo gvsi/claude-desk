@@ -228,7 +228,7 @@ async def _create_copy(state: Runtime) -> CopyCreated:
 
 
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
-    """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
+    """A new copy of the Turner seed, read back through its own owner token, which goes only into the cookie. It asks
     for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
     replayed night in its own transaction, so either can be stored even if the other fails."""
     created = await _create_copy(state)
@@ -242,7 +242,7 @@ async def _new_copy(state: Runtime, response: Response) -> CopyOut:
 
 @router.post("/copies", status_code=201, response_model=CopyOut, responses=error_responses(401, 422, 429, 503))
 async def create_copy(body: CopyRequest, request: Request, response: Response) -> CopyOut:
-    """A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it."""
+    """A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it."""
     state = runtime(request).started()
     ip = client_ip(request)
     await state.limiter.enforce("passcode", ip)          # counts the attempt; a right passcode gives it back

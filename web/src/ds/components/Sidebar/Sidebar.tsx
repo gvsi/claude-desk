@@ -50,7 +50,7 @@ export interface NavCount {
 }
 
 export interface SidebarProps {
-  /** The current business's name: "Rivera Plumbing". */
+  /** The current business's name: "Turner Plumbing". */
   business: string;
   /** Opens the business switcher (`SwitcherMenu`). */
   onSwitchBusiness: () => void;
@@ -110,7 +110,7 @@ function PlainLink({ children, ...props }: SidebarLinkProps) {
   return <a {...props}>{children}</a>;
 }
 
-/** The first letter of the first and last words, as written: "Maria Rivera" is "MR". */
+/** The first letter of the first and last words, as written: "Mike Turner" is "MT". */
 export function initialsOf(name: string): string {
   const words = name.trim().split(/\s+/).filter((word) => word !== '');
   const first = words[0];

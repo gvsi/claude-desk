@@ -247,7 +247,7 @@ function Header() {
   );
 }
 
-/** A fresh Rivera copy has one urgent callback job, with a read-only rule and fallback. */
+/** A fresh Turner copy has one urgent callback job, with a read-only rule and fallback. */
 function Jobs() {
   return (
     <section className="cd-business-jobs">

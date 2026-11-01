@@ -101,7 +101,7 @@ def test_amenity_exception_is_for_charter_policy_text_only():
                                             amenities=False) == {}
 
 
-# The Rivera seed's own business tool (test_rivera_urgent covers it); the tests here write the owner's.
+# The Turner seed's own business tool (test_rivera_urgent covers it); the tests here write the owner's.
 SEEDED = frozenset(tool.tool for tool in seed.RIVERA_BUSINESS_TOOLS)
 
 
@@ -746,7 +746,7 @@ async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(
     assert allowed.outcome == 'allow'
     assert (await executed(client, visitor, allowed)).state == 'succeeded'
     receipt = await read(client, visitor.headers, allowed)
-    assert receipt.visitor_plain == '“New client intake”: details saved for Maria Rivera'
+    assert receipt.visitor_plain == '“New client intake”: details saved for Mike Turner'
     verify_signature(await public_key(client), receipt)
 
 
@@ -1073,7 +1073,7 @@ def test_free_words_stand_in_titles_and_appointment_types_and_never_on_a_payment
 
 
 async def named_desk(app, client, tools, states):
-    """Rivera with business `tools` written, each row then put in its state of `states` (by tool):
+    """Turner with business `tools` written, each row then put in its state of `states` (by tool):
     `enabled`, `needs_review` (as written), `disabled`, `stale` (enabled, its profile pin broken), or
     `drifted` (enabled, its stored definition changed outside the write and its profile pin recomputed
     to match, so only `adapters.resolve`'s check of the definition can tell); a visitor of it. The seed's
@@ -1130,7 +1130,7 @@ async def test_business_free_names_are_enabled_resolving_titles_and_types_never_
     type, and nothing else does (a tool waiting for review, a disabled one, one whose profile no
     longer matches its pin, or one whose definition drifted from its pinned profile). The enabled
     payment resolves too, and lends nothing: a payment's title never backs a free word
-    (`blocks.free_name_fields`). The batch leaves out the Rivera seed's urgent tool, which it turns off."""
+    (`blocks.free_name_fields`). The batch leaves out the Turner seed's urgent tool, which it turns off."""
     from desk.kernel_service import context
 
     tools = [intake(title=INTRO_CALL),

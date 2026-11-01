@@ -64,7 +64,7 @@ async def test_context_clock_matches_the_kernel_and_business(frozen_kernel, ro_r
     view, session_id = http.session(visitor.session_token), visitor.state.session_id
     # Change the business after session creation: context reads the current time zone, not a session snapshot.
     await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(
-        name="Rivera Plumbing", owner_display_name="Marta Rivera", timezone=timezone), path={"id": desk_id})
+        name="Turner Plumbing", owner_display_name="Marta Turner", timezone=timezone), path={"id": desk_id})
     expected = {"as_of_utc": "2026-11-01T00:04:05.123456Z", "local_now": local_now,
                 "local_date": local_date, "weekday": weekday, "timezone": timezone}
     assert (await context(view, session_id)).clock.model_dump() == expected
@@ -118,7 +118,7 @@ async def test_context_clock_boundary_values(frozen_kernel, frozen_now, ro_read,
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     view, session_id = http.session(visitor.session_token), visitor.state.session_id
     await http.owner(copy.owner_token).call("PUT /desks/{id}/business", DeskBusinessRequest(
-        name="Rivera Plumbing", owner_display_name="Marta Rivera", timezone=timezone),
+        name="Turner Plumbing", owner_display_name="Marta Turner", timezone=timezone),
         path={"id": copy.desk_ids[0]})
 
     local_now, local_date, weekday = before

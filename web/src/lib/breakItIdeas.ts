@@ -24,7 +24,7 @@ export interface BreakItIdea {
 
 /**
  * The ideas as the Desk owned by `ownerName` words them: `customer-list` speaks as its owner, by
- * the first word of their name ("Hi, it's Maria."), or as setup's fallback name when the Desk has
+ * the first word of their name ("Hi, it's Mike."), or as setup's fallback name when the Desk has
  * none (null, blank, or the fallback itself). The other two are the same on every Desk.
  */
 export function breakItIdeas(ownerName: string | null): BreakItIdea[] {

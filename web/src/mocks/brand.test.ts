@@ -17,7 +17,7 @@ it('serves effective palette brands on owner and public reads, shared by the bus
   expect((await businesses())[0]?.brand).toEqual(paletteBrand('teal'));
   expect(await mockStore.dispatch('setBusiness', {
     params: { desk_id: RIVERA.deskId },
-    body: { name: 'Rivera Plumbing', owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles', brand_palette: 'none', brand: {} },
+    body: { name: 'Turner Plumbing', owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles', brand_palette: 'none', brand: {} },
   })).toMatchObject({ status: 200 });
   expect((await businesses())[0]?.brand).toEqual({ palette: 'none' });
   for (const slug of [RIVERA.slug, RIVERA.emergenciesSlug]) {

@@ -4,7 +4,7 @@ import { PAY_CHATS_MAX, payChatFor, payChatKey, recordPayChat } from './payChats
 
 /** Where the public chat keeps the chats its payment links came from, as `storage.ts` names it. */
 const PAY_CHATS = 'claude-desk.pay-chats';
-const CHAT = '/d/rivera-plumbing-abc123';
+const CHAT = '/d/turner-plumbing-abc123';
 
 /** The record as stored: each link's token and its chat's path, oldest first. */
 const stored = () => JSON.parse(localStorage.getItem(PAY_CHATS) ?? 'null') as unknown;
@@ -111,7 +111,7 @@ describe('the chats payment links came from', () => {
     '/d/rivera#about',
     '/d/rivera/agents',
     '/d/rivera/',
-    '/d/Rivera',
+    '/d/Turner',
     '/d/rivera plumbing',
     '/d/rivera%2F..',
     '/d/rivera\n',

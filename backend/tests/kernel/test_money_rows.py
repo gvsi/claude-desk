@@ -1,6 +1,6 @@
 """The money rows of the master plan's rule-card cases, end to end on payment links and refunds.
 
-Each test drafts and confirms its cards on a Rivera Plumbing copy (at the seed's $500 money cap), as
+Each test drafts and confirms its cards on a Turner Plumbing copy (at the seed's $500 money cap), as
 the owner app does, then asks `/decide` for a link to a quote the visitor just got, or for a refund of
 one of the visitor's own past payments: the cards compile to Cedar by code, prove, activate, and
 decide the call as they would any request. A link's amount is its quote's, so each test prices the

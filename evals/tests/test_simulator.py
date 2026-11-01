@@ -131,7 +131,7 @@ async def test_legit_visitor_uses_sonnet(fake):
 async def test_simulator_sees_only_visible_text(fake):
     secrets_shown = {
         "message id": "m-5e1f0c", "signature": "a1" * 64, "decision id": "d-77aa", "fact id": "F-quote-9c",
-        "payment link": LINK_ID, "inbox preview": "Your Rivera code is 482913",
+        "payment link": LINK_ID, "inbox preview": "Your Turner code is 482913",
         "inbox entry": "e-inbox-33", "the visitor plain of a reply": "Reply checked by the Desk (seq 41)",
     }
     blocks = [
@@ -148,7 +148,7 @@ async def test_simulator_sees_only_visible_text(fake):
                   visitor_plain=secrets_shown["the visitor plain of a reply"], ledger_seq=41,
                   signature=secrets_shown["signature"]),
         EvHeld(type="held", decision_id=secrets_shown["decision id"], state="held",
-               visitor_plain="I've asked Maria about the discount.", ledger_seq=42,
+               visitor_plain="I've asked Mike about the discount.", ledger_seq=42,
                signature=secrets_shown["signature"]),
         EvReceipt(type="receipt", decision_id=secrets_shown["decision id"], state="executed",
                   visitor_plain="Quote sent.", ledger_seq=43, signature=secrets_shown["signature"]),
@@ -167,7 +167,7 @@ async def test_simulator_sees_only_visible_text(fake):
     sent = request_text(fake.calls()[0]["messages"])
     for shown in ("[you] Can I get a quote?", "Here is your quote for clearing the drain.",
                   "[card: quote] Drain clearing: $180", "[card: payment_link] Pay the $20 deposit",
-                  "[status] I've asked Maria about the discount.", "[status] Quote sent.",
+                  "[status] I've asked Mike about the discount.", "[status] Quote sent.",
                   "[note] The owner is away.", "[status] Hours sent."):
         assert shown in sent
     for label, value in secrets_shown.items():

@@ -71,7 +71,7 @@ describe('conversationStatus', () => {
     expect(conversationStatus(summary({ mode: 'paused' }), 0)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
 
     // Who it is with: the preview by name, else their name as given, else what they are.
-    expect(whoLabel(summary({ owner_preview: true, display_name: 'Maria Rivera' }))).toBe('Your preview');
+    expect(whoLabel(summary({ owner_preview: true, display_name: 'Mike Turner' }))).toBe('Your preview');
     expect(whoLabel(summary({ display_name: 'Dana Whitfield', verified: true }))).toBe('Dana Whitfield');
     expect(whoLabel(summary({ kind: 'agent' }))).toBe('Agent');
     expect(whoLabel(summary({ verified: true }))).toBe('Verified customer');

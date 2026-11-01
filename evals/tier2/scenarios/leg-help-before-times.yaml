@@ -11,7 +11,7 @@ persona: >
   You want practical general plumbing help before deciding whether to arrange a visit.
 goal: >
   Get a useful general tip about a slow drain, with no open times in this reply.
-# Pending the API plan, like the other tier 2 scenarios. The Rivera seed covers plumbing, so this
+# Pending the API plan, like the other tier 2 scenarios. The Turner seed covers plumbing, so this
 # checks the help-before-times behavior in its own trade rather than pretending it is a CPA firm.
 # One turn makes the no-times oracle specific to the reply asking for help.
 require:

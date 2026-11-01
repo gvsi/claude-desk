@@ -1,6 +1,6 @@
 /**
- * What a fresh mock copy holds, by seed. `rivera` is the master plan's Rivera seed as far as the
- * mocked routes read it (Rivera Plumbing, Maria Rivera, the Main line Desk with its rule cards and
+ * What a fresh mock copy holds, by seed. `rivera` is the master plan's Turner seed as far as the
+ * mocked routes read it (Turner Plumbing, Mike Turner, the Main line Desk with its rule cards and
  * open status, the public website and price list knowledge, and the seeded hold) plus Dana's live
  * chat and Alex Kim's assistant's, a visiting agent's; `rivera_quiet` has no hold and no chats;
  * `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
@@ -32,9 +32,9 @@ export const RIVERA = {
   copyId: 'copy-demo-7f3a',
   businessId: 'biz-rivera',
   deskId: 'desk-rivera-main',
-  slug: 'rivera-plumbing-abc123',
+  slug: 'turner-plumbing-abc123',
   emergenciesDeskId: 'desk-rivera-emergencies',
-  emergenciesSlug: 'rivera-plumbing-em24hr',
+  emergenciesSlug: 'turner-plumbing-em24hr',
 } as const satisfies CopyIds;
 
 /**
@@ -49,9 +49,9 @@ export function copyIds(copyNo: number): CopyIds {
     copyId: `${RIVERA.copyId}-${tag}`,
     businessId: `${RIVERA.businessId}-${tag}`,
     deskId: `${RIVERA.deskId}-${tag}`,
-    slug: `rivera-plumbing-${tag.padStart(6, '0')}`,
+    slug: `turner-plumbing-${tag.padStart(6, '0')}`,
     emergenciesDeskId: `${RIVERA.emergenciesDeskId}-${tag}`,
-    emergenciesSlug: `rivera-plumbing-e${tag.padStart(5, '0')}`,
+    emergenciesSlug: `turner-plumbing-e${tag.padStart(5, '0')}`,
   };
 }
 
@@ -76,7 +76,7 @@ const ALL_DAY_EVERY_DAY: HoursWindow[] = [
   { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '00:00:00', end: '00:00:00' },
 ];
 
-/** When the kernel computed the mock's open statuses: a Friday, 90 seconds before Rivera's 6:00 pm close. */
+/** When the kernel computed the mock's open statuses: a Friday, 90 seconds before Turner's 6:00 pm close. */
 const OPEN_STATUS_AS_OF = '2026-10-30T17:58:30-07:00';
 const RIVERA_CLOSES = '2026-10-30T18:00:00-07:00';
 
@@ -249,7 +249,7 @@ export function presetCards(preset: RulesPreset, hours: readonly HoursWindow[]):
 
 /**
  * The active rules: version 7, proved, with the starter preset's cards the seed keeps, as the
- * kernel's Rivera seed does, then the seed's own, at Rivera's $500 payment limit. An approval's card
+ * kernel's Turner seed does, then the seed's own, at Turner's $500 payment limit. An approval's card
  * draft becomes version 8.
  */
 export function activePolicy(deskId: string): PolicyVersionOut {
@@ -298,7 +298,7 @@ function nativeTool(
 }
 
 /**
- * The tools a Rivera copy starts with, as the kernel's tool rows have them: every built-in tool,
+ * The tools a Turner copy starts with, as the kernel's tool rows have them: every built-in tool,
  * with the effects the master plan's tool table gives each, and both of the mock payments server's,
  * connected and pinned (the fixtures' profiles). Every one is on, so none waits for review.
  */
@@ -337,16 +337,16 @@ export function riveraTools(): ToolRecord[] {
 }
 
 /**
- * Maria's urgent business tool, as the kernel's Rivera seed gives every copy (`RIVERA_BUSINESS_TOOLS`):
- * an emergency callback that alerts her at once, whatever her notification settings.
+ * Mike's urgent business tool, as the kernel's Turner seed gives every copy (`RIVERA_BUSINESS_TOOLS`):
+ * an emergency callback that alerts him at once, whatever his notification settings.
  */
 const RIVERA_URGENT_JOB = {
   title: 'Emergency callback',
-  how: 'Asks Maria to call back urgently about an emergency.',
+  how: 'Asks Mike to call back urgently about an emergency.',
   config: { block: 'urgent', urgent_when: 'A burst or leaking pipe, flooding, a sewage backup, or no water' },
 } as const satisfies Pick<JobProposal, 'title' | 'how' | 'config'>;
 
-/** The kernel seed's card that lets anyone use Maria's urgent tool (`rv-urgent`). */
+/** The kernel seed's card that lets anyone use Mike's urgent tool (`rv-urgent`). */
 const RIVERA_URGENT_CARD = presetCard({
   card_id: 'rv-urgent',
   applies_to: 'desk.emergency-callback',
@@ -356,7 +356,7 @@ const RIVERA_URGENT_CARD = presetCard({
 });
 
 /**
- * Gives a Rivera copy's Desk its urgent tool, turned on, and the card that allows it, as the
+ * Gives a Turner copy's Desk its urgent tool, turned on, and the card that allows it, as the
  * kernel's copy does: the tool built as setup builds a Desk's own tools, then turned on as the
  * seed's rules version activates, with `rv-urgent` last among the seed's cards.
  */
@@ -370,11 +370,11 @@ const MINUTE = 60_000;
 /** What the seeded visitor asked, twelve minutes before the copy opened: the hold on Today. */
 function seededHoldText(): string {
   const turn = rivera.conversations.visitor.turns.find((t) => t.kind === 'visitor');
-  if (turn?.kind !== 'visitor') throw new Error("the Rivera fixtures changed: the seeded hold needs the visitor's message");
+  if (turn?.kind !== 'visitor') throw new Error("the Turner fixtures changed: the seeded hold needs the visitor's message");
   return turn.text;
 }
 
-/** Dana's live chat from the fixtures: her three messages, Maria's whisper and Claude's three checked replies. */
+/** Dana's live chat from the fixtures: her three messages, Mike's whisper and Claude's three checked replies. */
 function danaTurns(): ReplayTurn[] {
   const turns = rivera.conversations.danaLive.turns;
   const texts = turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
@@ -384,7 +384,7 @@ function danaTurns(): ReplayTurn[] {
   return texts.map((text, i) => {
     const spec = actions[i];
     const blocks = replies[i];
-    if (!spec || !blocks) throw new Error("the Rivera fixtures changed: Dana's live chat needs three replies");
+    if (!spec || !blocks) throw new Error("the Turner fixtures changed: Dana's live chat needs three replies");
     const steps: Step[] = [(ctx) => ctx.status('receipt', ctx.decide(spec)), writing, (ctx) => ctx.reply(blocks)];
     return { text, whisper: i === 1 && whisper?.kind === 'whisper' ? whisper.text : undefined, steps };
   });
@@ -407,15 +407,15 @@ export function seedWorld(world: MockWorld): void {
       item_id: 'kn-website',
       source: 'website',
       label: { readers: ['public'], record_owner: null },
-      title: 'Your website, rivera-plumbing.example, read during setup',
-      text: "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+      title: 'Your website, turner-plumbing.example, read during setup',
+      text: "Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
     },
     {
       item_id: 'kn-price-list',
       source: 'setup',
       label: { readers: ['public'], record_owner: null },
       title: 'Price list, from your answers in setup',
-      text: 'The price list Maria gave in setup covers the service call deposit, drain clearing, a water heater flush and leak repair. Each price is given in a quote from this list.',
+      text: 'The price list Mike gave in setup covers the service call deposit, drain clearing, a water heater flush and leak repair. Each price is given in a quote from this list.',
     },
   ];
   // The kernel stores these one after another on its live clock: website first, then price list.

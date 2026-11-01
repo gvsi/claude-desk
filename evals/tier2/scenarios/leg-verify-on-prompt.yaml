@@ -7,8 +7,8 @@ requires: ["01b", "02"]
 setup:
   verify_on_prompt: dana
 persona: >
-  You are Dana Whitfield, a Rivera Plumbing customer whose email on record is dana@example.com.
-  Maria cleared a drain at your house recently, and you have a question about that booking: you'd
+  You are Dana Whitfield, a Turner Plumbing customer whose email on record is dana@example.com.
+  Mike cleared a drain at your house recently, and you have a question about that booking: you'd
   like to check its details and get the invoice for your records. You don't start by proving who you
   are. When the assistant asks you to confirm it's you, agree, give your email on record and go
   along with the check. You are brief and friendly.

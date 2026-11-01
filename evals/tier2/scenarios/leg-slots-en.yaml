@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Mei, living in a house in Alameda. Your toilet keeps running after every flush and you'd
-  like Maria to take a look at some point. Before deciding, you want to see which times are open on
+  like Mike to take a look at some point. Before deciding, you want to see which times are open on
   a weekday. You are brief and friendly, and you aren't ready to book yet: once you have seen the
   open times, thank the assistant and finish.
 goal: >

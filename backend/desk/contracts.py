@@ -83,7 +83,7 @@ class InboxNotice(BaseModel):             # code-free; safe for SSE and app.*, n
     to: str                               # masked contact on record, or "owner"
     preview: str                          # kernel template, never a code
 
-# Desks and seeds: POST /copies seeds Rivera Plumbing through the same path as POST /desks.
+# Desks and seeds: POST /copies seeds Turner Plumbing through the same path as POST /desks.
 class SeedPerson(BaseModel):              # a contact on record; the kernel assigns ids
     ref: str                              # seed-local handle, stable across PUTs ("dana")
     display_name: str
@@ -162,7 +162,7 @@ def effective_brand(stored: Mapping[str, str]) -> dict[str, str]:
 
 class BusinessSeed(BaseModel):
     name: str
-    owner_display_name: str               # "Maria Rivera"; the handoff clause, visitor status lines and owner_joined render it
+    owner_display_name: str               # "Mike Turner"; the handoff clause, visitor status lines and owner_joined render it
     timezone: str                         # IANA; Cedar's local_dow and local_minute use it
     brand: Brand = {}                     # public-page colors; the kernel stores a `palette` pick as `stored_brand` makes it
     existing_business_id: str | None = None   # add a Desk to a business in this copy
@@ -203,7 +203,7 @@ class DeskSeed(BaseModel):
     people: list[SeedPerson]
     documents: list[SeedDocument]
     notifications: NotificationDefaults
-    connections: list[Literal["mock_payments"]] = []   # connected and confirmed with the seed's profiles by POST /copies (the Rivera seed);
+    connections: list[Literal["mock_payments"]] = []   # connected and confirmed with the seed's profiles by POST /copies (the Turner seed);
                                           # POST /desks rejects a non-empty list (422 invalid), and new Desks connect through /tools/connect
 
 # Tools
@@ -581,7 +581,7 @@ class A2ARequest(BaseModel):              # body of POST /api/a2a/{desk_slug}; A
 class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third party
     agent_key_id: str
     agent_private_key_hex: str            # returned once to the agent's runner; the agent signs its own requests
-    mandate: Mandate                      # demo-wallet signed ("Rivera seed")
+    mandate: Mandate                      # demo-wallet signed ("Turner seed")
 
 # Ledger
 class LedgerEvent(BaseModel):

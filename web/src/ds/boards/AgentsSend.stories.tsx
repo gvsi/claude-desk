@@ -28,7 +28,7 @@ function AgentsSend() {
           </Button>
         </div>
       </AgentsCard>
-      <AgentsCard title="Send an agent" lead="A built-in agent visits Rivera Plumbing for Alex Kim. It’s simulated.">
+      <AgentsCard title="Send an agent" lead="A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.">
         <SignedLimitPanel {...LIMIT} language="en" />
         <SuggestionChips label="Tasks for the agent" suggestions={TASKS} onPick={fn()} />
       </AgentsCard>

@@ -8,7 +8,7 @@
 
 ## What the consumer provides
 
-- `text`, the greeting the screen builds from the owner's local time and name: "Good morning, Maria". The design system formats no times.
+- `text`, the greeting the screen builds from the owner's local time and name: "Good morning, Mike". The design system formats no times.
 - `presence`, when there is something to say about who is here:
   - `line`, the words: "Two people and one agent are talking to your Desk right now.", "Quiet right now."
   - `people`, one `{ kind: 'person' | 'agent', initials? }` per visitor. The first three are drawn beside the line as small glyphs (a person's initials when given, else the person or agent glyph). They are `aria-hidden`: the line says it in words.

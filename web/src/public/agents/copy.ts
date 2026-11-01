@@ -6,7 +6,7 @@
  * a Desk that isn't there, "Try again"). Names are passed in as written.
  *
  * The spending limit is static copy, never formatted from a number: `limit` holds the signed limit
- * panel's words for the Rivera seed's demo mandate ($20 a charge, $100 in total, for one hour), and
+ * panel's words for the Turner seed's demo mandate ($20 a charge, $100 in total, for one hour), and
  * `copy.test.ts` ties the amounts to it.
  */
 import { Fragment, createElement, type ReactNode } from 'react';
@@ -26,7 +26,7 @@ export const FALLBACK_TASK_SET: DemoTaskSet = 'other';
 
 /**
  * Each task's chip in each set, and the title of the agent's first request once it is sent. The sets
- * are the API's (`agent_tasks {task_set}`, plan 09, C2): Rivera's seed keeps its own, and every other
+ * are the API's (`agent_tasks {task_set}`, plan 09, C2): Turner's seed keeps its own, and every other
  * Desk takes its setup business type's. A set the API adds has no words here, and fails to compile.
  */
 export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoTaskSet, Readonly<Record<DemoTask, string>>>>>> = {

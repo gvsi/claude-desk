@@ -77,10 +77,10 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
     runner = app.state.runtime.runner
 
     # A held request, the owner's answer, the resume job and Claude's follow-up with the visitor's credential. Claude
-    # passes the visitor's words on to Maria, so the decision the job carries quotes them.
+    # passes the visitor's words on to Mike, so the decision the job carries quotes them.
     said = ["A discount, please? The sink flooded twice", "Are you there?", "Thanks!"]
     model.add(response(tool_use("native__quote", {**DISCOUNTED_QUOTE, "note": said[0]}),
-                       reply("I've asked Maria to look at this.")))
+                       reply("I've asked Mike to look at this.")))
     asked = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said[0]})
     assert asked.status_code == 202
     await runner.drain()
@@ -89,7 +89,7 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
     answered = await owner.post(f"/api/owner/approvals/{decision_id}/answer", json={"answer": "allow_once"})
     assert answered.status_code == 200
     await resolved(engine, session_id)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(slug), headers=[cookie(token)]) as stream:
         await stream.until(lambda events: types(events).count("turn_end") == 2)
     await runner.drain()
@@ -147,7 +147,7 @@ async def test_a_failed_resume_job_logs_no_arguments(app, browser, fake, model, 
     session_id = (await visitor.post(f"/api/public/desks/{slug}/sessions")).json()["state"]["session_id"]
     said = "A discount, please? The sink flooded twice"
     model.add(response(tool_use("native__quote", {**DISCOUNTED_QUOTE, "note": said}),
-                       reply("I've asked Maria to look at this.")))
+                       reply("I've asked Mike to look at this.")))
     assert (await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said})).status_code == 202
     await app.state.runtime.runner.drain()
     (decision_id,) = [record.decision.decision_id for record in fake.decisions.values()
