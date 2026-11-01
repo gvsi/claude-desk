@@ -1,5 +1,5 @@
 /** Chen & Co. CPA's own tools, as the kernel lists them for setup and the owner's rules. */
-import type { BusinessToolDef, ToolRow } from '../api/views.ts';
+import type { JobProposal, ToolRow } from '../api/views.ts';
 import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
@@ -13,9 +13,9 @@ const BLOCK_SENTENCES = {
   urgent: 'Saves an urgent callback request and alerts the owner.',
 };
 
-/** Accepted setup proposals, structural until the setup proposal contracts land. */
+/** Accepted setup proposals; unfinished payment amounts fail definition validation below. */
 export function businessToolRows(
-  jobs: readonly { title: string; how: string; config: BusinessToolDef['config'] | null }[],
+  jobs: readonly Pick<JobProposal, 'title' | 'how' | 'config'>[],
   taken: Iterable<string> = [],
 ): ToolRow[] {
   const names = new Set(taken);
@@ -94,4 +94,10 @@ export function seedBusinessTools(desk: DeskRecord, rows: readonly ToolRow[] = c
     adapter: 'business', resource_kind: 'desk', input_schema: {}, review_reason: row.review_reason ?? null,
   }));
   desk.tools = [...desk.tools.filter((row) => !names.has(row.tool)), ...seeded];
+}
+
+/** Append accepted setup jobs without replacing any tools already on the Desk. */
+export function appendBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
+  if (!desk) throw new Error('the setup Desk must exist');
+  seedBusinessTools(desk, businessToolRows(jobs, desk.tools.map(({ tool }) => tool)));
 }
