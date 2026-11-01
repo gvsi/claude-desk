@@ -34,15 +34,17 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 /**
  * How a row ended, as it draws it: the line that takes the detail's place (null keeps the detail);
  * whether it ticked (done, with a check and a Done pill) or only settled (an answer the list doesn't
- * count: its line alone); and whether it was so at load.
+ * count: its line alone); whether its line says it's done; and whether it was so at load.
  */
 interface RowEnd extends Done {
   line: string | null;
   ticks: boolean;
+  /** False when a done row keeps words that don't say so, so its Done pill is read out instead. */
+  readsDone?: boolean;
 }
 
-function rowDone(done: Done | undefined, line: string | null): RowEnd | null {
-  return done === undefined ? null : { ...done, line, ticks: true };
+function rowDone(done: Done | undefined, line: string | null, readsDone = true): RowEnd | null {
+  return done === undefined ? null : { ...done, line, ticks: true, readsDone };
 }
 
 /** What happened to the "Try to break it" idea the owner picked, by its key. */
@@ -137,7 +139,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   // "Answer a held request": done once answered; else waiting while a request is held (or its answer
   // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
   // else empty: where a request will show, with no next step.
-  const answerDone = rowDone(signals.done.answer, signals.onStartingDesk ? ANSWER.done : TODAY_COPY.heldNone);
+  const answerDone = signals.onStartingDesk ? rowDone(signals.done.answer, ANSWER.done) : rowDone(signals.done.answer, TODAY_COPY.heldNone, false);
   const answerEnd: RowEnd | null =
     answerDone ?? (!waiting && settledAs !== null ? {
       line: settledAs === 'refused_at_execution' ? latestAnswer?.owner_plain ?? UNCOUNTED_ANSWER_LINES[settledAs] : UNCOUNTED_ANSWER_LINES[settledAs],
@@ -172,7 +174,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             end={rowDone(signals.done.chat, CHAT.done)}
             step={{ label: 'Open your public page', href: link, external: true }}
           />
-          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null)} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
           <Thing
             icon="clock"
             title={ANSWER.title}
@@ -393,8 +395,8 @@ function Thing({ icon, title, held = false, detail, below, end = null, step }: T
       ) : null}
       {end?.ticks ? (
         <div className="cd-things__action cd-things__action--done">
-          {/* The done line already says it in words, so the pill isn't read twice. */}
-          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
+          {/* A done line already says it in words, so the pill isn't read twice; a row that keeps its own words has it read. */}
+          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden={end.readsDone === false ? undefined : true}>
             <Pill>
               <StatusDot tone="handled" />
               Done

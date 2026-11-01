@@ -2124,10 +2124,14 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
+    // Its words don't say it's done, so the Done pill is read out.
+    expect(row.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).toBeNull();
     await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
 
     await router.navigate(TODAY);
-    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    const home = thingRow(screen, 'Answer a held request');
+    await expect.element(home.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    expect(home.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('break_done_line_stays_on_the_starting_desk_while_progress_follows_the_copy', async () => {
@@ -2147,9 +2151,13 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText("Ask for a discount, another customer's address or Maria's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
+    // Its words don't say it's done, so the Done pill is read out.
+    expect(row.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).toBeNull();
 
     await router.navigate(TODAY);
-    await expect.element(thingRow(screen, 'Try to break it').getByText(doneLine, { exact: true })).toBeVisible();
+    const home = thingRow(screen, 'Try to break it');
+    await expect.element(home.getByText(doneLine, { exact: true })).toBeVisible();
+    expect(home.getByText('Done', { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('second_desk_reads_the_desk_the_copy_started_with', async () => {
