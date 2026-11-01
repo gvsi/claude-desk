@@ -12,6 +12,8 @@ to start (`evals.tier2.passes`) and `cost_usd` raises.
 `cache_read_input_tokens`, `cache_creation_input_tokens`, `output_tokens`) or by the names the API's
 `app.model_calls` rows and the kernel's ledger summaries use (`cached_tokens`, `cache_write_tokens`),
 and takes a model by its production name or by the id its provider sends.
+The soft-promise check now uses the Sonnet row; Haiku stays for triage, translation and historical
+records. SDK output_tokens includes thinking tokens, charged once at the output price.
 """
 
 from collections.abc import Mapping

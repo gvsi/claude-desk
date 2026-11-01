@@ -378,6 +378,11 @@ export class MockStore {
     this.injections.push({ ...injection, left: injection.times ?? 1 });
   }
 
+  /** Faults still waiting for a request; lets a test prove its refresh actually consumed them. */
+  get pendingInjections(): readonly Injection[] {
+    return this.injections.filter((injection) => injection.left > 0);
+  }
+
   recordUnhandled(path: string): void {
     if (this.mode === 'simulated') this.unhandledPaths.push(path);
   }
@@ -465,7 +470,7 @@ export class MockStore {
     }
     if (injection !== null) {
       if (injection.status === 'network') return { network: true };
-      return { status: injection.status, body: wire(injection.body ?? faultBody(injection.status, key)) };
+      return { status: injection.status, body: wire(injection.body === undefined ? faultBody(injection.status, key) : injection.body) };
     }
     return { status: served.status, body: wire(served.body), ...(setCookie.length > 0 ? { setCookie: [...setCookie] } : {}) };
   }

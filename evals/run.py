@@ -10,7 +10,7 @@
     python -m evals.run results --pass <id>
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
-    python -m evals.run results-check --base <ref>
+    python -m evals.run results-check --base <ref> [--history-since <rev>]
     python -m evals.run merge-ready [--head <ref>]
     python -m evals.run calibrate --pass <id> [--write] [--owner-approved "<name>"]
     python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
@@ -343,8 +343,9 @@ def results_check(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="python -m evals.run results-check", allow_abbrev=False)
     parser.add_argument("--base", required=True)
+    parser.add_argument("--history-since")
     options = parser.parse_args(argv)
-    passed, reason = check(options.base)
+    passed, reason = check(options.base, history_since=options.history_since)
     print(f"results-check: {reason}")
     return 0 if passed else 1
 
@@ -456,7 +457,9 @@ class ReportRefused(RuntimeError):
 # The parts of a run's artifact the report never reads: what the visitor saw, what the simulated owner did
 # and read, and each decision's full form. They are left out before a transcript is read, since the runner
 # redacts every code a run saw wherever it appears, and a code that matches a timestamp's microseconds
-# leaves that timestamp unreadable. The report reads the records, usage and verdict, which are read whole.
+# leaves that timestamp unreadable. The report reads the records, usage and verdict, which are read whole,
+# and of the turns only how many visitor messages there were and when each Desk turn ended (`report.desk_turn_times`),
+# read before they're left out.
 UNREAD_ARTIFACT_FIELDS: dict[str, Any] = {"turns": [], "owner_actions": [], "documents_fetched": [],
                                           "decisions_full": {}, "owner_inbox": []}
 
@@ -542,7 +545,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     """Each run of the pass as the report reads it, from its row and its transcript, and the artifacts of
     its judged legitimate runs. A transcript that is missing, unreadable, another run's, or holds another
     verdict than its row refuses."""
-    from evals.report import ReportRun
+    from evals.report import ReportRun, desk_turn_times
     from evals.tier2.passes import pass_dir
     from evals.tier2.runner import RunOutcome
 
@@ -550,9 +553,11 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     runs, legit = [], []
     for row in result.runs:
         name = f"{row.scenario_id} rep {row.rep}"
+        turn_times = None
         try:
             data = json.loads((transcripts / f"{row.scenario_id}-{row.rep}.json").read_bytes())
             if isinstance(data, dict) and isinstance(data.get("artifact"), dict):
+                turn_times = desk_turn_times(data["artifact"])   # when each Desk turn ended, nothing it said
                 data["artifact"] = {**data["artifact"], **UNREAD_ARTIFACT_FIELDS}
             outcome = RunOutcome.model_validate(data)
         except (OSError, ValueError) as error:   # ValueError: JSON that doesn't parse, or a ValidationError
@@ -566,7 +571,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
         if scenario is None:
             raise ReportRefused(f"{name} names a scenario the suite doesn't hold")
         common: dict[str, Any] = {"rep": row.rep, "fallback_turns": outcome.simulator.fallback_turns,
-                                  "switches": outcome.simulator.switches}
+                                  "switches": outcome.simulator.switches, "turn_times": turn_times}
         try:
             if row.status == "incomplete":
                 # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a

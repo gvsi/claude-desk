@@ -5,7 +5,8 @@
 - `clock`: the kernel's current UTC instant and the business's local date and time, public
   information for every session kind, separate from labelled facts;
 - `tools`: the profiles of the tools the session may call now (`decide.tools_given` over the
-  Desk's enabled tools), the same set `/decide` checks a call against;
+  Desk's enabled tools, followed by `adapters.resolve`), so stale or unresolved profiles
+  cannot grant a next-step exemption;
 - `tools_declared`: every profile on the Desk that a session of its kind could ever be given
   (`decide.declared_tools`), in any standing and status, so the API can declare them all when a
   conversation starts and load each one only once it is given;
@@ -45,7 +46,7 @@ from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import ContextClock, SessionContext
-from desk.kernel_service import auth, clock, decide, labels
+from desk.kernel_service import adapters, auth, clock, decide, labels
 from desk.kernel_service.adapters.base import business_timezone
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
@@ -86,7 +87,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
-    given = decide.tools_given(principal, session_row, desk_row, await decide.enabled_tools(ctx, desk_id))
+    given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
 
     readers = labels.session_readers(session_row)
@@ -109,7 +110,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
                            local_date=local.date().isoformat(),
                            weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
                            timezone=tz.key),
-        tools=[profile for tool, profile in profiles.items() if tool in given],
+        tools=given,
         tools_declared=[profile for tool, profile in profiles.items() if tool in declared],
         facts=[fact for fact in readable
                if not labels.find_canaries_in([fact.fact_id, *((claim.key, claim.value) for claim in fact.claims)],
@@ -119,6 +120,15 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
                    for row in knowledge if labels.can_read(row.readers, readers)
                    and not labels.knowledge_canaries(row.item_id, row.title, row.text, canaries)],
     )
+
+
+async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
+                         desk_row: Desk) -> list[ToolProfile]:
+    """The callable session tools, after adapter resolution; shared with the reply check."""
+    enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
+    given = decide.tools_given(principal, session_row, desk_row, enabled)
+    return [_profile(enabled[tool]) for tool in sorted(given)
+            if adapters.resolve(tool, enabled[tool]) is not None]
 
 
 router = APIRouter()

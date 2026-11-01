@@ -635,7 +635,7 @@ async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_c
     assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] == [
         ("writing", None), ("error", "internal"), ("turn_end", None)]
 
-    model = ScriptedModel([response(reply("I've asked Maria Rivera, and her answer will show up here."))])
+    model = ScriptedModel([response(reply(prompts.STATUS_LINES["check_status"]["en"]))])
     assert await pending(caller, model, engine, locks) == "done"
     assert len(fake.called("/decide")) == 1                    # never decided again
     (held,) = tool_results(model.requests[0])

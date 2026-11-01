@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
@@ -46,6 +46,9 @@ export const RULES_TITLE = 'Rules';
  * While a request is held, any Desk can also ask why the latest one was (`holdQuestion`).
  */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
+
+// A slow hold-question read must not keep already-read rules hidden for more than three seconds.
+const NEEDS_YOU_FIRST_LOAD_WAIT_MS = 3_000;
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
@@ -94,15 +97,26 @@ export function RulesPage() {
   // worked and none waiting for the network, so a hold answered or expired since never shows. The
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
+  // Open once this visit's read settles, pauses offline, or takes too long after rules arrive.
+  // Later reads must not put the body back on its loading line.
+  const [needsYouWaitEnded, setNeedsYouWaitEnded] = useState(false);
+  const firstNeedsYouReady = needsYouWaitEnded || needsYou.isFetchedAfterMount || needsYou.isPaused;
+  if (firstNeedsYouReady && !needsYouWaitEnded) setNeedsYouWaitEnded(true);
+  const waitingForNeedsYou = fixedChips.length === 0 && !firstNeedsYouReady;
+  useEffect(() => {
+    if (!rules.isFetched || !waitingForNeedsYou) return;
+    const timer = window.setTimeout(() => setNeedsYouWaitEnded(true), NEEDS_YOU_FIRST_LOAD_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [rules.isFetched, waitingForNeedsYou]);
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
-  const chips = question === null ? fixedChips : [...fixedChips, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
+  const chips = question === null || (fixedChips.length === 0 && !rules.isFetched) ? fixedChips : [...fixedChips, question];
 
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
@@ -162,7 +176,7 @@ export function RulesPage() {
         {ownerErrorCopy(rules.error)}
       </Notice>
     );
-  } else if (rules.data === undefined || active === undefined) {
+  } else if (rules.data === undefined || active === undefined || waitingForNeedsYou) {
     body = <LoadingLine>Reading your rules</LoadingLine>;
   } else {
     const cap = capOf(active);
@@ -244,7 +258,7 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
-      {active === undefined ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+      {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {body}
       <AlwaysOnList />
     </div>
