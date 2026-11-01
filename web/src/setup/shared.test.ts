@@ -37,11 +37,12 @@ it('leads "Change something" to the setup chat on the same interview, and back t
   expect(opensSetupChat(new URLSearchParams('chatty'))).toBe(false);
 });
 
-it('lists the channels coming later by unique keys, the website embed in the words Live already uses', () => {
+it('lists the channels coming later by unique keys, in the order the Live board draws them', () => {
   const keys = COMING_LATER_CHANNELS.map(({ key }) => key);
   expect(new Set(keys).size).toBe(keys.length);
-  expect(COMING_LATER_CHANNELS.every(({ name }) => name.trim() !== '')).toBe(true);
-  expect(COMING_LATER_CHANNELS.find(({ key }) => key === 'website_embed')).toEqual({
-    key: 'website_embed', name: SETUP_COPY.live.websiteEmbed, line: SETUP_COPY.live.websiteEmbedLine,
-  });
+  expect(COMING_LATER_CHANNELS.map(({ name, line }) => [name, line])).toEqual([
+    ['WhatsApp', 'Customers message your Desk from WhatsApp.'],
+    ['iMessage', 'The same chat in Messages on iPhone.'],
+    ['Phone calls', 'Your Desk answers your business line by voice.'],
+  ]);
 });

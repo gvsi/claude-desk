@@ -495,6 +495,29 @@
   color: var(--text-secondary);
 }
 
+/* "More channels": each a row laid out as the embed is, 12 px above and below, a hairline between. */
+.cd-setup-live__channels {
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-live__channel {
+  padding-block: var(--space-12);
+}
+
+.cd-setup-live__channel:first-child {
+  padding-top: 0;
+}
+
+.cd-setup-live__channel:last-child {
+  padding-bottom: 0;
+}
+
+.cd-setup-live__channel + .cd-setup-live__channel {
+  border-top: 1px solid var(--line-hairline);
+}
+
 
 /* Narrower than a laptop: the bar takes two lines, the mark and "Save and exit", then the business
    and the steps, which say where the owner is in one line once they have under 480 px. */

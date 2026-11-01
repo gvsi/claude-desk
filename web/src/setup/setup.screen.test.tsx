@@ -2590,6 +2590,32 @@ describe('setup', () => {
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
+  it.each([1440, 390])('at %i px, live lists more channels, coming later, in a card after Share it', async (width) => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const share = screen.getByRole('region', { name: 'Share it' }).element();
+    const card = screen.getByRole('region', { name: 'More channels' });
+    await expect.element(card.getByRole('heading', { level: 2, name: 'More channels' })).toBeVisible();
+    expect(card.element().classList).toContain('cd-card');
+    expect(share.nextElementSibling).toBe(card.element());
+    const list = card.getByRole('list');
+    expect(getComputedStyle(list.element()).marginTop).toBe('10px');
+    const rows = list.getByRole('listitem').elements();
+    const channels = [
+      ['WhatsApp', 'Customers message your Desk from WhatsApp.'],
+      ['iMessage', 'The same chat in Messages on iPhone.'],
+      ['Phone calls', 'Your Desk answers your business line by voice.'],
+    ];
+    expect(rows.map((row) => [row.querySelector('.cd-setup-live__embed-title')?.textContent, row.querySelector('.cd-setup-live__embed-line')?.textContent, row.querySelector('.cd-pill')?.textContent])).toEqual(
+      channels.map(([name, line]) => [name, line, 'Coming later']),
+    );
+    const pads = rows.map((row) => [getComputedStyle(row).paddingTop, getComputedStyle(row).paddingBottom, getComputedStyle(row).borderTopWidth]);
+    expect(pads).toEqual([['0px', '12px', '0px'], ['12px', '12px', '1px'], ['12px', '0px', '1px']]);
+    expectNoHorizontalScroll();
+  });
+
   it('live_step_shows_the_signed_share_card', async () => {
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
