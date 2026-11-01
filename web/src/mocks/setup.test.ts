@@ -7,8 +7,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { PublicDesk } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, RulesDraft, SetupState, Today } from '../api/views.ts';
+import type { BusinessOut, CopyOut, RulesDraft, SetupState, SetupTools, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
+import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
 
@@ -124,6 +125,89 @@ describe('setup consultant run and decisions', () => {
     let state = await startState();
     state = await setupState('setupConsent', state.interview_id, { allow: true });
     expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
+  });
+
+  it('appends_accepted_jobs_in_order_without_replacing_a_taken_tool_name', async () => {
+    let state = await cpaAt('schedule');
+    const desk = mockStore.world.desk(state.desk_id)!;
+    seedBusinessTools(desk, businessToolRows([state.messages.at(-1)!.card!.job!]));
+    const toolsBefore = structuredClone(desk.tools);
+    state = await setupState('setupSuggestions', state.interview_id, {});
+    const response = await mockStore.dispatch('setupTools', { params: { id: state.interview_id } });
+    if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
+    expect((response.body as SetupTools).tools.filter(({ source }) => source === 'business').map(({ tool, business, status }) => [tool, business?.title, status])).toEqual([
+      ['desk.book-a-free-intro-call', 'Book a free intro call', 'needs_review'],
+      ['desk.book-a-free-intro-call-2', 'Book a free intro call', 'needs_review'],
+      ['desk.ask-new-clients-three-questions', 'Ask new clients three questions', 'needs_review'],
+    ]);
+    expect(desk.tools.slice(0, toolsBefore.length)).toEqual(toolsBefore);
+  });
+
+  it('both_finish_paths_leave_a_non_consultant_desks_tools_unchanged', async () => {
+    for (const ending of ['answer', 'suggestions']) {
+      let state = await startState('Rivera Plumbing. We fix leaks.');
+      const id = state.interview_id;
+      state = await setupState('setupConsent', id, { allow: false });
+      const desk = mockStore.world.desk(state.desk_id)!;
+      const toolsBefore = structuredClone(desk.tools);
+      const policyBefore = structuredClone(desk.policy);
+      if (ending === 'suggestions') state = await setupState('setupSuggestions', id, {});
+      else for (const { key: question } of SETUP_QUESTIONS) state = await setupState('setupAnswer', id, { question, text: 'Yes' });
+      expect(state.step, ending).toBe('tools');
+      const response = await mockStore.dispatch('setupTools', { params: { id } });
+      if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
+      expect((response.body as SetupTools).tools.filter(({ source }) => source === 'business'), ending).toEqual([]);
+      expect(desk.tools, ending).toEqual(toolsBefore);
+      expect(desk.policy, ending).toEqual(policyBefore);
+    }
+  });
+
+  it('use_your_suggestions_serves_the_accepted_booking_and_keeps_the_intake_declined', async () => {
+    let state = await cpaAt('intake');
+    const id = state.interview_id;
+    state = await setupState('setupProposal', id, { accept: false }, state.pending_card!);
+    state = await setupState('setupSuggestions', id, {});
+    expect(state.step).toBe('tools');
+    expect(state.messages.some(({ role, text }) => role === 'owner' && text === 'Use your suggestions')).toBe(true);
+    expect(state.messages.find(({ card }) => card?.job?.job === 'intake')?.card?.state).toBe('declined');
+    const response = await mockStore.dispatch('setupTools', { params: { id } });
+    if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
+    expect((response.body as SetupTools).tools.filter(({ source }) => source === 'business')).toEqual([
+      expect.objectContaining({
+        tool: 'desk.book-a-free-intro-call', status: 'needs_review', review_reason: 'new',
+        business: {
+          title: 'Book a free intro call', description: 'New clients pick a time within your opening hours and book a 20-minute call.',
+          config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
+        },
+      }),
+    ]);
+  });
+
+  it('finishing_the_last_answer_serves_only_the_accepted_booking_as_a_business_tool', async () => {
+    let state = await cpaAt('schedule');
+    const id = state.interview_id;
+    const booking = state.messages.at(-1)!.card!.job!;
+    const desk = mockStore.world.desk(state.desk_id)!;
+    const toolsBefore = structuredClone(desk.tools);
+    const policyBefore = structuredClone(desk.policy);
+    while (state.pending_card) {
+      const card = state.messages.at(-1)!.card!;
+      state = await setupState('setupProposal', id, { accept: card.job?.job === 'schedule' }, card.proposal_id);
+    }
+    state = await setupState('setupAnswer', id, { question: state.question, text: 'Ask me before every payment' });
+    expect(state.step).toBe('tools');
+    const response = await mockStore.dispatch('setupTools', { params: { id } });
+    if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
+    const rows = (response.body as SetupTools).tools.filter(({ source }) => source === 'business');
+    expect(rows).toEqual([expect.objectContaining({
+      tool: 'desk.book-a-free-intro-call', source: 'business', status: 'needs_review', review_reason: 'new',
+      business: { title: 'Book a free intro call', description: booking.how, config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 } },
+      definition_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      pending_definition_text: null, pending_sha256: null, cards: [],
+    })]);
+    expect(desk.tools.slice(0, toolsBefore.length)).toEqual(toolsBefore);
+    expect(desk.tools).toHaveLength(toolsBefore.length + 1);
+    expect(desk.policy).toEqual(policyBefore);
   });
 
   it('names_the_cpa_booking_free_intro_call', async () => {
@@ -722,7 +806,8 @@ describe("setup's examples", () => {
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.'],
         ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
         ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.'],
-        ['Chen & Co.', 'Linda', 'chen-co-setup1', 'New clients start with a free 20-minute consult, and we price each engagement after it.'],
+        // The raw description states free and a duration, so it stays private before public lines are seeded.
+        ['Chen & Co.', 'Linda', 'chen-co-setup1', null],
       ],
       es: [
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.'],
