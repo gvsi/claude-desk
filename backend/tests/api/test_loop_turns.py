@@ -205,7 +205,58 @@ async def test_time_notes_refresh_after_ten_minutes_from_the_last_note(api_conn,
         assert len(await rows(api_conn, caller.session_id, "desk_context", "text")) == 1
     assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
         (f"The business's local time is Saturday, 2026-10-31, {at} (America/Los_Angeles).",
-         f"business_local_time:2026-10-31T{at}-07:00") for at in ("17:40", "17:50", "18:00")]
+         f"business_local_time:America/Los_Angeles|2026-10-31T{at}-07:00") for at in ("17:40", "17:50", "18:00")]
+
+
+async def test_time_notes_refresh_when_the_business_timezone_changes(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(2)])
+    for zone in ("America/Los_Angeles", "America/Vancouver"):
+        fake.desks[caller.desk_id].timezone = zone
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+    assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
+        (f"The business's local time is Saturday, 2026-10-31, 17:40 ({zone}).",
+         f"business_local_time:{zone}|2026-10-31T17:40-07:00")
+        for zone in ("America/Los_Angeles", "America/Vancouver")]
+
+
+async def test_time_notes_refresh_when_the_clock_moves_back_on_the_same_date(api_conn, caller, fake):
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(2)])
+    for minute in (40, 39):
+        fake.now = datetime(2026, 11, 1, 0, minute, tzinfo=UTC)
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+    assert await rows(api_conn, caller.session_id, "note", "text") == [
+        (f"The business's local time is Saturday, 2026-10-31, 17:{minute} (America/Los_Angeles).",)
+        for minute in (40, 39)]
+
+
+async def test_time_notes_refresh_after_ten_elapsed_minutes_across_dst_fall_back(api_conn, caller, fake):
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(3)])
+    for hour, minute, count in ((8, 55, 1), (9, 0, 1), (9, 5, 2)):
+        fake.now = datetime(2026, 11, 1, hour, minute, tzinfo=UTC)
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+        assert len(await rows(api_conn, caller.session_id, "note", "text")) == count
+    assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
+        (f"The business's local time is Sunday, 2026-11-01, {at} (America/Los_Angeles).",
+         f"business_local_time:America/Los_Angeles|2026-11-01T{at}{offset}")
+        for at, offset in (("01:55", "-07:00"), ("01:05", "-08:00"))]
+
+
+async def test_a_legacy_time_note_with_an_unknown_zone_is_replaced_on_the_next_turn(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
+    await append_message(api_conn, caller.ids, "note", ref_id="business_local_time:2026-10-31T17:40-07:00",
+                         text="The business's local time is Saturday, 2026-10-31, 17:40 (America/Los_Angeles).")
+    await said(api_conn, caller, "Can you help?")
+    model = ScriptedModel([response(reply("How can I help?"))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    assert await rows(api_conn, caller.session_id, "note", "ref_id") == [
+        ("business_local_time:2026-10-31T17:40-07:00",),
+        ("business_local_time:America/Los_Angeles|2026-10-31T17:40-07:00",)]
 
 
 async def test_time_notes_refresh_at_local_midnight_before_ten_minutes(api_conn, caller, fake):
@@ -236,6 +287,26 @@ async def test_a_fresh_context_keeps_only_the_latest_time_note(api_conn, caller,
     assert texts.count("The business's local time is") == 1
     assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles)" in texts
     assert "17:40" not in texts
+    assert len(await rows(api_conn, caller.session_id, "note", "text")) == 2
+
+
+async def test_a_fresh_context_on_a_new_time_note_omits_the_older_time(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(2)])
+    await said(api_conn, caller, "Can you help?")
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    fake.now += timedelta(minutes=10)
+    rename(fake, caller.desk_id, "desk_name")  # opens a fresh prompt context this turn
+    await said(api_conn, caller, "Can you help?")
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    texts = json.dumps(model.requests[-1].messages)
+    assert "<conversation_so_far>" in texts
+    assert texts.count("The business's local time is") == 1
+    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles)" in texts
+    assert "17:40" not in texts
+    assert len(await rows(api_conn, caller.session_id, "context_start", "model_context")) == 2
     assert len(await rows(api_conn, caller.session_id, "note", "text")) == 2
 
 

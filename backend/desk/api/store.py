@@ -43,7 +43,8 @@ What the model sees (Plan 02a, "Transcript contract"):
 Model-visible kinds and their wrappers (prompts.py's `ROW_TAGS`): `visitor_text` <visitor_message>, `agent_text`
 <agent_message>, `owner_say` <owner_said_to_visitor>, `whisper` <owner_whisper> (an untrusted owner note in the user
 turn, never system text), `action_update` <action_update decision_id state>, `desk_context` <desk_context>, `note`
-<note>, and a `delivered` row whose author is the Desk <shown_to_visitor>. Claude's own delivered replies are replayed
+<note> (its `ref_id` may be `business_local_time:{timezone}|{local_now}`), and a `delivered` row whose author is the
+Desk <shown_to_visitor>. Claude's own delivered replies are replayed
 through its `send_reply` calls; an owner's say reaches the model through its `owner_say` row. `status`, `triage` and
 `annotation` rows are never model-visible, and neither are `owner_joined` and `owner_left` (Plan 02b): each keeps a
 take-over or a hand-back in the transcript, holding the event the visitor's stream got (`event_seq`), while Claude
@@ -393,7 +394,7 @@ TIME_NOTE_REF = "business_local_time:"
 
 
 async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock) -> int | None:
-    """Keep the kernel's business time in a model-only note; its ref_id retains local_now with its UTC offset.
+    """Keep the kernel's business time in a model-only note; its ref_id retains the zone and offset-aware local_now.
 
     Read and write under the events lock, so a concurrent refresh can't append the same note twice."""
     local = datetime.fromisoformat(clock.local_now)
@@ -403,10 +404,14 @@ async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock)
         MESSAGES.c.ref_id.startswith(TIME_NOTE_REF, autoescape=True)).order_by(MESSAGES.c.n.desc()).limit(1)
     )).scalar_one_or_none()
     if previous is not None:
-        last = datetime.fromisoformat(previous.removeprefix(TIME_NOTE_REF))
-        if local.date() == last.date() and local.astimezone(UTC) - last.astimezone(UTC) < timedelta(minutes=10):
-            return None
-    return await append_message(conn, ids, "note", ref_id=TIME_NOTE_REF + clock.local_now,
+        zone, separator, timestamp = previous.removeprefix(TIME_NOTE_REF).partition("|")
+        # Older markers have no zone: replace them on the next turn.
+        if separator and zone == clock.timezone:
+            last = datetime.fromisoformat(timestamp)
+            elapsed = local.astimezone(UTC) - last.astimezone(UTC)
+            if local.date() == last.date() and timedelta(0) <= elapsed < timedelta(minutes=10):
+                return None
+    return await append_message(conn, ids, "note", ref_id=f"{TIME_NOTE_REF}{clock.timezone}|{clock.local_now}",
                                 text=TIME_NOTE.format(weekday=WEEKDAYS[clock.weekday], date=local.date().isoformat(),
                                                       time=local.strftime("%H:%M"), timezone=clock.timezone))
 
