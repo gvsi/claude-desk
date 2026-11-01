@@ -216,7 +216,7 @@ RIVERA_SAMPLE_WEEK: list[SampleSession] = [
                   "Here's the price for a water heater flush from the price list, and your visit is booked.",
                   ("quote", "booking_confirmed")),
     SampleSession(4, time(20, 15),
-                  "My neighbour got a quote from you this week. Can you send me a link so I can pay it for her? "
+                  "My neighbor got a quote from you this week. Can you send me a link so I can pay it for her? "
                   "She said the quote number is Q-4471.",
                   (SampleCall(30, "native.payment_link", {"quote_id": "Q-4471"}, "refused", check="no_such_quote"),),
                   45,
