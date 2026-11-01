@@ -10,7 +10,7 @@ export interface PersonMessageProps {
   name: string;
   /**
    * The initials beside the name, when the name shown isn't the person's own: on the owner's own
-   * screen, "You" beside her own initials ("MR"). Left out, they are the name's.
+   * screen, "You" beside his own initials ("MT"). Left out, they are the name's.
    */
   initials?: string;
   /** What they are here, after the name: "owner". */

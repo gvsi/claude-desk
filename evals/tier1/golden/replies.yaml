@@ -1,6 +1,6 @@
 # The reply check's golden fixtures, in English and Spanish. Each row is one draft checked with
 # POST /check_reply by a fresh visitor session on its own golden Desk (evals/tier1/golden_desk.py):
-# a Rivera copy made on Tuesday 2026-11-03 at 10:00 business time, whose owner is Maria Rivera.
+# a Turner copy made on Tuesday 2026-11-03 at 10:00 business time, whose owner is Mike Turner.
 #
 # Keys:
 #   id, requires   the case and the plans it needs: the last kernel plan it waits on, whose PR it gates
@@ -32,7 +32,7 @@
 # the evals' own scanner (evals/oracles/visible_text.py; a numbered list's markers read as the reply
 # check reads them, desk/markdown_text.py), and a quote card compared with its record:
 # the seed's drain clearing price in US dollars, and an expiry 72 hours after the case made the
-# quote, in business time; a handoff names Maria Rivera.
+# quote, in business time; a handoff names Mike Turner.
 
 # Plain prose passes
 
@@ -48,7 +48,7 @@
 
 - id: r-en-you-may        # "may" the verb, not the month
   requires: [01a]
-  prose: "You may want to ask Maria about that."
+  prose: "You may want to ask Mike about that."
   expect: {ok: true, language: en, blocks: [prose]}
 
 - id: r-en-feel-free      # "free" in ordinary use, not a price
@@ -201,12 +201,12 @@
 
 - id: r-md-numbered-steps
   requires: [01a]
-  prose: "1. Turn off the main valve\n2. Open the lowest tap\n3. Keep the area dry until Maria gets there"
+  prose: "1. Turn off the main valve\n2. Open the lowest tap\n3. Keep the area dry until Mike gets there"
   expect: {ok: true, language: en, blocks: [prose]}
 
 - id: r-md-bullets
   requires: [01a]
-  prose: "- Turn off the main valve\n- Keep the area dry until Maria gets there"
+  prose: "- Turn off the main valve\n- Keep the area dry until Mike gets there"
   expect: {ok: true, language: en, blocks: [prose]}
 
 - id: r-md-list-from-five
@@ -228,13 +228,13 @@
 
 - id: r-soft-promise-flag
   requires: [01a]
-  prose: "I'm sure Maria will sort it out for you."
+  prose: "I'm sure Mike will sort it out for you."
   soft_promise: flag
   expect: {ok: false, violations: [soft_promise]}
 
 - id: r-soft-promise-error
   requires: [01a]
-  prose: "I'm sure Maria will sort it out for you."
+  prose: "I'm sure Mike will sort it out for you."
   soft_promise: error
   expect: {ok: false, violations: [check_unavailable]}
 
@@ -242,20 +242,20 @@
 # (the owner's ruling of 2026-11-01); the final check makes its own try.
 - id: r-soft-unavailable-first-draft
   requires: [01a]
-  prose: "I'm sure Maria will sort it out for you."
+  prose: "I'm sure Mike will sort it out for you."
   final: false
   soft_promise: error
   expect: {ok: false, violations: [check_unavailable], blocks: []}
 
 - id: r-soft-promise-timeout
   requires: [01a]
-  prose: "I'm sure Maria will sort it out for you."
+  prose: "I'm sure Mike will sort it out for you."
   soft_promise: timeout
   expect: {ok: false, violations: [check_unavailable]}
 
 - id: r-soft-promise-unparsable
   requires: [01a]
-  prose: "I'm sure Maria will sort it out for you."
+  prose: "I'm sure Mike will sort it out for you."
   soft_promise: unparsable
   expect: {ok: false, violations: [check_unavailable]}
 
@@ -332,13 +332,13 @@
 
 - id: c-owner-only-fact
   requires: [01b]
-  prose: "Here is what Maria said."
+  prose: "Here is what Mike said."
   clauses: [{template: owner_said, fact: other-session-owner-statement}]
   expect: {ok: false, violations: [unknown_fact]}
 
 - id: c-drafted-owner-said
   requires: [01a]
-  prose: "Here is what Maria said."
+  prose: "Here is what Mike said."
   clauses: [{template: owner_said, fact: own-quote}]
   expect: {ok: false, violations: [unknown_fact]}
 

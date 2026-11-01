@@ -12,7 +12,7 @@ function OwnerPhone({ current = 'today', label }: { current?: PhoneTab; label?: 
     <PhoneFrame caption="Today, for the owner">
       <div style={{ flex: '1 1 auto', minHeight: 0, padding: '28px 20px 0' }}>
         <h2 className="cd-type-greeting" style={{ margin: 0 }}>
-          Good morning, Maria
+          Good morning, Mike
         </h2>
       </div>
       <PhoneTabBar current={current} hrefs={HREFS} label={label} />
@@ -106,9 +106,9 @@ export const OnSafety: Story = {
 
 /** A page with two phones of the same app names each bar for its phone. */
 export const OwnLabel: Story = {
-  args: { label: 'Tabs on Maria’s phone' },
+  args: { label: 'Tabs on Mike’s phone' },
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('navigation', { name: 'Tabs on Maria’s phone' })).toBeVisible();
+    await expect(canvas.getByRole('navigation', { name: 'Tabs on Mike’s phone' })).toBeVisible();
     await expect(canvas.queryByRole('navigation', { name: "The owner app's tabs" })).toBeNull();
   },
 };

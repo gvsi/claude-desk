@@ -22,7 +22,7 @@ pytestmark = pytest.mark.requires("01a", "02a")
 
 async def test_api_target_serves_health_and_a_copy(k: KernelTarget, api: ApiTarget, records):
     """`/api/health` answers with the kernel's own `Health`; the target's passcode, and no other,
-    gives a fresh Rivera copy, whose Desks are the kernel's, and the owner cookie for it."""
+    gives a fresh Turner copy, whose Desks are the kernel's, and the owner cookie for it."""
     async with DeskClient(api.base_url, api.passcode) as client:
         health = await client.health()
         assert health["ok"] is True and Health.model_validate(health["kernel"]) == k.health

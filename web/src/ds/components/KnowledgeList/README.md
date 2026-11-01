@@ -21,7 +21,7 @@ Two kinds of item are owner-only, and only one loses its title:
 - `items`, in the order the screen lists them. With none, nothing is drawn: no board draws the list empty, so the page leaves the section out.
 - Each item's `id` (`KnowledgeItem.item_id`), the row's key.
 - `title`: the item's own title, shown as its owner's words (`data-copy="user"`), whether customers can see the item or only the owner. Pass `null` only when the kernel withheld it, for an item it forces owner-only: the row then reads "A note only you can see", in the design system's words.
-- `detail`: the line under the title, in the screen's words: where the item came from ("From your answers in setup", "rivera-plumbing.example, read during setup") or when it was added ("Added Oct 27", formatted by the screen). The row formats nothing.
+- `detail`: the line under the title, in the screen's words: where the item came from ("From your answers in setup", "turner-plumbing.example, read during setup") or when it was added ("Added Oct 27", formatted by the screen). The row formats nothing.
 - `readers`: the item's `label.readers`, exactly as the kernel returned them. The row says "Customers can see this" when they include "public", and "Only you" otherwise. A withheld item always says "Only you", whatever its label, since the kernel withholds only what it forces owner-only.
 
 ## What it shows

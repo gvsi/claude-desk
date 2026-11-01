@@ -212,8 +212,8 @@ describe('the dev server mock', () => {
       // Tab B's open stream carries approval first, then the outcome, back into the chat.
       const followUp = await stream.until('message');
       expect(followUp.map((ev) => ev.type)).toEqual(['receipt', 'resolved', 'writing', 'message']);
-      expect(followUp[0]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: 'Maria Rivera approved this' });
-      expect(followUp[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" });
+      expect(followUp[0]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: 'Mike Turner approved this' });
+      expect(followUp[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Mike Turner's price list" });
     } finally {
       await stream.close();
     }
@@ -408,7 +408,7 @@ describe('the dev server mock', () => {
       'text/plain; charset=utf-8',
       'inline; filename="Invoice-drain-clearing.txt"',
     ]);
-    expect(await opened.text()).toMatch(/^Rivera Plumbing\nInvoice for Dana Whitfield\n/);
+    expect(await opened.text()).toMatch(/^Turner Plumbing\nInvoice for Dana Whitfield\n/);
     const again = await tab.send('GET', href);
     expect([again.status, await again.text()]).toEqual([404, 'This link was already opened or has expired. Ask in the chat for a new one.']);
     const unknown = await tab.send('GET', `${href}x`, undefined, { headers: { accept: 'application/json' } });

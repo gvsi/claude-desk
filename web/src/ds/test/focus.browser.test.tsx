@@ -120,7 +120,7 @@ describe('focus', () => {
   it('a_held_text_field_rings_on_keyboard_focus', async () => {
     // A held (read-only) field draws no caret, so caret-only focus would leave it nothing: like any
     // other control, it shows the warm ring when the keyboard reaches it.
-    const screen = await render(<AfterStart><TextField label="Business name" value="Rivera Plumbing" readOnly onChange={noop} /></AfterStart>);
+    const screen = await render(<AfterStart><TextField label="Business name" value="Turner Plumbing" readOnly onChange={noop} /></AfterStart>);
     const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
     const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] input');
     if (field === null) throw new Error('no held field');

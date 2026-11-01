@@ -58,12 +58,12 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
 AMENITY_WORDING = ('Free parking', 'Complimentary coffee', 'Estacionamiento gratis', 'No cost parking')
 INTAKE = {'block': 'intake', 'questions': ['What?']}
 PAYMENT = {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}
-SEEDED_URGENT = 'desk.emergency-callback'   # the Rivera seed's urgent business tool, on every copy
+SEEDED_URGENT = 'desk.emergency-callback'   # the Turner seed's urgent business tool, on every copy
 
 
 async def put_card(kernel, ro_read, title, config):
     """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows,
-    leaving out the Rivera seed's own urgent tool (`SEEDED_URGENT`), which every copy has."""
+    leaving out the Turner seed's own urgent tool (`SEEDED_URGENT`), which every copy has."""
     from desk.api.kernel_client import KernelFailed
 
     http, schema, _ = kernel
@@ -299,7 +299,7 @@ async def test_reviewed_intake_decides_executes_and_cannot_select_its_config(ker
     assert result.state == 'succeeded' and result.model_view == {'lead_id': result.model_view['lead_id'], 'saved': True}
     assert result.facts == []
     receipt = await read_decision(session, allowed.decision_id)
-    assert receipt.visitor_plain == '“New client intake”: details saved for Maria Rivera'
+    assert receipt.visitor_plain == '“New client intake”: details saved for Mike Turner'
     [fact] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.facts WHERE fact_id = %s',
                      ('lead:' + result.model_view['lead_id'],))
     assert fact['readers'] == ['owner']
@@ -547,7 +547,7 @@ async def test_reviewed_typed_booking_books_its_slot_and_keeps_its_note_owner_on
     assert note['readers'] == ['owner']
     assert {claim['key']: claim['value'] for claim in note['claims']}['note'] == args['note']
     assert (await read_decision(session, allowed.decision_id)).visitor_plain == (
-        '“Book a consult”: booked on Maria Rivera\'s calendar')
+        '“Book a consult”: booked on Mike Turner\'s calendar')
     checked = await session.call('POST /check_reply', CheckReplyRequest(draft=ReplyDraft(
         session_id=visitor.state.session_id, generation=visitor.state.generation, prose='Here are the details.',
         clauses=[Clause(template='booking_confirmed', fact_id=fact.fact_id)])))

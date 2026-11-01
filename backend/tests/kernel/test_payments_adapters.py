@@ -9,7 +9,7 @@ owner card. Before either runs, the execution re-check lists the server's tools 
 definition refuses the call and puts the tool back to "needs review", and a server that can't be
 reached refuses it with "This isn't available right now".
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them, with Dana's two past payments
+Tests run on Turner Plumbing copies as `POST /copies` seeds them, with Dana's two past payments
 ($180 drain clearing, $250 leak repair) and Bob's one ($150 water heater flush) at the run's mock
 payments server (`mockpay`). Tests that decide draft and confirm `CHARGES` (auto, record owners) and
 `REFUNDS` (ask, record owners) first, so they need the solver (`solver`).
@@ -57,7 +57,7 @@ REFUNDS = RuleCard(card_id="refunds", applies_to=REFUND, mode="ask", who="record
 
 
 async def payments_copy(app: FastAPI, client, *extra: RuleCard) -> Rivera:
-    """A Rivera copy whose rules are `CHARGES`, `REFUNDS` and `extra`, drafted and confirmed at the
+    """A Turner copy whose rules are `CHARGES`, `REFUNDS` and `extra`, drafted and confirmed at the
     seed's $500 money cap."""
     copy = await rivera(app, client)
     await draft_and_confirm(client, copy.owner_token, copy.desk_id, [CHARGES, REFUNDS, *extra])

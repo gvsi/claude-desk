@@ -38,7 +38,7 @@ const SAMPLES: Record<RuleName, string[]> = {
   price: ['How much is drain clearing?', '¿Cuánto cuesta?'],
   area: ['Do you work in Alameda?', '¿Trabajan en Alameda?'],
   callback: ['Can you call me back?', 'Please call me tonight', 'Llámame'],
-  talk: ["I'd like to talk to Maria Rivera.", 'Quiero hablar con Maria'],
+  talk: ["I'd like to talk to Mike Turner.", 'Quiero hablar con Mike'],
   outage: ['outage'],
   other: ['Hello there', 'Hola'],
 };
@@ -208,7 +208,7 @@ describe('mock payloads', () => {
   it('setup_desk_tools_say_why_they_wait_for_review', async () => {
     // A new Desk's Documents and Payments tools, and the mock payments server's once connected,
     // wait for review as a connect never confirmed ("new"); the rest are on and wait for nothing.
-    const start = { description: 'Rivera Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles', idempotency_key: 'key-1' };
+    const start = { description: 'Turner Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles', idempotency_key: 'key-1' };
     const started = (await body('startSetup', { body: start })) as SetupState;
     const id = started.interview_id;
     await body('setupConnect', { params: { id }, body: { server: 'mock_payments' } });

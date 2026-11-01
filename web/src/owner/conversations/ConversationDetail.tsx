@@ -218,6 +218,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const read = chat.data;
   const { state } = read;
   const who = summary ? whoLabel(summary) : fallbackName(state);
+  // With no name on record, the title already says what they are ("Agent"), so the level isn't said twice.
+  const level = levelOf(state);
   const latest = latestOf(read.items);
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
@@ -302,7 +304,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
         <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
           {who}
         </h2>
-        <Pill>{levelOf(state)}</Pill>
+        {level !== who ? <Pill>{level}</Pill> : null}
         {state.kind === 'agent' ? (
           <Pill>
             <StatusDot tone="handled" />

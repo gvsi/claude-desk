@@ -7,7 +7,7 @@
 - The line, while a visitor's turn is between `EvWriting` and the delivered message or the turn's end: three dots where Claude's reply will appear, with "Claude is writing" for screen readers only.
 - In the setup interview while Claude prepares its next question.
 - The bubble (`variant="bubble"`) when the visitor is typing, with their name, on the owner's conversation screen: at the right, where their next bubble will appear.
-- The person form (`variant="person"`) when the owner or another person is typing on their side, at the left: on the public page after a take-over, with the name their messages show ("Maria Rivera").
+- The person form (`variant="person"`) when the owner or another person is typing on their side, at the left: on the public page after a take-over, with the name their messages show ("Mike Turner").
 - Put the bubble or the person form in a `TranscriptRow` at the end of the `Transcript`, where the next message will appear; the message replaces it.
 - Claude never types in a bubble or a person form: Claude's writing is always the line.
 

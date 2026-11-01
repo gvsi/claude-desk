@@ -16,16 +16,16 @@ import { one } from './spec.ts';
 
 const OWNER = rivera.business.ownerName;
 const said = rivera.events.takeOver.find((event: SseEvent): event is EvMessage => event.type === 'message');
-if (!said) throw new Error('the Rivera fixture has no owner message in its take-over');
+if (!said) throw new Error('the Turner fixture has no owner message in its take-over');
 
-/** Dana's chat on the public page after she asked for Maria: Maria joined, then types or has sent. */
+/** Dana's chat on the public page after she asked for Mike: Mike joined, then types or has sent. */
 function DanaSeesMaria({ landed }: { landed: boolean }) {
   return (
-    <Transcript label="Conversation with Rivera Plumbing">
+    <Transcript label="Conversation with Turner Plumbing">
       <TranscriptRow>
         <VisitorMessage text={`I'd like to talk to ${OWNER}.`} />
       </TranscriptRow>
-      <SystemLine text={`${OWNER} joined the chat`} initials="MR" />
+      <SystemLine text={`${OWNER} joined the chat`} initials="MT" />
       <TranscriptRow>
         {landed ? <PersonMessage name={OWNER} blocks={said!.blocks} language={said!.language} /> : <WritingIndicator variant="person" who={OWNER} language="en" />}
       </TranscriptRow>
@@ -43,13 +43,13 @@ const BUSY_ROWS = [
 function OwnerTypingBusy() {
   return (
     <Sheet title="Owner typing and busy buttons" gap={32}>
-      <Panel label="Dana’s view on the public page, while Maria types" width={380} compact>
+      <Panel label="Dana’s view on the public page, while Mike types" width={380} compact>
         <DanaSeesMaria landed={false} />
       </Panel>
-      <Panel label="Maria’s message lands: same left edge, nothing jumps" width={380} compact>
+      <Panel label="Mike’s message lands: same left edge, nothing jumps" width={380} compact>
         <DanaSeesMaria landed />
       </Panel>
-      <Panel label="Maria’s own screen, Dana typing: the signed bubble, for contrast" width={376} compact>
+      <Panel label="Mike’s own screen, Dana typing: the signed bubble, for contrast" width={376} compact>
         <Transcript label={`Conversation with ${rivera.people.dana.name}`}>
           <TranscriptRow>
             <VisitorMessage text="Yes please. Anything sooner though?" />
@@ -109,7 +109,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Typing-Owner-Busy',
     canvasNote: [
-      'The board’s panels from WritingIndicator, PersonMessage, SystemLine and Button. Maria’s message is the Rivera fixture’s, where the board writes that she is looking at the photos.',
+      'The board’s panels from WritingIndicator, PersonMessage, SystemLine and Button. Mike’s message is the Turner fixture’s, where the board writes that he is looking at the photos.',
       'Busy buttons show the spinner signed later the same day in place of the board’s three dots, at the same width and only on the pressed button; the busy row leaves out the red refusals, which only an approval card’s Deny shows.',
       'The board’s title, explanations and “How it behaves” list are sign-off notes and stay in the canvas; its dashed outlines marked parts before they were built.',
     ].join(' '),
@@ -122,9 +122,9 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas }) => {
-    // Owner typing: her initials and name as on her messages, three dots where her words start,
-    // no fill and no bubble; screen readers hear "Maria Rivera is typing".
-    const typing = canvas.getByRole('region', { name: 'Dana’s view on the public page, while Maria types' });
+    // Owner typing: his initials and name as on his messages, three dots where his words start,
+    // no fill and no bubble; screen readers hear "Mike Turner is typing".
+    const typing = canvas.getByRole('region', { name: 'Dana’s view on the public page, while Mike types' });
     // The joined line is a status too; the typing line is the one that says so.
     const status = within(typing)
       .getAllByRole('status')
@@ -136,14 +136,14 @@ export const Board: Story = {
     const avatar = one(frame, '.cd-person-message__avatar');
     await expect(avatar).toHaveAttribute('aria-hidden', 'true');
 
-    // Her message lands from the same left edge.
-    const landed = canvas.getByRole('region', { name: 'Maria’s message lands: same left edge, nothing jumps' });
+    // His message lands from the same left edge.
+    const landed = canvas.getByRole('region', { name: 'Mike’s message lands: same left edge, nothing jumps' });
     const landedAvatar = one(landed, '.cd-person-message__avatar');
     const rowLeft = (el: HTMLElement) => (el.closest('.cd-transcript-row') as HTMLElement).getBoundingClientRect().left;
     await expect(avatar.getBoundingClientRect().left - rowLeft(avatar)).toBe(landedAvatar.getBoundingClientRect().left - rowLeft(landedAvatar));
 
-    // Maria's own screen keeps the visitor's bubble.
-    const own = canvas.getByRole('region', { name: 'Maria’s own screen, Dana typing: the signed bubble, for contrast' });
+    // Mike's own screen keeps the visitor's bubble.
+    const own = canvas.getByRole('region', { name: 'Mike’s own screen, Dana typing: the signed bubble, for contrast' });
     await expect(within(own).getByRole('status')).toHaveTextContent('Dana is typing');
     await expect(own.querySelector('.cd-writing-indicator__bubble')).not.toBeNull();
 

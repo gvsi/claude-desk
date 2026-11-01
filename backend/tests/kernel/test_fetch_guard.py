@@ -18,9 +18,9 @@ import pytest
 from desk.kernel_service import fetch_guard, repo
 from desk.kernel_service.fetch_guard import FetchRefused
 
-HOST = "rivera-plumbing.example"
+HOST = "turner-plumbing.example"
 PUBLIC = "93.184.215.14"
-PAGE = "<html><head><title>Rivera Plumbing</title></head><body><p>Drains and leaks in Oakland.</p></body></html>"
+PAGE = "<html><head><title>Turner Plumbing</title></head><body><p>Drains and leaks in Oakland.</p></body></html>"
 
 
 class Resolver:
@@ -122,7 +122,7 @@ async def test_rebinding_resolves_once_and_connects_to_the_checked_address():
     assert request.headers["host"] == HOST
     assert request.extensions["sni_hostname"] == HOST
     assert (page.final_url, page.content_type, page.title, page.text) == (
-        f"https://{HOST}/services?area=oakland#top", "text/html", "Rivera Plumbing", "Drains and leaks in Oakland.")
+        f"https://{HOST}/services?area=oakland#top", "text/html", "Turner Plumbing", "Drains and leaks in Oakland.")
 
     # an IPv6 answer goes in the URL in brackets, and a port that isn't the scheme's stays in the Host
     resolver, site = Resolver({HOST: ["2606:4700::1111"]}), Site()
@@ -227,11 +227,11 @@ async def test_size_and_type_limits():
 
     # the page as plain text: no script or style, whitespace collapsed, in its charset, cut to size
     page = await fetched(body((
-        "<title>  Rivera\n Plumbing\x00 </title><style>p { color: red }</style><script>alert('hi')</script>"
+        "<title>  Turner\n Plumbing\x00 </title><style>p { color: red }</style><script>alert('hi')</script>"
         "<h1>Café &amp; drains</h1><p>Open\t8–6</p><div>Oakland</div><!-- a note -->"
     ).encode("latin-1", "replace"), "TEXT/HTML; charset=ISO-8859-1"))
     assert (page.content_type, page.title, page.text) == (
-        "text/html", "Rivera Plumbing", "Café & drains Open 8?6 Oakland")
+        "text/html", "Turner Plumbing", "Café & drains Open 8?6 Oakland")
     page = await fetched(html(f"<title>{'t' * 300}</title><p>{'word ' * 10_000}</p>"))
     assert (len(page.title), len(page.text)) == (fetch_guard.MAX_TITLE, fetch_guard.MAX_TEXT)
     page = await fetched(body(b"Open 8 to 6.\r\n\r\nCall."))
@@ -265,7 +265,7 @@ async def test_scheme_port_userinfo_rejected():
         ("javascript:alert(1)", "scheme"), (HOST, "scheme"),
         (f"https://{HOST}:8443/", "port"), (f"http://{HOST}:22/", "port"), ("http://127.0.0.1:6379/", "port"),
         (f"http://{HOST}:0/", "port"),
-        (f"https://maria:secret@{HOST}/", "userinfo"), (f"https://maria@{HOST}/", "userinfo"),
+        (f"https://maria:secret@{HOST}/", "userinfo"), (f"https://mike@{HOST}/", "userinfo"),
         ("https:///no-host", "error"),
     ]
     for url, reason in cases:
@@ -273,7 +273,7 @@ async def test_scheme_port_userinfo_rejected():
     assert (resolver.lookups, site.requests) == ([], [])          # refused before any lookup
     # a redirect is checked from scratch too
     for location, reason in ((f"ftp://{HOST}/", "scheme"), (f"https://{HOST}:8443/", "port"),
-                             (f"https://maria@{HOST}/", "userinfo")):
+                             (f"https://mike@{HOST}/", "userinfo")):
         site = Site(lambda request, location=location: redirect(location) if request.url.path == "/" else html(PAGE))
         assert await refused(f"https://{HOST}/", resolver, site) == reason, location
         assert len(site.requests) == 1

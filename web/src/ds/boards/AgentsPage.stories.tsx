@@ -38,7 +38,7 @@ function AgentsPage() {
           <li>Get a quote from the price list</li>
           <li>Find open times and book a visit</li>
           <li>Pay the service call deposit within a signed limit</li>
-          <li>Ask Maria for a callback</li>
+          <li>Ask Mike for a callback</li>
         </ul>
       </AgentsCard>
       <AgentsCard title="How agents prove who they are">
@@ -94,7 +94,7 @@ export const Board: Story = {
     const banner = canvas.getByRole('banner');
     await expect(Math.round(banner.getBoundingClientRect().height)).toBe(76);
     const title = canvas.getByRole('heading', { level: 1 });
-    await expect(title).toHaveTextContent('Rivera Plumbing for AI agents');
+    await expect(title).toHaveTextContent('Turner Plumbing for AI agents');
     expectComputed(title, SPEC.pageTitle);
     const main = canvas.getByRole('main');
     const column = one(main, '.board-agents__cards');

@@ -12,7 +12,7 @@ import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.t
 
 const { views } = rivera.connectors;
 
-/** Rivera Plumbing's tools step as the board draws it: four built in, two to add, Stripe and its two tools to connect. */
+/** Turner Plumbing's tools step as the board draws it: four built in, two to add, Stripe and its two tools to connect. */
 const BUILT_IN: SetupToolsRow[] = [
   { connector: views.quotes, state: 'on' },
   { connector: views.bookings, state: 'on' },

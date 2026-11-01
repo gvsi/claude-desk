@@ -32,8 +32,8 @@ from tests.api.test_triage import REPLY_TRIAGE, answer
 # A draft the kernel stops on a promise word (the fake's forced `promise_word` matches its first 40 characters), the
 # rewrite that passes, and a rewrite a test has stopped too. None has a digit, so the fake's number rules leave them be.
 DRAFT = "Your booking is confirmed for tomorrow morning, see you then."
-REWRITE = "Maria confirms each visit herself; here are her hours."
-SECOND_DRAFT = "I promise Maria will be there first thing tomorrow."
+REWRITE = "Mike confirms each visit himself; here are his hours."
+SECOND_DRAFT = "I promise Mike will be there first thing tomorrow."
 
 
 @pytest.fixture

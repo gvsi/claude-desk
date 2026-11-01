@@ -25,7 +25,7 @@ async def test_new_desk_has_no_seed_memory(app, client):
     copy = await rivera(app, client)
     created = await post_desk(client, copy, new_desk(name="Chen CPA"))
     owner = await owner_of(client, copy.owner, created.json()["desk_id"])
-    _, result = await owner.run("native.read_memory", {"query": "business trade hours website Rivera"})
+    _, result = await owner.run("native.read_memory", {"query": "business trade hours website Turner"})
     assert result.model_view == {"items": [], "simulated": True}
 
 

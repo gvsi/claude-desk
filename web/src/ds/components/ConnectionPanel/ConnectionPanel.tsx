@@ -9,7 +9,7 @@ import { SectionHeader } from '../SectionHeader/SectionHeader.tsx';
 
 import './ConnectionPanel.css';
 
-/** One line of a connection's details, in the screen's words: "Account", "Rivera Plumbing, test mode (mock)". */
+/** One line of a connection's details, in the screen's words: "Account", "Turner Plumbing, test mode (mock)". */
 export interface ConnectionDetail {
   label: string;
   value: string;

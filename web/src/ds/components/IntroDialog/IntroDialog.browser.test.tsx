@@ -156,7 +156,7 @@ it('the_exit_closes_at_once_under_reduced_motion', async () => {
 
 it('an_item_without_icon_or_detail_shows_neither', async () => {
   const dialog = await runWith({
-    thingsToTry: [{ title: 'Look around' }, { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' }],
+    thingsToTry: [{ title: 'Look around' }, { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person' }],
   });
   const items = [...dialog.querySelectorAll('li')];
   expect(items).toHaveLength(2);
@@ -164,7 +164,7 @@ it('an_item_without_icon_or_detail_shows_neither', async () => {
   expect(items[0]?.querySelector('.cd-intro__thing-detail')).toBeNull();
   expect(items[0]?.textContent).toBe('Look around');
   expect(items[1]?.querySelector('svg')).not.toBeNull();
-  expect(items[1]?.querySelector('.cd-intro__thing-detail')?.textContent).toBe('Rivera’s public page opens in a new tab.');
+  expect(items[1]?.querySelector('.cd-intro__thing-detail')?.textContent).toBe('Turner’s public page opens in a new tab.');
 });
 
 it('an_unknown_error_code_reads_as_unreachable', async () => {

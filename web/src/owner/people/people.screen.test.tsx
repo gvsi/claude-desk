@@ -140,14 +140,14 @@ function voicemailIn(root: HTMLElement): string | null {
 /** The sentence a voicemail says only with an urgent callback tool on. */
 const EMERGENCY = 'For an emergency, leave a message';
 
-/** Turns Rivera's urgent callback tool on or off on the Desk, as the owner would elsewhere. */
+/** Turns Turner's urgent callback tool on or off on the Desk, as the owner would elsewhere. */
 function riverasUrgentTool(status: 'enabled' | 'disabled'): void {
   const desk = mockStore.world.desk(RIVERA.deskId);
   if (!desk) throw new Error('the mock has the main Desk');
   desk.tools = desk.tools.map((row) => (row.tool === 'desk.emergency-callback' ? { ...row, status, review_reason: null } : row));
 }
 
-/** Rivera's business and owner, as the share kit names them. */
+/** Turner's business and owner, as the share kit names them. */
 const RIVERA_BUSINESS = rivera.business.name;
 const RIVERA_OWNER = rivera.business.ownerName;
 
@@ -170,7 +170,7 @@ function stubClipboard() {
 
 /** A setup interview made through the mock, its rules confirmed, at the owner's preview before going live. */
 async function setupAtPreview(): Promise<SetupState> {
-  const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
+  const description = "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
   const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA, idempotency_key: newIdempotencyKey() } });
   // A new interview answers 201, as the API's does.
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
@@ -605,8 +605,8 @@ describe('share', () => {
     await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
     await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
 
-    // The ready-made words, each with its Copy, which copies its words. Rivera's urgent callback
-    // tool is on, so once the Desk's tools are read the voicemail says Maria calls back about an
+    // The ready-made words, each with its Copy, which copies its words. Turner's urgent callback
+    // tool is on, so once the Desk's tools are read the voicemail says Mike calls back about an
     // emergency.
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Ready-made words' })).toBeVisible();
     const blocks = SHARE_COPY(business, owner, url, { urgentCallback: true });
@@ -656,7 +656,7 @@ describe('share', () => {
     expect(voicemail(ofLinda.screen.container)).toBe(lindaWords);
     await cleanup();
 
-    // Rivera's Desk, whose urgent callback tool the seed turns on as the kernel's does: the voicemail
+    // Turner's Desk, whose urgent callback tool the seed turns on as the kernel's does: the voicemail
     // word for word, emergency callback included, once its tools are read. Until then it is drawn
     // without that sentence, so it never draws a promise and takes it back.
     const rivera = mockStore.world.desk(RIVERA.deskId);
@@ -670,13 +670,13 @@ describe('share', () => {
     expect(voicemail(ofRivera.screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
     held.release();
     await expect.poll(() => voicemail(ofRivera.screen.container)).toBe(
-      'You’ve reached Rivera Plumbing. For quotes and bookings, visit ' +
-        `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.`,
+      'You’ve reached Turner Plumbing. For quotes and bookings, visit ' +
+        `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Mike Turner will call you back.`,
     );
   });
 
   it('a_cached_emergency_promise_waits_for_shares_own_read', async () => {
-    // Rules read with Rivera's urgent callback on, a read the app keeps; then the tool goes off
+    // Rules read with Turner's urgent callback on, a read the app keeps; then the tool goes off
     // elsewhere. Share, in the same app, leaves the promise out while its own read is out, and
     // after it lands with the tool off.
     const { screen, router } = await renderRoute(`${DESK}/rules`);

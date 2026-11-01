@@ -105,7 +105,7 @@ it('touch_hit_areas_in_the_composer_stay_apart', async () => {
         helper="Rule changes are shown to you before they apply."
         {...tools}
       />
-      <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" {...tools} />
+      <Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" {...tools} />
     </div>,
   );
   try {

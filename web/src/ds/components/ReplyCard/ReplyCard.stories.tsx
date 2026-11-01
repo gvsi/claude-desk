@@ -91,7 +91,7 @@ export const BookingConfirmed: Story = {
     // The kernel's booking card: the date, the arrival window and who comes, with no booking ID.
     await expect(canvas.getByText('Tuesday, November 3')).toBeVisible();
     await expect(canvas.getByText('2:00 pm to 4:00 pm')).toBeVisible();
-    await expect(canvas.getByText('With Maria Rivera')).toBeVisible();
+    await expect(canvas.getByText('With Mike Turner')).toBeVisible();
     await expect(canvas.queryByText(/B-77/)).toBeNull();
     // The outcome's check is sage, beside the word that says the same, and hidden from screen readers.
     const check = canvasElement.querySelector('.cd-reply-card__check');
@@ -180,10 +180,10 @@ export const OwnerSaid: Story = {
   args: { block: blocks.owner_said.en },
   parameters: {
     canvas: 'N-Public-Handoff-Run1',
-    canvasNote: "The board shows Maria's words as her own message while she is in the chat; passed through Claude, they arrive verbatim in this card.",
+    canvasNote: "The board shows Mike's words as his own message while he is in the chat; passed through Claude, they arrive verbatim in this card.",
   },
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('article', { name: 'Maria Rivera said' })).toBeVisible();
+    await expect(canvas.getByRole('article', { name: 'Mike Turner said' })).toBeVisible();
   },
 };
 
@@ -302,7 +302,7 @@ export const BookingConfirmedEs: Story = {
     await expect(canvas.getByRole('article', { name: 'Reservado' })).toBeVisible();
     await expect(canvas.getByText('martes 3 de noviembre')).toBeVisible();
     await expect(canvas.getByText('De 14:00 a 16:00')).toBeVisible();
-    await expect(canvas.getByText('Con Maria Rivera')).toBeVisible();
+    await expect(canvas.getByText('Con Mike Turner')).toBeVisible();
   },
 };
 
@@ -333,8 +333,8 @@ export const DocumentLinkEs: Story = {
 
 const longDocument: CardBlock = {
   ...blocks.document_link.es,
-  title: 'Factura_destape_de_desagüe_y_cambio_de_junta_del_calentador_Rivera_Plumbing_para_Lucía_Herrera.pdf',
-  text: 'Factura_destape_de_desagüe_y_cambio_de_junta_del_calentador_Rivera_Plumbing_para_Lucía_Herrera.pdf',
+  title: 'Factura_destape_de_desagüe_y_cambio_de_junta_del_calentador_Turner_Plumbing_para_Lucía_Herrera.pdf',
+  text: 'Factura_destape_de_desagüe_y_cambio_de_junta_del_calentador_Turner_Plumbing_para_Lucía_Herrera.pdf',
 };
 
 const longQuote: CardBlock = {

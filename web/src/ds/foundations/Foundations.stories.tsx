@@ -21,13 +21,13 @@ const STEMS: Record<string, string> = {
 };
 
 const SAMPLES: Record<string, string> = {
-  greeting: 'Good morning, Maria',
+  greeting: 'Good morning, Mike',
   'page-title': 'Conversations',
   'intro-title': 'A Claude front desk for your business',
   wordmark: 'Claude Desk',
   summary: 'Dana wants to move her drain cleaning to the weekend.',
   reply: 'I can book that for you. Which of these times works best?',
-  'illustration-reply': 'You’re booked, Dana. Maria will text you when she’s on her way.',
+  'illustration-reply': 'You’re booked, Dana. Mike will text you when he’s on his way.',
   body: 'Claude answers for your business when you can’t.',
   control: 'Allow this time',
   section: 'Needs you',
@@ -37,7 +37,7 @@ const SAMPLES: Record<string, string> = {
   pill: 'Plumbing',
   count: '3',
   'badge-caps': 'Preview',
-  'brand-name': 'Rivera Plumbing',
+  'brand-name': 'Turner Plumbing',
   amount: '$20.00',
   figure: '$1,860',
   'figure-small': '14',

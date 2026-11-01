@@ -118,7 +118,7 @@ async def test_take_over_bumps_the_generation_and_announces_the_owner(app, brows
     assert sent.headers[OWNER] == chat.owner_token and VISITOR not in sent.headers
     # The visitor sees the owner join, by the kernel's name for them, and nothing else.
     assert [event.model_dump() for event in await stored_events(engine, chat.session_id)] == [
-        {"type": "owner_joined", "name": "Maria Rivera"}]
+        {"type": "owner_joined", "name": "Mike Turner"}]
     # Claude reads that the owner took over at its next call; the note wakes no turn.
     assert await rows(engine, chat.session_id, "note", "text", "wake") == [(NOTES["taken_over"], False)]
     await app.state.runtime.runner.drain()
@@ -156,7 +156,7 @@ async def test_take_over_of_a_paused_session(app, browser, fake, kernel_http, mo
     assert ledgered(fake, chat.session_id, "takeover") == [("takeover", {"from": "paused", "to": "owner",
                                                                           "generation": 1})]
     assert [event.model_dump() for event in await stored_events(engine, chat.session_id)] == [
-        {"type": "owner_joined", "name": "Maria Rivera"}]
+        {"type": "owner_joined", "name": "Mike Turner"}]
     assert await rows(engine, chat.session_id, "note", "text", "wake") == [(NOTES["taken_over"], False)]
     await app.state.runtime.runner.drain()
     assert model.requests == []
@@ -215,7 +215,7 @@ async def test_say_is_checked_and_delivered_as_the_owner(app, browser, fake, ker
         "type": "message", "message_id": verdict["message_id"], "generation": 1, "author": "owner", "language": "en",
         "handoff": False, "blocks": verdict["blocks"], "visitor_plain": verdict["visitor_plain"],
         "ledger_seq": verdict["ledger_seq"], "signature": verdict["signature"]}
-    assert verdict["visitor_plain"] == "Written by Maria Rivera"
+    assert verdict["visitor_plain"] == "Written by Mike Turner"
     assert await rows(engine, chat.session_id, "delivered", "author", "ref_id") == [("owner", verdict["message_id"])]
     items = (await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")).json()["items"]
     assert [(item["kind"], item["event"].get("author")) for item in items] == [("owner_joined", None),
@@ -279,7 +279,7 @@ async def test_say_needs_take_over(app, browser, fake, kernel_http, model, engin
     # Claude has the conversation, or the breaker paused it: the owner's words would reach no one as theirs.
     for mode in ("ai", "paused"):
         fake.set_mode(chat.session_id, mode)
-        refused = await message(chat, "Hi, this is Maria.")
+        refused = await message(chat, "Hi, this is Mike.")
         assert (refused.status_code, refused.json()) == (409, {"error": "take_over_first"}), mode
     assert fake.called("POST /owner/messages") == []
     assert await stored_events(engine, chat.session_id) == []
@@ -341,7 +341,7 @@ async def test_visitor_messages_during_take_over_do_not_wake_claude(app, browser
     assert (await mode_change(chat, "takeover", 0)).status_code == 200
 
     async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
-        sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Is that Maria?"})
+        sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Is that Mike?"})
         assert sent.status_code == 202
         await app.state.runtime.runner.drain()
         said = await message(chat, "Yes, it's me. How can I help?")
@@ -353,10 +353,10 @@ async def test_visitor_messages_during_take_over_do_not_wake_claude(app, browser
     assert model.requests == []
     assert types(events) == ["owner_joined", "message"] and events[1][1].author == "owner"
     assert await rows(engine, chat.session_id, "visitor_text", "text", "wake", "model_seq") == [
-        ("Is that Maria?", False, None)]
+        ("Is that Mike?", False, None)]
     owner_items = (await chat.owner.get(chat.path())).json()["items"]
     assert [(item["kind"], item["text"]) for item in owner_items] == [("owner_joined", None),
-                                                                        ("visitor_text", "Is that Maria?"),
+                                                                        ("visitor_text", "Is that Mike?"),
                                                                         ("delivered", None)]
 
 
@@ -368,7 +368,7 @@ async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser
     assert (await answer(held, "allow_once")).json()["decision"]["state"] == "executed"
     await resolved(engine, held.session_id)
     calls_before = len(model.requests)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
 
     async with Stream(app, events_path(held.slug, "after=4"), headers=[cookie(held.token)]) as stream:
         await stream.until(lambda events: "resolved" in types(events))
@@ -410,7 +410,7 @@ async def test_resume_after_breaker_pause(app, browser, fake, kernel_http, model
     # During the pause the owner allows the held request: a pause doesn't cancel it, so it runs.
     assert (await answer(held, "allow_once")).json()["decision"]["state"] == "executed"
     await resolved(engine, held.session_id)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     fake.calls.clear()
 
     resumed = await held.owner.post(f"{path}/resume", json={"generation": 0})
@@ -430,7 +430,7 @@ async def test_resume_after_breaker_pause(app, browser, fake, kernel_http, model
     assert types(events) == ["receipt", "resolved", "writing", "message", "turn_end"]
     assert (events[0][1].decision_id, events[0][1].state) == (held.decision_id, "approved")
     assert (events[1][1].decision_id, events[1][1].state) == (held.decision_id, "executed")
-    assert events[3][1].blocks[0].text == "Good news: Maria said yes." and events[3][1].generation == 1
+    assert events[3][1].blocks[0].text == "Good news: Mike said yes." and events[3][1].generation == 1
     follow_up = json.dumps(model.requests[-1].messages)
     fact_ids = " ".join(fact.fact_id for fact in fake.decisions[held.decision_id].result.facts)
     assert fact_ids and (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\"'
@@ -605,7 +605,7 @@ async def test_owner_transcript_shows_where_the_owner_joined_and_left(app, brows
     # Each is the event the visitor's stream got, as it was sent: the owner's name as the kernel had it.
     live = sent_events(stream)
     assert [event["type"] for event in live] == ["owner_joined", "message", "owner_left"]
-    assert joined["event"] == live[0] == {"type": "owner_joined", "name": "Maria Rivera"}
+    assert joined["event"] == live[0] == {"type": "owner_joined", "name": "Mike Turner"}
     assert left["event"] == live[2] == {"type": "owner_left"}
     assert said["event"] == live[1] and said["event"]["author"] == "owner"
     # Each stands at the moment its event was published, in the same transaction.
@@ -638,10 +638,10 @@ async def test_visitor_reload_shows_where_the_owner_joined_and_left(app, browser
     live = sent_events(stream)
     desk = fake.desks[fake.sessions[chat.session_id].desk_id]
     await kernel_http.owner(chat.owner_token).call("PUT /desks/{id}/business", DeskBusinessRequest(
-        name=desk.business_name, owner_display_name="Maria Rivera Ortiz", timezone=desk.timezone,
+        name=desk.business_name, owner_display_name="Mike Turner Ortiz", timezone=desk.timezone,
         brand=dict(desk.brand)), path={"id": desk.desk_id})
     assert db.execute(f"SELECT owner_display_name FROM {FAKE_RO_SCHEMA}.businesses WHERE business_id = %s",
-                      (desk.business_id,)).fetchone() == ("Maria Rivera Ortiz",)
+                      (desk.business_id,)).fetchone() == ("Mike Turner Ortiz",)
 
     reloaded = (await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")).json()
 
@@ -649,7 +649,7 @@ async def test_visitor_reload_shows_where_the_owner_joined_and_left(app, browser
     assert [(item["kind"], item["text"], item["event"]["type"]) for item in items] == [
         ("owner_joined", None, "owner_joined"), ("delivered", None, "message"), ("owner_left", None, "owner_left")]
     assert [item["event"] for item in items] == live
-    assert items[0]["event"] == {"type": "owner_joined", "name": "Maria Rivera"}
+    assert items[0]["event"] == {"type": "owner_joined", "name": "Mike Turner"}
     published = await event_times(engine, chat.session_id)
     assert [datetime.fromisoformat(item["created_at"]) for item in items] == [published[1], published[2], published[3]]
     assert reloaded["last_seq"] == 3
@@ -674,7 +674,7 @@ async def test_visitor_reload_reads_the_mode_with_its_cursor(app, browser, fake,
             return
         landed.append(True)
         assert (await mode_change(chat, "handback", 1)).status_code == 200
-        sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Maria"})
+        sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Mike"})
         assert sent.status_code == 202, sent.text
         await app.state.runtime.runner.drain()
 
@@ -727,7 +727,7 @@ async def test_a_hand_back_during_a_reload_comes_on_the_stream(app, browser, fak
         if not landed:
             landed.append(True)
             assert (await mode_change(chat, "handback", 1)).status_code == 200
-            sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Maria"})
+            sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Mike"})
             assert sent.status_code == 202, sent.text
             await app.state.runtime.runner.drain()
         return items

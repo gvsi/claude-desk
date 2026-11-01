@@ -66,7 +66,7 @@ def test_quote_fact_id_reads_the_quote_result_claude_was_sent():
 
 
 def test_a_quote_not_done_fails_the_script():
-    held = {"outcome": "held_for_owner", "decision_id": "dec-1", "message": "I've asked Maria."}
+    held = {"outcome": "held_for_owner", "decision_id": "dec-1", "message": "I've asked Mike."}
     with pytest.raises(AssertionError, match="held_for_owner"):
         quote_fact_id(request_with(json.dumps(held)))
     two = {"outcome": "done", "decision_id": "dec-1", "result": {}, "fact_ids": ["quote:q-1", "quote:q-2"]}

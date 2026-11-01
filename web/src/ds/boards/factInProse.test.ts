@@ -40,7 +40,7 @@ describe('fact_in_prose', () => {
   it('catches_what_the_kernel_catches', () => {
     const cases: [string, string][] = [
       // The always-on scans: any numeral, any currency sign, a percent sign.
-      ['Maria arrives at 2.', 'digit'],
+      ['Mike arrives at 2.', 'digit'],
       ['Llega a las ٢.', 'digit'],
       ['That’s $ well spent.', 'currency'],
       ['It’s 50% off.', 'percent_sign'],
@@ -61,7 +61,7 @@ describe('fact_in_prose', () => {
       ['It comes at no extra charge.', 'lex.en.promise'],
       // Any word after "no" but "matter", "one", "way" or "doubt" can start a waiver or sit in one ("set", "standard",
       // "worries"), so a charge, cost or fee after it blocks.
-      ['There’s no set cost until Maria sees the leak.', 'lex.en.promise'],
+      ['There’s no set cost until Mike sees the leak.', 'lex.en.promise'],
       ['No standard fees will be charged.', 'lex.en.promise'],
       ['No worries about costs; you pay nothing.', 'lex.en.promise'],
       ['There’s no set up fee.', 'lex.en.promise'],
@@ -80,7 +80,7 @@ describe('fact_in_prose', () => {
 
   it('passes_what_the_kernel_passes', () => {
     // The modal "may", a booking claim with a condition straight before it, and a booking claim beside its card.
-    for (const text of ['You may call Maria.', 'Once your visit is confirmed, Maria texts you.', 'Cuando tu cita está confirmada, te escribimos.']) {
+    for (const text of ['You may call Mike.', 'Once your visit is confirmed, Mike texts you.', 'Cuando tu cita está confirmada, te escribimos.']) {
       expect(rules(text), text).toEqual([]);
     }
     expect(rules('Your appointment is confirmed.', true)).toEqual([]);
@@ -132,7 +132,7 @@ describe('fact_in_prose', () => {
         }
       }
     }
-    for (const text of ['Your call is confirmed.', 'Your call with Maria is confirmed.', 'Your callback request is confirmed.',
+    for (const text of ['Your call is confirmed.', 'Your call with Mike is confirmed.', 'Your callback request is confirmed.',
       'Your follow-up-call is confirmed.', 'Tu llamada está confirmada.']) {
       expect(factsInProse(text, { callbackCard: true }), text).toEqual([]);
       expect(factsInProse(text, { bookingCard: true }).map((hit) => hit.rule), text).toEqual([
@@ -143,7 +143,7 @@ describe('fact_in_prose', () => {
   });
 
   it('requires_booking_backing_for_phrasal_set_service_calls', () => {
-    for (const subject of ['service call', 'service-call', 'emergency service call', 'emergency service-call', 'service call with Maria']) {
+    for (const subject of ['service call', 'service-call', 'emergency service call', 'emergency service-call', 'service call with Mike']) {
       for (const tail of ['up', 'to proceed']) {
         const text = `Your ${subject} is set ${tail}.`;
         for (const bookingCard of [false, true]) {
@@ -190,8 +190,8 @@ describe('fact_in_prose', () => {
       { rule: 'lex.es.callback', span: 'Tu llamada está confirmada' },
       { rule: 'lex.es.booking', span: 'Está confirmada' },
     ]);
-    expect(factsInProse('Your call WITH Maria is confirmed.', { callbackCard: true })).toEqual([]);
-    expect(rules('Your appointment with Maria is set up.')).toContain('lex.en.booking');
+    expect(factsInProse('Your call WITH Mike is confirmed.', { callbackCard: true })).toEqual([]);
+    expect(rules('Your appointment with Mike is set up.')).toContain('lex.en.booking');
     const regex = toJavaScript(String.raw`context|(?P<claim>booked)`);
     expect([...('context booked'.matchAll(regex))].map((match) => match.groups?.claim)).toEqual([undefined, 'booked']);
   });

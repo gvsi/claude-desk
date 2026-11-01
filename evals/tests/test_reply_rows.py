@@ -183,8 +183,8 @@ def verdict(kinds: list[str], blocks: list[RenderedBlock], *, ok: bool | None = 
 PROSE = RenderedBlock(kind="prose", text="Here is your quote.")
 QUOTE_CARD = RenderedBlock(kind="card", template="quote", text="$180.00\nDrain clearing", fact_id="quote:Q-1",
                            title="$180.00", lines=["Drain clearing"])
-HANDOFF = RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.",
-                        title="Let me check with Maria Rivera.")
+HANDOFF = RenderedBlock(kind="card", template="handoff", text="Let me check with Mike Turner.",
+                        title="Let me check with Mike Turner.")
 OFFER = RenderedBlock(kind="prose", text="Would you like me to arrange a callback?")
 
 

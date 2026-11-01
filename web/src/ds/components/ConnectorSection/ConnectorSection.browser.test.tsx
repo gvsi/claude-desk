@@ -13,7 +13,7 @@ import { motion } from '../../test/reducedMotion.ts';
 import { ConnectorSection, type ConnectorSectionProps } from './ConnectorSection.tsx';
 
 const [quotes, bookings] = rivera.connectors.sections;
-if (!quotes || !bookings) throw new Error('The Rivera hub fixture lost a section');
+if (!quotes || !bookings) throw new Error('The Turner hub fixture lost a section');
 
 /** A place to render sections into, and a way to draw them again with new props. */
 function mount(): (props: ConnectorSectionProps) => HTMLElement {

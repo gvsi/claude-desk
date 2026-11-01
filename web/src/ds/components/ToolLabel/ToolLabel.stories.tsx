@@ -40,7 +40,7 @@ export const Memory: Story = {
 };
 
 export const Website: Story = {
-  args: { text: 'Read riveraplumbing.example' },
+  args: { text: 'Read turnerplumbing.example' },
   play: async ({ args, canvasElement }) => {
     await expectToolLabel(canvasElement, args.text);
   },

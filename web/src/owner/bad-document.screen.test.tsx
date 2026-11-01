@@ -39,7 +39,7 @@ vi.mock('../about/documents.ts', () => {
 });
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
-const GREETING = /^Good (morning|afternoon|evening), Maria$/;
+const GREETING = /^Good (morning|afternoon|evening), Mike$/;
 const ERROR_LINE = 'This document can’t be shown right now. You can go back and try again later.';
 
 // The last Desk lives in this browser's storage, which outlives a test.
@@ -79,9 +79,9 @@ describe('A document that cannot be parsed, from the owner app', () => {
 
     // The public page, with its chat and the AI disclosure.
     const publicPage = await renderRoute(`/d/${RIVERA.slug}`);
-    await expect.element(publicPage.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect.element(publicPage.screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
     await expect
-      .element(publicPage.screen.getByText("You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime."))
+      .element(publicPage.screen.getByText("You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime."))
       .toBeVisible();
 
     // Opened at its own address, the About page shows its error too.

@@ -65,7 +65,7 @@ def test_the_owner_lines_are_owner_only_and_in_both_languages(lang):
     assert not render.OWNER_STATUS_KEYS & (render.STATUS_KEYS | render.DECISION_STATUS_KEYS)
     for key in render.OWNER_STATUS_KEYS:
         with pytest.raises(KeyError):
-            render.status(key, lang, owner="Maria Rivera")
+            render.status(key, lang, owner="Mike Turner")
 
 
 def test_an_owner_line_is_in_the_owners_language():
@@ -249,9 +249,9 @@ async def test_an_expired_mandate_on_the_approval_path_names_no_rule_change(desk
 # ---- The approval path ---------------------------------------------------------------------------
 
 async def test_an_approval_the_new_rules_refuse_tells_the_owner_the_rules_changed(app, client):
-    """Maria stops quotes after a stranger's discounted quote was held, then allows it: the answer
-    and her read of the decision say her rules changed; the stranger's session reads the generic
-    line and nothing of hers, and the signature, which leaves `owner_plain` out, still verifies."""
+    """Mike stops quotes after a stranger's discounted quote was held, then allows it: the answer
+    and his read of the decision say his rules changed; the stranger's session reads the generic
+    line and nothing of his, and the signature, which leaves `owner_plain` out, still verifies."""
     copy, visitor, held = await held_quote(app, client)
     await activate(app, copy, NEVER_QUOTES)
     line = OWNER_LINES["en"]["refused_rules_changed"]
@@ -275,8 +275,8 @@ async def delete_desk(client: httpx.AsyncClient, rows: Rivera | CopyRows) -> Non
 
 
 async def test_an_approval_after_the_desk_was_deleted_tells_the_owner_so(app, client):
-    """The Desk is deleted while a quote waits, then Maria allows it: the answer's re-check finds the
-    Desk gone, and her answer and read say the Desk was deleted."""
+    """The Desk is deleted while a quote waits, then Mike allows it: the answer's re-check finds the
+    Desk gone, and his answer and read say the Desk was deleted."""
     copy, visitor, held = await held_quote(app, client)
     await delete_desk(client, copy)
     line = OWNER_LINES["en"]["refused_desk_deleted"]
@@ -428,8 +428,8 @@ async def test_a_held_booking_whose_slot_started_names_no_cause(app, client, fro
 
 
 async def test_an_allow_the_new_rules_refuse_tells_the_owner_the_rules_changed(app, client):
-    """Maria stops quotes between a stranger's allowed quote and its execution: `/execute` is refused,
-    and only her read says her rules changed."""
+    """Mike stops quotes between a stranger's allowed quote and its execution: `/execute` is refused,
+    and only his read says his rules changed."""
     copy, visitor = await visitor_of(app, client)
     args = quote_args(("drain", 1))
     allowed = await decided(client, visitor, "native.quote", args)

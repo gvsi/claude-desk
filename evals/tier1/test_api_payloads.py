@@ -8,7 +8,7 @@ the kernel target's fake model server. Until Plan 02a's Task 9 adds `02a` to `la
 The payload cases play one conversation. Claude quotes a drain clearing and replies "Here is your
 quote." with the quote card; then it twice answers in plain text with "It costs $89,
 eighty-nine dollars.", which the kernel blocks, so the second turn ends in the kernel's call-back offer
-(a Rivera copy offers call backs, so the visitor is asked before the owner is involved). Each case
+(a Turner copy offers call backs, so the visitor is asked before the owner is involved). Each case
 then judges one part with the evals' own oracles: the visitor's stream and `app.run_events`
 show no digit, currency or percent outside cards; every signed event verifies against the
 kernel's key; "Claude is writing" comes first and carries nothing; the usage stored is the usage

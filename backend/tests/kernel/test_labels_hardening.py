@@ -9,7 +9,7 @@ or digits of other scripts drawn like its own. Knowledge
 the owner adds is untrusted text: it is the owner's alone unless marked public, it stays the
 owner's when it carries a canary, and it never changes what a session may do.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), or on
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), or on
 Desks with scripted adapters (`FakeAdapter`) where a test says what a tool returns, or stands in
 for the document release tool, which comes later in this plan.
 """
@@ -517,7 +517,7 @@ async def seen_by(client: httpx.AsyncClient, copy: Rivera, session) -> list[tupl
 
 
 PARKING = knowledge("kb-parking", "Parking", "Street parking is fine on our block.", ["owner"])
-TOOLS = knowledge("kb-a-tools", "Tools", "Maria brings a drain camera to every call.", ["public"])
+TOOLS = knowledge("kb-a-tools", "Tools", "Mike brings a drain camera to every call.", ["public"])
 SEEDED_KNOWLEDGE_ENTRIES = [
     {"part": "knowledge", "item_id": item_id, "owner_only_forced": False}
     for item_id in ("kn-website", "kn-price-list")]

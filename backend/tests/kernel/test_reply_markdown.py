@@ -19,9 +19,9 @@ from .helpers import rows_of
 from .test_adapters import visitor_of
 from .test_reply_check import assert_kept, assert_offered, change_fact, checked, clause, own_quote
 
-STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry"
+STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Mike\n4. Keep the area dry"
 # The business's contact as its owner might write it: a phone, an email and a website, in its accepted form.
-RIVERA_CONTACT = "Call (510) 555-0142 · Email: maria@riveraplumbing.example · Website: www.riveraplumbing.example"
+RIVERA_CONTACT = "Call (510) 555-0142 · Email: mike@turnerplumbing.example · Website: www.turnerplumbing.example"
 
 
 async def with_contact(app, copy, contact: str = RIVERA_CONTACT) -> None:
@@ -37,10 +37,10 @@ def test_a_list_from_one_of_at_most_nine_items_shows_no_number_to_scan():
     and has at most nine items shows only 1 to 9: its numbers are left out of the visible reading,
     and its typed markers are blanked from the raw one, wherever its lines put them."""
     read = markdown_text.read(STEPS)
-    assert read.visible == "Turn off the main valve\nOpen the lowest tap\nWait for Maria\nKeep the area dry\n"
-    assert read.list_markers == ((0, 2), (27, 29), (50, 52), (68, 70))
+    assert read.visible == "Turn off the main valve\nOpen the lowest tap\nWait for Mike\nKeep the area dry\n"
+    assert read.list_markers == ((0, 2), (27, 29), (50, 52), (67, 69))
     assert markdown_text.blank_list_markers(STEPS) == (
-        "   Turn off the main valve\n   Open the lowest tap\n   Wait for Maria\n   Keep the area dry")
+        "   Turn off the main valve\n   Open the lowest tap\n   Wait for Mike\n   Keep the area dry")
     assert markdown_text.read("1) a\n2) b").list_markers == ((0, 2), (5, 7))
     assert markdown_text.read("> 1. a\n> 2. b").list_markers == ((2, 4), (9, 11))      # in a quote
     assert markdown_text.read("- 1. a\n- 1) b").list_markers == ((2, 4), (9, 11))      # after bullets
@@ -96,8 +96,8 @@ NINE_STEPS = "\n".join(f"{n}. Check the next fitting" for n in range(1, 10))
     STEPS,
     NINE_STEPS,
     "  1. Turn off the valve\n  2. Open a faucet",
-    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMaria looks at it when she's there.",
-    "Before Maria gets there:\n1. Turn off the main valve\n   - It is under the sink\n2. Keep the area dry",
+    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMike looks at it when he's there.",
+    "Before Mike gets there:\n1. Turn off the main valve\n   - It is under the sink\n2. Keep the area dry",
 ])
 async def test_a_numbered_list_from_one_to_nine_passes_by_the_owners_decision(app, client, prose):
     """The owner's decision of 2026-11-01: the markers of an ordered list that starts at 1 and has at
@@ -117,7 +117,7 @@ async def test_a_numbered_list_from_one_to_nine_passes_by_the_owners_decision(ap
     (ELEVEN_STEPS, "10"),
     (TEN_ONES, "10"),                          # typed "1." each, it shows 1 to 10
     ("1. a\n\n10) b", "10"),                   # a new delimiter starts a new list, at 10
-    ("Maria can be there in 5 days.", "5"),
+    ("Mike can be there in 5 days.", "5"),
     ("Step 1. Turn off the valve", "1"),       # not at a line start
     ("1.5 hours is all it takes.", "1.5"),
     ("1. Turn off the valve\n2. Wait 3 hours", "3"),
@@ -137,7 +137,7 @@ async def test_every_other_number_stays_blocked(app, client, prose, span):
     ("| Service | Price |\n|---|---|\n| Drain | $180 |", {"currency", "digit"}),
     ("- Free inspection\n- Photos of the work", {"lex.en.promise"}),
     ("# Free estimates", {"lex.en.promise"}),
-    ("[Free estimate](https://riveraplumbing.example)", {"lex.en.promise"}),
+    ("[Free estimate](https://turnerplumbing.example)", {"lex.en.promise"}),
     ("It's `$100` for the visit.", {"currency", "digit"}),
     # numbers stay refused in every Markdown form but list numbers 1 to 9
     ("100. dollars", {"digit", "lex.en.money"}),
@@ -164,7 +164,7 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     verdict = await checked(client, visitor, prose)
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
-    assert_offered(verdict)                     # none of the prose is shown: the call-back offer Rivera's Desk has
+    assert_offered(verdict)                     # none of the prose is shown: the call-back offer Turner's Desk has
 
 
 def test_struck_through_text_is_still_read_with_one_tilde_or_two():
@@ -181,7 +181,7 @@ def test_titles_and_alt_text_are_read_after_the_body_so_they_split_no_word():
 async def test_a_link_title_splits_no_word_from_the_scan(app, client):
     copy, visitor = await visitor_of(app, client)
     await with_contact(app, copy)
-    verdict = await checked(client, visitor, 'You get a [fr](https://riveraplumbing.example "details")ee inspection.')
+    verdict = await checked(client, visitor, 'You get a [fr](https://turnerplumbing.example "details")ee inspection.')
     assert verdict.ok is False
     assert ("promise_word", "lex.en.promise", "free") in found(verdict)
 
@@ -201,15 +201,15 @@ async def test_html_an_escaping_renderer_shows_is_caught_by_the_raw_reading(app,
 @pytest.mark.parametrize(("prose", "span"), [
     ("[Pay here](https://elsewhere.example/pay) for the visit.", "Pay here"),
     ("Here is our [site](javascript:alert)", "site"),
-    ("See [our photos](https://riveraplumbing.example.evil.example).", "our photos"),   # the host must match
-    ("See [our photos](https://evil.example/riveraplumbing.example).", "our photos"),
-    ("See [our photos](https://riveraplumbing.example@evil.example).", "our photos"),
-    ("See [our photos](http://riveraplumbing.example).", "our photos"),                # https only
-    ("See [our photos](ftp://riveraplumbing.example).", "our photos"),
+    ("See [our photos](https://turnerplumbing.example.evil.example).", "our photos"),   # the host must match
+    ("See [our photos](https://evil.example/turnerplumbing.example).", "our photos"),
+    ("See [our photos](https://turnerplumbing.example@evil.example).", "our photos"),
+    ("See [our photos](http://turnerplumbing.example).", "our photos"),                # https only
+    ("See [our photos](ftp://turnerplumbing.example).", "our photos"),
     ("Read [this page](/pay) first.", "this page"),
-    ("[riveraplumbing.example](https://elsewhere.example)", "riveraplumbing.example"),
+    ("[turnerplumbing.example](https://elsewhere.example)", "turnerplumbing.example"),
     ("[Write to us](mailto:someone@elsewhere.example)", "Write to us"),
-    ("[Write to us](mailto:maria@riveraplumbing.example.evil.example)", "Write to us"),
+    ("[Write to us](mailto:mike@turnerplumbing.example.evil.example)", "Write to us"),
     ("[Our page][page] has the details.\n\n[page]: https://elsewhere.example", "Our page"),
     ("Everything is on [the page about the visit and what to bring along](https://elsewhere.example).",
      "the page about the visit and what to bri"),
@@ -224,15 +224,15 @@ async def test_a_markdown_link_must_go_to_the_business_contact(app, client, pros
 
 @pytest.mark.parametrize(("prose", "span"), [
     ("See https://elsewhere.example for reviews.", "https://elsewhere.example"),
-    ("See http://riveraplumbing.example for photos.", "http://riveraplumbing.example"),     # https only
-    ("See www.riveraplumbing.example.evil.example for photos.", "www.riveraplumbing.example.evil.example"),
+    ("See http://turnerplumbing.example for photos.", "http://turnerplumbing.example"),     # https only
+    ("See www.turnerplumbing.example.evil.example for photos.", "www.turnerplumbing.example.evil.example"),
     ("See www.elsewhere.example/rivera for reviews.", "www.elsewhere.example/rivera"),
     ("Write to someone@elsewhere.example about it.", "someone@elsewhere.example"),
     ("Run `curl https://elsewhere.example/pay` to pay.", "https://elsewhere.example/pay"),   # in code too
     ("Reviews: <https://elsewhere.example>", "https://elsewhere.example"),
     ("Write to <someone@elsewhere.example>.", "someone@elsewhere.example"),
     ("See [https://elsewhere.example/rivera](https://elsewhere.example/rivera).", "https://elsewhere.example/rivera"),
-    ("See [our site](https://riveraplumbing.example) or https://riverap1umbing.example.",   # a lookalike
+    ("See [our site](https://turnerplumbing.example) or https://riverap1umbing.example.",   # a lookalike
      "https://riverap1umbing.example"),
 ])
 async def test_every_clickable_link_must_go_to_the_business_contact(app, client, prose, span):
@@ -265,8 +265,8 @@ async def test_a_cell_past_the_header_is_read_as_the_chats_show_it(app, client):
     ('<a href="https://elsewhere.example/pay">Our reviews</a> are kind.', 'https://elsewhere.example/pay">Our'),
     ("Write to <!-- someone@elsewhere.example --> us.", "someone@elsewhere.example"),
     # only a trailing pipe is trimmed: inside the URL it is userinfo, and the host is the one after it
-    ("Our photos: https://riveraplumbing.example|@elsewhere.example for you.",
-     "https://riveraplumbing.example|@elsewher"),                   # a span is cut at 40 characters
+    ("Our photos: https://turnerplumbing.example|@elsewhere.example for you.",
+     "https://turnerplumbing.example|@elsewher"),                   # a span is cut at 40 characters
 ])
 async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_contact(app, client, prose, span):
     """Defence in depth: the raw prose is read for URLs and email addresses too, so one the visible
@@ -278,29 +278,29 @@ async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_conta
 
 
 @pytest.mark.parametrize("prose", [
-    "- Turn off the main valve\n- Open the lowest tap\n- Keep the area dry until Maria gets there",
-    "* Turn off the main valve\n* Keep the area dry until Maria gets there",
-    "**Service call deposit**\n\nMaria credits it to the repair if you go ahead with it.",
+    "- Turn off the main valve\n- Open the lowest tap\n- Keep the area dry until Mike gets there",
+    "* Turn off the main valve\n* Keep the area dry until Mike gets there",
+    "**Service call deposit**\n\nMike credits it to the repair if you go ahead with it.",
     "## What to do now\n\nTurn off the main valve and keep the area dry.",
     "| Service | What it covers |\n|---|---|\n| Drain clearing | Kitchen and bathroom drains |",
-    "Photos of her past jobs are on [our website](https://riveraplumbing.example).",
-    "Photos of her past jobs are on [our website](https://www.riveraplumbing.example/photos).",
-    "Photos of her past jobs are on [our website](HTTPS://RiveraPlumbing.Example/photos).",
-    "Photos of her past jobs are at https://riveraplumbing.example and on the way.",
-    "Photos of her past jobs are at <https://riveraplumbing.example>.",
-    "You can also [email Maria](mailto:maria@riveraplumbing.example) about it.",
-    "You can also write to <maria@riveraplumbing.example> about it.",
-    "Book online at https://riveraplumbing.example/book any time.",
-    "Photos of her past jobs are at www.riveraplumbing.example.",
-    "Photos are at https://WWW.riveraplumbing.example/photos (or www.riveraplumbing.example).",
-    "You can write to maria@riveraplumbing.example about it.",
-    "You can write to MARIA@RiveraPlumbing.example about it.",
+    "Photos of her past jobs are on [our website](https://turnerplumbing.example).",
+    "Photos of her past jobs are on [our website](https://www.turnerplumbing.example/photos).",
+    "Photos of her past jobs are on [our website](HTTPS://TurnerPlumbing.Example/photos).",
+    "Photos of her past jobs are at https://turnerplumbing.example and on the way.",
+    "Photos of her past jobs are at <https://turnerplumbing.example>.",
+    "You can also [email Mike](mailto:mike@turnerplumbing.example) about it.",
+    "You can also write to <mike@turnerplumbing.example> about it.",
+    "Book online at https://turnerplumbing.example/book any time.",
+    "Photos of her past jobs are at www.turnerplumbing.example.",
+    "Photos are at https://WWW.turnerplumbing.example/photos (or www.turnerplumbing.example).",
+    "You can write to mike@turnerplumbing.example about it.",
+    "You can write to MIKE@TurnerPlumbing.example about it.",
     "The forms are on irs.gov if you need them.",                    # no scheme or www.: no link
-    "Pay for it at riveraplumbing.example/pay when you're ready.",
+    "Pay for it at turnerplumbing.example/pay when you're ready.",
     "Call <!-- note --> us about it.",
-    "Turn off the main valve.<br>Keep the area dry until Maria gets there.",
-    "Our site is `https://riveraplumbing.example`.",                   # a code span's backticks aren't the URL's
-    "| Where | Link |\n|---|---|\n| Website |https://riveraplumbing.example|",   # nor an unpadded cell's pipe
+    "Turn off the main valve.<br>Keep the area dry until Mike gets there.",
+    "Our site is `https://turnerplumbing.example`.",                   # a code span's backticks aren't the URL's
+    "| Where | Link |\n|---|---|\n| Website |https://turnerplumbing.example|",   # nor an unpadded cell's pipe
 ])
 async def test_honest_formatting_and_the_business_own_links_pass(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -314,33 +314,33 @@ def test_the_links_the_chats_make_of_plain_text_are_read_as_links():
     """GFM links a URL with a scheme or "www." (here read as https) and an email address, without the
     punctuation a sentence puts after it; a domain alone isn't a link."""
     links = markdown_text.literal_links(
-        "Visit www.rivera.example. Or (https://pay.example/a?b=1), or write to maria@rivera.example.\n"
+        "Visit www.rivera.example. Or (https://pay.example/a?b=1), or write to mike@rivera.example.\n"
         "See irs.gov, http://rivera.example/x@y.example and www.code.example!")
     assert [(link.text, link.href) for link in links] == [
         ("www.rivera.example", "https://www.rivera.example"),
         ("https://pay.example/a?b=1", "https://pay.example/a?b=1"),
         ("http://rivera.example/x@y.example", "http://rivera.example/x@y.example"),
         ("www.code.example", "https://www.code.example"),
-        ("maria@rivera.example", "mailto:maria@rivera.example")]
+        ("mike@rivera.example", "mailto:mike@rivera.example")]
 
 
 @pytest.mark.parametrize(("contact", "hosts", "emails"), [
-    (RIVERA_CONTACT, {"riveraplumbing.example"}, {"maria@riveraplumbing.example"}),
-    ("Website: https://WWW.Rivera.example/book, Email: Maria@Rivera.example",
-     {"rivera.example"}, {"maria@rivera.example"}),
+    (RIVERA_CONTACT, {"turnerplumbing.example"}, {"mike@turnerplumbing.example"}),
+    ("Website: https://WWW.Rivera.example/book, Email: Mike@Rivera.example",
+     {"rivera.example"}, {"mike@rivera.example"}),
     ("riverapl.example/photos or https://pay.riverapl.example", {"riverapl.example", "pay.riverapl.example"}, set()),
     ("(510) 555-0142", set(), set()),
-    ("Call Maria any time, she is free", set(), set()),          # not a contact: names nothing
+    ("Call Mike any time, he is free", set(), set()),          # not a contact: names nothing
 ])
 def test_a_public_contact_names_its_hosts_and_emails(contact, hosts, emails):
     assert public_contact.contact_endpoints(contact) == (frozenset(hosts), frozenset(emails))
 
 
 @pytest.mark.parametrize("prose", [
-    "![](https://riveraplumbing.example/a.png)",
-    "Here is the valve to turn: ![the valve](https://riveraplumbing.example/valve.png)",
-    "[![our logo](https://riveraplumbing.example/logo.png)](https://riveraplumbing.example)",
-    "![a](https://riveraplumbing.example/a.png) and ![b](https://riveraplumbing.example/b.png)",
+    "![](https://turnerplumbing.example/a.png)",
+    "Here is the valve to turn: ![the valve](https://turnerplumbing.example/valve.png)",
+    "[![our logo](https://turnerplumbing.example/logo.png)](https://turnerplumbing.example)",
+    "![a](https://turnerplumbing.example/a.png) and ![b](https://turnerplumbing.example/b.png)",
 ])
 async def test_an_image_is_refused_whoever_hosts_it(app, client, prose):
     copy, visitor = await visitor_of(app, client)

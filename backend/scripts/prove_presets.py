@@ -1,12 +1,12 @@
-"""Prove the Rivera seed's cards and the starter presets, and write or check their reports.
+"""Prove the Turner seed's cards and the starter presets, and write or check their reports.
 
     uv run python -m scripts.prove_presets          # make proofs: prove each set and write its report
     uv run python -m scripts.prove_presets --check  # make check-presets: prove each set again and compare
 
 Each set is compiled over the profiles a Desk made from it enables (`activation.shipped_profiles`:
-the registered native adapters, and for the Rivera seed also both mock payments tools pinned at the
+the registered native adapters, and for the Turner seed also both mock payments tools pinned at the
 hashes of the server's default definitions, so no server runs) and that Desk's schema, at the money
-cap it ships at (`activation.SHIPPED_CAPS`: the Rivera seed at its $500, the presets at 0), twice,
+cap it ships at (`activation.SHIPPED_CAPS`: the Turner seed at its $500, the presets at 0), twice,
 to show its hashes are deterministic, then proved with `desk-prove`
 (`DESK_PROVE`, else `desk-prove` on PATH; cvc5 through `CVC5` or PATH). A report is written only
 when all seven obligations hold. `--check` writes nothing and exits 1 unless every fresh report

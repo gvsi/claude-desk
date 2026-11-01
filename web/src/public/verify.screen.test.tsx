@@ -29,7 +29,7 @@ const VERIFIED = 'Verified with a code. Simulated verification';
 const FAILED = 'That code didn’t work. Check the newest code, or ask me for a new one.';
 
 /** What the Demo inbox entry for the invoice row's code says, word for word: the kernel's `inbox_code_body`. */
-const CODE_BODY = `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
+const CODE_BODY = `Your Turner Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
 
 /** The inbox's place when it couldn't be read at all, so no entry can say it failed. */
 const INBOX_FAILED = 'Couldn’t open the Demo inbox, where your code arrives.';
@@ -52,7 +52,7 @@ const VERIFY_CARD = rivera.blocks.verify_prompt.en.title ?? '';
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
-/** Every event this browser's chat with Rivera has carried, in order. */
+/** Every event this browser's chat with Turner has carried, in order. */
 function chatEvents(): { seq: number; ev: SseEvent }[] {
   return mockStore.visitorSession(RIVERA.slug)?.events ?? [];
 }
@@ -103,33 +103,33 @@ describe('verification', () => {
   });
 
   it('cant_get_the_code_closes_the_form_while_the_owner_is_in_the_chat', async () => {
-    const ask = "I'd like to talk to Maria Rivera.";
+    const ask = "I'd like to talk to Mike Turner.";
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
     await say(screen, 'Can you send my invoice?');
     const escape = screen.getByRole('button', { name: 'I can’t get the code' });
     await expect.element(escape).toBeVisible();
 
-    // Maria takes the chat over. She is already here, so the form's way out asks for nobody: it
+    // Mike takes the chat over. He is already here, so the form's way out asks for nobody: it
     // closes the form, sends nothing, and focus moves on to the composer. The kernel's card stays.
     const chat = mockStore.visitorSession(RIVERA.slug);
     if (!chat) throw new Error('this browser has a chat');
     mockStore.world.takeOver(chat);
-    await vi.waitFor(() => expect(document.querySelector('.cd-public-shell__disclosure')?.textContent).toMatch(/^Maria Rivera is in this chat\./));
+    await vi.waitFor(() => expect(document.querySelector('.cd-public-shell__disclosure')?.textContent).toMatch(/^Mike Turner is in this chat\./));
     const sent = requests('sendMessage').length;
     await escape.click();
     await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toHaveFocus();
     expect(screen.getByText(ask, { exact: true }).query()).toBeNull();
     expect(requests('sendMessage')).toHaveLength(sent);
     await expect.element(screen.getByRole('article', { name: "Confirm it's you" })).toBeVisible();
 
-    // She hands the chat back: the form comes back under the card, its way out with it.
+    // He hands the chat back: the form comes back under the card, its way out with it.
     mockStore.world.handBack(chat);
     await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'I can’t get the code' })).toBeVisible();
 
-    // With Claude answering, the same button asks for her, as the head's Ask does.
+    // With Claude answering, the same button asks for him, as the head's Ask does.
     const again = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(again.screen);
     await say(again.screen, 'Can you send my invoice?');
@@ -161,7 +161,7 @@ describe('verification', () => {
   });
 
   it('a_late_verify_answer_never_brings_the_owner_back', async () => {
-    const ownerLine = /^Maria Rivera is in this chat\./;
+    const ownerLine = /^Mike Turner is in this chat\./;
     const headLine = () => document.querySelector('.cd-public-shell__disclosure')?.textContent ?? '';
     /** The head's lines from now on, until `stop`. */
     const watchHead = () => {
@@ -180,7 +180,7 @@ describe('verification', () => {
     };
 
     for (const answer of ['the verify answer', 'the read after a lost verify answer'] as const) {
-      // Dana asks for her invoice, and Maria takes the chat over while the form is up.
+      // Dana asks for her invoice, and Mike takes the chat over while the form is up.
       const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
       await ready(screen);
       await say(screen, 'Can you send my invoice?');
@@ -190,7 +190,7 @@ describe('verification', () => {
       await vi.waitFor(() => expect(headLine()).toMatch(ownerLine));
 
       // Dana sends the code. Its answer (or, when that is lost, the read of the session after it)
-      // was taken while the chat was in Maria's hands, and lands only after she has handed it back
+      // was taken while the chat was in Mike's hands, and lands only after he has handed it back
       // and Claude has started writing.
       const late = held();
       if (answer === 'the verify answer') {
@@ -209,7 +209,7 @@ describe('verification', () => {
       mockStore.emit(RIVERA.slug, { type: 'writing' });
       await vi.waitFor(() => expect(headLine()).toMatch(/^You're chatting with Claude/));
 
-      // It lands: Dana is verified, and the head never says Maria is back in the chat.
+      // It lands: Dana is verified, and the head never says Mike is back in the chat.
       const head = watchHead();
       late.release();
       await expect.element(screen.getByText(VERIFIED)).toBeVisible();
@@ -236,7 +236,7 @@ describe('verification', () => {
     await expect.element(invoice).toBeVisible();
     const invoiceReceipts = (card: Element) =>
       [...(card.closest('.cd-transcript-row')?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
-    const explained = ["Document shared from Maria Rivera's records"];
+    const explained = ["Document shared from Mike Turner's records"];
     await vi.waitFor(() => expect(invoiceReceipts(invoice.element())).toEqual(explained));
 
     // The same after a reload, read back from the stored conversation.
@@ -548,7 +548,7 @@ describe('Demo inbox', () => {
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
     const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Demo inbox', exact: true })).toBeVisible();
     // Time for a read on mount to go out, had anything sent the failed one again.
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -570,7 +570,7 @@ describe('Demo inbox', () => {
     await nav.getByRole('link', { name: 'Rules' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await nav.getByRole('link', { name: 'Today' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(2);
 
     await open.click();

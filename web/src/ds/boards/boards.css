@@ -529,7 +529,7 @@
   border-top: 1px solid var(--line-hairline);
 }
 
-/* Ask for Maria: the public page in two states side by side, a hairline between them. */
+/* Ask for Mike: the public page in two states side by side, a hairline between them. */
 .board-handoff {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

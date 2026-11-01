@@ -20,7 +20,7 @@ export interface DirectoryRowView {
   href?: string;
   /** A quiet word before the count: "Always on" for Verification, "Coming soon in this demo" for an app the demo can't connect yet. */
   note?: string;
-  /** A connected app's account, in the screen's words, after "Connected": "Rivera Plumbing, test mode (mock)". */
+  /** A connected app's account, in the screen's words, after "Connected": "Turner Plumbing, test mode (mock)". */
   connection?: string;
   /**
    * An app to connect: "Connect" calls this, and opens the add flow's sign-in. An available app

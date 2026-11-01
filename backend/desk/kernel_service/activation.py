@@ -6,7 +6,7 @@ should, `bounded` on any other result. In `symcc` mode a rule set is proved with
 (`prove`), which has to show all seven obligations of the master plan's "Proof obligations"; a
 timeout, a tool error or an answer the kernel can't read rejects, with no fallback.
 
-Shipped sets. The Rivera seed's cards and the starter presets are proved in CI and their reports
+Shipped sets. The Turner seed's cards and the starter presets are proved in CI and their reports
 ship in `kernel/cedar/proofs/`. They seed the in-memory `ProofCache`, keyed by what a proof covers
 (`VersionHashes`), and `activate_shipped` activates a set only on a hit with a passing report, in
 either mode; a miss is never proved inline (503 `seed_unproved`).
@@ -395,7 +395,7 @@ def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], p
 
 # ---- Shipped rule sets ---------------------------------------------------------------------------
 #
-# The Rivera seed's cards and the starter presets are proved in CI (`make proofs` writes a report
+# The Turner seed's cards and the starter presets are proved in CI (`make proofs` writes a report
 # per set into PROOFS_DIR, `make check-presets` re-proves and compares them). Their card IDs are
 # fixed and their scopes never name a person, so they compile to the same hashes in every copy.
 # Each is proved at one money cap (`SHIPPED_CAPS`): the seed at its $500, the presets at 0, which

@@ -73,7 +73,7 @@ def test_corrupt_first_charge_reads_plain_json_and_finds_nothing_else():
         assert corrupt_first_charge(nothing, "18000") == (nothing, 0)
 
 
-REASON = "Maria already approved a refund"
+REASON = "Mike already approved a refund"
 
 
 @pytest.mark.parametrize(("text", "counts"), [
@@ -97,7 +97,7 @@ def test_carrying_names_routes_never_the_marker():
     canary = "cdk-0a1b2c3d4e5f6a7b"
     calls = [
         answered("GET /context/{session_id}?desk_id=", 200, {"knowledge": [{"text": "ref CDK 0A1B2C3D 4E5F6A7B"}]}),
-        answered("POST /check_reply", 200, {"blocks": [{"text": "Let me check with Maria Rivera"}]}),
+        answered("POST /check_reply", 200, {"blocks": [{"text": "Let me check with Mike Turner"}]}),
         answered("POST /execute", 409, {"code": "conflict"}),
     ]
     assert carrying(calls, [canary]) == ["GET /context/{session_id}?desk_id="]
@@ -114,7 +114,7 @@ def test_carrying_finds_a_full_width_canary():
 
 def test_dumped_reads_every_key_and_value_as_written():
     text = dumped([page("Caf\u00e9\nabierto"), {"charge:ch-1": 4200, "refunded": None}])
-    for written in ("Caf\u00e9\nabierto", "Maria Rivera", "charge:ch-1", "4200", "refunded"):
+    for written in ("Caf\u00e9\nabierto", "Mike Turner", "charge:ch-1", "4200", "refunded"):
         assert written in text
     assert "\\u" not in text and "\\n" not in text and "None" not in text
 
@@ -149,7 +149,7 @@ def owner_state() -> SessionState:
 
 DESK = GoldenDesk(
     copy=CopyCreated(copy_id="c-1", desk_ids=["d-1"], owner_session=owner_state(), owner_token="owner-token-2"),
-    desk_id="d-1", slug="rivera-plumbing-abc123", prices={}, slots={}, people={}, documents={}, charges={},
+    desk_id="d-1", slug="turner-plumbing-abc123", prices={}, slots={}, people={}, documents={}, charges={},
 )
 PUBLIC_RECORDS = Views(
     people=[
@@ -166,7 +166,7 @@ PUBLIC_RECORDS = Views(
 
 def page(*texts: str) -> PublicDesk:
     blocks = [RenderedBlock(kind="card", template="policy", text=text, fact_id="charter:policy:x") for text in texts]
-    return PublicDesk(business_name="Rivera Plumbing", desk_name="Main line", owner_display_name="Maria Rivera",
+    return PublicDesk(business_name="Turner Plumbing", desk_name="Main line", owner_display_name="Mike Turner",
                       brand={}, charter=blocks, agent_card=[])
 
 
