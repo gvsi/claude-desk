@@ -112,6 +112,20 @@ class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's 
     now: list[str]                        # event kinds that alert at once ("approval", "callback", "breaker")
     briefing: list[str]
 
+# A Desk's brand colours, picked from a fixed palette: the owner picks a key and the kernel stores it with this
+# table's colours, never colours of the request's, so every pick keeps the public page's header readable
+# (tests/test_brand_palette.py holds each primary to 4.5:1 under both of the header's text tokens).
+BrandPalette = Literal["teal", "navy", "forest", "plum", "rust", "slate"]   # in display order
+DEFAULT_BRAND_PALETTE: BrandPalette = "teal"
+BRAND_PALETTE: dict[BrandPalette, dict[str, str]] = {   # the one table: the header's field and the rule under it
+    "teal": {"primary": "#1F4E4A", "accent": "#B87333"},
+    "navy": {"primary": "#1F3A5C", "accent": "#C9A24B"},
+    "forest": {"primary": "#28452B", "accent": "#B5A05E"},
+    "plum": {"primary": "#4A2D4D", "accent": "#C98FA3"},
+    "rust": {"primary": "#6B2F22", "accent": "#D9A578"},
+    "slate": {"primary": "#33383F", "accent": "#8FA4B8"},
+}
+
 class BusinessSeed(BaseModel):
     name: str
     owner_display_name: str               # "Maria Rivera"; the handoff clause, visitor status lines and owner_joined render it
