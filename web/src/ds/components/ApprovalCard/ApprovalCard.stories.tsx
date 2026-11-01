@@ -4,6 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
+import { animationLabel, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { Notice } from '../Notice/Notice.tsx';
@@ -383,17 +384,29 @@ function readLanding(root: HTMLElement, status: Element, moments: readonly numbe
  * card's outgoing layer, its status line and focus, then the settle at each of `moments` (ms from
  * its start), every animation of it paused there in turn. Then the settle finishes.
  */
-function land(root: HTMLElement, update: Partial<ApprovalCardProps>, moments: readonly number[]): Promise<Landing> {
-  return new Promise((resolve) => {
-    const observer = new MutationObserver(() => {
-      const status = root.querySelector('.cd-approval-card__status-line[role="status"]');
-      if (status === null || status.textContent === HELD_LINE) return;
-      observer.disconnect();
-      resolve(readLanding(root, status, moments));
-    });
-    observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
-    updateScreen(root, update);
-  });
+async function land(root: HTMLElement, update: Partial<ApprovalCardProps>, moments: readonly number[]): Promise<Landing> {
+  let observer: MutationObserver | undefined;
+  try {
+    return await animationWithin(
+      new Promise<Landing>((resolve, reject) => {
+        observer = new MutationObserver(() => {
+          const status = root.querySelector('.cd-approval-card__status-line[role="status"]');
+          if (status === null || status.textContent === HELD_LINE) return;
+          observer?.disconnect();
+          try {
+            resolve(readLanding(root, status, moments));
+          } catch (error) {
+            reject(error);
+          }
+        });
+        observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+        updateScreen(root, update);
+      }),
+      'cd-approval-card answer landing',
+    );
+  } finally {
+    observer?.disconnect();
+  }
 }
 
 /** The settle's moments: its start, mid-crossfade, the crossfade done, into the ease, the pulse at its widest, and its end. */
@@ -1535,9 +1548,20 @@ export const EnterLands: Story = {
     await waitFor(() => expect(status).toHaveTextContent("You allowed this. It's done."));
     // Once every animation of the settle is done, and a frame after: focus is on the status line,
     // where the answers' focus goes, never on the page or the outgoing layer.
-    await Promise.allSettled(card.getAnimations({ subtree: true }).filter(settleMotion).map((animation) => animation.finished));
-    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving')).toBeNull());
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await Promise.all(
+      card.getAnimations({ subtree: true }).filter(settleMotion).map((animation) =>
+        animationWithin(animation.finished.catch(() => undefined), animationLabel(animation)),
+      ),
+    );
+    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving'), 'cd-approval-card leaving layer is removed').toBeNull(), { timeout: 2000 });
+    let frame = 0;
+    try {
+      await animationWithin(new Promise((resolve) => {
+        frame = requestAnimationFrame(resolve);
+      }), 'cd-approval-card focus frame');
+    } finally {
+      cancelAnimationFrame(frame);
+    }
     await expect(status).toHaveFocus();
   },
 };
