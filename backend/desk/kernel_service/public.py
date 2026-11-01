@@ -29,9 +29,8 @@ name, the default brand) and the owner is alerted in the Demo inbox, whatever th
 defaults, at most once an hour per Desk.
 
 A stored policy line that fails the public-text scan is withheld individually. The remaining
-policies are rescanned in display order after each removal. The same hourly alert names each
-withheld line by its card's public label and says why from its rule IDs (`withheld_policy_alert`),
-never quoting its text.
+policies are rescanned in display order after each removal. The owner isn't alerted (the owner's
+decision of 2026-11-01): the line is simply left out.
 
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
 Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
@@ -40,7 +39,7 @@ but that alert, so it has no ledger entry.
 
 import logging
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
@@ -71,66 +70,11 @@ HEADER_WORDS = {"business_name": "business name", "desk_name": "Desk name", "own
                 "brand": "brand colors"}
 WITHHELD_ALERT_EVERY = timedelta(hours=1)
 
-# Proposed wording awaiting the owner's sign-off.
-# A withheld policy line, by its key after "policy:", as the public page labels its card (the web app's
-# `NAMED_POLICIES`); a line the page shows as "Policy" is named by its key's words ("first_visit": "First visit").
-POLICY_LABELS = {"service_area": "Service area", "about": "About us", "pricing": "Pricing",
-                 "intake": "Getting started", "after_hours": "After hours", "urgent": "Urgent help",
-                 "how_we_help": "How we help"}
-# Why each line is withheld, from its rule IDs (never its text), after "it".
-POLICY_CAUSES = {
-    "number": "names a number",
-    "price": "names a price or a discount",
-    "date": "names a date or a time",
-    "promise": "makes a promise",
-    "booking": "confirms a booking or a call",
-    "language": "isn't in English or Spanish",
-    "format": "has hidden formatting characters",
-    "check": "doesn't pass the page's check",
-}
-
-
-def _and(words: Sequence[str]) -> str:
-    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
-
-
-def _policy_cause(rule: str) -> str:
-    """The cause in `POLICY_CAUSES` a public-text rule ID gives (`reply_check.scan_public_text`)."""
-    category = rule.rsplit(".", 1)[-1]
-    if rule == "digit" or category == "number":
-        return "number"
-    if rule in ("currency", "percent_sign") or category in ("money", "percent"):
-        return "price"
-    if category in ("date", "promise", "booking"):
-        return category
-    if category == "callback":
-        return "booking"
-    if rule in ("language", "mixed_script"):
-        return "language"
-    if rule == "format_control":
-        return "format"
-    return "check"
-
-
-def withheld_policy_alert(policies: Mapping[str, Iterable[str]]) -> str:
-    """The owner's alert that the page left out `policies` (key after "policy:" → its rule IDs), naming
-    each by its public label and saying why from the rules, never quoting the line."""
-    lines = []
-    for key in sorted(policies):
-        label = POLICY_LABELS.get(key, key.replace("_", " ").capitalize())
-        causes = {_policy_cause(rule) for rule in policies[key]} or {"check"}
-        if "price" in causes:
-            causes.discard("number")                      # a price names its own number already
-        because = _and([words for cause, words in POLICY_CAUSES.items() if cause in causes])
-        lines.append(f"{label}, because it {because}")
-    hidden = lines[0] if len(lines) == 1 else f"{', '.join(lines[:-1])}, and {lines[-1]}"
-    return f"Your public page is hiding {hidden}."
-
 
 def withheld_alert(fields: Sequence[str]) -> str:
     """The owner's alert that the page left out `fields` (header field names)."""
     words = [HEADER_WORDS[field] for field in fields]
-    named = _and(words)
+    named = words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
     it = "it" if len(words) == 1 else "them"
     return (f"Text from one of your private documents is in your {named}, so your public page doesn't show {it}. "
             f"Change {it} to show {it} again.")
@@ -146,21 +90,16 @@ def header_of(desk: Desk, business: Business, canaries: Mapping[str, str]) -> tu
     return header | {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}, withheld
 
 
-async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str],
-                          policies: Mapping[str, Iterable[str]] = {}) -> None:
-    """Tells the owner the page left out `fields` and `policies` (`withheld_policy_alert`), unless it
-    did within the hour."""
+async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str]) -> None:
+    """Tells the owner the page left out `fields`, unless it did within the hour."""
     preview, now = render.owner_preview("public_page"), ctx.clock.now()
     recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(
         DemoInboxRow.desk_id == desk_id, DemoInboxRow.kind == "alert", DemoInboxRow.preview == preview,
         DemoInboxRow.created_at > now - WITHHELD_ALERT_EVERY).limit(1)))
     if recent.first() is not None:
         return
-    body = [withheld_alert(fields)] if fields else []
-    if policies:
-        body.append(withheld_policy_alert(policies))
     await demo_inbox.deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
-                             body=" ".join(body), preview=preview)
+                             body=withheld_alert(fields), preview=preview)
 
 
 def open_status(hours: Sequence[HoursWindow], timezone: str, now: datetime, lang: render.Language) -> OpenStatus | None:
@@ -211,6 +150,8 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
+    if withheld:
+        await _alert_withheld(ctx, desk.desk_id, withheld)
     info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)
     now = ctx.clock.now()
     charter: list[RenderedBlock] = []
@@ -229,18 +170,11 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     # in the order the visitor receives them. Remove only contributing lines, then rescan:
     # removing one line can bring formerly separated promise fragments together.
     # Remove individual failures first, so their language evidence cannot withhold honest neighbors.
-    withheld_policies: dict[str, set[str]] = {}
-    for block in charter:
-        for fact_id, rules in reply_check.policy_card_rules("", [block]).items():
-            withheld_policies.setdefault(fact_id, set()).update(rules)
-    charter = [block for block in charter if block.fact_id not in withheld_policies]
+    # The owner isn't alerted (the owner's decision of 2026-11-01).
+    failing = {fact_id for block in charter for fact_id in reply_check.policy_card_rules("", [block])}
+    charter = [block for block in charter if block.fact_id not in failing]
     while refused := reply_check.policy_card_rules("", charter):
-        for fact_id, rules in refused.items():
-            withheld_policies.setdefault(fact_id, set()).update(rules)
         charter = [block for block in charter if block.fact_id not in refused]
-    if withheld or withheld_policies:
-        await _alert_withheld(ctx, desk.desk_id, withheld, {
-            fact_id.removeprefix("charter:policy:"): rules for fact_id, rules in withheld_policies.items()})
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS
