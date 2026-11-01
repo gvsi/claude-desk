@@ -4,11 +4,11 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import AwareDatetime, BaseModel, Field, StrictInt, StringConstraints, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
 
 # Identity and sessions: built by the kernel from its own tables; never accepted over HTTP.
 ActorKind = Literal["visitor", "agent", "owner"]
@@ -137,6 +137,9 @@ AUTO_MONEY_HARD_CAP_CENTS = 1_000_000     # $10,000: the platform ceiling, the m
                                           # the same as the per-payment limit (`PriceItem.unit_cents`, `NormalizedAction.amount_cents`,
                                           # the baseline's `money_has_amount`); Plan 01b raises it from Plan 01a's 50_000 and moves it
                                           # here ("Money cap")
+# Why `RuleCard` refuses an auto money card: read by the rules chat too, which names it for a business money card the
+# card alone can't recognise.
+AUTO_MONEY_NEEDS_LIMIT = f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}"
 
 class DeskSeed(BaseModel):
     name: str                             # "Main line"
@@ -168,8 +171,8 @@ MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects
 MCP_TOOLS: frozenset[str] = frozenset({"payments.list_charges", "payments.create_refund"})   # pinned by definition hash
 
 class ToolProfile(BaseModel):
-    tool: ToolName
-    source: Literal["native", "mcp"]
+    tool: "AnyToolName"
+    source: Literal["native", "mcp", "business"]
     effects: list[Effect]
     reversible: bool
     adapter: str                          # trusted code that normalizes args and resolves resources; no adapter, no tool
@@ -185,6 +188,7 @@ class ToolProfile(BaseModel):
     status: Literal["enabled", "needs_review", "disabled"]
     review_reason: Literal["new", "changed", "delisted"] | None = None   # set only while needs_review: a connect not yet
                                           # confirmed, a changed definition (pending_sha256 set), a tool its server stopped listing
+    business: "BusinessToolDef | None" = None
 
 class ToolCall(BaseModel):                # what Claude proposed (untrusted)
     call_id: str
@@ -202,7 +206,7 @@ class NormalizedAction(BaseModel):        # immutable; decisions, approvals and 
     desk_id: str
     session_id: str
     generation: int
-    tool: ToolName
+    tool: "AnyToolName"
     effects: list[Effect]
     args_sha256: str                      # sha256 of canonical_json(adapter-normalized args)
     profile_sha256: str
@@ -263,6 +267,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
     person_id: str | None = None          # required iff who == "person"
     agent_key_id: str | None = None       # required iff who == "agent"
     max_amount_cents: StrictInt | None = Field(None, ge=0)   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out;
+                                          # a card alone cannot know a business tool's effects: callers supply those money tools;
                                           # the kernel also holds it to its version's auto_money_cap_cents ("Money cap")
     max_discount_bp: StrictInt = Field(0, ge=0, le=10_000)   # auto only; a larger requested discount asks
     hours: HoursWindow | None = None      # auto only
@@ -272,7 +277,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
 
     @model_validator(mode="after")
     def _limits_only_on_auto(self) -> Self:
-        if self.applies_to not in _RULE_TARGETS:
+        if self.applies_to not in _RULE_TARGETS and not is_business_tool(self.applies_to):
             raise ValueError('applies_to names a tool or an effect ("effect:charge")')
         limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
         if self.mode != "auto" and (self.review or limited):
@@ -280,7 +285,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         if self.mode == "auto" and moves_money(self) and (
             self.max_amount_cents is None or self.max_amount_cents > AUTO_MONEY_HARD_CAP_CENTS
         ):
-            raise ValueError(f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}")
+            raise ValueError(AUTO_MONEY_NEEDS_LIMIT)
         if (self.who == "person") != (self.person_id is not None):
             raise ValueError('person_id is required iff who == "person"')
         if (self.who == "agent") != (self.agent_key_id is not None):
@@ -289,11 +294,14 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
             raise ValueError('a default card is the compiler\'s "ask" card for anyone')
         return self
 
-def moves_money(card: RuleCard) -> bool:
+def moves_money(card: RuleCard, money_tools: Collection[str] = frozenset()) -> bool:
     """Does the card take or pay out money: on a money tool, or on an effect in `MONEY_EFFECTS`.
     Defined here alone: `RuleCard` holds an auto money card to an amount with it, and the money cap
-    (`desk.money_cap`) and the kernel's compiler read it too."""
-    return card.applies_to in MONEY_TOOLS or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS}
+    (`desk.money_cap`) and the kernel's compiler read it too. A card alone cannot know a business
+    tool's effects: callers with the Desk's profiles supply `money_tools`; RuleCard's own validator
+    calls this without that set."""
+    return (card.applies_to in MONEY_TOOLS or card.applies_to in money_tools
+            or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS})
 
 def money_tool(tool: str, effects: Iterable[str]) -> bool:
     """Does a tool with these effects take or pay out money: a money tool, or one with an effect in
@@ -301,6 +309,12 @@ def money_tool(tool: str, effects: Iterable[str]) -> bool:
     auto permit on such a tool with it, and the reference generator, the bounded check and decide
     read it too."""
     return tool in MONEY_TOOLS or not MONEY_EFFECTS.isdisjoint(effects)
+
+def money_tools_of(tools: Iterable[tuple[str, Iterable[str]]]) -> frozenset[str]:
+    """Names of tools that take or pay out money, from (tool, effects) pairs of any source or status.
+    Kernel profile callers and the API's rules and setup reads share this definition; the API
+    projects pairs from its read view without needing full profiles."""
+    return frozenset(tool for tool, effects in tools if money_tool(tool, effects))
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"
@@ -525,7 +539,7 @@ class DemoAgentIssued(BaseModel):         # POST /agents/demo: a simulated third
 class LedgerEvent(BaseModel):
     kind: Literal["session", "auth", "verify", "decide", "review", "breaker", "approval", "execute",
                   "payment", "document_link", "reply", "policy", "tool_pin", "takeover", "whisper",
-                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search"]
+                  "rate_limit", "agent_auth", "head_checkpoint", "desk_data", "web_search", "business_tools"]
     origin: Literal["kernel", "api"]      # "api" events are recorded as reported, not as verified
     session_id: str | None = None
     ref_id: str | None = None
@@ -549,3 +563,57 @@ class LedgerPage(BaseModel):
     first_bad_seq: int | None
     public_key_hex: str
     key_id: str
+
+# Business tools: configurations of kernel-owned blocks, never executable owner input.
+BusinessToolName = Annotated[str, StringConstraints(pattern=r"^desk\.[a-z][a-z0-9-]{0,39}$")]
+AnyToolName = ToolName | BusinessToolName
+
+
+def is_business_tool(tool: str) -> bool:
+    import re
+    return re.fullmatch(r"desk\.[a-z][a-z0-9-]{0,39}", tool) is not None
+
+
+class IntakeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["intake"]
+    questions: list[Annotated[str, Field(max_length=120)]] = Field(min_length=1, max_length=5)
+
+
+class TypedBookingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["typed_booking"]
+    appointment_type: str = Field(max_length=60)
+    minutes: StrictInt = Field(ge=15, le=60)
+
+
+class PurposePaymentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["purpose_payment"]
+    purpose: str = Field(max_length=60)
+    amount_cents: StrictInt = Field(ge=0, le=1_000_000)
+
+
+class UrgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    block: Literal["urgent"]
+    urgent_when: str = Field(max_length=300)
+
+
+BlockConfig = Annotated[IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig,
+                        Field(discriminator="block")]
+
+
+class BusinessToolDef(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    title: str = Field(max_length=60)
+    description: str = Field(max_length=300)
+    config: BlockConfig
+
+
+class BusinessTool(BusinessToolDef):
+    tool: BusinessToolName
+
+
+ToolProfile.model_rebuild()
+NormalizedAction.model_rebuild()

@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
+import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -79,6 +79,24 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
+/** The most of a visitor's newest message a conversation summary carries, "…" included. */
+const LATEST_VISITOR_TEXT_MAX = 200;
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
+ * to single spaces, and cut to 199 characters and "…" past 200, with no space left before the
+ * "…". Null for an agent's or the owner's chat, the owner's preview, before the visitor writes,
+ * and when what they wrote last is all whitespace.
+ */
+function latestVisitorText(session: SessionRecord): string | null {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  const newest = session.items.findLast((item) => item.kind === 'visitor_text');
+  if (newest?.text == null) return null;
+  const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return null;
+  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -93,6 +111,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    latest_visitor_text: latestVisitorText(session),
   };
 }
 
@@ -436,6 +455,7 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
+    answers: items.filter((i) => i.kind === 'answer').length,
     turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
     newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },
@@ -653,9 +673,9 @@ function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
 export function rulesView(desk: DeskRecord): RulesView {
   const cards = desk.policy.cards;
   const tools = desk.tools.map((tool): ToolRow => {
-    const covering = new Set(rulesForTool({ tool: tool.tool, effects: tool.effects }, cards).map((card) => card.card_id));
+    const covering = new Set(rulesForTool({ tool: tool.tool as ToolName, effects: tool.effects }, cards).map((card) => card.card_id));
     return {
-      tool: tool.tool,
+      tool: tool.tool as ToolName,
       source: tool.source,
       ...(tool.business === undefined ? {} : { business: structuredClone(tool.business) }),
       effects: [...tool.effects],

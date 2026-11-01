@@ -466,7 +466,8 @@ async def refuse_public_charter(ctx: KernelCtx, part: str, charter: Sequence[Cla
 
 async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
                                 desk_id: str | None = None, *,
-                                allow_words: Mapping[str, frozenset[str]] = {}, contact_format: bool = False) -> None:
+                                allow_words: Mapping[str, frozenset[str]] = {}, contact_format: bool = False,
+                                amenities: bool = True) -> None:
     """Refuse public prose the reply check would reject, and with `contact_format` a contact that isn't a
     list of contact endpoints, before writing any of it: 422 `invalid`.
 
@@ -485,7 +486,8 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
         limit = "policy_count_limit"
     elif total_characters > reply_check.PUBLIC_POLICY_MAX_CHARS:
         limit = "policy_text_limit"
-    fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(values, allow_words=allow_words)
+    fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(
+        values, allow_words=allow_words, amenities=amenities)
     if not fields and not contact_format:
         return
     contact = {"contact": ["contact_format"]} if contact_format else {}
