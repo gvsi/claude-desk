@@ -8,7 +8,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { cdp, userEvent, type Locator } from 'vitest/browser';
+import { cdp, page, userEvent, type Locator } from 'vitest/browser';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { apiPath, ROUTES } from '../../api/routes.ts';
@@ -135,8 +135,9 @@ async function askForTheWeekdayChange(opts: RenderRouteOptions = {}, words = ASK
   const composer = rendered.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
   await composer.fill(words);
   await userEvent.keyboard('{Enter}');
-  // Beside the page, or a dialog over it where it is a sheet.
-  const panel = rendered.screen.getByRole(opts.viewport === 'phone' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
+  // Beside the page, or a dialog over it where it is a sheet: under 1024 px.
+  const sheet = opts.viewport === 'phone' || (typeof opts.viewport === 'object' && opts.viewport.width < 1024);
+  const panel = rendered.screen.getByRole(sheet ? 'dialog' : 'complementary', { name: 'Ask Claude' });
   const log = panel.getByRole('log');
   await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
   return { ...rendered, panel, log };
@@ -597,6 +598,24 @@ describe('on a phone', () => {
     await pause(500);
     expect(updatedRows(root)).toEqual([]);
     expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
+  });
+
+  it('a_window_widened_past_the_sheet_lands_the_change_beside_the_panel', async () => {
+    // Confirmed in the sheet on a tablet-wide window, the row waits for the sheet.
+    answerWithNoRefunds();
+    const { screen, log } = await askForTheWeekdayChange({ viewport: { width: 900, height: 900 } }, STOP_REFUNDS);
+    const root = screen.container;
+    const version = desk().lastVersion;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.poll(() => desk().policy.version).toBe(version);
+    await pause(300);
+    expect(updatedRows(root)).toEqual([]);
+
+    // Widened past the sheet's breakpoint, Ask Claude sits beside the page, and the row lands at once.
+    await page.viewport(1440, 900);
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toEqual(['Refund']);
   });
 
   it('the_sheet_shows_the_receipt_and_closing_it_brings_rules_to_the_row', async () => {

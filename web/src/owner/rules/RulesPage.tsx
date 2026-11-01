@@ -20,6 +20,7 @@ import {
   PresetMenu,
   SuggestionChips,
   TextLink,
+  useAskClaudeIsSheet,
   type NoticeTone,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
@@ -94,9 +95,6 @@ function withLanding(landed: Landed, landing: Landing): Landed {
   for (const tool of landing.rows.tools) tools.set(tool, landing.id);
   return { tools, limit: landing.rows.moneyLimit ? landing.id : landed.limit };
 }
-
-/** Under this width Ask Claude is a sheet over the page, so a change lands once it closes. */
-const ASK_CLAUDE_SHEET = '(max-width: 1023.98px)';
 
 /**
  * The first row `landing` changed, in the page's order, within `page`: a business job's card or a
@@ -204,7 +202,9 @@ export function RulesPage() {
   const landing = useLanding(deskId);
   const [kept, setKept] = useState<Landed>(NOTHING_LANDED);
   const [toReveal, setToReveal] = useState<Landing | null>(null);
-  const sheetOver = asking && window.matchMedia(ASK_CLAUDE_SHEET).matches;
+  // Where Ask Claude is a sheet over the page, a change lands once the sheet closes.
+  const isSheet = useAskClaudeIsSheet();
+  const sheetOver = asking && isSheet;
   const ready = landing !== null && drawn && active !== undefined && active.version >= landing.version && !sheetOver;
   const landed = ready ? withLanding(kept, landing) : kept;
   useEffect(() => {
