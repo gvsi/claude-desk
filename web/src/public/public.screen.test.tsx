@@ -2646,6 +2646,52 @@ describe('public chat page', () => {
     expect(opening).toEqual(['visitorSession', 'openPreview', 'visitorSession', 'visitorSession']);
   });
 
+  it.each(['desktop', 'phone'] as const)('preview_bar_takes_the_owner_back_on_%s', async (viewport) => {
+    // The owner's own preview, from "Chat as a customer": a slim bar over the brand header says what
+    // the page is, the short line on a phone, and takes them back to the Desk's Today.
+    const { screen, router } = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`, { viewport });
+    await ready(screen);
+    const bar = screen.getByRole('region', { name: 'Owner preview', exact: true });
+    await expect.element(bar).toBeVisible();
+    const line = viewport === 'desktop' ? 'Your public page, as customers see it' : 'Your public page';
+    expect(bar.element().querySelector('p')?.innerText).toBe(line);
+    const back = bar.getByRole('link', { name: 'Back to your Desk', exact: true });
+    await expect.element(back).toHaveAttribute('href', `/app/${RIVERA.deskId}/today`);
+    // Above the brand header, inside the window's height: the page still doesn't scroll.
+    const header = document.querySelector('.cd-public-shell__brand') as HTMLElement;
+    expect(bar.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().top);
+    await expectScreenBasics(screen.container, { owner: false });
+    expectNoHorizontalScroll();
+    expectNoWindowScroll();
+
+    await back.click();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/today`));
+  });
+
+  it('preview_bar_never_shows_to_a_visitor', async () => {
+    const bar = () => document.querySelector('[aria-label="Owner preview"]');
+    // The public page without `?preview=`, even in the owner's own browser: no bar, and the page
+    // never asks for the owner's reads.
+    const plain = await renderRoute(PAGE);
+    await ready(plain.screen);
+    expect(bar()).toBeNull();
+    expect(requests('me')).toEqual([]);
+
+    // `?preview=` naming no Desk of the owner's: no bar.
+    const other = await renderRoute(`${PAGE}?preview=desk-of-someone-else`);
+    await ready(other.screen);
+    await vi.waitFor(() => expect(requests('me')).toHaveLength(1));
+    expect(bar()).toBeNull();
+
+    // Anyone can add `?preview=`: without the owner's session the read fails, and there's no bar.
+    mockStore.reset('rivera', { signedIn: false });
+    const stranger = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`);
+    await ready(stranger.screen);
+    await vi.waitFor(() => expect(requests('me')).toHaveLength(1));
+    await sleep(100);
+    expect(bar()).toBeNull();
+  });
+
   it('break_it_link_types_its_idea', async () => {
     // Today's "Try to break it" hands the idea over in this browser, and opens the owner's preview
     // with the hand-off's token in its link.
