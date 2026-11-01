@@ -1024,6 +1024,52 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
         404, "not_found")
 
 
+# The Rivera seed's starter questions, in the order the public chat's chips show them.
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_public_desk_serves_the_seeds_starters_in_its_language(kernel, ro_read):
+    """Rivera's three seed-only starter questions, in the language asked for and never in a session's context; a Desk
+    the owner makes has none."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    for lang, starters in RIVERA_STARTERS.items():
+        assert (await public_page(http, slug, lang)).starters == starters, lang
+    visitor = await new_visitor(http, slug)
+    facts = (await context(http.session(visitor.session_token), visitor.state.session_id)).facts
+    assert "charter:contact" in [fact.fact_id for fact in facts]
+    assert not [fact for fact in facts if fact.fact_id.startswith("charter:starter:")]
+    created = await http.owner(copy.owner_token).call("POST /desks", a_new_desk())
+    assert (await public_page(http, created.slug, "es")).starters == []
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_charter_write_naming_a_starter_is_refused(kernel, ro_read):
+    """Only the seed writes starters: an owner's charter write naming one is 422 `invalid`, naming the key, and changes
+    nothing; a write without one keeps the seed's starters, as it keeps the hours."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    slug, path = desk_slug(ro_read, schema, copy), {"id": desk_id}
+    contact = Claim(key="contact", kind="text", value="(510) 555-0199")
+    query = "SELECT fact_id, claims FROM {ro}.facts WHERE desk_id = %s AND kind = 'charter' ORDER BY fact_id"
+    before = ro_read(schema, copy.copy_id, query, (desk_id,))
+    with pytest.raises(KernelFailed) as failure:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+            contact, Claim(key="starter:1", kind="text", value="Is the first visit free today?")]), path=path)
+    assert (failure.value.status, failure.value.code, failure.value.detail) == (
+        422, "invalid", {"starter:1": ["starter_seed_only"]})
+    assert ro_read(schema, copy.copy_id, query, (desk_id,)) == before
+    assert (await public_page(http, slug, "en")).starters == RIVERA_STARTERS["en"]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[contact]), path=path)
+    assert (await public_page(http, slug, "es")).starters == RIVERA_STARTERS["es"]
+
+
 RIVERA_TIME = ZoneInfo("America/Los_Angeles")
 # The Rivera seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
 RIVERA_OPEN = {**{day: (time(8), time(18)) for day in range(5)}, 5: (time(9), time(13))}

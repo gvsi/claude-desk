@@ -322,6 +322,10 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
 NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "callback", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
@@ -1756,6 +1760,12 @@ class FakeKernelState:
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
         desk.rivera_seed = True
+        for lang, questions in RIVERA_STARTERS.items():
+            for n, question in enumerate(questions, start=1):
+                key = f"starter:{n}:{lang}"
+                self._put_fact(desk, Fact(fact_id=f"charter:{key}", kind="charter", status="available",
+                                          source="kernel", claims=[Claim(key=key, kind="text", value=question)],
+                                          label=Label(readers=["public"])))
         for index, item in enumerate(RIVERA_KNOWLEDGE):
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
@@ -2221,7 +2231,24 @@ class FakeKernelState:
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
-                          agent_card=card, open_status=self._open_status(desk, language))
+                          agent_card=card, open_status=self._open_status(desk, language),
+                          starters=self._starters(desk, language))
+
+    def _starters(self, desk: Desk, language: str) -> list[str]:
+        canaries = self._canaries(desk.copy_id)
+        questions = []
+        for n in (1, 2, 3):
+            key = f"starter:{n}:{language}"
+            fact = desk.facts.get(f"charter:{key}")
+            if (fact is None or "public" not in fact.label.readers or fact.status != "available"
+                    or not self._current(fact)):
+                continue
+            claim = next((claim for claim in fact.claims if claim.key == key and claim.kind == "text"), None)
+            if claim is not None:
+                text = claim.value.strip()
+                if 0 < len(text) <= 80 and not canary_spans(text, canaries):
+                    questions.append(text)
+        return questions
 
     def _agent_tools(self, desk: Desk) -> set[str]:
         """What an agent session may be given on the Desk now: its enabled tools an agent could ever be given, kept to
@@ -2347,7 +2374,8 @@ class FakeKernelState:
                                timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
-            facts=[fact for fact in facts if self._readable(session, fact)],
+            facts=[fact for fact in facts if self._readable(session, fact)
+                   and not fact.fact_id.startswith("charter:starter:")],
             knowledge=[item for item in desk.knowledge.values()
                        if self._readers(session) & set(item.label.readers)])
 
@@ -3334,6 +3362,9 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        starters = {key: ["starter_seed_only"] for key in keys if key.startswith("starter:")}
+        if starters:
+            raise Refusal(422, "invalid", starters)
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
         if len(values) > 40:
@@ -3350,11 +3381,12 @@ class FakeKernelState:
 
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
-        stays, since the hours write it); a key given twice is 422."""
+        and seed-only starters stay); a key given twice or a `starter:` key is 422."""
         desk = self._owners_desk(request, request.path_params["id"])
         self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
-                        if fact.kind == "charter" and fact_id != "charter:hours"]:
+                        if fact.kind == "charter" and fact_id != "charter:hours"
+                        and not fact_id.startswith("charter:starter:")]:
             del desk.facts[fact_id]
             self._drop("facts", (desk.desk_id, fact_id))
         for claim in body.charter:

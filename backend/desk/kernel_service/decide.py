@@ -76,7 +76,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, mandates,
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, desks, explain, ledger, mandates,
                                  render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -849,7 +849,8 @@ async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Revie
     if call.action is None:
         raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter",
+        ~FactRow.fact_id.startswith(desks.STARTER_FACT_PREFIX)).order_by(FactRow.fact_id)))
     data = ReviewInput(action=ReviewAction.of(call.action, tz=call.business.timezone),
                        cards=[ReviewCard.of(card) for card in pending],
                        facts=[ReviewFact(key=claim.key, value=claim.value) for fact in facts

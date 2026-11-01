@@ -46,7 +46,7 @@ from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import ContextClock, SessionContext
-from desk.kernel_service import adapters, auth, clock, decide, labels
+from desk.kernel_service import adapters, auth, clock, decide, desks, labels
 from desk.kernel_service.adapters.base import business_timezone
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
@@ -98,6 +98,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     local = now.astimezone(tz)
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.status != "expired",
+        ~FactRow.fact_id.startswith(desks.STARTER_FACT_PREFIX),
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
     knowledge = await ctx.db.scalars(ctx.repo.scoped(
         select(KnowledgeRow).where(KnowledgeRow.desk_id == desk_id).order_by(KnowledgeRow.created_at,

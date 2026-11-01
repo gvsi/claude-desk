@@ -119,7 +119,8 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     # charter facts, the hours included, are public
     facts = {fact.fact_id: fact for fact in await rows_of(app, copy_id, select(Fact).where(Fact.kind == "charter"))}
     assert set(facts) == {"charter:contact", "charter:policy:service_area", "charter:policy:first_visit",
-                          "charter:policy:arrival", "charter:hours"}
+                          "charter:policy:arrival", "charter:hours",
+                          *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert all(fact.readers == ["public"] and fact.source == "kernel" and fact.status == "available"
                for fact in facts.values())
     assert [(c.key, c.value) for c in facts["charter:contact"].claims] == [("contact", "(510) 555-0142")]

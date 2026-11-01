@@ -72,6 +72,7 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 WINDOW_SEARCH = timedelta(days=14)        # how far ahead a callback window is looked for
 DAY_END = 24 * 60                         # an hours window ending at 00:00 ends at midnight
 HOURS_FACT = "charter:hours"
+STARTER_FACT_PREFIX = "charter:starter:"
 TIMEZONES = frozenset(available_timezones())   # the IANA names the time zone database lists
 MAX_DOCUMENT_BYTES = 200 * 1024
 MAX_DOCUMENTS = 50                        # on one Desk, each a canary every scan looks for
@@ -139,10 +140,13 @@ def one_person_per_contact(contacts: Iterable[str]) -> None:
 
 
 def check_charter(charter: Sequence[Claim]) -> None:
-    """Charter claims become `charter:<key>` facts: one per key, and never the hours."""
+    """Charter claims become `charter:<key>` facts: one per key, never hours or seed-only starters."""
     if any(claim.key == "hours" for claim in charter):
         raise InvalidSeed("hours_claim")
     unique(claim.key for claim in charter)
+    starters = {claim.key: ["starter_seed_only"] for claim in charter if claim.key.startswith("starter:")}
+    if starters:
+        raise KernelFailure(422, "invalid", "starter_seed_only", detail=starters)
 
 
 def unique(ids: Iterable[str]) -> None:
@@ -488,7 +492,7 @@ def prices_shown(price_items: Sequence[PriceItemSeed]) -> list[tuple[str, str]]:
 
 
 async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) -> list[str]:
-    """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours.
+    """The Desk's public `charter:<key>` facts, replaced; keep hours and seed-only starters.
     The public page shows them, so a document's canary in a key or a value is refused first
     (`refuse_public_canaries`). Text policies render verbatim, so their values must also pass
     the reply check's public prose scan (`refuse_public_promises`). Contact and structured
@@ -499,7 +503,8 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
     await refuse_public_promises(ctx, "charter", policy_values(body.charter), desk_row.desk_id)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT)))}
+        FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT,
+        ~FactRow.fact_id.startswith(STARTER_FACT_PREFIX))))}
     wanted = {fact.fact_id: fact for fact in map(charter_fact, body.charter)}
     for fact_id, row in rows.items():
         if fact_id not in wanted:
