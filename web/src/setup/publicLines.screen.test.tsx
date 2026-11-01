@@ -787,7 +787,7 @@ it('keeps an edited suggestion open if a successful save does not make it owner-
 });
 
 
-it('refreshes a stale price id and uses recomputed ids from each response while other actions wait', async () => {
+it('refreshes a stale price id and uses ids from the latest response while other actions wait', async () => {
   const state = await atSituations();
   const params = { id: state.interview_id };
   const response = await mockStore.dispatch('setupPublicLines', { params });
@@ -827,7 +827,7 @@ it('refreshes a stale price id and uses recomputed ids from each response while 
   await expect.element(screen.getByText('Review, $600', { exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
-  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['review-3', 'review-3', 'review', 'review']);
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['review-3', 'review-3', 'review', 'review-2']);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
 });

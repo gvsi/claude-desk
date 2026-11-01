@@ -26,7 +26,7 @@ function afterHoursOf(answer: string | undefined): string | undefined {
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 
-/** Match setup.py's price_items: ASCII-folded title slugs, capped at 40, with unique suffixes. */
+/** Assign stable IDs at seeding: ASCII-folded title slugs, capped at 40, with unique suffixes. */
 function priceItems(items: Pick<PublicPriceItem, 'title' | 'unit_cents'>[]): PublicPriceItem[] {
   const taken = new Set<string>();
   return items.map(({ title, unit_cents }) => {
@@ -95,7 +95,6 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
       }),
     });
   }
-  if (data.prices) data.prices.items = priceItems(data.prices.items);
   return data;
 }
 
@@ -107,7 +106,7 @@ export const PUBLIC_LINES_ROUTES = {
     const index = found.prices?.items.findIndex((item) => item.item_id === req.params.item_id) ?? -1;
     if (!found.prices || index === -1) return { status: 409, body: { error: 'conflict' } };
     const items = found.prices.items.filter((_, position) => position !== index);
-    found.prices = items.length ? { source: 'suggested', items: priceItems(items) } : null;
+    found.prices = items.length ? { source: 'suggested', items } : null;
     return { status: 200, body: structuredClone(found) };
   },
   removePublicLine(sv, req) {
