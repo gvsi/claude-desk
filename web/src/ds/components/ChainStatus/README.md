@@ -17,7 +17,7 @@
 
 | State | Dot | Line |
 | --- | --- | --- |
-| `chainOk: true` | handled | "Every entry checks out" |
+| `chainOk: true` | handled | "Every entry matches the chain" |
 | `chainOk: false`, or anything but `true` or `null` | refused | "Entry {firstBadSeq} doesn't match the chain" ("An entry doesn't match the chain" without a well-formed number) |
 | `chainOk: null` | info | "Not checked yet" |
 

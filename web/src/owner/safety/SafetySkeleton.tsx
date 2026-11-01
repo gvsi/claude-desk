@@ -72,7 +72,7 @@ function Bar() {
               height="1lh"
               radius="full"
               measure={{
-                label: 'Every entry checks out',
+                label: 'Every entry matches the chain',
                 className: 'cd-type-body',
                 tagName: 'span',
               }}
