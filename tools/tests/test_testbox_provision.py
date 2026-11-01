@@ -548,25 +548,42 @@ def test_promote_refuses_a_standby_that_is_missing_stopped_or_misconfigured(monk
 def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessions(tmp_path):
     """Lanes on a laptop share one SSH connection; sshd's default of 10 sessions on it refused new calls once a
     dozen lanes ran at once. The bootstrap raises it, reloading sshd only when the setting changes: a reload keeps
-    open connections, and each new one gets the new limit."""
+    open connections, and each new one gets the new limit. A failed check leaves nothing installed, so a retry
+    checks again."""
     import os
     import re
     import subprocess
     script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
     block = script[script.index('# Every lane on a laptop shares one SSH connection'):script.index('# This server holds only disposable test data')]
-    assert int(re.search(r'MaxSessions (\d+)', block).group(1)) >= 256
+    assert 256 <= int(re.search(r'MaxSessions (\d+)', block).group(1)) <= 450   # each session holds ~2 of 1024 files
     # On a fresh machine no connection has started ssh.service yet, so the check's runtime directory may be missing.
     assert block.index('install -d -o root -g root -m 0755 /run/sshd') < block.index('sshd -t')
     (tmp_path / 'bin').mkdir()
     log = tmp_path / 'services'
+    effective = tmp_path / 'effective'
+    (tmp_path / 'bin/systemctl').write_text('#!/bin/sh\necho "systemctl $*" >> ' + str(log) + '\n')
+    (tmp_path / 'bin/sshd').write_text('#!/bin/sh\necho "sshd $*" >> ' + str(log) + '\n'
+                                       'test "$1" = -T && cat ' + str(effective) + '\nexit 0\n')
     for tool in ('systemctl', 'sshd'):
-        (tmp_path / 'bin' / tool).write_text('#!/bin/sh\necho "' + tool + ' $*" >> ' + str(log) + '\n')
         (tmp_path / 'bin' / tool).chmod(0o755)
     config = tmp_path / 'sshd_config.d'
     config.mkdir()
     commands = block.replace('/etc/ssh/sshd_config.d', str(config)).replace('/tmp/desk-testbox-sshd.conf', str(tmp_path / 'desired.conf'))
     commands = commands.replace('install -d -o root -g root -m 0755 /run/sshd', 'mkdir -p ' + str(tmp_path / 'run-sshd'))
     env = {**os.environ, 'PATH': str(tmp_path / 'bin') + ':' + os.environ['PATH']}
-    for _ in range(2):
-        subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)
-    assert log.read_text().splitlines() == ['sshd -t', 'systemctl try-reload-or-restart ssh.service']
+    run = lambda: subprocess.run(['bash', '-e', '-c', commands], env=env, capture_output=True)
+    reload = ['sshd -t', 'sshd -T', 'systemctl try-reload-or-restart ssh.service']
+
+    effective.write_text('maxsessions 256\n')
+    assert run().returncode == 0 and run().returncode == 0
+    assert log.read_text().splitlines() == reload                       # installed once, then left alone
+    (config / '90-testbox.conf').write_text('old configuration')
+    assert run().returncode == 0
+    assert log.read_text().splitlines() == reload * 2                   # a changed file is checked and reloaded
+
+    log.write_text('')
+    (config / '90-testbox.conf').unlink()
+    effective.write_text('maxsessions 10\n')                           # another drop-in read first wins
+    assert run().returncode != 0
+    assert not (config / '90-testbox.conf').exists()                    # so a retry checks again
+    assert 'systemctl try-reload-or-restart ssh.service' not in log.read_text()
