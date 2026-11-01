@@ -1161,8 +1161,9 @@ describe('OwnerLayout', () => {
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
     await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
-    // The old copy's Today is gone (still on its skeleton, its inbox still out), and the new copy's loading page is up.
-    expect(pageNow()).toBe('loading');
+    // Navigation and the held read can precede React's commit, leaving the old Today's skeleton
+    // mounted briefly. Wait for the new copy's loading page before either held answer is released.
+    await vi.waitFor(() => expect(pageNow()).toBe('loading'));
     const sawItOpening = watchFor('Opening your Demo inbox');
 
     // The old copy's inbox answers late, before the new copy's Desks do.
