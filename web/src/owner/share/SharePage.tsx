@@ -1,13 +1,20 @@
 /**
  * Share (N-Run2-Share): the Desk's public link, from its slug, with everything an owner needs to put
- * it where customers already look. It reads nothing of its own: the business and the Desk come
- * with the owner's frame.
+ * it where customers already look. The business and the Desk come with the owner's frame, and the
+ * page draws at once. It reads one thing of its own, the Desk's tools (the rules read Rules makes),
+ * only to know whether the voicemail may promise an emergency callback: until that read lands, or
+ * if it fails, the voicemail is drawn without that sentence, so it never promises one and takes it
+ * back.
  */
+import { useQuery } from '@tanstack/react-query';
+
 import { PageHeader } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { rulesQuery } from '../rules/RuleDraftReview.tsx';
 import { ShareKit } from './ShareKit.tsx';
+import { urgentCallbackOn } from './shareCopy.ts';
 
 import './SharePage.css';
 
@@ -15,11 +22,17 @@ const TITLE = 'Share';
 
 export function SharePage() {
   const { business, desk } = useOwnerDesk();
+  const rules = useQuery(rulesQuery(desk.desk_id));
   useDocumentTitle(inApp(TITLE));
   return (
     <div className="cd-share-page">
       <PageHeader title={TITLE} subtitle="Put your Desk where customers already look for you." />
-      <ShareKit publicUrl={publicLink(desk.slug)} business={business.name} ownerName={business.owner_display_name} />
+      <ShareKit
+        publicUrl={publicLink(desk.slug)}
+        business={business.name}
+        ownerName={business.owner_display_name}
+        urgentCallback={rules.data !== undefined && urgentCallbackOn(rules.data.tools)}
+      />
     </div>
   );
 }

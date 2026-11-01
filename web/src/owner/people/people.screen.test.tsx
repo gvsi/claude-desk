@@ -10,10 +10,11 @@ import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { newIdempotencyKey } from '../../api/http.ts';
-import type { RulesView, SetupState } from '../../api/views.ts';
+import type { RulesView, SetupState, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { seedBusinessTools } from '../../mocks/businessTools.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -21,6 +22,8 @@ import { MINUTE } from '../../mocks/world.ts';
 import { SPEC, expectTabOrder } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
+import { holdReads } from '../../test/holdReads.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { SHARE_COPY, displayLink } from '../share/shareCopy.ts';
@@ -124,6 +127,33 @@ const JORDAN = { name: 'Jordan Pike', note: 'Asked about a gas line for an outdo
 
 /** An email address written out in full: no "•" standing in for its name. */
 const UNMASKED_EMAIL = /[\w.+-]*[\w+-]@[\w-]+\.[\w.]+/g;
+
+/** Rivera's business and owner, as the share kit names them. */
+const RIVERA_BUSINESS = rivera.business.name;
+const RIVERA_OWNER = rivera.business.ownerName;
+
+/**
+ * Rivera's urgent business tool, on, as the kernel seeds every Rivera copy with it: an emergency
+ * callback that alerts Maria at once.
+ */
+const URGENT_TOOL: ToolRow = {
+  tool: 'desk.emergency-callback',
+  source: 'business',
+  status: 'enabled',
+  review_reason: null,
+  effects: ['change'],
+  reversible: true,
+  description_confirmed: 'Saves an urgent callback request and alerts the owner right away.',
+  definition_sha256: 'e'.repeat(64),
+  pending_definition_text: null,
+  pending_sha256: null,
+  cards: [],
+  business: {
+    title: 'Emergency callback',
+    description: 'Asks Maria to call back urgently about an emergency.',
+    config: { block: 'urgent', urgent_when: 'A burst or leaking pipe, flooding, a sewage backup, or no water' },
+  },
+};
 
 /** The QR code the share kit draws for `url`, as the image it shows. */
 async function qrImage(url: string): Promise<string> {
@@ -575,9 +605,10 @@ describe('share', () => {
     await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
     await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
 
-    // The ready-made words, each with its Copy, which copies its words.
+    // The ready-made words, each with its Copy, which copies its words. The mock's Rivera has no tool
+    // for urgent callbacks, so its voicemail promises no emergency callback.
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Ready-made words' })).toBeVisible();
-    const blocks = SHARE_COPY(business, owner, url);
+    const blocks = SHARE_COPY(business, owner, url, { urgentCallback: false });
     expect(words.getByRole('listitem').elements().map((row) => row.querySelector('.cd-copy-list__words')?.textContent)).toEqual(blocks.map((b) => b.text));
     await words.getByRole('button', { name: 'Copy Voicemail' }).click();
     expect(copies).toHaveBeenLastCalledWith(blocks[2]?.text);
@@ -599,6 +630,48 @@ describe('share', () => {
     expect(marked).toBe('share-card');
     expect(document.documentElement.hasAttribute('data-print-only')).toBe(false);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('voicemail_promises_an_emergency_callback_only_with_an_urgent_callback_tool', async () => {
+    /** The voicemail's words as the page shows them. */
+    const voicemail = (root: HTMLElement) =>
+      [...root.querySelectorAll('.cd-copy-list__words')].find((words) => words.textContent?.startsWith('You’ve reached'))?.textContent ?? null;
+    const rulesRead = () => mockStore.requests.filter((r) => r.key === 'rules').length;
+
+    // A Desk Linda made in setup has no tool for urgent callbacks, only the callback every Desk has:
+    // its voicemail stops after the link, before and after its tools are read.
+    const linda = await liveSetupDeskIds("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
+    const lindasDesk = mockStore.world.desk(linda.deskId);
+    if (!lindasDesk) throw new Error('setup made the Desk');
+    expect(lindasDesk.tools.some((tool) => tool.tool === 'native.request_callback' && tool.status === 'enabled')).toBe(true);
+    const lindaUrl = `${window.location.origin}/d/${linda.slug}`;
+    const lindaWords = SHARE_COPY(lindasDesk.summary.business_name, 'Linda', lindaUrl, { urgentCallback: false })[2]?.text;
+    expect(lindaWords).not.toContain('emergency');
+    const ofLinda = await renderRoute(`/app/${linda.deskId}/share`);
+    await expect.element(ofLinda.screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    expect(voicemail(ofLinda.screen.container)).toBe(lindaWords);
+    await expect.poll(rulesRead).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(voicemail(ofLinda.screen.container)).toBe(lindaWords);
+    await cleanup();
+
+    // Rivera's Desk with its urgent callback tool on, as the kernel seeds it: the voicemail word
+    // for word, emergency callback included, once its tools are read. Until then it is drawn without
+    // that sentence, so it never draws a promise and takes it back.
+    const rivera = mockStore.world.desk(RIVERA.deskId);
+    if (!rivera) throw new Error('the mock has the main Desk');
+    seedBusinessTools(rivera, [URGENT_TOOL]);
+    const held = holdReads('/api/owner/desks/:deskId/rules');
+    const ofRivera = await renderRoute(`${DESK}/share`);
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    await expect.element(ofRivera.screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    await expect.poll(held.held).toBeGreaterThan(0);
+    expect(voicemail(ofRivera.screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
+    held.release();
+    await expect.poll(() => voicemail(ofRivera.screen.container)).toBe(
+      'You’ve reached Rivera Plumbing. For quotes and bookings, visit ' +
+        `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.`,
+    );
   });
 
   it('print_card_prints_the_card_alone', async () => {

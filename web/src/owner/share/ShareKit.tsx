@@ -12,6 +12,11 @@ export interface ShareKitProps {
   business: string;
   /** The owner's display name, whom a customer can ask for. */
   ownerName: string;
+  /**
+   * Whether the Desk has a tool for urgent callbacks on (`urgentCallbackOn`), so the voicemail can
+   * say the owner calls back about an emergency; false until the Desk's tools are read.
+   */
+  urgentCallback: boolean;
 }
 
 /** Marks the page while the browser prints, so the print styles leave only the card on paper. */
@@ -36,8 +41,8 @@ async function writeToClipboard(text: string): Promise<void> {
  * and the website embed, which is coming later. Each is built from `publicUrl`; a link under the
  * API's paths, a document link among them, throws before anything shows.
  */
-export function ShareKit({ publicUrl, business, ownerName }: ShareKitProps) {
-  const words = SHARE_COPY(business, ownerName, publicUrl);
+export function ShareKit({ publicUrl, business, ownerName, urgentCallback }: ShareKitProps) {
+  const words = SHARE_COPY(business, ownerName, publicUrl, { urgentCallback });
   return (
     <div className="cd-share-kit">
       <Card as="section" label="Your link">
