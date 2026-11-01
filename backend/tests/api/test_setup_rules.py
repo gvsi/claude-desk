@@ -96,6 +96,7 @@ from tests.api.test_setup_questions import (
     cut_short,
     idle_in_transaction,
     new_owner,
+    next_step,
     structured,
     turn,
 )
@@ -535,6 +536,35 @@ async def test_using_the_suggestions_while_the_offer_waits_adds_no_test_client(a
     assert (done["step"], done["question"]) == ("tools", None)
     assert done["messages"][-3:] == [CLOSING_PLAN, OFFER, owner_line("Use your suggestions")]
     assert len(model.requests) == asked and kernel_writes(fake) == []
+
+
+async def test_using_the_suggestions_runs_the_post_finish_work_once_the_offer_is_answered(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    async with engine.begin() as conn:                    # the contact question comes up before the others
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+        interview.transcript.append(setup.Entry(role="claude", text="Which contact should customers see?",
+                                                question="contact_and_after_hours"))
+        await setup._save(conn, interview)
+    reply = await answer(owner, model, state["interview_id"], CONTACT_SAID, turn(),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    finished = []
+
+    async def after_finish(ctx, interview):
+        finished.append(interview.step)
+
+    monkeypatch.setattr(setup, "after_finish", after_finish)
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan=CLOSING_PLAN["text"]))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    # The suggestions close the plan and bring up the offer: the post-finish work waits for its answer.
+    assert reply.json()["question"] == "test_client" and reply.json()["messages"][-2:] == [CLOSING_PLAN, OFFER]
+    assert finished == []
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
+    assert finished == ["tools"]
 
 
 @pytest.mark.parametrize("reenable", [False, True])

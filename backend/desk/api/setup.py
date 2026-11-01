@@ -2887,12 +2887,15 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if not business_tools_enabled:
             _clear_configs(interview)
         await close_setup(ctx, engine, model, interview)
-        connect = _claim_connector_connect(interview)
+        # With the test-client offer waiting, the Tools step and its post-finish work wait for its answer (`answer`).
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
-        await after_finish(ctx, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
