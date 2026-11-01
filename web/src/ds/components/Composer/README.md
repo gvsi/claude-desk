@@ -15,6 +15,7 @@
 - Shift+Enter starts a new line.
 - An Enter that confirms an IME word (during composition, or reported as key code 229 after it, as Safari does) does neither.
 - Nothing is sent while the text is empty or only spaces: Enter does nothing and the send button is disabled.
+- A click anywhere on the box that isn't one of its controls (its padding, the empty part of the row under the text) focuses the text box with the caret at the end, as on claude.ai. Its buttons and the counter keep their own click, words selected in the text box stay selected, a selection started in the text box and released on the box is kept, and a disabled composer does nothing.
 
 ## What the consumer provides
 

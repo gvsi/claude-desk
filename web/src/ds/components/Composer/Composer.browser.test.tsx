@@ -110,3 +110,57 @@ it('send_held_keeps_typing_and_focus_but_holds_send_and_enter_until_it_lifts', a
   expect(sent).toEqual(['Is $500 fine?\nOr less?']);
   expect(box.value).toBe('');
 });
+
+/** Where a press on `variant`'s box lands away from its controls: the owner's tools row, or the single row's padding. */
+async function clickBoxSurface(variant: 'owner' | 'visitor' | 'whisper', input: HTMLElement): Promise<void> {
+  const box = input.closest<HTMLElement>('.cd-composer__box')!;
+  if (variant === 'owner') {
+    // The middle of the row under the text, where no control is: the empty part Send leaves.
+    await userEvent.click(box.querySelector<HTMLElement>('.cd-composer__tools')!);
+    return;
+  }
+  await userEvent.click(box, { position: { x: 6, y: Math.round(box.getBoundingClientRect().height / 2) } });
+}
+
+for (const variant of ['owner', 'visitor', 'whisper'] as const) {
+  it(`a_click_on_the_${variant}_box_away_from_its_controls_puts_the_caret_at_the_end_of_the_text`, async () => {
+    const sent: string[] = [];
+    const screen = await render(
+      <div>
+        <button type="button">Elsewhere</button>
+        <Composer variant={variant} label="Message" placeholder="Message" onSend={(text) => sent.push(text)} />
+      </div>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    const box = input.element() as HTMLTextAreaElement;
+    await input.click();
+    await userEvent.keyboard('Thursday works');
+    await screen.getByRole('button', { name: 'Elsewhere' }).click();
+    expect(document.activeElement).not.toBe(box);
+    await clickBoxSurface(variant, box);
+    expect(document.activeElement).toBe(box);
+    expect(box.selectionStart).toBe('Thursday works'.length);
+    expect(box.selectionEnd).toBe('Thursday works'.length);
+    // Send keeps its own click: the words go, and the box clears.
+    await screen.getByRole('button', { name: variant === 'whisper' ? 'Send whisper' : 'Send' }).click();
+    expect(sent).toEqual(['Thursday works']);
+    expect(box.value).toBe('');
+  });
+}
+
+it('a_click_on_the_box_keeps_a_selection_in_the_text_and_does_nothing_while_disabled', async () => {
+  const props = { variant: 'owner', label: 'Message', placeholder: 'Message', onSend: () => {} } as const;
+  const screen = await render(<Composer {...props} />);
+  const input = screen.getByRole('textbox', { name: 'Message' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  await userEvent.keyboard('Thursday works');
+  box.setSelectionRange(0, 8);
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).toBe(box);
+  expect([box.selectionStart, box.selectionEnd]).toEqual([0, 8]);
+  box.blur();
+  await screen.rerender(<Composer {...props} disabled />);
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).not.toBe(box);
+});
