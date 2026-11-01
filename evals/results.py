@@ -52,6 +52,8 @@ its splits must hold its suite, and any added or edited results JSON must valida
 their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
 merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
 empty recorded-rate history, append-only rate and waiver histories, and kept landed plans.
+On every readiness path, the actual merge tree must also have exactly one Alembic head when its
+migrations directory exists; revision metadata is parsed as literals without executing migrations.
 Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
@@ -103,6 +105,7 @@ written. It never lowers the bar quietly: a lower bound on the same held-out set
 doesn't load), and `results-check` names each lowered rate a change adds (`lowered_notice`).
 """
 
+import ast
 import json
 import subprocess
 import tempfile
@@ -148,6 +151,7 @@ RATES_PATH = "evals/recorded_rates.json"
 LANDED_PATH = "evals/tier1/landed.toml"
 SCENARIOS_PATH = "evals/tier2/scenarios"
 SPLITS_PATH = "evals/splits.yaml"
+MIGRATIONS_PATH = "backend/alembic/versions"
 # The owner's scope (owner decision, 2026-10-30): the kernel, the prompts, the policies, the model settings,
 # and the tier 2 scenarios and judges. Everything else relies on tier 1 and CI.
 GATED_PATHS = (
@@ -266,11 +270,83 @@ def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None 
     return all(required - landed for required in requirements)
 
 
+def _migration_revision(raw: bytes, path: str) -> tuple[str, tuple[str, ...]]:
+    """Read only module-level literal metadata, without importing or executing a migration."""
+    try:
+        module = ast.parse(raw, filename=path)
+    except SyntaxError as error:
+        raise GitError(f"migration {path!r} doesn't parse: {error}") from None
+    values: dict[str, Any] = {}
+    for statement in module.body:
+        if isinstance(statement, ast.Assign):
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in ("revision", "down_revision"):
+                try:
+                    values[target.id] = ast.literal_eval(statement.value)
+                except (ValueError, TypeError) as error:
+                    raise GitError(f"migration {path!r} has non-literal {target.id}: {error}") from None
+    if "revision" not in values or "down_revision" not in values:
+        raise GitError(f"migration {path!r} must assign literal revision and down_revision at module level")
+    revision, parent = values["revision"], values["down_revision"]
+    if not isinstance(revision, str) or not revision:
+        raise GitError(f"migration {path!r} revision must be a nonempty string")
+    parents = () if parent is None else (parent,) if isinstance(parent, str) else parent
+    if not isinstance(parents, (tuple, list)) or any(not isinstance(p, str) or not p for p in parents):
+        raise GitError(f"migration {path!r} down_revision must be None, a string, or a tuple/list of revision strings")
+    return revision, tuple(parents)
+
+
+def _migration_heads(root: Path, tree: str) -> list[str] | None:
+    """Heads in the merged git tree, or None when the migrations directory is absent."""
+    entry = git(root, "ls-tree", "-z", tree, "--", MIGRATIONS_PATH).rstrip("\0")
+    if not entry:
+        return None
+    if entry.split("\t", 1)[0].split()[1] != "tree":
+        raise GitError(f"{MIGRATIONS_PATH} can't be read as a directory in the merge tree")
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    paths = git(root, "ls-tree", "-r", "-z", "--name-only", tree, "--", MIGRATIONS_PATH + "/").split("\0")
+    for path in paths:
+        if not path.endswith(".py"):
+            continue
+        raw = show(root, tree, path)
+        if raw is None:
+            raise GitError(f"migration {path!r} can't be read from the merge tree")
+        revision, down_revisions = _migration_revision(raw, path)
+        if revision in revisions:
+            raise GitError(f"migration {path!r} duplicates revision {revision!r}")
+        revisions.add(revision)
+        parents.update(down_revisions)
+    return sorted(revisions - parents)
+
+
 def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """An unarmed union and merge with no recorded rates are ready; otherwise apply the both-sides rule."""
+    """Require one merged migration head, then apply the unarmed or both-sides results rule."""
     head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
     main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
     base = git(root, "merge-base", head_commit, main_commit).strip()
+    done = subprocess.run(
+        ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
+        capture_output=True, text=True,
+    )
+    if done.returncode == 1:
+        # With -z, the tree id and conflicted paths precede an empty field and the messages.
+        paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
+        return False, ("not ready: the PR conflicts with origin/main in "
+                       f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
+    if done.returncode != 0:
+        raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
+    merged = done.stdout.split("\0", 1)[0].strip()
+    heads = _migration_heads(root, merged)
+    if heads is not None and len(heads) != 1:
+        return False, (f"not ready: merged Alembic migrations have {len(heads)} heads: "
+                       f"{', '.join(repr(head) for head in heads) or 'none'}; "
+                       "re-chain the PR's migration onto origin/main's head")
 
     def changed_inputs(commit: str) -> list[str]:
         paths = git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}..{commit}").split("\0")
@@ -290,18 +366,6 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
         except ValueError as error:
             raise GitError(f"merge readiness {RATES_PATH} doesn't load: {error}") from None
         if pending_only and not any(histories):
-            done = subprocess.run(
-                ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
-                capture_output=True, text=True,
-            )
-            if done.returncode == 1:
-                # With -z, the tree id and conflicted paths precede an empty field and the messages.
-                paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
-                return False, ("not ready: the PR conflicts with origin/main in "
-                               f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
-            if done.returncode != 0:
-                raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
-            merged = done.stdout.split("\0", 1)[0].strip()
             try:
                 merged_pending_only = unarmed(merged, root)
             except CheckFailed as error:
