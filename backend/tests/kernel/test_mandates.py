@@ -816,7 +816,8 @@ async def test_a_quote_is_charged_once(desk_prove, app, client, frozen_clock):
         assert again.visitor_plain == "Not something I can do here"
     refusals = [entry for entry in decide_entries(await ledger_rows(app, setup.desk), setup.session_id)
                 if entry.get("outcome") == "refuse"]
-    assert refusals == [{"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paid"}] * 2
+    assert refusals == [{"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paid",
+                         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}] * 2
     assert [(key, amount) for key, amount, _, _ in agent_charges(copy_id)] == [(first.action.action_id, 2_000)]
     assert mandate_spend(copy_id) == [(2_000, 0)]
 
@@ -860,7 +861,8 @@ async def test_a_charge_that_timed_out_keeps_its_quote_unpayable_before_its_outc
     response = await asyncio.wait_for(running, 10)
     assert ExecResult.model_validate(response.json()).state == "unknown"
     assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
-        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying",
+         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}]
     assert await reservations(app, copy_id) == [(first.action.action_id, 2_000, "reserved")]   # kept while unknown
     assert agent_charges(copy_id) == []
     assert await quote_status(app, copy_id, quote_id) != "paid"
@@ -886,7 +888,8 @@ async def test_a_charge_cut_off_after_its_intent_keeps_its_quote_unpayable_until
     again = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-2")
     assert (again.outcome, again.action) == ("refuse", None), again.reason_plain
     assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
-        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying",
+         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}]
     assert agent_charges(copy_id) == []
 
     frozen_clock.advance(31)                            # an orphan now: a read reconciles it

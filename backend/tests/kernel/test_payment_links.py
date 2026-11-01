@@ -267,7 +267,8 @@ async def test_a_quote_has_one_open_link_and_is_paid_once(desk_prove, app, clien
     assert "It didn't match your records, so it was refused." in refused.reason_plain
     refusals = [entry.event.summary for entry in await ledger_rows(app, copy)
                 if entry.event.kind == "decide" and entry.event.summary.get("outcome") == "refuse"]
-    assert refusals == [{"outcome": "refuse", "tool": TOOL, "reason": "adapter_refused", "check": "quote_paid"}]
+    assert refusals == [{"outcome": "refuse", "tool": TOOL, "reason": "adapter_refused", "check": "quote_paid",
+                         "policy_version": 2, "auto_money_cap_cents": 50_000}]
     assert len(await links_of(app, copy)) == 1 and len(checkouts(copy)) == 1
 
 

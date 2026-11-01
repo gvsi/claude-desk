@@ -2756,8 +2756,12 @@ class FakeKernelState:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
+        # every decide entry names the rules version and its money cap, a refusal before any action too (the
+        # kernel's `decide._store`)
         summary = {"decision_id": decision_id, "action_id": action.action_id if action else None, "tool": tool,
-                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
+                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version,
+                   "auto_money_cap_cents": min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS),
+                   "reviewed": False}
         if why is not None:
             summary["reason"] = why
         if check is not None:
