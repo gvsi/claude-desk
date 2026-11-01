@@ -1683,9 +1683,19 @@ def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
             and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
 
 
+def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
+    """A strict subset of the stored owner days and windows, with every retained time unchanged."""
+    if "hours" in before.suggested_fields:
+        return False
+    stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
+    remaining = {(day, window.start, window.end) for answer in named for window in [answer.window()]
+                 for day in window.days}
+    return remaining < stored
+
+
 def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
     """The facts this turn gave off their own question that the owner's own words this turn (`said`) back: a list they
-    said to clear (`CLEARABLE`), or a structured value `owner_supports` finds in
+    said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports` finds in
     `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained suggested
     item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
     backed = set()
@@ -1703,6 +1713,7 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: Se
                 changed = [item for item in value if listed.get(_title(item.title)) != item.unit_cents]
                 value = changed or value
         if ((name in CLEARABLE and value == [])
+                or (name == "hours" and before is not None and _only_removes_hours(before, value))
                 or (name in {"public_contact", "price_items", "hours"}
                     and owner_supports(name, value, said, stated=True))):
             backed.add(name)

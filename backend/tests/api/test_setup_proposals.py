@@ -523,7 +523,7 @@ async def test_owner_hours_correction_on_another_question_is_the_owners(proposal
     await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
     corrected = [{"days": weekdays, "start": "09:00", "end": "17:00"}]
     reply = await answer(owner, model, interview_id,
-                         "Call 415-555-0118. Closed Saturdays now, Monday to Friday 9am to 5pm.",
+                         "Call 415-555-0118. Closed Saturdays now.",
                          turn(public_contact="415-555-0118", hours=corrected), question="contact_and_after_hours")
     assert reply.status_code == 200, reply.text
     record = await stored(engine, interview_id)
@@ -535,6 +535,23 @@ async def test_owner_hours_correction_on_another_question_is_the_owners(proposal
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert parts.hours == answers.hours and parts.calendar
     assert all(date.fromisoformat(slot.slot_id[2:10]).weekday() < 5 for slot in parts.calendar)
+
+
+@pytest.mark.parametrize("days,start,end,held,supported", [
+    (["mon"], "09:00", "17:00", False, True),
+    (["mon", "tue", "sat"], "09:00", "17:00", False, False),
+    (["mon"], "10:00", "17:00", False, False),
+    (["mon"], "09:00", "17:00", True, False),
+    (["mon", "tue"], "09:00", "17:00", False, False),
+])
+def test_off_topic_hours_removals_never_add_days_or_change_times(days, start, end, held, supported):
+    from desk.api.prompts import SetupPatch
+
+    before = SetupAnswers(summary="Plumbing", hours=[HoursAnswer(days=["mon", "tue"], start="09:00", end="17:00").window()],
+                          suggested_fields=["hours"] if held else [])
+    patch = SetupPatch(hours=[HoursAnswer(days=days, start=start, end=end)])
+    backed = setup._backed_off_topic(patch, "contact_and_after_hours", "Call 415-555-0118. Closed Tuesdays now.", before)
+    assert ("hours" in backed) is supported
 
 
 async def test_owner_price_clear_on_another_question_is_the_owners(proposals, model, engine):
