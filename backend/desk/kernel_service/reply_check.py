@@ -94,7 +94,7 @@ import logging
 import re
 import unicodedata
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,7 +112,8 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
+from desk.kernel_service import (agents, auth, context, demo_inbox, jev, labels, lang, ledger, markdown_text, render,
+                                 sessions)
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
@@ -622,6 +623,23 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
             or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
+def markdown_violations(prose: str, raw: Sequence[Violation],
+                        scan: Callable[[str], list[Violation]]) -> list[Violation]:
+    """What the prose shows once rendered as Markdown (`markdown_text.read`, the owner's decision of
+    2026-11-01) that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries,
+    names and passed cards) on the visible text, each violation whose kind, rule ID and span `raw`
+    doesn't hold, in order. Prose the parser can't read whole (`markdown_text.TooDeep`, or any
+    error) is one `promise_word` (`markdown.parse`), and nothing of its reading is trusted."""
+    try:
+        reading = markdown_text.read(prose)
+    except Exception as error:   # any failure fails closed: the reply is refused
+        log_error(logger, error, "markdown_unread")
+        return [Violation(kind="promise_word", span=_span(prose), rule_id="markdown.parse")]
+    reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
+    return [violation for violation in scan(reading.visible)
+            if (violation.kind, violation.rule_id, violation.span) not in reported]
+
+
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
 # Each pattern reads the policy's own text from a hit's end, so a unit can't come from another card.
 _BLANK = r"[\s\-‐‑]"
@@ -1047,9 +1065,12 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     # Clauses first: the scan exempts only booking or callback cards that passed; refusals follow the prose's.
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
-    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
-                             booking_card=any(card.template == "booking_confirmed" for card in cards),
-                             callback_card=any(card.template == "callback_confirmed" for card in cards))
+    names = await desk_names(ctx, desk_id)
+    passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
+              "callback_card": any(card.template == "callback_confirmed" for card in cards)}
+    raw = scan_prose(draft.prose, canaries, names, **passed)
+    violations += raw
+    violations += markdown_violations(prose, raw, lambda visible: scan_prose(visible, canaries, names, **passed))
     violations += refused
     violations += policy_card_violations(prose, cards)
     detected_language = detected if detected in ("en", "es") else None
