@@ -967,7 +967,8 @@ it('renders multiple hours windows and exact price amounts without text lines or
   await expect.element(screen.getByText('Mon, Wed, Fri, 9:30 am – 12 pm', { exact: true })).toBeVisible();
   await expect.element(screen.getByText('Annual review, $1,860', { exact: true })).toBeVisible();
   await expect.element(screen.getByText('Filing, $40.50', { exact: true })).toBeVisible();
-  expect([...screen.container.querySelectorAll('.cd-public-lines__label')].map((label) => label.textContent)).toEqual(['Hours', '', 'Price list', '']);
+  expect([...screen.container.querySelectorAll('.cd-public-lines__label')].map((label) => label.textContent)).toEqual(['Hours', 'Price list', '']);
+  expect(screen.container.querySelector('.cd-public-lines__row')!.querySelectorAll('.cd-public-lines__text p')).toHaveLength(2);
   expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(0);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
