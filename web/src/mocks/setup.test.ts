@@ -16,7 +16,7 @@ import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
-import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo } from './setup.ts';
+import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet, thanksTo } from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -1144,6 +1144,26 @@ describe("the real situations, in the business's own words", () => {
       ['after_hours', 'hold', 'allow', bookings, ['card-2'], false, false],
       ['public', 'refuse', 'refuse', 'Private data only to its verified owner.', [], false, true],
     ]);
+  });
+});
+
+describe("the built-in agent's task words on a Desk setup made", () => {
+  it('each_starter_gets_its_business_type_and_the_seed_none', async () => {
+    // As setup's start reads a type in the description: the salon is "other", the plumber a trade,
+    // the rentals a landlord and the CPA firm an office, in either language. The seeded Desk, which
+    // setup didn't make, has none (its set is Rivera's).
+    const expected = ['other', 'trade', 'landlord', 'office'];
+    for (const language of ['en', 'es'] as const) {
+      mockStore.reset('rivera');
+      const types = [];
+      for (const { description } of START_EXAMPLES[language].examples) {
+        const desk = await started(description);
+        const made = mockStore.world.desks.find((d) => d.summary.slug === desk.slug);
+        types.push(made === undefined ? undefined : setupTaskSet(mockStore.world, made.summary.desk_id));
+      }
+      expect(types, language).toEqual(expected);
+      expect(setupTaskSet(mockStore.world, mockStore.world.desks[0]?.summary.desk_id ?? '')).toBeNull();
+    }
   });
 });
 

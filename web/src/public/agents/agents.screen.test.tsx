@@ -33,6 +33,8 @@ import { AGENT_CARD_BLOCKS, agentCardOut } from '../../mocks/agents.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { START_EXAMPLES } from '../../setup/copy.ts';
+import { liveSetupDesk } from '../../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { agentStartLostLine } from './copy.ts';
@@ -257,6 +259,61 @@ describe('agents page', () => {
     await expectScreenBasics(phone.screen.container, { owner: false });
   });
 
+  it('a_desk_setup_made_offers_its_own_tasks', async () => {
+    // A CPA firm's Desk, which setup made as an office: its chips ask for a consult and say "up front",
+    // in English and Spanish, never Rivera's visit or service call deposit; the run's first request
+    // is titled with the chip picked. The Desk's set is read once, with the visitor's chat.
+    const slug = await liveSetupDesk(START_EXAMPLES.en.examples[3]?.description ?? '');
+    const office = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const { screen } = await renderRoute(`/d/${slug}/agents`);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: office[0] })).toBeVisible();
+    const names = () => panel.getByRole('button').elements().map((el) => el.textContent);
+    expect(names().filter((name) => office.includes(name ?? ''))).toEqual(office);
+    expect(names()).not.toContain('Book the earliest visit');
+    expect(names()).not.toContain('Get a quote and pay the service call deposit');
+    expect(requests('agentTasks')).toHaveLength(1);
+    expect(calls().indexOf('openSession')).toBeLessThan(calls().indexOf('agentTasks'));
+
+    await panel.getByRole('button', { name: office[0] }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'book_visit' });
+    const titles = [...panel.element().querySelectorAll('.cd-agent-message__title')].map((title) => title.textContent);
+    expect(titles[0]).toBe(office[0]);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    const es = await renderRoute(`/d/${slug}/agents`, { language: 'es-MX' });
+    const enviar = es.screen.getByRole('region', { name: 'Enviar un agente' });
+    await expect.element(enviar.getByRole('button', { name: 'Reservar la primera consulta libre' })).toBeVisible();
+    await expect.element(enviar.getByRole('button', { name: 'Pagar por adelantado, dentro de su límite' })).toBeVisible();
+  });
+
+  it('the_tasks_wait_in_shapes_and_a_failed_read_offers_plain_words', async () => {
+    // While the Desk's set is read, the tasks' shapes hold their place and no task can be picked yet.
+    mockStore.inject({ route: 'agentTasks', status: 200, body: { task_set: 'rivera' }, delayMs: 1_000 });
+    const slow = await renderRoute(PAGE);
+    const waiting = slow.screen.getByRole('region', { name: 'Send an agent' });
+    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(3);
+    expect(chipsIn(slow.screen)).toEqual([]);
+    await expect.element(waiting.getByRole('button', { name: TASKS[0] })).toBeVisible();
+    expect(waiting.element().querySelector('[data-loading="task-chips"]')).toBeNull();
+
+    // A read that fails never holds the page up: the tasks come in plain words for any business, and
+    // the agent still goes out on the one picked.
+    const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    for (const failure of [{ status: 503 as const }, { status: 'network' as const }]) {
+      mockStore.inject({ route: 'agentTasks', ...failure });
+      const { screen } = await renderRoute(PAGE);
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      await expect.element(panel.getByRole('button', { name: plain[0] })).toBeVisible();
+      for (const name of plain) await expect.element(panel.getByRole('button', { name })).toBeVisible();
+      await expect.element(screen.getByRole('region', { name: 'What agents can do here' })).toBeVisible();
+      await panel.getByRole('button', { name: plain[2] }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'push_the_limit' });
+    }
+  });
+
   it('send_an_agent_leads_the_cards', async () => {
     // The page's one live moment comes first, right under the title and the AI disclosure; the
     // reference follows in its own order: what agents can do, how they prove who they are, then
@@ -418,6 +475,8 @@ describe('agents page', () => {
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByText(LEAD, { exact: true })).toBeVisible();
     expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
+    // The tasks come once the Desk's set is read: Rivera's own.
+    await expect.element(panel.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
     // Before a run, the tasks sit under the signed limit.
     const limitRegion = panel.getByRole('region', { name: 'Signed limit' }).element();
@@ -1413,7 +1472,8 @@ describe('agents page', () => {
     // answered 401), and opening a new one fails (a 429, or no answer). The send itself never
     // answered, so the start is still unresolved: the lost line and "Try again" stay, with no task to
     // send a second agent and no busy line. The next "Try again" opens a new session, where the key,
-    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once.
+    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once. The
+    // page opened its session when it read the Desk's tasks, so the first send opens none.
     for (const failure of [{ status: 429 as const }, { status: 'network' as const }]) {
       mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
       const { screen } = await renderRoute(PAGE);
@@ -1427,7 +1487,7 @@ describe('agents page', () => {
       mockStore.dropVisitorCookie(RIVERA.slug);
       mockStore.inject({ route: 'openSession', ...failure });
       await panel.getByRole('button', { name: 'Try again' }).click();
-      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(2);
+      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(1);
       await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
       await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
       expect(chipsIn(screen), what).toEqual([]);
@@ -1438,7 +1498,7 @@ describe('agents page', () => {
       await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
       await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
       expect(chipsIn(screen), what).toEqual([]);
-      expect(requests('openSession', mark), what).toHaveLength(3);
+      expect(requests('openSession', mark), what).toHaveLength(2);
       const keys = requests('sendAgent', mark).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
       expect(keys, what).toHaveLength(3);
       expect(new Set(keys).size, what).toBe(1);

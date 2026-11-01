@@ -47,6 +47,13 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
+ * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+ * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ */
+export interface AgentTasks {
+  task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+}
+/**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
  * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
  *
@@ -1237,6 +1244,7 @@ export const API_OPERATIONS = {
   "POST /api/public/desks/{slug}/verify/check": { 200: "VerifyChecked" },
   "GET /api/public/desks/{slug}/demo_inbox": { 200: "DemoInboxEntry[]" },
   "POST /api/public/desks/{slug}/agents/key": { 200: "DemoAgentIssued" },
+  "GET /api/public/desks/{slug}/agent_tasks": { 200: "AgentTasks" },
   "POST /api/public/desks/{slug}/send_agent": { 202: "AgentRunStarted" },
   "GET /api/public/desks/{slug}/send_agent/{run_id}": { 200: "DemoAgentRun" },
   "GET /api/d/{token}": { 200: null },
