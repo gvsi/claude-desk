@@ -45,17 +45,28 @@ repository root. CI is unset by default; use `tools/testbox/run --ci make evals-
 enable the strict landed gate explicitly. The caller's other environment variables are
 never forwarded.
 
-## Lane isolation and synchronization
+## Trusted lanes and synchronization
 
 The worktree directory name identifies the lane. Names requiring normalization receive a
 hash suffix; `--lane scratch-name` selects a second scratch lane for experiments. Do not
-reuse someone else's lane name. Each lane has its own source copy, virtual environments,
+reuse someone else's lane name. Agents are trusted. Lanes are kept apart by directory,
+database and network namespace to prevent accidents, not to contain a hostile lane.
+All jobs run as one Unix user with sudo and use one Postgres superuser; a lane can access
+other lanes' files, processes and databases. This is not a privilege boundary.
+The machine holds no secrets, and its role can only register with SSM and open SSM sessions
+with the exact permissions listed above. Each lane has its own source copy, virtual environments,
 kernel target directory, node_modules, temporary files, network namespace and Postgres
 database. A lock covers both sync and execution, including callers from different laptops.
 Network namespaces let two lanes use the same fixed test ports. Each run has a systemd
 control group so child servers are stopped when the command finishes. Package download caches
 and the Cargo registry are shared; compilation outputs are not. Cargo builds use eight
 jobs per lane.
+
+Each call has a unique service and a control-stream lease. Ctrl-C or SIGTERM closes the
+lease; the client waits for remote cleanup before exiting. If the client is killed,
+EOF independently triggers the remote watchdog. The lane lock is released only after the
+call's service and its whole process group are stopped, including detached descendants
+in its control group. A killed process itself cannot wait for cleanup before exiting.
 
 The client compares source content hashes under the lane lock and sends only changed files,
 repairing sources edited or removed by a previous remote command. It syncs tracked and
@@ -67,6 +78,8 @@ as an incremental bundle when either ref changes, including unpushed commits, wi
 local Git configuration or hooks.
 HEAD and the index use the caller's committed HEAD; staged and unstaged source changes
 remain in the working tree.
+A pending-transfer manifest is saved before copying sources; paths left by an interrupted
+sync are reconciled on the next call. Successful sync atomically promotes the manifest.
 Changing branches removes stale synced files and invalidates affected build/schema caches.
 Remote test reports remain in the lane; source files are never copied back automatically.
 
