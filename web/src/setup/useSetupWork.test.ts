@@ -117,21 +117,22 @@ it('retries_a_rejected_read_and_stops_when_the_step_moves_on_even_if_busy_stays_
   expect(work.gaveUp).toBe(false);
 });
 
-it('gives_up_ninety_seconds_after_the_turn_last_streamed_anything', async () => {
+it('gives_up_a_whole_wait_after_the_turn_last_streamed_anything', async () => {
+  // How long the step waits on a busy turn that streams nothing, read from the step itself.
   show(busy, 0);
-  await advance(80000);
-  // The turn's stream says it is still writing: the wait starts again from here.
-  show(busy, 1);
-  await advance(80000);
-  expect(work.gaveUp).toBe(false);
-  show(busy, 2);
-  await advance(89999);
-  expect(work.gaveUp).toBe(false);
-  await advance(1);
+  let wait = 0;
+  while (!work.gaveUp && wait < 600_000) {
+    await advance(1000);
+    wait += 1000;
+  }
   expect(work.gaveUp).toBe(true);
-  // Something more streams after all: the notice goes, and the wait starts again.
-  show(busy, 3);
+  // Something more streams after all: the notice goes, and the whole wait starts again from there.
+  show(busy, 1);
   expect(work.gaveUp).toBe(false);
-  await advance(89999);
+  await advance(wait - 2000);
+  show(busy, 2);
+  await advance(wait - 1000);
   expect(work.gaveUp).toBe(false);
+  await advance(1000);
+  expect(work.gaveUp).toBe(true);
 });
