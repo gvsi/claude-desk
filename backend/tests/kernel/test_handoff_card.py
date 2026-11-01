@@ -22,7 +22,7 @@ import sqlalchemy.exc
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import DemoInboxEntry, ReplyVerdict, SessionCreated
+from desk.contracts import Claim, DemoInboxEntry, Label, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Document, Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger, reply_check
@@ -31,6 +31,7 @@ from desk.kernel_service.decisions import SoftPromiseVerdict
 from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import Rivera, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
+from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
 from .test_execute import executed
 from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
@@ -38,7 +39,7 @@ from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
 from .test_reply_check import (assert_handed_off, checked, clause, keep_alive_until, post_check, public_key,
                                reply_entries, verify_verdict)
-from .test_verification import api_rows
+from .test_verification import api_rows, check, code_in, entry_of, started
 
 CARD_REASON = "The Desk handed this to you."
 PREVIEW = "A conversation was handed to you"
@@ -423,6 +424,112 @@ async def test_the_owners_own_preview_opens_no_handoff(app, client):
     # an ordinary visitor's card still opens one
     assert_handed_off(await checked(client, await open_visitor(client, copy), BLOCKED))
     assert len(await handoffs_of(app, copy)) == 1
+
+
+async def test_the_owners_preview_callback_keeps_its_card_and_reconciliation_without_needing_the_owner(app, client):
+    """A preview's call-back writes its own row already done, no Needs-you item or alert, but
+    keeps its window fact for the card and its row for reconciliation, even after another call."""
+    copy = await rivera(app, client)
+    await alert_now(app, copy, "callback")
+    response = await client.post("/sessions", headers=copy.owner, json={
+        "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    previewing = Visitor(session_id=created.state.session_id, token=created.session_token)
+    before = await owner_alerts(client, copy)
+    requests = []
+    for call_id in ("call-1", "call-2"):
+        decision = await decided(client, previewing, "native.request_callback", CALLBACK, call_id=call_id)
+        result = await executed(client, previewing, decision)
+        assert result.state == "succeeded" and result.inbox == []
+        [fact] = result.facts
+        assert fact.fact_id == f"handoff:{result.model_view['handoff_id']}"
+        assert (fact.status, fact.claims, fact.expires_at) == ("committed", [
+            Claim(key="window_start", kind="datetime", value="2026-10-30T11:00:00-07:00"),
+            Claim(key="window_end", kind="datetime", value="2026-10-30T12:00:00-07:00")],
+            datetime(2026, 10, 30, 12, 0, tzinfo=TZ))
+        requests.append((decision, result))
+
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("callback", "done")] * 2
+    assert api_rows(copy.copy_id, "SELECT handoff_id FROM kernel_ro.handoffs WHERE status = 'open'") == []
+    assert await owner_alerts(client, copy) == before
+    assert handoff_entries(await ledger_rows(app, copy)) == []       # no closing entry for a preview
+    for decision, result in requests:
+        reconciled = await run(app, copy.copy_id, decision, "reconcile")
+        assert (reconciled.facts, reconciled.model_view) == (result.facts, result.model_view)
+        [fact] = result.facts
+        verdict = await checked(client, previewing, "", [clause("callback_confirmed", fact.fact_id)])
+        assert verdict.ok
+        [block] = verdict.blocks
+        assert (block.template, block.fact_id, block.title, block.lines) == (
+            "callback_confirmed", fact.fact_id,
+            "Maria Rivera will call you back on Friday, October 30, between 11:00 am and 12:00 pm", [])
+    assert await owner_alerts(client, copy) == before
+
+    # An ordinary visitor still leaves one open call-back and alerts the owner.
+    visitor = await open_visitor(client, copy)
+    result = await callback(client, visitor)
+    assert api_rows(copy.copy_id, "SELECT handoff_id, session_id FROM kernel_ro.handoffs WHERE status = 'open'") == [
+        (result.model_view["handoff_id"], visitor.session_id)]
+    [alert] = [entry for entry in await owner_alerts(client, copy) if entry not in before]
+    assert alert.to == "owner" and "Sam Lee" in alert.body
+
+
+async def verify_dana(client, visitor):
+    """Verify an existing session through the code sent to Dana's contact on record."""
+    [notice] = (await started(client, visitor, DANA)).inbox
+    response = await check(client, visitor, code_in(await entry_of(client, visitor, notice)))
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("verified_first", [False, True], ids=["verified-after", "verified-first"])
+async def test_preview_callback_fact_stays_in_its_session_after_verification(app, client, verified_first):
+    """A real visitor verified as the same person gets neither the preview fact nor its card."""
+    copy = await rivera(app, client)
+    response = await client.post("/sessions", headers=copy.owner, json={
+        "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    preview = Visitor(session_id=created.state.session_id, token=created.session_token)
+    if verified_first:
+        await verify_dana(client, preview)
+    [fact] = (await callback(client, preview)).facts
+    if not verified_first:
+        await verify_dana(client, preview)
+
+    visitor = await confirmed(client, copy, DANA)
+    context = await context_of(client, visitor.session_id, visitor.headers)
+    verdict = await checked(client, visitor, "", [clause("callback_confirmed", fact.fact_id)])
+    assert (fact.fact_id in fact_ids(context.facts), verdict.ok) == (False, False)
+    assert not any(block.template == "callback_confirmed" for block in verdict.blocks)
+
+    # Verification preserves the session-only label, its preview card and the owner's access.
+    preview_context = await context_of(client, preview.session_id, preview.headers)
+    [stored] = [item for item in preview_context.facts if item.fact_id == fact.fact_id]
+    assert stored.label == Label(readers=["owner", f"session:{preview.session_id}"])
+    assert (await checked(client, preview, "", [clause("callback_confirmed", fact.fact_id)])).ok
+    owner = await owner_session_id(client, copy.owner)
+    assert fact.fact_id in fact_ids((await context_of(client, owner, copy.owner, desk_id=copy.desk_id)).facts)
+
+
+@pytest.mark.parametrize("verified_first", [False, True], ids=["verified-after", "verified-first"])
+async def test_visitor_callback_fact_reaches_the_same_person_in_another_session(app, client, verified_first):
+    """Ordinary call-backs keep person sharing, whether verification precedes or follows them."""
+    copy, visitor = await visitor_of(app, client)
+    if verified_first:
+        await verify_dana(client, visitor)
+    [fact] = (await callback(client, visitor)).facts
+    if not verified_first:
+        await verify_dana(client, visitor)
+
+    returning = await confirmed(client, copy, DANA)
+    context = await context_of(client, returning.session_id, returning.headers)
+    [shared] = [item for item in context.facts if item.fact_id == fact.fact_id]
+    assert shared.label.record_owner is not None
+    assert shared.label.readers == ["owner", f"session:{visitor.session_id}",
+                                    f"person:{shared.label.record_owner}"]
+    assert (await checked(client, returning, "", [clause("callback_confirmed", fact.fact_id)])).ok
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("callback", "open")]
 
 
 # ---- One open handoff per session, a call-back's included ----------------------------------------------

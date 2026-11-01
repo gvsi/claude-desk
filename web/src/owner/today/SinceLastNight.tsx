@@ -1,11 +1,11 @@
 import { useId, type ReactNode, type Ref } from 'react';
 
-import { ownerErrorCopy } from '../../api/http.ts';
 import type { BriefingItem, Today } from '../../api/views.ts';
 import { Button, Card, EmptyState, Notice, SectionHeader, TextLink } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useToday } from '../useDesks.ts';
+import { useReadFailure } from '../useReadFailure.ts';
 import { BriefingRow, isShown } from './BriefingRow.tsx';
 
 /** The full briefing's page under the Desk. */
@@ -78,6 +78,7 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const { desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const today = useToday(deskId, { retryOnMount: false });
+  const failure = useReadFailure(today, { pausedRoute: 'today' });
   const titleId = useId();
   const briefing = today.data?.briefing;
   const replayed = today.data?.recorded_history?.briefing === true;
@@ -85,16 +86,16 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
 
   let body;
   if (briefing === undefined) {
-    body = today.isError ? (
+    body = failure !== null ? (
       <Notice
         tone="error"
         action={
-          <Button variant="secondary" onClick={() => void today.refetch()}>
+          <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
             Try again
           </Button>
         }
       >
-        {ownerErrorCopy(today.error)}
+        {failure.line}
       </Notice>
     ) : (
       <p className="cd-today__loading cd-type-meta" role="status">

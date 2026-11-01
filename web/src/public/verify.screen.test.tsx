@@ -494,8 +494,8 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_says_so', async () => {
-    // Opened from another page, Today keeps its column on the loading line while it reads what it
-    // first shows, the Demo inbox included. When the inbox's read and its retry fail, Today opens on
+    // Opened from another page, Today keeps its own skeleton while it reads what it first shows,
+    // the Demo inbox included. When the inbox's read and its retry fail, Today opens on
     // that: the inbox's place says it couldn't be opened, with "Try again", never a sheet that would
     // say it's empty, and never a line saying it is still opening.
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { retryScale: 0 });
@@ -525,12 +525,16 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_on_a_reload_says_so', async () => {
-    // Reloaded, the owner's loading page stays while what Today first shows is read, the inbox
-    // included. When the inbox's read and its retry fail, Today opens on that, without sending it
-    // again: one loading step, then the line saying it couldn't be opened, with "Try again".
-    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    // Reloaded, the owner's full-page skeleton stays while what Today first shows is read, the inbox
+    // included, with its status hidden. When the inbox's read and its retry fail, Today opens on
+    // that, without sending it again: one loading step, then the line saying it couldn't be opened,
+    // with "Try again".
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
     const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
+    const opening = screen.getByRole('status').filter({ hasText: 'Opening your Desk' });
+    await expect.element(opening).toHaveTextContent('Opening your Desk');
+    await expect.element(opening).toHaveClass('cd-sr-only');
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
@@ -592,8 +596,9 @@ describe('Demo inbox', () => {
 
   it('owner_inbox_that_failed_as_a_capped_read_ahead_isnt_sent_again', { timeout: 15_000 }, async () => {
     // A returning owner's first visit reads Today ahead, here past its cap: Today is slow, and the
-    // inbox's read and its retry fail. Today opens once the cap is reached, on that failure, without
-    // sending the inbox's read again: it is this visit's own.
+    // inbox's read and its retry fail. The frame opens once the cap is reached and Today's skeleton
+    // holds until Today's read is in; Today then opens on the inbox's failure without sending its
+    // read again: it is this visit's own.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
     let slowToday = true;
     worker.use(
@@ -614,20 +619,28 @@ describe('Demo inbox', () => {
     expect(requests('ownerInbox')).toHaveLength(2);
   });
 
-  it('owner_inbox_still_out_as_today_opens_says_so', { timeout: 15_000 }, async () => {
-    // A read of the inbox that runs past Today's wait: Today opens without it, and the inbox's place
-    // says it is opening until the read comes back; here it and its retry fail, so it then says the
-    // inbox couldn't be opened, with "Try again".
+  it('owner_inbox_still_out_as_today_opens_keeps_todays_skeleton', { timeout: 15_000 }, async () => {
+    // A read of the inbox that runs past the reload's wait: the frame opens, and Today keeps its own
+    // skeleton until the read comes back (plan 08c, decision 7), so the inbox's place never says it
+    // is opening; here it and its retry fail, so Today opens on the line saying the inbox couldn't
+    // be opened, with "Try again".
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
     const slow = holdInboxReadsAfter(0);
+    const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ }), { timeout: 6_000 }).toBeVisible();
-    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }), { timeout: READ_AHEAD_MS + 2_000 }).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Today' })).toHaveClass('cd-sr-only');
+    const opening = screen.getByRole('status').filter({ hasText: 'Opening your Desk' });
+    await expect.element(opening).toHaveClass('cd-sr-only');
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).not.toBeNull();
+    expect(screen.getByRole('heading', { level: 1, name: /, Maria$/ }).elements()).toHaveLength(0);
     expect(slow.held()).toBe(1);
 
     slow.release();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(sawItOpening()).toBe(false);
     expect(requests('ownerInbox')).toHaveLength(2);
     await screen.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();

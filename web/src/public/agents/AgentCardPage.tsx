@@ -7,7 +7,7 @@
  * own agent with a demo key (`ConnectYourOwn`) follow. No model text is shown here but the Desk's
  * checked replies to the built-in agent; the agent's own words never are.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useLocation, useParams } from 'react-router';
 
 import type { PublicDesk } from '../../api/contracts.ts';
@@ -18,7 +18,7 @@ import {
   ConceptFooter,
   DisclosureLine,
   EmptyState,
-  LoadingLine,
+  SkeletonScreen,
   Notice,
   PageHeader,
   PublicBrandHeader,
@@ -33,6 +33,7 @@ import { PUBLIC_COPY } from '../copy.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 import { useAgentSession } from './agentSession.ts';
 import { AgentsCard } from './AgentsCard.tsx';
+import { AgentsSkeleton } from './AgentsSkeleton.tsx';
 import { ConnectYourOwn } from './ConnectYourOwn.tsx';
 import { AGENTS_COPY } from './copy.ts';
 import { SEND_ID, SendAgentPanel } from './SendAgentPanel.tsx';
@@ -46,14 +47,18 @@ export function AgentCardPage() {
   const [language] = useState(browserLanguage);
   useDocumentLanguage(language);
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const tryAgainRef = useRef<HTMLDivElement>(null);
+  const hadFocus = useRef(false);
 
   const read = useCallback(async (): Promise<Load> => {
     try {
-      const [desk, card] = await Promise.all([
+      const [desk, card] = await Promise.allSettled([
         request('publicDesk', { params: { slug }, query: { lang: language } }),
         request('agentCard', { params: { slug } }),
       ]);
-      return { kind: 'ready', desk, card };
+      if (desk.status === 'rejected') throw desk.reason;
+      if (card.status === 'rejected') throw card.reason;
+      return { kind: 'ready', desk: desk.value, card: card.value };
     } catch (err) {
       return { kind: err instanceof ApiError && err.kind === 'not_found' ? 'not_found' : 'unavailable' };
     }
@@ -71,12 +76,30 @@ export function AgentCardPage() {
   }, [read]);
 
   const retry = () => {
+    hadFocus.current = tryAgainRef.current?.contains(document.activeElement) ?? false;
     setLoad({ kind: 'loading' });
     void read().then(setLoad);
   };
 
-  if (load.kind !== 'ready') return <AgentsState load={load} language={language} onRetry={retry} />;
-  return <AgentsPage slug={slug} desk={load.desk} card={load.card} language={language} />;
+  // AgentsState unmounts while the shapes show. Keep the old button's focus here so a second
+  // failure can restore it, provided the visitor hasn't moved focus elsewhere.
+  useLayoutEffect(() => {
+    if (load.kind === 'loading') return;
+    const refocus = hadFocus.current;
+    hadFocus.current = false;
+    const fell = document.activeElement === null || document.activeElement === document.body;
+    if (refocus && fell) tryAgainRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, [load]);
+
+  return (
+    <>
+      {load.kind === 'loading' ? <main className="cd-sr-only"><h1>Claude Desk</h1></main> : null}
+      <SkeletonScreen loading={load.kind === 'loading'} status={AGENTS_COPY[language].opening} lang={language} skeleton={<AgentsSkeleton language={language} />}>
+        {load.kind === 'ready' ? <AgentsPage slug={slug} desk={load.desk} card={load.card} language={language} /> :
+          load.kind === 'loading' ? null : <AgentsState load={load} language={language} onRetry={retry} tryAgainRef={tryAgainRef} />}
+      </SkeletonScreen>
+    </>
+  );
 }
 
 interface AgentsPageProps {
@@ -157,32 +180,13 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
  * "Try again" goes with its notice while the page is read again, so its focus falls to the page; if
  * that read fails too, the new "Try again" takes the focus back.
  */
-function AgentsState({ load, language, onRetry }: { load: Exclude<Load, { kind: 'ready' }>; language: CopyLanguage; onRetry: () => void }) {
-  const copy = AGENTS_COPY[language];
+function AgentsState({ load, language, onRetry, tryAgainRef }: {
+  load: Exclude<Load, { kind: 'ready' } | { kind: 'loading' }>;
+  language: CopyLanguage;
+  onRetry: () => void;
+  tryAgainRef: RefObject<HTMLDivElement>;
+}) {
   const page = PUBLIC_COPY[language];
-  // Around "Try again", which goes with its notice while the page is read again.
-  const tryAgainRef = useRef<HTMLDivElement>(null);
-  // Whether "Try again" had focus when pressed (by a key, or by a click in a browser that focuses
-  // what is clicked), so a read that fails again knows to hand it back.
-  const hadFocus = useRef(false);
-
-  const tryAgain = () => {
-    hadFocus.current = tryAgainRef.current?.contains(document.activeElement) ?? false;
-    onRetry();
-  };
-
-  // The read "Try again" started has ended. If it failed again, the new "Try again" takes the focus
-  // the old one had, which fell to the page when it went, so the next Enter tries once more; the
-  // notice is still an alert, and its words are read out as it comes. A visitor who has put focus
-  // somewhere else keeps their place. A read that works draws the whole page instead, with focus at
-  // its start. The focus doesn't scroll the page.
-  useLayoutEffect(() => {
-    if (load.kind === 'loading') return;
-    const refocus = hadFocus.current;
-    hadFocus.current = false;
-    const fell = document.activeElement === null || document.activeElement === document.body;
-    if (refocus && fell) tryAgainRef.current?.querySelector('button')?.focus({ preventScroll: true });
-  }, [load]);
 
   let body: ReactNode;
   if (load.kind === 'not_found') body = <EmptyState title={page.deskUnavailableTitle} body={page.deskUnavailableBody} />;
@@ -192,7 +196,7 @@ function AgentsState({ load, language, onRetry }: { load: Exclude<Load, { kind: 
         tone="error"
         action={
           <div ref={tryAgainRef}>
-            <Button variant="secondary" onClick={tryAgain}>
+            <Button variant="secondary" onClick={onRetry}>
               {page.tryAgain}
             </Button>
           </div>
@@ -201,8 +205,6 @@ function AgentsState({ load, language, onRetry }: { load: Exclude<Load, { kind: 
         {UNREACHABLE_COPY[language]}
       </Notice>
     );
-  } else {
-    body = <LoadingLine>{copy.opening}</LoadingLine>;
   }
   return (
     <div className="cd-agents-page" lang={language}>
