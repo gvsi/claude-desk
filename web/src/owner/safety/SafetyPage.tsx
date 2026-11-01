@@ -294,11 +294,11 @@ export function SafetyPage() {
   const attempts = useAttempts(deskId);
   const today = useToday(deskId);
   const settled = [ledger, health, attempts, today].every((read) => read.isFetched || read.isPaused);
-  // A paused first read lands its network error. Reconnecting keeps the page and its view switch
-  // in place while those reads start, even though none has fetched yet.
-  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
-  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
-  const ready = settled || firstReadsEnded;
+  // Once either view has shown the real region, keep its control mounted. This also retains
+  // paused-read errors across reconnect while reads with no data start for the first time.
+  const [hasShownRegion, setHasShownRegion] = useState(settled || view === 'entries');
+  if ((settled || view === 'entries') && !hasShownRegion) setHasShownRegion(true);
+  const ready = settled || hasShownRegion;
 
   const changeView = (next: SafetyView) => {
     setParams(

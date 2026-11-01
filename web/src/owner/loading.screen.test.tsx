@@ -1507,6 +1507,38 @@ it('safety_view_switch_keeps_focus', async () => {
   expect(layers()).toBe(0);
 });
 
+it('safety_switching_from_entries_during_first_reads_keeps_the_same_focused_control', async () => {
+  const health = holdReads(ROUTES.health.path);
+  const { screen } = await renderRoute(`${SAFETY}?view=entries`, { pollScale: 100 });
+  await vi.waitFor(() => expect(health.held()).toBe(1));
+  const entries = screen.getByRole('radio', { name: 'Every entry', exact: true });
+  const stopped = screen.getByRole('radio', { name: 'Stopped', exact: true });
+  await expect.element(entries).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const stoppedNode = stopped.element();
+  const region = document.querySelector('.cd-safety__region');
+  const layers = watchLayers();
+  (entries.element() as HTMLElement).focus();
+  const { userEvent } = await import('vitest/browser');
+  await userEvent.keyboard('{ArrowLeft}');
+  await nextFrames();
+  expect(stoppedNode.isConnected, 'switching views must keep the real control mounted').toBe(true);
+  expect(stopped.element()).toBe(stoppedNode);
+  await expect.element(stopped).toHaveFocus();
+  await expect.element(stopped).toHaveAttribute('aria-checked', 'true');
+  expect(document.querySelector('.cd-safety__region')).toBe(region);
+  await nextFrames();
+  expect(layers()).toBe(0);
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  health.release();
+  await expect.element(screen.getByText('Signed with a development key', { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  await expect.element(stopped).toHaveFocus();
+  expect(stopped.element()).toBe(stoppedNode);
+  expect(layers()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
 /** Customers reads none of Safety's first view, so no prefetch races the held request. */
 async function beforeSafety(viewport: 'desktop' | 'phone' = 'phone', retryScale = 1) {
   const rendered = await renderRoute(PEOPLE, { viewport, pollScale: 100, retryScale });
