@@ -123,7 +123,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
       onNext('safety_check');
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) await reread();
+      if (err instanceof ApiError && err.status === 409) {
+        const current = await reread();
+        if (current === null || current.step === 'rules' || current.step === 'situations') await lines.refetch();
+      }
       const line = err instanceof ApiError && err.status === 422 && err.code === 'line_refused'
         ? shown.find((line) => line.key === err.lineKey && canEdit(line)) : undefined;
       if (line) {

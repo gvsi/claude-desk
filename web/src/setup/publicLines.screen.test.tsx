@@ -447,3 +447,29 @@ it.each([undefined, '', null, 7])('holds a public-lines response without a usabl
   expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
+
+
+it('redraws public lines after a stale confirmation and waits for a second Looks right', async () => {
+  const { screen, state } = await openLines();
+  const params = { id: state.interview_id };
+  const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  const updatedText = 'Updated by another owner tab.';
+  const saved = await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:about', text: updatedText } });
+  if ('network' in saved) throw new Error('save failed');
+  expect(saved.status).toBe(200);
+  const latest = saved.body as SetupPublicLines;
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.conflict);
+  await expect.element(screen.getByText(updatedText, { exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLines')).toHaveLength(2);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: before.lines.map((line) => line.key), revision: before.revision });
+  expect(storedPublicState(mockStore.world, state.interview_id)!.lines.slice(1).every((line) => line.source === 'suggested')).toBe(true);
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(2);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: latest.lines.map((line) => line.key), revision: latest.revision });
+  expect(storedPublicState(mockStore.world, state.interview_id)!.hours).toEqual(before.hours);
+  expect(storedPublicState(mockStore.world, state.interview_id)!.prices).toEqual(before.prices);
+});
