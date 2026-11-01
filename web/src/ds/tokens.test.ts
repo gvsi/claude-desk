@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss, type DesignTokens, type TypeStyle } from '../../scripts/build-tokens.mjs';
-import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast } from './contrast';
+import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -511,6 +511,18 @@ describe('design tokens', () => {
     expect(tokenValue('size-touch')).toBe('44px');
   });
 
+  test('qr_tile_tokens_match_the_board', () => {
+    // N-Live-REV-QR-B: the QR code on Share's card, its dark modules on a sand tile with an inset hairline.
+    expect({ tile: tokenValue('qr-tile'), ink: tokenValue('qr-ink'), hairline: tokenValue('qr-hairline') }).toEqual({
+      tile: '#eae6dc',
+      ink: '{bg-app}',
+      hairline: 'rgba(28,27,25,0.13)',
+    });
+    // The code reads no CSS, so it takes them as hex, its ink through its alias; a translucent one has none.
+    expect([tokenHex('qr-ink'), tokenHex('qr-tile')]).toEqual(['#1c1b19', '#eae6dc']);
+    expect(() => tokenHex('qr-hairline')).toThrow();
+  });
+
   test('settings_measures_are_tokens', () => {
     // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
     expect(tokenValue('size-sub-nav')).toBe('200px');
@@ -535,6 +547,7 @@ describe('design tokens', () => {
       'line-control-hover',
       'line-hairline',
       'mark-hairline',
+      'qr-hairline',
       'scrim',
     ]);
     for (const [name, reason] of Object.entries(DECORATIVE_COLORS)) {
@@ -551,6 +564,12 @@ describe('design tokens', () => {
     // Each new word of Claude's reply settles in over 150 ms as it streams or is revealed, as the
     // signed Markdown and streaming boards draw it.
     expect(tokenValue('motion-settle')).toBe('150ms');
+  });
+
+  test('follow_beat_is_a_token', () => {
+    // After a revealed reply's words, its cards and then their receipts fade in 120 ms apart, as the
+    // signed visitor reveal boards draw it.
+    expect(tokenValue('motion-follow')).toBe('120ms');
   });
 
   test('motion_stays_in_range', () => {

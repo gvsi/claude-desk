@@ -1,7 +1,7 @@
 import { useId, type CSSProperties } from 'react';
 
 import type { ThisWeek as ThisWeekFigures, ThisWeekDay } from '../../api/views.ts';
-import { Card, StatusDot, TextLink } from '../../ds/index.ts';
+import { Card, SectionHeader, StatusDot, TextLink } from '../../ds/index.ts';
 import { formatCents, formatDay } from '../../lib/format.ts';
 import { useToday } from '../useDesks.ts';
 import { RecordedHistoryLink } from './SinceLastNight.tsx';
@@ -132,7 +132,8 @@ function TurnedDown({ week, deskId }: { week: ThisWeekFigures; deskId: string })
 }
 
 /**
- * "Last 7 days" in Today's right column, the seven dates ending today on the business's clock:
+ * "Last 7 days" in Today's right column, its section title over one card, as "Needs you" opens the
+ * page's column, the seven dates ending today on the business's clock:
  * what was booked, who handled the conversations, and the requests turned down. Every figure is
  * the API's; the page formats them and adds none up.
  */
@@ -142,22 +143,19 @@ export function ThisWeek({ deskId }: { deskId: string }) {
   const week = today.data?.this_week;
   if (week === undefined) return null;
   return (
-    <Card padding={16}>
-      <section className="cd-week" aria-labelledby={titleId}>
-        <div className="cd-week__head">
-          <h2 id={titleId} className="cd-week__heading cd-type-section">
-            Last 7 days
-          </h2>
-          {today.data?.recorded_history?.this_week === true ? (
-            <p className="cd-week__caption">
-              <RecordedHistoryLink deskId={deskId} />
-            </p>
-          ) : null}
+    <section className="cd-today__section" aria-labelledby={titleId}>
+      <SectionHeader
+        id={titleId}
+        title="Last 7 days"
+        caption={today.data?.recorded_history?.this_week === true ? <RecordedHistoryLink deskId={deskId} /> : undefined}
+      />
+      <Card padding={16}>
+        <div className="cd-week">
+          <Bookings week={week} />
+          <Handled week={week} />
+          <TurnedDown week={week} deskId={deskId} />
         </div>
-        <Bookings week={week} />
-        <Handled week={week} />
-        <TurnedDown week={week} deskId={deskId} />
-      </section>
-    </Card>
+      </Card>
+    </section>
   );
 }

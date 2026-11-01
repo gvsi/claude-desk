@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import type { Decision } from '../../api/contracts.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
-import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
+import { breakItIdeas, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
@@ -59,9 +59,6 @@ interface Pick {
   outcome: 'opened' | 'blocked';
 }
 
-/** The ideas' words, as the chips show them. */
-const IDEA_TEXTS = BREAK_IT_IDEAS.map((idea) => idea.text);
-
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
   if (!rule) return TODAY_COPY.waiting;
@@ -86,8 +83,10 @@ function routerClick(go: () => void) {
 /**
  * Today's "Things to try": four ways into the demo, each with its next step, ticked off in place as
  * the owner does it, and counted in the line under the heading; then a link to the Vision article,
- * where a Desk could go next. "Answer a held request" waits until something is held, and stays once
- * it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
+ * where a Desk could go next. From 640 px they are cards side by side, each next step at its foot;
+ * on a phone they are rows in one card, each row the next step itself with a chevron at its right.
+ * "Answer a held request" says where a request will show until something is held (no next step, so
+ * the four keep their places), and stays once it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
  * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
  * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
  * remembered in this browser when it can be, and a hidden list reads nothing.
@@ -137,30 +136,32 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   const ownerName = today.data?.greeting_name ?? firstName(business.owner_display_name);
   // "Answer a held request": done once answered; else waiting while a request is held (or its answer
   // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
-  // else not drawn.
+  // else empty: where a request will show, with no next step.
   const answerDone = rowDone(signals.done.answer, ANSWER.done);
   const answerEnd: RowEnd | null =
     answerDone ?? (!waiting && settledAs !== null ? {
       line: settledAs === 'refused_at_execution' ? latestAnswer?.owner_plain ?? UNCOUNTED_ANSWER_LINES[settledAs] : UNCOUNTED_ANSWER_LINES[settledAs],
       ticks: false, atLoad: false,
     } : null);
-  const answerRow = answerDone !== null ? 'done' : waiting ? 'waiting' : answerEnd !== null ? 'settled' : 'absent';
+  const answerWaits = answerDone === null && waiting;
 
   return (
     <section className="cd-things" aria-labelledby={titleId}>
       <div className="cd-things__head">
-        <h2 id={titleId} className="cd-things__title cd-type-section">
-          Things to try
-        </h2>
+        <div className="cd-things__head-line">
+          <h2 id={titleId} className="cd-things__title cd-type-section">
+            Things to try
+          </h2>
+          <div ref={toggleRef} className="cd-things__hide">
+            <Button variant="ghost" onClick={() => setHiddenAndRemember(true)}>
+              Hide this list
+            </Button>
+          </div>
+        </div>
         {/* The line keeps the room of its longest wording, so counting never changes its height. */}
         <p className="cd-things__caption cd-type-meta" data-room={doneCaption(0)}>
           <span className="cd-things__caption-now">{doneCaption(signals.count)}</span>
         </p>
-        <div ref={toggleRef} className="cd-things__hide">
-          <Button variant="ghost" onClick={() => setHiddenAndRemember(true)}>
-            Hide this list
-          </Button>
-        </div>
       </div>
       <Card padding={16}>
         <ul className="cd-things__list">
@@ -169,29 +170,24 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             title={CHAT.title}
             detail={TODAY_COPY.chatDetail}
             end={rowDone(signals.done.chat, CHAT.done)}
-          >
-            <Button variant="secondary" href={link} external>
-              Open your public page
-            </Button>
-          </Thing>
+            step={{ label: 'Open your public page', href: link, external: true }}
+          />
           <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, BREAK.done)} />
-          {answerRow === 'absent' ? null : (
-            <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld?.held_by)} end={answerEnd}>
-              <Button variant="secondary" onClick={onFocusRequest}>
-                Open the request
-              </Button>
-            </Thing>
-          )}
+          <Thing
+            icon="clock"
+            title={ANSWER.title}
+            held={answerWaits}
+            detail={answerWaits ? heldLine(firstHeld?.held_by) : TODAY_COPY.heldNone}
+            end={answerEnd}
+            step={answerWaits ? { label: 'Open the request', onClick: onFocusRequest } : null}
+          />
           <Thing
             icon="plus"
             title={CREATE.title}
             detail={TODAY_COPY.createDetail}
             end={rowDone(signals.done.create, CREATE.done)}
-          >
-            <Button variant="secondary" href="/app/setup" onClick={routerClick(() => void navigate('/app/setup'))}>
-              Start a Desk
-            </Button>
-          </Thing>
+            step={{ label: 'Start a Desk', href: '/app/setup', onClick: routerClick(() => void navigate('/app/setup')) }}
+          />
         </ul>
       </Card>
       <p className="cd-things__vision cd-type-meta">
@@ -199,6 +195,20 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
       </p>
     </section>
   );
+}
+
+/**
+ * A row's next step: a link (`href`, in a new tab when `external`) or a button. From 640 px it is a
+ * secondary button at the card's foot, named by `label`; on a phone the whole row is it, named by
+ * the row's title, with a chevron at its right.
+ */
+interface Step {
+  label: string;
+  href?: string;
+  external?: boolean;
+  onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
+  /** A step that shows or hides something under the row: whether it is showing. */
+  expanded?: boolean;
 }
 
 interface ThingProps {
@@ -211,8 +221,8 @@ interface ThingProps {
   below?: ReactNode;
   /** Set once the row has ended: it ticks off when its thing is done, or settles with its line alone. */
   end?: RowEnd | null;
-  /** The row's next step, at its right. */
-  children: ReactNode;
+  /** The row's next step; null for a row with none yet. */
+  step: Step | null;
 }
 
 /**
@@ -338,7 +348,9 @@ function useTickInPlace(done: boolean, eases: boolean) {
  * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
  * shown again), is drawn still.
  */
-function Thing({ icon, title, held = false, detail, below, end = null, children }: ThingProps) {
+function Thing({ icon, title, held = false, detail, below, end = null, step }: ThingProps) {
+  const titleId = useId();
+  const detailId = useId();
   // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
   const [drawnEnded, setDrawnEnded] = useState(end !== null);
   if (end === null && drawnEnded) setDrawnEnded(false);
@@ -354,28 +366,40 @@ function Thing({ icon, title, held = false, detail, below, end = null, children 
         )}
       </span>
       <div className="cd-things__text">
-        <h3 ref={titleRef} className="cd-things__item-title cd-type-control" tabIndex={-1}>
+        <h3 ref={titleRef} id={titleId} className="cd-things__item-title cd-type-control" tabIndex={-1}>
           {title}
           {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
-        <p className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
+        <p id={detailId} className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
           {end === null ? detail : end.line}
         </p>
       </div>
-      {/* A settled row has no next step and no pill, so no place for one either. */}
-      {end === null || end.ticks ? (
-        <div className="cd-things__action">
-          {end === null ? (
-            children
-          ) : (
-            // The done line already says it in words, so the pill isn't read twice.
-            <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
-              <Pill>
-                <StatusDot tone="handled" />
-                Done
-              </Pill>
-            </span>
-          )}
+      {/* A settled row has no next step and no pill, so no place for one either; nor has a row with no step yet. */}
+      {end === null && step !== null ? (
+        <>
+          <div className="cd-things__action">
+            {step.href !== undefined ? (
+              <Button variant="secondary" href={step.href} external={step.external} onClick={step.onClick}>
+                {step.label}
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={step.onClick}>
+                {step.label}
+              </Button>
+            )}
+          </div>
+          <RowStep step={step} labelledBy={titleId} describedBy={detailId} />
+        </>
+      ) : null}
+      {end?.ticks ? (
+        <div className="cd-things__action cd-things__action--done">
+          {/* The done line already says it in words, so the pill isn't read twice. */}
+          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
+            <Pill>
+              <StatusDot tone="handled" />
+              Done
+            </Pill>
+          </span>
         </div>
       ) : null}
       {below && end === null ? <div className="cd-things__below">{below}</div> : null}
@@ -384,8 +408,45 @@ function Thing({ icon, title, held = false, detail, below, end = null, children 
 }
 
 /**
- * "Try to break it": the fixed ideas. A pick hands the idea to the public page through this
- * browser's storage (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
+ * A row's next step on a phone: a chevron at the row's right whose press area is the whole row, named
+ * by the row's title and described by its line, with the focus ring around the row. From 640 px it
+ * isn't drawn, and the card's button is the step.
+ */
+function RowStep({ step, labelledBy, describedBy }: { step: Step; labelledBy: string; describedBy: string }) {
+  const chevron = <Icon name="chevron-right" size={16} />;
+  if (step.href !== undefined) {
+    return (
+      <a
+        className="cd-things__go"
+        href={step.href}
+        target={step.external ? '_blank' : undefined}
+        rel={step.external ? 'noopener noreferrer' : undefined}
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        onClick={step.onClick}
+      >
+        {chevron}
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="cd-things__go"
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      aria-expanded={step.expanded}
+      onClick={step.onClick}
+    >
+      {chevron}
+    </button>
+  );
+}
+
+/**
+ * "Try to break it": the fixed ideas, the one that speaks as the owner in this Desk's owner's name
+ * (`breakItIdeas`). A pick hands the idea to the public page through this browser's storage
+ * (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
  * one-time token in its link (`?try=`), never the idea's key or words; the page types the idea into
  * its chat box for the owner to send. Nothing is sent without their Send, and nothing is written to
  * the owner's clipboard. The tab opens in the click itself, so the browser counts it as the owner's
@@ -406,9 +467,11 @@ function openByHand(href: string): ReactNode {
 function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: string; ownerName: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
+  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner.
+  const ideas = breakItIdeas(ownerName);
 
   const onPick = (text: string) => {
-    const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
+    const idea = ideas.find((each) => each.text === text);
     if (idea === undefined) return;
     const n = (pick?.n ?? 0) + 1;
     const token = handOffBreakItIdea(slug, idea.key);
@@ -424,7 +487,7 @@ function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: strin
 
   const below = showing ? (
     <div className="cd-things__ideas">
-      <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
+      <SuggestionChips label="Ideas to try" suggestions={ideas.map((idea) => idea.text)} onPick={onPick} />
       {pick !== null && pick.token === null ? (
         <Notice key={pick.n} tone="info" action={pick.outcome === 'blocked' ? openByHand(customerLink(slug, deskId)) : undefined}>
           Your browser didn't let Today pass the idea on. Type it in the new tab.
@@ -454,16 +517,14 @@ function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: strin
       }
       below={below}
       end={end}
-    >
-      <Button
-        variant="secondary"
-        onClick={() => {
+      step={{
+        label: showing ? 'Hide ideas' : 'Show me ideas',
+        expanded: showing,
+        onClick: () => {
           setShowing(!showing);
           setPick(null);
-        }}
-      >
-        {showing ? 'Hide ideas' : 'Show me ideas'}
-      </Button>
-    </Thing>
+        },
+      }}
+    />
   );
 }

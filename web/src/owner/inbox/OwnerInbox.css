@@ -1,24 +1,7 @@
-/* OwnerInbox: in Today's right column, the Demo inbox sheet's button (the sheet itself opens over
-   the page at the right), with a failed read's line across the column 10 px under it; the line
-   that the inbox is opening; or, before anything has been read, the inbox's title over the line
-   that it couldn't be opened, 10 px apart, as the visitor's place has them. */
+/* OwnerInbox: in the demo bar, the Demo inbox sheet's quiet button; the sheet itself opens over the
+   page at the right. */
 
 .cd-owner-inbox {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-10);
-  min-width: 0;
-}
-
-.cd-owner-inbox > .cd-notice {
-  align-self: stretch;
-}
-
-.cd-owner-inbox__failed {
-  display: flex;
-  flex-direction: column;
-  align-self: stretch;
-  gap: var(--space-10);
-  min-width: 0;
+  flex: none;
 }
