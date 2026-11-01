@@ -2029,14 +2029,14 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
              for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():
+            # A stale draft pin never borrows a newer enabled definition from the live Desk.
+            tools.pop(pin.tool, None)
             adapter = await adapters.resolve(ctx, row.desk_id, pin.tool)
-            if adapter is None and pin.tool.startswith('desk.'):
-                raise ConfirmConflict(ctx.copy_id, row.desk_id, row.version, 'pin_changed')
             if adapter is not None:    # a tool no adapter runs is never given
                 try:
                     profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
                 except mcp_pins.BusinessProfileChanged:
-                    raise ConfirmConflict(ctx.copy_id, row.desk_id, row.version, 'pin_changed') from None
+                    continue          # a changed business pin is not given; the batch still runs
                 tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
     return tools
 

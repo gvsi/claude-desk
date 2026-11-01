@@ -109,10 +109,9 @@ async def test_reput_refreshes_a_profile_changed_by_kernel_code_and_can_confirm(
 
 
 @pytest.mark.solver
-@pytest.mark.parametrize('phase', ['after_check', 'before_enable', 'probe'])
+@pytest.mark.parametrize('phase', ['after_check', 'before_enable'])
 async def test_config_races_return_pin_changed_conflicts(app, client, monkeypatch, desk_prove, phase):
     from desk.kernel_service import mcp_pins
-    from .test_probe import probe
 
     copy = await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200
@@ -126,35 +125,53 @@ async def test_config_races_return_pin_changed_conflicts(app, client, monkeypatc
         response = await put(client, copy, [intake(config={'block': 'intake', 'questions': ['Where?']})])
         assert response.status_code == 200, response.text
 
-    if phase == 'probe':
-        await change()
-        response = await client.post(f'/policy/{version}/probe', headers=copy.owner, json={
-            'desk_id': copy.desk_id, 'probes': [probe(row.tool, {'name': 'Dana', 'answers': ['Consult']})]})
+    if phase == 'after_check':
+        original = mcp_pins.check_enables
+
+        async def after_check(*args, **kwargs):
+            result = await original(*args, **kwargs)
+            assert result.state == 'ok'
+            await change()
+            return result
+
+        monkeypatch.setattr(mcp_pins, 'check_enables', after_check)
     else:
-        if phase == 'after_check':
-            original = mcp_pins.check_enables
+        original = mcp_pins.enable_tools
 
-            async def after_check(*args, **kwargs):
-                result = await original(*args, **kwargs)
-                assert result.state == 'ok'
-                await change()
-                return result
+        async def before_enable(*args, **kwargs):
+            await change()
+            return await original(*args, **kwargs)
 
-            monkeypatch.setattr(mcp_pins, 'check_enables', after_check)
-        else:
-            original = mcp_pins.enable_tools
-
-            async def before_enable(*args, **kwargs):
-                await change()
-                return await original(*args, **kwargs)
-
-            monkeypatch.setattr(mcp_pins, 'enable_tools', before_enable)
-        response = await client.post('/policy/confirm', headers=copy.owner,
-                                     json={'desk_id': copy.desk_id, 'version': version})
+        monkeypatch.setattr(mcp_pins, 'enable_tools', before_enable)
+    response = await client.post('/policy/confirm', headers=copy.owner,
+                                 json={'desk_id': copy.desk_id, 'version': version})
     assert response.status_code == 409, response.text
     assert response.json()['code'] == 'conflict'
     events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'policy']
     assert events[-1].summary == {'version': version, 'refused': 'pin_changed'}
+    assert (await business_rows(app, copy))[row.tool].status == 'needs_review'
+
+
+@pytest.mark.solver
+async def test_probe_skips_a_changed_business_pin_without_failing_the_batch(app, client, desk_prove):
+    from .test_probe import probe
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    row = (await business_rows(app, copy))['desk.new-enquiry']
+    response = await client.post('/tools/confirm', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'tools': [{'tool': row.tool, 'definition_sha256': row.definition_sha256}], 'enable': True})
+    assert response.status_code == 200, response.text
+    version = response.json()['draft']['version']
+    assert (await put(client, copy, [intake(config={'block': 'intake', 'questions': ['Where?']})])).status_code == 200
+    response = await client.post(f'/policy/{version}/probe', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'probes': [probe(row.tool, {'name': 'Dana', 'answers': ['Consult']}),
+                                         probe('native.capture_lead', {'name': 'Dana'})]})
+    assert response.status_code == 200, response.text
+    assert [result['outcome'] for result in response.json()] == ['refuse', 'allow']
+    events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'policy']
+    assert not any(event.summary.get('refused') == 'pin_changed' for event in events)
+    assert events[-1].summary['outcomes'] == ['refuse', 'allow']
     assert (await business_rows(app, copy))[row.tool].status == 'needs_review'
 
 
