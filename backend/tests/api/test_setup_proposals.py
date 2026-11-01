@@ -223,6 +223,77 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == set(fields)
 
 
+async def test_counts_on_another_question_never_back_hours_through_rules(proposals, model, engine, fake):
+    from tests.api.test_setup_questions import answer, turn
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    reply = await answer(owner, model, interview_id, "We repair plumbing. We are a 9-person team with 5 vans.",
+                         turn(summary="We repair plumbing.", hours=hours))
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert record["answers"]["suggested_fields"] == ["hours"]
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said["owner_fields"] == ["summary"]
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    model.add(unparseable(), unparseable())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    for route, part in (("hours", "hours"), ("calendar", "calendar_slots")):
+        calls = fake.called(f"PUT /desks/{{id}}/{route}")
+        assert calls and all(call.body[part] == [] for call in calls), route
+    assert fake.desks[state["desk_id"]].hours == [] and not fake.desks[state["desk_id"]].slots
+    assert (await stored(engine, interview_id))["answers"]["suggested_fields"] == ["hours"]
+
+
+@pytest.mark.parametrize("text,owned", [
+    ("We repair plumbing. We're open 9am to 5pm weekdays.", True),
+    ("We repair plumbing, 9 to 5 on weekdays.", True),
+    ("We repair plumbing. Our 9-person team runs 5 vans.", False),
+])
+async def test_off_topic_hours_are_the_owners_only_as_stated_times(proposals, model, engine, text, owned):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    reply = await answer(owner, model, interview_id, text, turn(summary="We repair plumbing.", hours=hours))
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.hours == [HoursAnswer(**window).window() for window in hours]
+    assert ("hours" in answers.suggested_fields) is not owned
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert ("hours" in said["owner_fields"]) is owned
+
+
+@pytest.mark.parametrize("owner_text,supported", [
+    # Off their own question, hours count only in explicit time syntax: a meridiem, a clock time or a range.
+    ("We're open 9am to 5pm weekdays", True),
+    ("Open 9 a.m. until 5 p.m.", True),
+    ("09:00 to 17:00", True),
+    ("9:00-5:00", True),
+    ("9 to 5", True),
+    ("9-5", True),
+    ("9–5", True),
+    ("from 9 until 5", True),
+    ("9-17 on weekdays", True),
+    ("A 9-person team with 5 vans", False),
+    ("We are a 9-person team with 5 vans.", False),
+    ("Our 9-5-person crew", False),
+    ("9pm to 5am", False),
+    ("Open from 9, we close at 5", False),
+])
+def test_owner_supports_off_topic_hours_only_as_stated_times(owner_text, supported):
+    window = [HoursAnswer(days=["mon"], start="09:00", end="17:00")]
+    assert setup.owner_supports("hours", window, owner_text, stated=True) is supported
+
+
 @pytest.mark.parametrize("domain", ["attacker.example", "bobs-plumbing-booking.net"])
 async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(proposals, model, engine, fake, domain):
     from tests.api.test_setup_questions import answer, turn

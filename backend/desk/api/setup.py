@@ -1609,10 +1609,11 @@ def _contact_parts(text: str) -> tuple[set[str], list[str]]:
 
 def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                    value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str, *,
-                   stated_prices: bool = False) -> bool:
+                   stated: bool = False) -> bool:
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
     needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
-    it has fewer) in one number the owner typed; a contact with no part needs its whole text. With `stated_prices`, an amount counts only when written as a price ("$150")."""
+    it has fewer) in one number the owner typed; a contact with no part needs its whole text. With `stated`, prices need a dollar sign; hours need a meridiem, a clock time or a range,
+    never unrelated bare counts."""
     if not value:
         return True
     folded = owner_text.casefold()
@@ -1625,23 +1626,32 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                 any(digits[-10:] in typed for typed in owner_phones) for digits in phones)
         return contact in folded
     if field == "price_items":
-        sign = r"\$\s?" if stated_prices else r"\$?"
+        sign = r"\$\s?" if stated else r"\$?"
         amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
                    for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
                                             owner_text)}
         return all(item.unit_cents in amounts for item in cast(list[PriceAnswer], value))
 
-    def has_time(clock: str) -> bool:
+    def has_time(clock: str, text: str, *, explicit: bool = False) -> bool:
         hour, minute = map(int, clock.split(":"))
         period = "am" if hour < 12 else "pm"
         minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
-        clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}{minutes})"
+        clock_forms = rf"(?:{re.escape(clock)}|(?:{hour}|{hour % 12 or 12}){minutes})"
         matching_period = rf"{period[0]}\.?m\.?"
         no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
-        return re.search(rf"(?<![\w:]){clock_forms}(?:\s*{matching_period}|{no_period})"
-                         rf"(?![\w:]|\.\d)", folded) is not None
+        if explicit:
+            clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}:{minute:02d})"
+            time = rf"(?:{hour % 12 or 12}{minutes}\s*{matching_period}|{clock_forms}{no_period})"
+        else:
+            time = rf"{clock_forms}(?:\s*{matching_period}|{no_period})"
+        return re.search(rf"(?<![\w:]){time}(?![\w:]|\.\d)", text) is not None
 
-    return all(has_time(window.start) and has_time(window.end) for window in cast(list[HoursAnswer], value))
+    endpoint = r"\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?"
+    ranges = [match.group() for match in re.finditer(
+        rf"(?<![\w:.-]){endpoint}\s*(?:to\b|until\b|[-–—])\s*{endpoint}(?![\w:]|[-–—]\w)", folded)]
+    return all((has_time(window.start, folded, explicit=stated) and has_time(window.end, folded, explicit=stated))
+               or (stated and any(has_time(window.start, span) and has_time(window.end, span) for span in ranges))
+               for window in cast(list[HoursAnswer], value))
 
 
 # Each fact a turn can set, with the question it belongs to: there a turn's value is the owner's, and on any other
@@ -1675,7 +1685,7 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str) -> set[str
         value = getattr(patch, name)
         if ((name in CLEARABLE and value == [])
                 or (name in {"public_contact", "price_items", "hours"}
-                    and owner_supports(name, value, said, stated_prices=True))):
+                    and owner_supports(name, value, said, stated=True))):
             backed.add(name)
     return backed
 
