@@ -453,6 +453,32 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+@pytest.mark.parametrize("choice", ["allow_once", "deny_once"])
+async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, ro_read, choice):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    result = await answer(http.owner(copy.owner_token), held.decision_id, choice)
+    assert "approved" in result.model_dump(mode="json")
+    if choice == "deny_once":
+        assert result.approved is None and result.decision.state == "denied"
+        assert result.execution is None
+        return
+
+    assert result.approved is not None
+    assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
+        held.decision_id, "approved", "Maria Rivera approved this")
+    assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.owner_plain is None
+    assert result.approved.ledger_seq < result.decision.ledger_seq
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_limit_hold_offers_no_deny_always(kernel, ro_read, arrange):
     """"Deny always" is offered only on a hold an `ask` card decided (master "Decision lifecycle"). The seeded 15% quote
     is a limit hold, through `rv-quote`'s hold twin: its answers leave it out, and posting it is 422 `invalid` with
@@ -543,9 +569,15 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
 
     result = await answer(owner, held.decision_id, "allow_once")
     assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
-    assert result.execution is None and result.card_diff is None
+    assert result.execution is None and result.card_diff is None and result.approved is None
     assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
-    assert await read_decision(view, held.decision_id) == result.decision
+    owner_line = "Your rules changed before this ran, so it wasn't done."
+    assert result.decision.owner_plain == owner_line
+    assert await read_decision(owner, held.decision_id) == result.decision
+    # the session reads the owner's answer without the owner's line (`owner_plain`), which only the owner's reads carry
+    read = await read_decision(view, held.decision_id)
+    assert read.owner_plain is None
+    assert read.model_copy(update={"owner_plain": owner_line}) == result.decision
     assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
                    (session_id,)) == [{"n": 0}]
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
@@ -2197,7 +2229,51 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
     assert mandate == {"committed_cents": 10_000, "reserved_cents": 0}
 
 
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("path", ["allow", "approval"])
+async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read, arrange, path):
+    """Expiry changes the mandate's authority, not the owner's rules: both kernels ledger `conditions`,
+    charge nothing and give the owner the fallback, on allow and `allow_once` paths alike."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    if path == "approval":
+        await arrange.ask(owner, ro_read, ro_schema, copy, "native.charge_mandate")
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    view = turn_view(http, issued, slug, session_id, "Please charge the deposit")
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+    quoted = await execute(view, await decide(view, session_id, 0, "call-quote", "native.quote",
+                                              quote_args(deposit)), 0)
+    decision = await decide(view, session_id, 0, "call-charge", "native.charge_mandate",
+                            {"quote_id": quoted.model_view["quote_id"]})
+    assert decision.outcome == ("allow" if path == "allow" else "hold")
+    arrange.expire_mandate(issued.mandate.mandate_id)
+
+    if path == "allow":
+        assert await refused(execute(view, decision, 0)) == (409, "conflict")
+    else:
+        result = await answer(owner, decision.decision_id, "allow_once")
+        assert result.execution is None
+
+    read = await read_decision(owner, decision.decision_id)
+    assert read.state == "refused_at_execution"
+    page = await ledger_page(owner, copy.desk_ids[0])
+    entries = [entry.event.summary for entry in page.entries
+               if entry.event.ref_id == decision.decision_id
+               and entry.event.kind == ("execute" if path == "allow" else "approval")]
+    assert entries[-1]["check"] == "conditions"
+    assert read.owner_plain == "This couldn't run, so it wasn't done."
+    assert (await read_decision(view, decision.decision_id)).owner_plain is None
+    (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
+                                                  " WHERE mandate_id = %s", (issued.mandate.mandate_id,))
+    assert mandate == {"committed_cents": 0, "reserved_cents": 0}
+
+
 # Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
+
 
 SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
 # `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).

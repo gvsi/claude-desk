@@ -76,6 +76,7 @@ export function useTakeOver(sessionId: string): UseTakeOver {
   const reread = useCallback(async (): Promise<OwnerTranscript | null> => {
     void queryClient.invalidateQueries({ queryKey: ['conversations'] });
     void queryClient.invalidateQueries({ queryKey: ['today'] });
+    void queryClient.invalidateQueries({ queryKey: ['needsYou'] });
     await queryClient.invalidateQueries({ queryKey: conversationKey(sessionId) });
     const read = queryClient.getQueryState<OwnerTranscript>(conversationKey(sessionId));
     return read?.status === 'success' ? (read.data ?? null) : null;

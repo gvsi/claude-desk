@@ -314,8 +314,8 @@ class _Messages:
         return await self._messages.create(**wire)
 
 
-class _WithSystem:
-    """The SDK client as `AnthropicDecisions` calls it, with `system` sent in place of the kernel's prompt."""
+class WithSystem:
+    """The SDK client with a system prompt override, also used by the reviewer runner."""
 
     def __init__(self, client: Any, system: str, request_hashes: frozenset[str] | None = None):
         self.messages = _Messages(client.messages, system, request_hashes)
@@ -389,10 +389,8 @@ def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput, candid
             + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000
 
 
-class _Meter:
-    """The run's spend against its cap: a call reserves its bound before it starts and is charged
-    its priced usage, else that bound, when it ends. `estimated_usd` is the part of the spend
-    charged at a bound, an estimate rather than a price."""
+class SpendMeter:
+    """Spend reservations and cap accounting, also used by the reviewer runner."""
 
     def __init__(self, cap: float):
         self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
@@ -606,9 +604,9 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
                                    code_blocked=code_blocked(case), majority_required=case.majority_required,
                                    requested=config.samples) for case in cases}
-    wire_client = _WithSystem(deps.client(key), prompt.text, request_hashes)
+    wire_client = WithSystem(deps.client(key), prompt.text, request_hashes)
     checker = (AnthropicDecisions if config.candidate == "sonnet" else HistoricalHaikuSoftPromise)(wire_client)
-    meter = _Meter(config.max_usd)
+    meter = SpendMeter(config.max_usd)
     bounds = {case.id: call_bound(prompt.text, inputs[case.id], config.candidate) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0

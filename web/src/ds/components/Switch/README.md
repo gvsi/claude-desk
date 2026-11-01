@@ -21,6 +21,7 @@
 | `description` | `string` | `.cd-type-caption` in `text-secondary`; `aria-describedby`. |
 | `checked` | `boolean` | Required; `aria-checked`. |
 | `onChange` | `(checked: boolean) => void` | Required. Click, Enter and Space all call it. |
+| `disabled` | `boolean` | Another write prevents changes: `aria-disabled`, focus kept and presses ignored, without `aria-busy`. |
 | `waiting` | `boolean` | A change is being saved: `aria-busy` and `aria-disabled`, focus kept, presses ignored, and the look of the state last passed. |
 
 The row is a `button` with `role="switch"` and fills its container's width. On: a `button-primary` track with a `bg-app` knob at the end. Off: a `fill-secondary` track with a `text-secondary` knob at the start, so the state reads from the knob's place and contrast, not from color alone. The row takes `fill-hover` on hover, and the knob slides at `motion-fast`; nothing moves under reduced motion.
