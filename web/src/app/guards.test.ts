@@ -123,7 +123,7 @@ function rawColors(scanned: Source[] = sources): string[] {
 }
 
 // A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
-const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
+const BUSY_LABEL = /['"`>]\s*(?!(?:Something|Nothing|Anything|Everything)\b)[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
 
 // One part of a JSX opening tag: a character outside braces, or a braced expression (braces nest
 // two deep), so an arrow's `>` inside `onClick={() => …}` doesn't end the tag.
@@ -764,9 +764,16 @@ describe('app source guards', () => {
       "<Button busy={busy}>{busy ? 'Starting…' : 'Start the demo'}</Button>",
       '<Button variant="primary">Sending...</Button>',
       'const label = pending ? `Sending your answer…` : `Allow this time`;',
+      '<Button>Saving…</Button>',
     ];
     for (const text of bad) expect(hits(BUSY_LABEL, sample(text)), text).toHaveLength(1);
-    const fine = "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />";
+    const fine = [
+      "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />",
+      "'Something else…'",
+      "'Nothing…'",
+      "'Anything…'",
+      "'Everything…'",
+    ].join('\n');
     expect(hits(BUSY_LABEL, sample(fine))).toEqual([]);
     expect(hits(BUSY_LABEL)).toEqual([]);
   });
