@@ -857,18 +857,54 @@ function enterTools(world: MockWorld, interview: Interview): void {
   }
 }
 
-// The owner's own contact for the test client, read as the API reads it (setup.py `_owner_contact`): every email and
-// phone typed on the contact question, without the hours beside a phone and without one the owner rejects in its
-// clause or gives as someone else's; of the rest, those marked as the owner's own come first, then the one email,
-// else the one phone. Unlike the API, the mock reads no names.
+// The owner's own contact for the test client, read as the API reads it (setup.py `_owner_contact` and `_whose`): every
+// email and phone typed on the contact question, without the hours beside a phone and without one the owner rejects
+// or gives as another person's, which carries on to every contact after it in its sentence until the owner marks one
+// as their own; of the rest, those marked as the owner's own come first, then the one email, else the one phone.
 const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const CONTACT_PHONE = /(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)/g;
 const HOUR = String.raw`(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?`;
 const TIMES = new RegExp(String.raw`(?<![\w.+-])(?:${HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*${HOUR}|24\s*\/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)(?![\w-]|[.:]\d)`, 'gi');
-const CLAUSE_END = /[;!?\n]|[.,](?=\s|$)/g;
+const SENTENCE_END = /[;!?\n]|\.(?=\s|$)/g;
 const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
 const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
 const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
+/** A name just before a contact ("Ana at …", "Maria: …") or as a possessive ("Ana's email is …"). */
+const NAMED = /(\p{L}[\p{L}'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$/u;
+const POSSESSIVE = /(\p{L}[\p{L}-]*)'s\b/gu;
+/** The capitalized words that are never a person's name: a contact's labels and other common words (setup.py `_NOT_NAMES`). */
+const NOT_NAMES = new Set([
+  'call', 'us', 'at', 'or', 'text', 'email', 'phone', 'tel', 'mobile', 'office', 'website', 'web', 'llámanos', 'al',
+  'escríbenos', 'a', 'teléfono', 'correo', 'llama', 'móvil', 'celular', 'oficina', 'sitio', 'página', 'electrónico',
+  'ext', 'ask', 'for', 'site', 'and', 'o', 'y',
+  'my', 'me', 'contact', 'contacts', 'customers', 'clients', 'reach', 'use', 'write', 'message', 'our', 'the', 'please',
+  'bookings', 'booking', 'sales', 'orders', 'support', 'info', 'hello', 'emergencies', 'emergency', 'urgent', 'after',
+  'hours', 'business', 'just', 'then', 'otherwise', 'also', 'contacto', 'clientes', 'cliente', 'escríbeme', 'llámame',
+  'escribe', 'reservas', 'urgencias', 'para', 'por', 'favor', 'mi',
+]);
+const wordsOf = (text: string | null): string[] => (text ?? '').toLowerCase().match(/\p{L}+/gu) ?? [];
+const capitalized = (word: string): boolean => word[0] !== undefined && word[0] !== word[0].toLowerCase();
+
+/** What the words before a contact say about whose it is, by the marker closest to it (setup.py `_whose`). */
+function whose(words: string, owner: ReadonlySet<string>, notNames: ReadonlySet<string>): 'owner' | 'rejected' | 'other' | null {
+  const folded = words.toLowerCase();
+  const closest = new Map<'owner' | 'rejected' | 'other', number>();
+  const note = (kind: 'owner' | 'rejected' | 'other', at: number) => closest.set(kind, Math.max(closest.get(kind) ?? -1, at));
+  for (const [pattern, kind] of [[REJECTED, 'rejected'], [OWNERS, 'owner'], [SOMEONE_ELSE, 'other']] as const) {
+    for (const match of folded.matchAll(new RegExp(pattern.source, 'g'))) note(kind, match.index + match[0].length);
+  }
+  const names = [...words.matchAll(POSSESSIVE)].map((match) => [match[1]!, match.index + match[0].length] as const);
+  const named = NAMED.exec(words);
+  if (named) names.push([named[1]!, named.index + named[0].length] as const);
+  for (const [name, at] of names) {
+    if (!capitalized(name)) continue;
+    if (owner.has(name.toLowerCase())) note('owner', at);
+    else if (!notNames.has(name.toLowerCase())) note('other', at);
+  }
+  let found: 'owner' | 'rejected' | 'other' | null = null;
+  for (const [kind, at] of closest) if (found === null || at > closest.get(found)!) found = kind;
+  return found;
+}
 
 /** Each email and phone in `text`, in order, a phone as one number of 7 to 15 digits. */
 function contactsIn(text: string): { start: number; end: number; value: string; email: boolean }[] {
@@ -884,21 +920,28 @@ function contactsIn(text: string): { start: number; end: number; value: string; 
 }
 
 function ownerContactOf(interview: Interview): string | null {
+  const owner = new Set(wordsOf(interview.ownerName));
+  const notNames = new Set([...NOT_NAMES, ...wordsOf(interview.business)]);
   const contacts = new Map<string, { value: string; email: boolean; rejected: boolean; someoneElses: boolean; marked: boolean }>();
   for (const said of interview.contactSaid) {
     const text = said.replace(/’/g, "'");
-    const ends = [...text.matchAll(CLAUSE_END)].map((match) => match.index + match[0].length);
+    const ends = [...text.matchAll(SENTENCE_END)].map((match) => match.index + match[0].length);
+    let sentence = -1;
+    let carried: 'rejected' | 'other' | null = null;
     let previous = 0;
     for (const { start, end, value, email } of contactsIn(text)) {
-      const before = text.slice(Math.max(previous, ...ends.filter((stop) => stop <= start)), start).toLowerCase();
+      const begins = Math.max(0, ...ends.filter((stop) => stop <= start));
+      if (begins !== sentence) [sentence, carried, previous] = [begins, null, begins];
+      const marker = whose(text.slice(previous, start), owner, notNames);
       previous = end;
+      if (marker !== null) carried = marker === 'owner' ? null : marker;
       const key = email ? value.toLowerCase() : value.replace(/\D/g, '');
       const contact = contacts.get(key) ?? { value, email, rejected: false, someoneElses: false, marked: false };
-      contacts.set(key, { ...contact, value });
-      const kept = contacts.get(key)!;
-      if (REJECTED.test(before)) kept.rejected = true;
-      else if (SOMEONE_ELSE.test(before)) kept.someoneElses = true;
-      else if (OWNERS.test(before)) kept.marked = true;
+      contact.value = value;
+      contacts.set(key, contact);
+      if (carried === 'rejected') contact.rejected = true;
+      else if (carried === 'other') contact.someoneElses = true;
+      else if (marker === 'owner') contact.marked = true;
     }
   }
   const kept = [...contacts.values()].filter(({ rejected, someoneElses }) => !rejected && !someoneElses);
@@ -910,11 +953,19 @@ function ownerContactOf(interview: Interview): string | null {
   return phones.length === 1 ? phones[0]!.value : null;
 }
 
-/** The words a typed answer to the offer is read by (setup.py `_reads_yes`): a "no" one wins; with neither, the offer is asked again. */
+/**
+ * The words a typed answer to the offer is read by (setup.py `_reads_yes`): a question or a conditional yes is
+ * neither, then a "no" one wins; with neither, the offer is asked again.
+ */
 const TYPED_YES = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'please do', 'do it', 'add me', 'sounds good', 'sí', 'si', 'vale', 'claro', 'dale', 'añádeme', 'agrégame'];
 const TYPED_NO = ['no', 'not', "don't", 'dont', 'nope', 'not now', 'later', 'skip', 'no gracias'];
 
+const UNCLEAR = /[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)(?![\p{L}\p{N}])|^\W*do\s+(?:you|i|we|they|he|she|this|that)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])if(?![\p{L}\p{N}])/iu;
+const SI = /(?<![\p{L}\p{N}])si(?![\p{L}\p{N}])/iu;
+const SI_ALONE = /^\W*si\s*(?:$|[,.!])/i;
+
 function readsYes(text: string): boolean | null {
+  if (UNCLEAR.test(text) || (SI.test(text) && !SI_ALONE.test(text))) return null;
   const said = ` ${(text.toLowerCase().replace(/’/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? []).join(' ')} `;
   if (TYPED_NO.some((phrase) => said.includes(` ${phrase} `))) return false;
   if (TYPED_YES.some((phrase) => said.includes(` ${phrase} `))) return true;

@@ -561,9 +561,17 @@ describe('the test-client offer, as the API asks it', () => {
     const state = await finished(CONTACT);
     expect([state.step, state.question]).toEqual(['questions', 'test_client']);
     expect(state.messages.slice(-2)).toEqual([{ role: 'claude', text: QUESTIONS_DONE, choices: [], card: null }, OFFER]);
-    for (const contact of ['Yes', 'The same as on my website.', 'We are open 8.00-17.00']) {
+    // With no contact of the owner's own, as the API reads it: none typed, hours only, another person's or a rejected one.
+    for (const contact of [
+      'Yes', 'The same as on my website.', 'We are open 8.00-17.00', 'Ana: ana@example.test',
+      'Call my assistant Ana at (510) 555-0142 or email ana@example.test.', 'Do not use old@example.test or 510-555-0142.',
+      'Ana’s email is ana@example.test',
+    ]) {
       const without = await finished(contact);
       expect([without.step, without.question, without.messages.at(-1)?.text], contact).toEqual(['tools', null, QUESTIONS_DONE]);
+    }
+    for (const contact of ['Ana handles bookings. My own email is lee@example.com.', 'Ana: ana@example.test, Lee: lee@example.com']) {
+      expect((await finished(contact)).question, contact).toBe('test_client');
     }
   });
 
@@ -580,10 +588,13 @@ describe('the test-client offer, as the API asks it', () => {
   });
 
   it('an_answer_that_is_neither_yes_nor_no_gets_the_same_offer_again', async () => {
-    const offered = await finished(CONTACT);
-    const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text: 'What does that mean?' });
-    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
-    expect(state.messages.slice(-2)).toEqual([{ role: 'owner', text: 'What does that mean?', choices: [], card: null }, OFFER]);
+    // A question or a conditional yes is no yes, whatever words it holds.
+    for (const text of ['What does that mean?', 'What does add me as a test client mean?', 'What happens if I say yes?', "If it's free, yes"]) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['questions', 'test_client']);
+      expect(state.messages.slice(-2), text).toEqual([{ role: 'owner', text, choices: [], card: null }, OFFER]);
+    }
   });
 
   it('use_your_suggestions_reaches_the_same_offer_and_using_them_again_moves_on', async () => {
