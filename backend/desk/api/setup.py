@@ -2639,6 +2639,7 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
 
 
 PUBLIC_LINE_FIELDS = ("summary", "pricing", "intake", "after_hours", "urgent", "service_area", "how_we_help")
+PUBLIC_CHARTER_REPAIR_TIMEOUT_S = DEFAULT_TIMEOUT_S
 
 
 class PublicLineProblem(Exception):
@@ -2714,25 +2715,51 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
             })
         except ValidationError:
             raise ApiProblem(422, "invalid") from None
-        return await _commit_public_lines(owner, engine, interview, seen, now)
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key)
 
 
 async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
-                               now: datetime) -> SetupPublicLines:
-    await _put_public_charter(owner, interview, now)
-    try:
-        await _commit(engine, owner, interview, seen)
-    except Exception as failed:
-        logger.warning("setup public lines save failed (%s)", type(failed).__name__)
+                               now: datetime, *, key: str | None = None) -> SetupPublicLines:
+    async def repair() -> None:
         try:
-            stored = await _read(engine, owner, interview.interview_id)
-            await _put_public_charter(owner, stored, now)
+            async with asyncio.timeout(PUBLIC_CHARTER_REPAIR_TIMEOUT_S):
+                stored = await _read(engine, owner, interview.interview_id)
+                await _put_public_charter(owner, stored, now)
         except Exception as restore_failed:
-            logger.error("setup public charter restore failed (%s)", type(restore_failed).__name__)
+            logger.error("setup public charter restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
-            logger.warning("setup public charter restored from stored answers")
-        raise ApiProblem(409, "conflict") from None
-    return _public_lines(interview.answers)
+            logger.warning("setup public charter restored from stored answers (key=%s)", key)
+
+    async def settle() -> SetupPublicLines:
+        try:
+            await _put_public_charter(owner, interview, now)
+        except KernelUnavailable:
+            await repair()
+            raise
+        try:
+            await _commit(engine, owner, interview, seen)
+        except Exception as failed:
+            logger.warning("setup public lines save failed (%s)", type(failed).__name__)
+            await repair()
+            raise ApiProblem(409, "conflict") from None
+        return _public_lines(interview.answers)
+
+    task = asyncio.create_task(settle())
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Keep the caller's _turn and owner context open until publication, save and repair settle.
+        # Repeated disconnect/shutdown cancellation must not release either resource early.
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()  # consume a settlement failure even when the request can no longer answer
+        raise
 
 
 async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,

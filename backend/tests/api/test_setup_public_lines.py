@@ -1,5 +1,6 @@
 """Public setup lines: owner provenance, strict charter publication and rollback."""
 
+import asyncio
 import json
 from datetime import date
 
@@ -9,7 +10,7 @@ from sqlalchemy import text as sql
 
 from desk.api import setup
 from desk.api.deps import ApiProblem
-from desk.api.kernel_client import CredentialView, KernelHttp
+from desk.api.kernel_client import CredentialView, KernelHttp, KernelUnavailable
 from desk.api.prompts import SetupAnswers
 from desk.kernel_api import DeskCharterRequest
 from tests.api.test_setup_questions import app, begin, model, new_owner, stored
@@ -59,6 +60,91 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
 def charter(fake, desk_id):
     return {fact_id: fact.model_dump(mode="json") for fact_id, fact in fake.desks[desk_id].facts.items()
             if fact.kind == "charter"}
+
+
+async def test_lost_put_response_restores_stored_charter(lines_setup, engine, fake, monkeypatch, caplog):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    calls = []
+    original = CredentialView.call
+
+    async def lose_response(self, route, body=None, **kwargs):
+        result = await original(self, route, body, **kwargs)
+        if route == "PUT /desks/{id}/charter":
+            calls.append(body)
+            if len(calls) == 1:
+                raise KernelUnavailable(route)
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", lose_response)
+    reply = await owner.browser.put(path, json={"key": "policy:pricing", "text": "Private candidate marker."})
+    assert reply.status_code == 503, reply.text
+    assert len(calls) == 2
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert caplog.messages.count("setup public charter restored from stored answers (key=policy:pricing)") == 1
+    assert "Private candidate marker" not in caplog.text
+
+
+async def test_cancel_during_save_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = setup._commit
+
+    async def pause_save(*args):
+        entered.set()
+        await release.wait()
+        await original(*args)
+
+    monkeypatch.setattr(setup, "_commit", pause_save)
+    request = asyncio.create_task(request_lines(owner.browser, path, "put"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        request.cancel()
+        await asyncio.sleep(0.01)
+        assert not request.done()
+        assert (await owner.browser.get(path)).status_code == 409
+        # A second cancellation must not release the guard or cancel the save either.
+        request.cancel()
+        await asyncio.sleep(0.01)
+        assert not request.done()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+    assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == "Quotes before repairs."
+    assert charter(fake, state["desk_id"])["charter:policy:pricing"]["claims"][0]["value"] == "Quotes before repairs."
+    assert (await owner.browser.get(path)).status_code == 200
+
+
+async def test_cancel_during_put_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = CredentialView.call
+
+    async def pause_put(self, route, body=None, **kwargs):
+        result = await original(self, route, body, **kwargs)
+        if route == "PUT /desks/{id}/charter":
+            entered.set()
+            await release.wait()
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", pause_put)
+    request = asyncio.create_task(request_lines(owner.browser, path, "put"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        request.cancel()
+        await asyncio.sleep(0.01)
+        assert not request.done()
+        assert (await owner.browser.get(path)).status_code == 409
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+    assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == "Quotes before repairs."
+    assert charter(fake, state["desk_id"])["charter:policy:pricing"]["claims"][0]["value"] == "Quotes before repairs."
+    assert (await owner.browser.get(path)).status_code == 200
 
 
 async def test_put_saves_owner_text_and_publishes_whole_charter(lines_setup, engine, fake, monkeypatch):
@@ -270,7 +356,8 @@ async def test_failed_restore_is_logged_once_and_answers_conflict(lines_setup, e
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     assert "setup public lines save failed (RuntimeError)" in caplog.text
-    assert "setup public charter restore failed (RuntimeError)" in caplog.text
+    key = "policy:pricing" if method == "put" else None
+    assert caplog.messages.count(f"setup public charter restore failed (RuntimeError, key={key})") == 1
     assert "private save failure marker" not in caplog.text
     assert "private restore failure marker" not in caplog.text
 
