@@ -1279,7 +1279,7 @@ async def test_an_error_after_a_202_reaches_the_next_retry(app, browser, fake, k
     reply = await owner.browser.post(path)
     assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
     assert len(fake.called("POST /policy/draft")) == 1
-    reply = await owner.browser.post(path)
+    reply = await settled(owner, path)
     assert reply.status_code == 200, reply.text
     assert len(fake.called("POST /policy/draft")) == 2
 
