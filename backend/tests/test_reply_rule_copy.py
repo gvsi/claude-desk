@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from desk.api.owner_reads import REPLY_WHY_BY_RULE
+from desk.api.owner_reads import REPLY_WHY_BY_RULE, reply_reason
 from desk.kernel_service import jev, reply_check
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 
@@ -36,4 +36,10 @@ async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_bl
     assert len(violations) == 1 and violations[0].kind == "soft_promise"
     assert {violation.rule_id for violation in violations} <= REPLY_WHY_BY_RULE.keys()
     if jev_blocked:
-        assert REPLY_WHY_BY_RULE["soft.jev"] == "Jev flagged a promise or identity claim the cards don't back"
+        assert REPLY_WHY_BY_RULE["soft.jev"] == "a second check flagged a promise the business's records don't back"
+
+
+def test_both_promise_checkers_have_one_owner_explanation():
+    assert reply_reason([("soft_promise", "soft.promise"), ("soft_promise", "soft.jev")]) == (
+        "A reply was stopped before it was shown, because "
+        "a second check flagged a promise the business's records don't back.")

@@ -68,7 +68,7 @@ REPLY_WHY_BY_RULE = {
     # Proposed wording awaiting the owner's sign-off.
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
-    "soft.jev": "Jev flagged a promise or identity claim the cards don't back",
+    "soft.jev": "a second check flagged a promise the business's records don't back",
 }
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",
@@ -358,6 +358,9 @@ def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
 def reply_reason(violations: Iterable[tuple[str, str | None]]) -> str:
     """The owner's line for a blocked reply of Claude's, from its violations: each one's rule ID's line, else its
     kind's."""
+    violations = list(violations)
+    if any(rule_id == "soft.jev" for _, rule_id in violations):
+        violations = [(kind, rule_id) for kind, rule_id in violations if rule_id != "soft.promise"]
     why = list(dict.fromkeys(line for kind, rule_id in violations
                              if (line := REPLY_WHY_BY_RULE.get(rule_id or "") or REPLY_WHY.get(kind))))
     return f"{REPLY_STOPPED}, because {' and '.join(why)}." if why else f"{REPLY_STOPPED}."
