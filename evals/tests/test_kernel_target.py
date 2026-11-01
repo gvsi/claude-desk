@@ -46,7 +46,8 @@ class StandInKernel:
 
     def __init__(self) -> None:
         self.proof_mode = "symcc"
-        self.model = "claude-haiku-5-5"   # the model `GET /whoami` calls, as a reply check would
+        self.model = "claude-sonnet-5-5"   # the model `GET /whoami` calls, as a reply check would
+        self.schema = "SoftPromiseVerdict"
         self.apps: list[tuple[object, dict[str, str | None]]] = []   # each app's clock and environment
         self.lifespan: list[str] = []
         self.requests = 0
@@ -69,7 +70,9 @@ class StandInKernel:
             client = anthropic.AsyncAnthropic(max_retries=0)   # reads ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL
             try:
                 await client.messages.create(
-                    model=self.model, max_tokens=16, messages=[{"role": "user", "content": "Hi"}]
+                    model=self.model, max_tokens=16, messages=[{"role": "user", "content": "Hi"}],
+                    output_config={"format": {"type": "json_schema", "schema": {
+                        "title": self.schema, "type": "object"}}}
                 )
             except anthropic.APIStatusError:
                 pass   # an unscripted call: the kernel fails closed, and the target's stop() fails the case
@@ -169,11 +172,11 @@ async def test_target_runs_the_kernel_app_on_its_clock_and_fake(
         assert env == {"ANTHROPIC_BASE_URL": target.fake.url, "ANTHROPIC_API_KEY": DUMMY_KEY, "DESK_ENV": "test",
                        "DESK_DECISIONS": "anthropic", "DESK_SIGNING_SEED": None}
 
-        # The kernel's model call reaches the fake, whose Haiku default passes the soft-promise check.
+        # The kernel's model call reaches the fake's Sonnet default for the verdict schema.
         whoami = await target.call("GET /whoami", auth=Auth.raw({"X-Session-Token": "secret-token"}),
                                    expect=Expect(fields={"kind": "visitor"}))
         assert isinstance(whoami, WhoAmI)
-        assert len(target.fake.calls("claude-haiku-5-5")) == 1
+        assert len(target.fake.calls("claude-sonnet-5-5", schema="SoftPromiseVerdict")) == 1
         assert [(called.route, called.status) for called in target.responses] == [("GET /whoami", 200)]
         assert "secret-token" not in repr(target.responses)
     finally:
@@ -395,7 +398,7 @@ async def test_proving_routes_get_the_longer_client_timeout(kernel: StandInKerne
 
 
 async def test_stop_fails_on_an_unscripted_model_call(kernel: StandInKernel):
-    kernel.model = "claude-sonnet-5-5"   # a reviewer call no case scripted
+    kernel.schema = "Review"   # the same Sonnet model, but a reviewer call no case scripted
     target = await KernelTarget(models="fake").start()
     await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
     with pytest.raises(AssertionError, match="1 unscripted model calls.*claude-sonnet-5-5"):
