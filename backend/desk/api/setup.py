@@ -1390,6 +1390,47 @@ def _normalize_choices(choices: list[Choice]) -> list[Choice]:
     return normalized
 
 
+def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> SuggestedFacts:
+    """Search may inform the plan, but suggested facts need evidence from the owner's sources.
+
+    Only explicitly supported fields survive. Construct from that allowlist so a future field is omitted
+    until it has its own provenance check, including when the model supplies a subclass with extra fields.
+    """
+    folded = text.casefold()
+    words = set(re.findall(r"[^\W\d_]+", folded))
+    amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "").strip()) * 100)
+               for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)", text)}
+
+    def has_time(clock: str) -> bool:
+        hour, minute = map(int, clock.split(":"))
+        period = "am" if hour < 12 else "pm"
+        # Whole-hour values also commonly appear without minutes or a meridiem, e.g. "7 to 9".
+        minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
+        twelve_hour = rf"{hour % 12 or 12}{minutes}\s*(?:{period})?"
+        return re.search(rf"(?<![\w:])(?:{re.escape(clock)}|{twelve_hour})(?![\w:]|\.\d)", folded) is not None
+
+    area_words = [word for word in re.findall(r"[^\W\d_]+", suggested.service_area.casefold()) if len(word) >= 4]
+    contact = suggested.public_contact
+    digits = re.sub(r"\D", "", contact)
+    kept = {
+        "service_area": suggested.service_area if (suggested.service_area.casefold() in folded or
+                         (area_words and all(word in words for word in area_words))) else "",
+        "hours": suggested.hours if all(has_time(window.start) and has_time(window.end)
+                                         for window in suggested.hours) else [],
+        "public_contact": contact if (contact.casefold() in folded or
+                          (len(digits) >= 7 and re.fullmatch(r"[+\d\s().-]+", contact) and
+                           digits in re.sub(r"\D", "", text))) else "",
+        "price_items": [item for item in suggested.price_items if item.unit_cents in amounts],
+        "after_hours": "",
+    }
+    filtered = SuggestedFacts.model_construct(**kept)
+    filtered_values = filtered.model_dump()
+    for name, value in suggested.model_dump().items():
+        if name not in kept or value != filtered_values[name]:
+            logger.info("dropped setup suggestion: %s", name)
+    return filtered
+
+
 async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
                          entries: list[Entry]) -> None:
     """Append the consultant opening and its first fact question; the caller owns persistence."""
@@ -1411,6 +1452,12 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         logger.warning("the setup understanding was unavailable; asking the first question")
         interview.transcript.append(_ask(interview, "what_you_do"))
         return
+    # Match exactly the sources included in the understanding message, excluding this run's staged entries.
+    sources = [entry for entry in entries if entry.pending is None or entry.pending != _run_id(interview)]
+    if any(entry.read == "web_search" and entry.content for entry in sources):
+        owner_text = "\n".join([_history(interview)[0].text, *[
+            entry.content for entry in sources if entry.read in {"memory", "website"} and entry.content]])
+        answer.suggested = _owner_sourced_suggestions(answer.suggested, owner_text)
     opening = Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested)
     interview.transcript.append(opening)
     opening.planned = [card for draft in answer.jobs if (card := _planned_job(interview, draft)) is not None]

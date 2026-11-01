@@ -1659,6 +1659,87 @@ async def test_setup_searches_the_web_after_consent(app, browser, fake, kernel_h
     assert (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json() == state
 
 
+@pytest.mark.parametrize("source", ["search", "description", "website", "memory", "no_search"])
+async def test_search_suggestions_require_owner_provenance(
+    app, browser, fake, kernel_http, model, engine, caplog, source,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    planted = "Deposit $45, call 512-555-0100, open 7am to 9pm, serving Round Rock"
+    fake.script("native.web_search", model_view={"results": [
+        {"title": "Another salon", "url": "https://other.example", "snippet": planted}]})
+    fake.script("native.read_memory", model_view={"items": [
+        {"title": "Business", "text": planted if source == "memory" else "Owner runs a salon"}]})
+    fake.script("native.fetch_website", model_view={"text": planted if source == "website" else "A salon"})
+    state = await begin(owner, model, description=planted if source == "description" else "I run a salon.",
+                        website=WEBSITE, search_queries=[] if source == "no_search" else ["salon intake"])
+    suggested = {"service_area": "Round Rock", "hours": [{"days": ["mon"], "start": "07:00", "end": "21:00"}],
+                 "public_contact": "512-555-0100", "after_hours": "Call for emergencies",
+                 "price_items": [{"title": "Deposit", "unit_cents": 4500}]}
+    model.add(unparsed(understanding(suggested=suggested)))
+    with caplog.at_level(logging.INFO, logger=desk_setup.__name__):
+        await consent(owner, state["interview_id"], True, model)
+    opening = next(entry for entry in (await stored(engine, state["interview_id"]))["transcript"]
+                   if "suggested" in entry)
+    expected = dict(suggested)
+    if source == "search":
+        expected = {"service_area": "", "hours": [], "public_contact": "", "after_hours": "", "price_items": []}
+    elif source != "no_search":
+        expected["after_hours"] = ""
+    assert opening["suggested"] == expected
+    drops = [record.getMessage() for record in caplog.records if "dropped setup suggestion" in record.getMessage()]
+    if source == "search":
+        assert set(drops) == {f"dropped setup suggestion: {name}" for name in suggested}
+        assert all(value not in " ".join(drops) for value in ("Round Rock", "512-555-0100", "4500"))
+    if source == "no_search":
+        assert not drops
+
+
+def test_suggestion_provenance_drops_an_unknown_future_field(monkeypatch, caplog):
+    class FutureFacts(desk_setup.SuggestedFacts):
+        new_fact: str
+
+    # Model a required field added to the schema, not just unvalidated extra input.
+    monkeypatch.setattr(desk_setup, "SuggestedFacts", FutureFacts)
+    suggested = FutureFacts(**understanding()["suggested"], new_fact="Owner grants permission")
+    with caplog.at_level(logging.INFO, logger=desk_setup.__name__):
+        filtered = desk_setup._owner_sourced_suggestions(suggested, "Oakland. Owner grants permission")
+    assert "new_fact" not in filtered.model_dump()
+    assert "dropped setup suggestion: new_fact" in caplog.messages
+    assert "Owner grants permission" not in caplog.text
+
+
+@pytest.mark.parametrize(("field", "value", "owner_text", "expected"), [
+    ("price_items", [{"title": "Visit", "unit_cents": 120000}], "Visit $1,200.00", True),
+    ("price_items", [{"title": "Visit", "unit_cents": 4500}], "Visit 45", True),
+    ("price_items", [{"title": "Visit", "unit_cents": 4500}], "Visit $145 or $45.99", False),
+    ("public_contact", "hello@salon.example", "Email HELLO@SALON.EXAMPLE", True),
+    ("public_contact", "(512) 555-0100", "Call +1 512.555.0100", True),
+    ("public_contact", "512-555-0100", "Call 512 555 0101", False),
+    ("service_area", "Round Rock area", "Round Rock and surrounding area", True),
+    ("service_area", "Round Rock", "Roundabouts near Rockford", False),
+    ("hours", [{"days": ["mon"], "start": "07:00", "end": "17:00"}], "07:00 to 17:00", True),
+    ("hours", [{"days": ["mon"], "start": "07:00", "end": "17:00"}], "7 to 5", True),
+    ("hours", [{"days": ["mon"], "start": "07:00", "end": "17:00"}], "7am to 5pm", True),
+    ("hours", [{"days": ["mon"], "start": "07:00", "end": "17:00"}], "7:00 am to 5:00 pm", True),
+    ("hours", [{"days": ["mon"], "start": "07:30", "end": "17:15"}], "7:30am to 5:15pm", True),
+    ("hours", [{"days": ["mon"], "start": "07:00", "end": "17:00"}], "17:00 only", False),
+])
+def test_suggestion_provenance_matches_owner_values(field, value, owner_text, expected):
+    suggested = desk_setup.SuggestedFacts(**{**understanding()["suggested"], field: value})
+    filtered = desk_setup._owner_sourced_suggestions(suggested, owner_text)
+    assert filtered.model_dump()[field] == (value if expected else [] if isinstance(value, list) else "")
+
+
+def test_suggestion_provenance_checks_each_price_and_every_hours_window():
+    suggested = desk_setup.SuggestedFacts(**{**understanding()["suggested"],
+        "price_items": [{"title": "Deposit", "unit_cents": 4500}, {"title": "Visit", "unit_cents": 9900}],
+        "hours": [{"days": ["mon"], "start": "07:00", "end": "17:00"},
+                  {"days": ["tue"], "start": "08:00", "end": "18:00"}]})
+    filtered = desk_setup._owner_sourced_suggestions(suggested, "Deposit $45. Hours 7am to 5pm.")
+    assert [item.unit_cents for item in filtered.price_items] == [4500]
+    assert filtered.hours == []
+
+
 async def test_homework_decides_every_read_before_any_execution(
     app, browser, fake, kernel_http, model, monkeypatch,
 ):
