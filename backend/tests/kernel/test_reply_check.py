@@ -2337,6 +2337,8 @@ def test_scan_public_text(text, rules):
     # Digits before "days a week", and a range of digits before a distance unit
     "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
     "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # "mañana" as the morning, after "por la", "en la" or "de la"
+    "Trabajamos por la mañana.", "Abrimos de la mañana a la noche.", "En la mañana y en la tarde.",
     # A known limit: a fee written in words passes, since any cardinal number word does.
     "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
     "Seven days to finish any job in Oakland.",
@@ -2373,6 +2375,8 @@ def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     ("Oakland: 1500 minimum.", ["digit"]),
     ("Outside Oakland, a hundred off.", ["lex.en.number"]),
     ("Trip fee 20 to 30.", ["digit"]),
+    ("Llegamos mañana.", ["lex.es.date"]),
+    ("Mañana por la mañana en Oakland.", ["lex.es.date"]),
     ("Seven days a week, 2 to 3 hours each.", ["digit"]),
     # Response times and dates
     ("Service in Oakland within two hours.", ["lex.en.date"]),

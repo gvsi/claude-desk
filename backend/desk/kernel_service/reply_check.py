@@ -560,6 +560,7 @@ SERVICE_AREA_DAY_WORDS = re.compile(
     r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{_BLANK}+de{_BLANK}+semana"
     r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
+SERVICE_AREA_MORNING = re.compile(r"\b(?:por|en|de)\s+la\s+$", re.IGNORECASE)
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
@@ -578,7 +579,9 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
                 or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
                     and SERVICE_AREA_BEFORE_UNIT.match(text, end) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
-        return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+        return (SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+                or (hit.casefold() in {"mañana", "manana"}
+                    and SERVICE_AREA_MORNING.search(text[:start]) is not None))
     return False
 
 

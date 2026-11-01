@@ -2761,6 +2761,8 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     ("We cover 20-30 miles around Oakland.", []),
     ("Within 20–30 miles of Oakland.", []),
     ("Trip fee 20 to 30.", ["digit"]),
+    ("Trabajamos por la mañana.", []),
+    ("Llegamos mañana.", ["lex.es.date"]),
     # A known limit: a fee written in words passes, since any cardinal number word does.
     ("Cargo de viaje: cincuenta.", []),
     ("Same-day service in Oakland.", ["lex.en.date"]),

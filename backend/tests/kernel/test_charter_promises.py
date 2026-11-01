@@ -48,6 +48,7 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     "We cover 20-30 miles around Oakland.",
     "Within 20–30 miles of Oakland.",
     "20 to 30 miles",
+    "Trabajamos por la mañana.",
 ])
 async def test_service_area_allows_area_and_weekly_availability(app, client, text):
     copy = await rivera(app, client)
