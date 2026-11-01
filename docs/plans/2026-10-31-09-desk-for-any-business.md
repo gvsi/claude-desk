@@ -344,7 +344,7 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
   - The master plan amendment goes through 88.
 - **Description template:** `description_confirmed` is built from a fixed template per block, with the config quoted as data. Test: an instruction planted in `how` appears only inside quotes.
 - **Money:** `moves_money` and `auto_money` become effect-based for business tools (B3).
-- **Urgent alerts:** the urgent alert kind joins `now` for any Desk with an urgent tool (B4).
+- **Urgent alerts:** urgent alerts reach the owner's Demo inbox at once, whatever the notification settings (see Owner rulings after round 1) (B4).
 - **B6:**
   - Up to 3 searches per setup, a 20 s deadline each, on `claude-sonnet-5-5`, with usage ledgered.
   - What it returns is Claude's cited summary, labelled as such.
@@ -374,6 +374,9 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
 ## Owner rulings after round 1 (2026-10-31; these win too)
 
 - **Money maximums are optional** (Giovanni: "it's something the owner can set but they shouldn't be mandated to set one"). The money cap with refunds, and the payment-link limit, are opt-in topics, never asked by default. Until the owner sets an amount, every payment asks the owner (cap 0, refunds "ask", link limit unset), so invariant 3 holds. The consultant mentions it once, with a choice to set an amount it handles on its own, now or later in Rules. Only on opt-in does code ask the isolated limit question. The money question loses its "I'd suggest $X to start" sentence, and no limit choice is marked recommended.
+- **Urgent alerts (B4):** an urgent call alerts the owner's Demo inbox at once, whatever the notification settings. No settings row is written, and the callback stays kind `callback` (no migration). Every urgent call alerts, with no throttle (Giovanni): a looping visitor or agent can send repeated alerts, a known risk. An urgent request that is held for approval alerts through the approval alert, which follows the owner's settings, until a later change.
+- **How we help lists only each accepted job's `how` line, with no title** (Giovanni). `how` is written in the third person, with no "you" or "your" and no prices, "free", durations, times, days or numbers, because customers read it and the public policy scan refuses those words. A refused `policy:how_we_help` is dropped and logged by key.
+- **Web search queries are about the kind of business**, never this business by name, its competitors, prices or fees (Giovanni). This replaces the spec's "by name and area". The consent question keeps its wording.
 - **An unpriced purpose-payment card at finish becomes "declined"** ("Not now"). It isn't a job, a tool or part of `how_we_help`.
 - **Copy signed off:**
   - the 13 D1 boards, their words and calls, and board 14 with editing in place (built Sunday);
