@@ -15,8 +15,9 @@ const DONE: Readonly<Partial<Record<string, string>>> = {
 
 /**
  * The task a checked message reports done, in the owner's words, or null. It needs a card that
- * reports the task done and an action that ran for it: a status of the turn, right before the
- * message, that says it was executed. A request, a hold or a refusal ran nothing. A payment card
+ * reports the task done and an action that ran for it: a status of the turn, before the message,
+ * that says it was executed. A draft the check stopped and Claude rewrote stays in the same turn,
+ * so the scan steps over it. A request, a hold or a refusal ran nothing. A payment card
  * is the one exception: only the kernel issues it, as the Desk's own message, once the checkout
  * it completed has paid, so that message is itself the record that the payment ran. A message
  * that hands the chat to the owner reports no task done: the handoff is what happened last.
@@ -29,6 +30,7 @@ function doneIn(items: readonly OwnerTranscriptItem[], index: number, message: E
   if (card.template === 'payment_confirmed' && message.author === 'desk') return words;
   for (let i = index - 1; i >= 0; i -= 1) {
     const item = items[i];
+    if (item?.kind === 'stopped_draft') continue;
     if (item?.kind !== 'status') break;
     if (item.event !== null && 'state' in item.event && item.event.state === 'executed') return words;
   }

@@ -73,6 +73,20 @@ describe('latestOf', () => {
     expect(latestOf(paid)).toBe('Deposit paid');
   });
 
+  it('a_task_done_stays_done_when_the_check_stopped_the_first_draft', () => {
+    // The check stopped Claude's first draft of the turn's reply, and Claude rewrote it: the draft
+    // the owner keeps sits between what ran and the checked reply, in the same turn.
+    const stopped: Part = { kind: 'stopped_draft', text: null, event: null };
+    const booked = reply([blocks.prose.details.en, blocks.booking_confirmed.en]);
+    const charged = reply([blocks.prose.details.en, blocks.charge_confirmed.en]);
+    expect(latestOf(chat(words('visitor_text', 'Tuesday at 2 works.'), status('executed'), stopped, booked))).toBe('Visit booked');
+    expect(latestOf(chat(words('agent_text', 'Charge the deposit to the signed limit.'), status('executed'), stopped, charged))).toBe('Deposit paid');
+    // A stopped draft is no action that ran: with nothing executed in the turn, the kernel's line stays.
+    expect(latestOf(chat(words('visitor_text', 'Tuesday at 2 works.'), stopped, booked))).toBe(REPLY_CHECKED);
+    expect(latestOf(chat(words('visitor_text', 'Tuesday at 2 works.'), status('held'), stopped, booked))).toBe(REPLY_CHECKED);
+    expect(latestOf(chat(status('executed'), booked, words('visitor_text', 'Book another one.'), stopped, booked))).toBe(REPLY_CHECKED);
+  });
+
   it('a_booking_held_refused_or_only_asked_for_is_not_done', () => {
     // Its card beside it or not, a booking that didn't run keeps the kernel's line.
     const booked = [blocks.prose.details.en, blocks.booking_confirmed.en];

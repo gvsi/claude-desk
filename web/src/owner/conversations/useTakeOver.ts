@@ -14,7 +14,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import type { SessionMode } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
-import type { OwnerTranscript, TranscriptItem } from '../../api/views.ts';
+import type { OwnerTranscript, OwnerTranscriptItem } from '../../api/views.ts';
 
 /** A 409 on any of these: the chat moved on while the owner was acting. */
 export const CHANGED_WHILE_ACTING = 'This chat changed while you were acting. Check the latest and try again.';
@@ -49,10 +49,10 @@ export interface UseTakeOver {
   messageError: string | null;
 }
 
-const maxN = (items: readonly TranscriptItem[]) => items.reduce((max, item) => Math.max(max, item.n), 0);
+const maxN = (items: readonly OwnerTranscriptItem[]) => items.reduce((max, item) => Math.max(max, item.n), 0);
 
 /** Whether `item`, past `after`, is the owner's `kind` message with `text`. */
-function isMine(item: TranscriptItem, after: number, kind: MessageKind, text: string): boolean {
+function isMine(item: OwnerTranscriptItem, after: number, kind: MessageKind, text: string): boolean {
   if (item.n <= after) return false;
   if (kind === 'whisper') return item.kind === 'whisper' && item.text === text;
   return item.kind === 'delivered' && item.event?.type === 'message' && item.event.author === 'owner' && item.event.blocks.some((b) => b.text === text);
