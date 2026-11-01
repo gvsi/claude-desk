@@ -329,7 +329,7 @@ async def test_setup_exposes_held_policy_keys_and_clears_them_after_rewording(
     async def refuse_denial(view, route, body=None, **kwargs):
         if route == "PUT /desks/{id}/charter" and any(
                 claim.key == "policy:urgent" and claim.value == denied for claim in body.charter):
-            raise KernelFailed(422, "invalid", {"policy:urgent": ["policy.ai_denial"]})
+            raise KernelFailed(422, "invalid", detail={"policy:urgent": ["policy.ai_denial"]})
         return await call(view, route, body, **kwargs)
 
     monkeypatch.setattr(KernelView, "call", refuse_denial)
@@ -379,7 +379,7 @@ async def test_setup_state_shows_a_refused_public_contact_as_held(app, browser, 
     async def refuse_contact(view, route, body=None, **kwargs):
         if route == "PUT /desks/{id}/charter" and any(
                 claim.key == "contact" and claim.value == refused for claim in body.charter):
-            raise KernelFailed(422, "invalid", {"contact": ["contact_format"]})
+            raise KernelFailed(422, "invalid", detail={"contact": ["contact_format"]})
         return await call(view, route, body, **kwargs)
 
     monkeypatch.setattr(KernelView, "call", refuse_contact)
@@ -515,34 +515,110 @@ async def test_a_refused_contact_is_held_with_the_named_policy_and_the_rest_save
     assert REFUSED_CONTACT not in caplog.text and "$90" not in caplog.text
 
 
-@pytest.mark.parametrize(("first_refusal", "expected_held"), [
-    ({"charter": ["policy_count_limit"]}, ["policy:about", "policy:service_area", "policy:intake", "contact"]),
-    ({"charter": ["policy_text_limit"]}, ["policy:about", "policy:service_area", "policy:intake", "contact"]),
-    ({"policy:intake": ["lex.en.promise"]}, ["policy:intake", "contact", "policy:about", "policy:service_area"]),
-], ids=["policy-count-cap", "policy-text-cap", "named-policy"])
-async def test_a_contact_refused_by_a_later_write_is_held_and_left_out_of_the_last_write(first_refusal, expected_held,
-                                                                                        caplog):
-    kernel = ScriptedKernel()
-    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
-                                    intake="Ask about consultations", service_area="Oakland"),
-                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
-    charters = charter_writes(kernel, [first_refusal, {"contact": ["contact_format"]}])
-    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+async def put_parts(kernel: ScriptedKernel, parts) -> list[str]:
+    """Writes setup's parts to Desk d1 through `kernel` as its owner; returns the held charter keys."""
     async with kernel.client() as http:
         owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
                          kernel=http.owner("owner-token"), ro=None)
-        held = await _put_parts(owner, "d1", parts)
+        return await _put_parts(owner, "d1", parts)
 
+
+async def test_a_lone_contact_refusal_leaves_the_targeted_policy_retry(caplog):
+    """The kernel checks the contact before any policy line, so a bad contact comes back alone on the first write.
+    Holding it doesn't use up the retry that drops only the policy lines the next refusal names."""
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    pricing="from $90", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"contact": ["contact_format"]}, {"policy:pricing": ["currency", "digit"]}]
+    charters = charter_writes(kernel, refusals)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    assert held == ["contact", "policy:pricing"]
     assert len(charters) == 3
-    assert "contact" in [claim["key"] for claim in charters[1]]
-    assert charters[2] == []
-    assert held == expected_held
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] != "contact"]
+    assert [claim["key"] for claim in charters[2]] == ["policy:about", "policy:service_area"]
     assert [request.url.path for request in kernel.requests[3:]] == [
         "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
     warnings = [record for record in caplog.records
                 if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
-    assert len(warnings) == 2 and warnings[1].args["contact"] == ["contact_format"]
+    assert [record.args for record in warnings] == refusals
+    assert REFUSED_CONTACT not in caplog.text and "$90" not in caplog.text
+
+
+@pytest.mark.parametrize("second_refusal", [
+    {"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]}, {"policy:unknown": ["language"]},
+], ids=["policy-count-cap", "policy-text-cap", "no-matching-claim"])
+async def test_a_policy_fallback_after_a_lone_contact_refusal_drops_every_policy_line(second_refusal, caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    charters = charter_writes(kernel, [{"contact": ["contact_format"]}, second_refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    assert held == ["contact", "policy:about", "policy:service_area", "policy:intake"]
+    assert len(charters) == 3 and charters[2] == []
+    assert [request.url.path for request in kernel.requests[3:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        {"contact": ["contact_format"]},
+        {"policy:about": [], "policy:service_area": [], "policy:intake": []}]
     assert REFUSED_CONTACT not in caplog.text
+
+
+async def test_a_refusal_after_the_cap_with_nothing_left_to_drop_propagates():
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"charter": ["policy_count_limit"]}, {"policy:unknown": ["x"]}]
+    charters = charter_writes(kernel, refusals)
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", refusals[1])
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 2
+    assert charters[1] == [{"key": "contact", "kind": "text", "value": "hello@example.test"}]
+
+
+async def test_a_lone_contact_refusal_allows_at_most_four_charter_writes():
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="No", pricing="from $90",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    detail = {"policy:about": ["lex.en.promise"]}
+    kernel.fail(lambda request: httpx.Response(422, json={
+        "code": "invalid", "detail": {"contact": ["contact_format"]} if len(kernel.requests) == 1 else detail}))
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 4
+    first, *later = [json.loads(request.content)["charter"] for request in kernel.requests]
+    assert later == [[claim for claim in first if claim["key"] != "contact"],
+                     [claim for claim in first if claim["key"] not in ("contact", "policy:about")],
+                     []]
+
+
+@pytest.mark.parametrize("detail", [{"policy:unknown": ["x"]}, {"charter": ["policy_count_limit"]}],
+                         ids=["no-matching-claim", "policy-count-cap"])
+async def test_a_fallback_with_nothing_to_drop_propagates_without_resending_the_charter(detail):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31), publish_policies=False)
+    assert [claim.key for claim in parts.charter] == ["contact"]
+    charter_writes(kernel, [detail])
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"]
 
 
 @pytest.mark.parametrize("prior_refusals", [0, 1, 2])
@@ -567,7 +643,7 @@ async def test_other_charter_errors_propagate_without_another_put(prior_refusals
                          kernel=http.owner("owner-token"), ro=None)
         with pytest.raises(KernelFailed) as caught:
             await _put_parts(owner, "d1", parts)
-    assert (caught.value.status, caught.value.code, caught.value.detail) == (status, code, detail)
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (status, code, detail or {})
     assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * (prior_refusals + 1)
 
 

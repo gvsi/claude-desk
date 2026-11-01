@@ -1941,45 +1941,47 @@ def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessT
                      notifications=default_notifications(business_type))
 
 
-async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
-    """Writes the charter in at most three tries, holding back what the kernel's public-text checks refuse, and
-    returns the held keys in the order they were dropped once a write succeeds.
+CHARTER_CAPS = ({"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]})
+POLICY_RETRIES = 2
 
-    A refusal (422 `invalid` naming keys) drops each named claim, a policy line or the public contact alike. A cap
-    refusal, or one naming no claim sent, drops every `policy:` claim instead. A second refusal drops every
-    `policy:` claim still left and any other claim it names, such as the contact; with nothing left to drop it
-    propagates, as does a third refusal or any other failure. Each drop is logged by key and rule ids, never text.
+
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+    """Writes the charter, holding back what the kernel's public-text checks refuse, and returns the held keys in
+    the order they were dropped once a write succeeds.
+
+    A refusal (422 `invalid` naming keys) drops claims and the charter is sent again without them; nothing is ever
+    re-sent unchanged. The public contact is held like a policy line. The kernel checks the contact before any
+    policy line, so a refusal naming only the contact drops it without using up a policy retry. The first other
+    refusal drops just the claims it names; a cap refusal, one naming no claim sent, or a second one drops every
+    `policy:` claim left and any other claim it names. That is at most four writes when the contact is refused on
+    its own and three otherwise. A refusal with nothing left to drop, a third, or any other failure propagates.
+    Each drop is logged by key and rule ids, never text.
     """
-    path = {"id": desk_id}
-    try:
-        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-        return []
-    except KernelFailed as refused:
-        if refused.status != 422 or refused.code != "invalid" or not refused.detail:
-            raise
-        dropped = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
-        if refused.detail in ({"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]}) or not dropped:
-            held = [claim.key for claim in charter if claim.key.startswith("policy:")]
-            logger.warning("setup dropped refused charter claims: %s", held)
-        else:
+    held: list[str] = []
+    policy_refusals = 0
+    while True:
+        try:
+            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
+                                    path={"id": desk_id})
+            return held
+        except KernelFailed as refused:
+            if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+                raise
+            named = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
+            if refused.detail.keys() == {"contact"} and named:
+                dropped = named
+            elif policy_refusals < POLICY_RETRIES:
+                targeted = policy_refusals == 0 and named and refused.detail not in CHARTER_CAPS
+                dropped = named if targeted else {claim.key: refused.detail.get(claim.key, []) for claim in charter
+                                                  if claim.key.startswith("policy:") or claim.key in named}
+                policy_refusals += 1
+            else:
+                raise
+            if not dropped:
+                raise
             logger.warning("setup dropped refused charter claims: %s", dropped)
-            held = list(dropped)
-        charter = [claim for claim in charter if claim.key not in held]
-    try:
-        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-        return held
-    except KernelFailed as refused:
-        if refused.status != 422 or refused.code != "invalid" or not refused.detail:
-            raise
-        dropped = {claim.key: refused.detail.get(claim.key, []) for claim in charter
-                   if claim.key.startswith("policy:") or claim.key in refused.detail}
-        if not dropped:
-            raise
-        logger.warning("setup dropped refused charter claims: %s", dropped)
-        held.extend(dropped)
-        charter = [claim for claim in charter if claim.key not in dropped]
-    await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
-    return held
+            held.extend(dropped)
+            charter = [claim for claim in charter if claim.key not in dropped]
 
 
 async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> list[str]:
