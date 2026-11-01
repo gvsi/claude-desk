@@ -129,6 +129,8 @@ make setup
 make evals-tier1
 ```
 
+A real-kernel tier 1 run, like the backend's tests, starts each case on an empty database: it empties every table in the `kernel`, `app`, `mockpay` and `procrastinate` schemas of the database `.env` names, and so does the evals unit test that checks this. Point `.env` at a database of its own, not one a running `make dev` stack or another run is using.
+
 Tier 2 needs `ANTHROPIC_API_KEY` in `.env` on either provider, because the kernel's reviewer and soft-promise checks always use it. For `MODEL_PROVIDER=bedrock`, also set `BEDROCK_BEARER_TOKEN`, the Bedrock-only credential. Then run every scenario once (at most $40), gate the pass, measure latency for it (20 turns each of a plain question, a quote and a booking, at most $3) and write its report:
 
 ```sh

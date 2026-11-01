@@ -1,7 +1,10 @@
 import { useId } from 'react';
 
+import { BUSINESS_WORDS } from '../../../owner/connectors/businessWords.ts';
+import type { IconName } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
+import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { ConnectorSummary } from '../ConnectorName/ConnectorSummary.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
@@ -24,11 +27,20 @@ export type SetupToolsRow =
     };
 
 export interface SetupToolsListProps {
+  /** The Desk's own jobs, in the order the API lists them. */
+  jobs?: readonly SetupJobRow[];
   /** The connectors that are part of Claude Desk, Verification among them, under "Built in". */
   builtIn: readonly SetupToolsRow[];
   /** The apps that can be connected from outside, under "Connect your own". */
   external: readonly SetupToolsRow[];
 }
+
+export type SetupJobRow = {
+  key: string;
+  title: string;
+  line: string;
+  glyph: IconName;
+} & ({ state: 'on' } | { state: 'needs_review'; onReview: () => void });
 
 /** What a row that is on says, beside its handled dot. */
 const STATUS_WORDS = { on: 'On', always_on: 'Always on' } as const;
@@ -39,12 +51,45 @@ const STATUS_WORDS = { on: 'On', always_on: 'Always on' } as const;
  * "Always on") or its button ("Add" for a built-in connector, "Connect" for an app, after how many
  * tools it brings). Rows are not links; nothing turns on from here.
  */
-export function SetupToolsList({ builtIn, external }: SetupToolsListProps) {
+export function SetupToolsList({ jobs = [], builtIn, external }: SetupToolsListProps) {
   return (
     <div className="cd-setup-tools">
+      <Jobs rows={jobs} />
       <Group title="Built in" verb="Add" rows={builtIn} />
       <Group title="Connect your own" verb="Connect" rows={external} />
     </div>
+  );
+}
+
+function Jobs({ rows }: { rows: readonly SetupJobRow[] }) {
+  const headingId = useId();
+  if (rows.length === 0) return null;
+  return (
+    <Card as="section" label={BUSINESS_WORDS.jobs} padding={16}>
+      <h2 id={headingId} className="cd-setup-tools__heading cd-type-control">{BUSINESS_WORDS.jobs}</h2>
+      <ul role="list" className="cd-setup-tools__rows" aria-labelledby={headingId}>
+        {rows.map((row) => (
+          <li key={row.key} className="cd-setup-tools__row cd-setup-tools__row--job">
+            <ConnectorIcon icon="quotes" glyph={row.glyph} size="section" />
+            <span className="cd-connector-summary">
+              <span className="cd-connector-summary__name cd-type-body">{row.title}</span>
+              <span className="cd-connector-summary__description cd-type-meta">{row.line}</span>
+            </span>
+            {row.state === 'on' ? (
+              <span className="cd-setup-tools__end cd-type-meta"><StatusDot tone="handled" />{STATUS_WORDS.on}</span>
+            ) : row.state === 'needs_review' ? (
+              <span className="cd-setup-tools__end cd-setup-tools__end--action cd-type-meta">
+                <span className="cd-setup-tools__job-status"><StatusDot tone="held" />{BUSINESS_WORDS.needsReview}</span>
+                <Button variant="secondary" onClick={row.onReview}>
+                  <span aria-hidden="true">{BUSINESS_WORDS.review}</span>
+                  <span className="cd-sr-only">{`${BUSINESS_WORDS.review} ${row.title}`}</span>
+                </Button>
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
