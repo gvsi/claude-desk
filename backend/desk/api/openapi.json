@@ -2625,15 +2625,27 @@
         "summary": "Start Setup",
         "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nEach start carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy answers the interview the first made, as it stands now, and makes nothing: no model call, no Desk, no\ncount on the limits. A repeat with another body is 409 `conflict`, and one sent while the first is still starting\nanswers 409 `in_progress` at once, to be sent again after `retry_after`. A first that stopped before the kernel\nwas asked for the Desk (its process did, say) frees the key once it is older than the longest a start can take. A\nstart is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent\nmeanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's\noverlap a repeat routed to the other task can be counted twice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nA start that fails before the kernel is asked for the Desk (refused by the limits, or Claude couldn't answer)\nfrees its key, so the same request can be sent again. Once the Desk was asked for, the key keeps the outcome\nwhatever the kernel answered, a refusal too, and a repeat of a start that failed answers 409 `key_spent`.",
         "operationId": "owner_start_setup",
+        "parameters": [
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SetupStartIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -2647,64 +2659,64 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "404": {
-            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Not Found"
           },
           "409": {
-            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Conflict"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Too Many Requests"
           },
           "503": {
-            "description": "Service Unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -2723,6 +2735,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -2804,6 +2826,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -2915,6 +2947,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -5850,6 +5892,79 @@
       }
     },
     "/api/owner/desks/{desk_id}/knowledge": {
+      "get": {
+        "summary": "Knowledge",
+        "description": "The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.\nContent the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text.",
+        "operationId": "owner_knowledge",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeRow"
+                  },
+                  "title": "Response Owner Knowledge"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
       "post": {
         "summary": "Add Knowledge",
         "description": "Tell Claude something about the business, kept by the kernel under its `item_id` (posting it again replaces\nit): owner-only, or public once the owner marks it so (`Label(readers=[\"public\"])`). It is information for Claude,\nnever a rule; the kernel refuses other readers or a text over 100 KiB (422), and keeps an item that quotes a\nprivate document owner-only.",
@@ -7781,6 +7896,28 @@
         "title": "CheckedDraft",
         "description": "A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses."
       },
+      "Choice": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Text"
+          },
+          "recommended": {
+            "type": "boolean",
+            "title": "Recommended"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "recommended"
+        ],
+        "title": "Choice"
+      },
       "Claim": {
         "properties": {
           "key": {
@@ -7875,6 +8012,46 @@
         ],
         "title": "ConfirmRulesIn",
         "description": "`POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms."
+      },
+      "ConnectorProposal": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "enum": [
+              "google_calendar",
+              "gmail",
+              "google_drive",
+              "quickbooks",
+              "stripe",
+              "square",
+              "calendly"
+            ],
+            "title": "App"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
+          },
+          "connectable": {
+            "type": "boolean",
+            "title": "Connectable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app",
+          "label",
+          "why",
+          "connectable"
+        ],
+        "title": "ConnectorProposal"
       },
       "ConversationSummary": {
         "properties": {
@@ -9181,6 +9358,135 @@
         ],
         "title": "InboxNotice"
       },
+      "IntakeConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "intake",
+            "title": "Block"
+          },
+          "questions": {
+            "items": {
+              "type": "string",
+              "maxLength": 120,
+              "minLength": 1,
+              "description": "1 to 120 characters."
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Questions",
+            "description": "1 to 5 intake questions, each 1 to 120 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "questions"
+        ],
+        "title": "IntakeConfig"
+      },
+      "JobProposal": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "enum": [
+              "answer",
+              "intake",
+              "schedule",
+              "price",
+              "documents",
+              "status",
+              "payment",
+              "urgent"
+            ],
+            "title": "Job"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Title",
+            "description": "Title, at most 60 characters."
+          },
+          "who": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Who",
+            "description": "Who this is for, at most 60 characters; empty if unclear.",
+            "default": ""
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
+          },
+          "how": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "How",
+            "description": "How the Desk helps, at most 300 characters."
+          },
+          "autonomy": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ask"
+            ],
+            "title": "Autonomy"
+          },
+          "can_do_today": {
+            "type": "boolean",
+            "title": "Can Do Today"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/IntakeConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TypedBookingConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PurposePaymentConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UrgentConfig"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "block",
+                  "mapping": {
+                    "intake": "#/components/schemas/IntakeConfig",
+                    "purpose_payment": "#/components/schemas/PurposePaymentConfig",
+                    "typed_booking": "#/components/schemas/TypedBookingConfig",
+                    "urgent": "#/components/schemas/UrgentConfig"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job",
+          "title",
+          "why",
+          "how",
+          "autonomy",
+          "can_do_today",
+          "config"
+        ],
+        "title": "JobProposal"
+      },
       "KnowledgeIn": {
         "properties": {
           "item": {
@@ -9232,6 +9538,76 @@
           "label"
         ],
         "title": "KnowledgeItem"
+      },
+      "KnowledgeRow": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "readers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Readers"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "website",
+              "upload",
+              "setup",
+              "memory_import"
+            ],
+            "title": "Source"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "text",
+          "readers",
+          "source",
+          "created_at"
+        ],
+        "title": "KnowledgeRow",
+        "description": "An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view\nmasks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows\nwithout a timestamp. Every field is always sent."
       },
       "Label": {
         "properties": {
@@ -10776,6 +11152,75 @@
         ],
         "title": "ProofReport"
       },
+      "ProposalCard": {
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "pattern": "^p-[0-9a-f]{12}$",
+            "title": "Proposal Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "job",
+              "connector"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "accepted",
+              "declined",
+              "changed"
+            ],
+            "title": "State"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^p-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connector": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "proposal_id",
+          "kind",
+          "state",
+          "job",
+          "connector"
+        ],
+        "title": "ProposalCard"
+      },
       "ProvingPending": {
         "properties": {
           "retry": {
@@ -10872,6 +11317,43 @@
           "agent_card"
         ],
         "title": "PublicDesk"
+      },
+      "PurposePaymentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "purpose_payment",
+            "title": "Block"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Purpose",
+            "description": "Payment purpose, 1 to 60 characters."
+          },
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "purpose",
+          "amount_cents"
+        ],
+        "title": "PurposePaymentConfig"
       },
       "RecordedHistory": {
         "properties": {
@@ -11653,17 +12135,35 @@
       "SetupAnswerIn": {
         "properties": {
           "question": {
-            "type": "string",
-            "enum": [
-              "what_you_do",
-              "hours_and_area",
-              "quote_limit",
-              "discounts",
-              "documents_and_payments",
-              "money_limit",
-              "contact_and_after_hours"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "what_you_do",
+                  "hours_and_area",
+                  "quote_limit",
+                  "discounts",
+                  "documents_and_payments",
+                  "money_limit",
+                  "contact_and_after_hours"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Question"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card"
           },
           "text": {
             "type": "string",
@@ -11675,11 +12175,10 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "question",
           "text"
         ],
         "title": "SetupAnswerIn",
-        "description": "`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers\n(`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."
+        "description": "`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.\nNaming the ask prevents a repeated answer from answering the next one."
       },
       "SetupConsentIn": {
         "properties": {
@@ -11710,6 +12209,24 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/Choice"
+            },
+            "type": "array",
+            "title": "Choices",
+            "default": []
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11718,7 +12235,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`)."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
       },
       "SetupStartIn": {
         "properties": {
@@ -11821,6 +12338,17 @@
               }
             ],
             "title": "Question"
+          },
+          "pending_card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Card"
           },
           "busy": {
             "type": "boolean",
@@ -12700,6 +13228,60 @@
         ],
         "title": "Triage",
         "description": "A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a\ncategory for the Safety page's filters. AI-written, for the owner alone."
+      },
+      "TypedBookingConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "typed_booking",
+            "title": "Block"
+          },
+          "appointment_type": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Appointment Type",
+            "description": "Appointment name, 1 to 60 characters."
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 15.0,
+            "title": "Minutes",
+            "description": "Appointment length, 15 to 60 minutes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "appointment_type",
+          "minutes"
+        ],
+        "title": "TypedBookingConfig"
+      },
+      "UrgentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "urgent",
+            "title": "Block"
+          },
+          "urgent_when": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Urgent When",
+            "description": "When a request is urgent, 1 to 300 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "urgent_when"
+        ],
+        "title": "UrgentConfig"
       },
       "VerifyCheckIn": {
         "properties": {

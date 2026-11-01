@@ -23,6 +23,9 @@ from desk.api.prompts import (
     DraftedSituations,
     RuleChat,
     SetupStart,
+    SetupNextStep,
+    SetupCardAnswer,
+    SetupUnderstanding,
     Translation,
     Triage,
 )
@@ -32,7 +35,7 @@ REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
-    "setup": (SetupStart, *SETUP_TURNS.values()),       # an answer turn answers in its question's own model
+    "setup": (SetupStart, SetupUnderstanding, SetupNextStep, SetupCardAnswer, *SETUP_TURNS.values()),
     "card_draft": (DraftedRules,),
     "situations": (DraftedSituations,),
     "rules_chat": (RuleChat,),
@@ -120,6 +123,30 @@ def test_the_count_follows_every_ref_where_it_is_used():
 
 def test_every_structured_route_is_counted():
     assert set(OUTPUTS) == ROUTES - {"conversation"}
+
+
+def test_typed_card_revisions_use_one_required_draft():
+    schema = strict_schema(SetupCardAnswer)
+    assert "revised" in schema["required"]
+    assert SetupCardAnswer.model_json_schema()["properties"]["revised"]["maxItems"] == 1
+    assert schema["properties"]["revised"]["items"]["$ref"] == "#/$defs/JobDraft"
+    assert schema["properties"]["decision"]["enum"] == ["accept", "decline", "change", "none"]
+
+
+@pytest.mark.parametrize("output", [SetupNextStep, SetupCardAnswer, *[model for key, model in SETUP_TURNS.items()
+                                                  if key in {"what_you_do", "hours_and_area", "contact_and_after_hours"}]])
+def test_setup_planning_uses_one_required_shape(output):
+    from desk.api.prompts import planning_fields
+
+    schema = strict_schema(output)
+    fields = planning_fields()
+    assert set(fields) <= set(schema["required"])
+    assert "next_topic" not in schema["properties"]
+    assert len(schema["properties"]["next"]["anyOf"]) == 4
+    variants = [schema["$defs"][ref["$ref"].split("/")[-1]] for ref in schema["properties"]["next"]["anyOf"]]
+    assert [variant["properties"]["kind"]["const"] for variant in variants] == ["topic", "job", "connector", "done"]
+    assert all(variant["additionalProperties"] is False for variant in variants)
+    assert "_draft_errors" not in schema["properties"]
 
 
 @pytest.mark.parametrize(("route", "output"), SENT, ids=[f"{route}-{output.__name__}" for route, output in SENT])
