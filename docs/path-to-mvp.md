@@ -21,11 +21,11 @@ A waived violation stays in the report, counted apart and with who signed the wa
 
 The [service configuration](../infra/stacks/compute_express.py) runs exactly one task, a single copy of the API and kernel containers, each with [its own secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic at the same origin; the fallback uses an internal load balancer. This describes the configuration in the repository, not an audit of the live deployment.
 
-For an MVP, run the database across availability zones, rehearse restores and failover, and move rate and spend limits into shared storage before adding tasks, since today each task keeps its own. Add a web application firewall, and alerts for spend, waits for database connections and the ledger, holds, payment reconciliation and failed replies. Set an availability target and name who is on call. The [deploy guide](deploy.md) covers releases and infrastructure costs.
+For an MVP, run the database across availability zones, rehearse restores and failover, and move rate limits into shared storage before adding tasks, since today each task keeps its own. Add a web application firewall, and alerts for spend, waits for database connections and the ledger, holds, payment reconciliation and failed replies. Set an availability target and name who is on call. The [deploy guide](deploy.md) covers releases and infrastructure costs.
 
 ## Model integration
 
-Opus handles conversation, Sonnet reviews actions and Haiku checks replies. [Prompt caching](../backend/desk/api/model.py) covers the unchanging start of each prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
+Opus handles conversation, Sonnet reviews actions and Haiku checks replies. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
 
 | Metric | Value | Source |
 |---|---|---|
