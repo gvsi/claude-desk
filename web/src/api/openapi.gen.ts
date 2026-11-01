@@ -876,6 +876,7 @@ export interface SetupPublicLineIn {
   text: string;
 }
 export interface SetupPublicLines {
+  revision: string;
   lines: SetupPublicLine[];
   hours: SetupPublicHours | null;
   prices: SetupPublicPrices | null;
@@ -889,7 +890,13 @@ export interface SetupPublicPriceItem {
   title: string;
   unit_cents: number;
 }
-export interface SetupPublicLinesConfirmIn {}
+export interface SetupPublicLinesConfirmIn {
+  /**
+   * @minItems 1
+   */
+  keys: [string, ...string[]];
+  revision: string;
+}
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name

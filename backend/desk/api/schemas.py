@@ -705,6 +705,7 @@ class SetupPublicPrices(BaseModel):
 
 
 class SetupPublicLines(BaseModel):
+    revision: str
     lines: list[SetupPublicLine]
     hours: SetupPublicHours | None
     prices: SetupPublicPrices | None
@@ -725,6 +726,9 @@ class SetupPublicLineError(BaseModel):
 
 class SetupPublicLinesConfirmIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    keys: Annotated[list[str], Field(min_length=1)]
+    revision: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class SetupState(BaseModel):

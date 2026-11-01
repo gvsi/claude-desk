@@ -103,6 +103,7 @@ running nothing. The confirm activates the draft with Answering still off, and g
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import logging
@@ -2686,7 +2687,7 @@ def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> Publi
 
 
 def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
-    return SetupPublicLines(lines=[
+    public = SetupPublicLines(revision="", lines=[
         SetupPublicLine(key=key, text=value.strip(),
                         source="suggested" if field in answers.suggested_fields else "owner",
                         editable=field != "how_we_help")
@@ -2696,6 +2697,10 @@ def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
        prices=SetupPublicPrices(source="suggested" if "price_items" in answers.suggested_fields else "owner",
                                 items=[item.model_dump() for item in price_items(answers.price_items)])
        if answers.price_items else None)
+    canonical = json.dumps(public.model_dump(mode="json", exclude={"revision"}), sort_keys=True,
+                           separators=(",", ":"))
+    public.revision = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return public
 
 
 async def _public_lines_interview(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Interview:
@@ -2884,20 +2889,22 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
 
 async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
-                                now: datetime) -> SetupPublicLines:
+                                now: datetime, *, keys: list[str], revision: str) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
-        republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))
-                              if field in interview.answers.suggested_fields)
         public = _public_lines(interview.answers)
         listed = {line.key for line in public.lines}
-        confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in listed}
-        if public.hours is not None:
-            confirmed.add("hours")
-        if public.prices is not None:
-            confirmed.add("price_items")
+        listed.update(key for key in ("hours", "prices") if getattr(public, key) is not None)
+        if not keys or not revision.strip() or not set(keys) <= listed:
+            raise ApiProblem(422, "invalid")
+        if revision != public.revision:
+            raise ApiProblem(409, "conflict")
+        confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in keys}
+        confirmed.update(field for key, field in (("hours", "hours"), ("prices", "price_items")) if key in keys)
+        republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))
+                              if field in confirmed and field in interview.answers.suggested_fields)
         interview.answers = interview.answers.model_copy(update={
             "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
         })

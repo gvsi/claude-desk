@@ -47,7 +47,7 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
     before = await stored(engine, state["interview_id"])
     reply = await owner.browser.get(path)
     assert reply.status_code == 200, reply.text
-    assert reply.json() == {"lines": [
+    assert reply.json() == {"revision": setup._public_lines(SetupAnswers(**before["answers"])).revision, "lines": [
         {"key": "policy:about", "text": "Local plumbing help.", "source": "owner", "editable": True},
         {"key": "contact", "text": "hello@example.test", "source": "suggested", "editable": True},
         {"key": "policy:pricing", "text": "Written quotes before work.", "source": "suggested", "editable": True},
@@ -67,6 +67,22 @@ async def patch_answers(engine, state, **patch):
 
 HOURS = [{"days": ["mon", "tue"], "start": "09:00:00", "end": "17:00:00"}]
 PRICES = [{"title": "Visit", "unit_cents": 12500}]
+
+
+async def test_revision_changes_after_edit_confirm_and_removal(lines_setup):
+    owner, _, path = lines_setup
+    initial = (await owner.browser.get(path)).json()
+    assert isinstance(initial["revision"], str) and initial["revision"]
+    assert (await owner.browser.get(path)).json()["revision"] == initial["revision"]
+    edited = await owner.browser.put(path, json={"key": "policy:about", "text": "Plumbing repairs."})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["revision"] != initial["revision"]
+    confirmed = await owner.browser.post(f"{path}/confirm", json={
+        "keys": ["policy:pricing"], "revision": edited.json()["revision"]})
+    assert confirmed.status_code == 200, confirmed.text
+    removed = await owner.browser.delete(f"{path}/policy:intake")
+    assert removed.status_code == 200, removed.text
+    assert len({result["revision"] for result in (initial, edited.json(), confirmed.json(), removed.json())}) == 4
 
 
 @pytest.mark.parametrize("suggested", [True, False])
@@ -113,11 +129,88 @@ async def test_other_line_edit_holds_all_unconfirmed_suggestions(lines_setup, en
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == suggested
 
 
+async def test_confirm_only_selected_text_leaves_hours_and_prices_held(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    shown = (await owner.browser.get(path)).json()
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={
+        "keys": ["policy:pricing"], "revision": shown["revision"]})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["revision"] != shown["revision"]
+    assert [part for part, _ in calls] == ["charter"]
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == [
+        "intake", "hours", "price_items", "public_contact"]
+    desk = fake.desks[state["desk_id"]]
+    assert not desk.hours and not desk.prices and not desk.slots
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+    assert reply.json()["hours"]["source"] == reply.json()["prices"]["source"] == "suggested"
+
+
+async def test_confirm_stale_revision_conflicts_without_writing(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    shown = (await owner.browser.get(path)).json()
+    edited = await owner.browser.put(path, json={"key": "policy:about", "text": "Plumbing repairs."})
+    assert edited.status_code == 200, edited.text
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={
+        "keys": ["policy:pricing"], "revision": shown["revision"]})
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+@pytest.mark.parametrize("keys", [["unknown"], ["hours"], ["prices"], ["policy:intake"], ["contact"]])
+async def test_confirm_unknown_or_unlisted_key_is_invalid(lines_setup, engine, monkeypatch, keys):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, intake="", public_contact="")
+    shown = (await owner.browser.get(path)).json()
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={"keys": keys, "revision": shown["revision"]})
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "invalid"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+@pytest.mark.parametrize("body", [None, {}, {"keys": ["contact"]}, {"revision": "current"},
+    {"keys": [], "revision": "current"}, {"keys": ["contact"], "revision": ""},
+    {"keys": ["contact"], "revision": "   "}, {"keys": None, "revision": "current"},
+    {"keys": [1], "revision": "current"}, {"keys": ["contact"], "revision": 1}])
+async def test_confirm_requires_nonempty_keys_and_revision(lines_setup, engine, monkeypatch, body):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", **({"json": body} if body is not None else {}))
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "invalid"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+async def test_confirm_only_hours_and_prices_publishes_them(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    calls = received_parts(monkeypatch)
+    reply = await confirm_shown(owner.browser, path, ["hours", "prices"])
+    assert reply.status_code == 200, reply.text
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"]
+    assert reply.json()["hours"]["source"] == reply.json()["prices"]["source"] == "owner"
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == [
+        "pricing", "intake", "public_contact"]
+    desk = fake.desks[state["desk_id"]]
+    assert desk.hours and desk.prices and desk.slots
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+
+
 async def test_confirm_publishes_suggested_contact_hours_calendar_and_prices(lines_setup, engine, fake, monkeypatch):
     owner, state, path = lines_setup
     await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 200, reply.text
     assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"]
     parts = dict(calls)
@@ -133,7 +226,7 @@ async def test_confirm_publishes_suggested_contact_hours_calendar_and_prices(lin
     assert all(line["source"] == "owner" for line in reply.json()["lines"])
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == []
     calls.clear()
-    again = await owner.browser.post(f"{path}/confirm", json={})
+    again = await confirm_shown(owner.browser, path)
     assert again.status_code == 200, again.text
     assert [part for part, _ in calls] == ["charter"]
 
@@ -145,21 +238,18 @@ async def test_confirm_publishes_only_changed_fact_parts(lines_setup, engine, mo
     owner, state, path = lines_setup
     await patch_answers(engine, state, hours=HOURS, price_items=PRICES, suggested_fields=suggested)
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 200, reply.text
     assert [part for part, _ in calls] == parts
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == []
 
 
-async def test_confirm_republishes_empty_suggested_parts(lines_setup, engine, monkeypatch):
+async def test_confirm_leaves_unlisted_empty_suggested_parts_held(lines_setup, engine, monkeypatch):
     owner, state, path = lines_setup
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 200, reply.text
-    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"]
-    assert dict(calls)["hours"] == {"hours": []}
-    assert dict(calls)["calendar"] == {"calendar_slots": []}
-    assert dict(calls)["prices"] == {"price_items": []}
+    assert [part for part, _ in calls] == ["charter"]
     assert reply.json()["hours"] is reply.json()["prices"] is None
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == ["hours", "price_items"]
 
@@ -200,7 +290,7 @@ async def test_delete_republishes_after_failed_confirm_repair(lines_setup, engin
         return result
 
     monkeypatch.setattr(CredentialView, "call", lose_and_fail_repair)
-    failed = await owner.browser.post(f"{path}/confirm", json={})
+    failed = await confirm_shown(owner.browser, path)
     assert failed.status_code == 503, failed.text
     assert await stored(engine, state["interview_id"]) == before
     desk = fake.desks[state["desk_id"]]
@@ -230,7 +320,7 @@ async def test_delete_one_suggested_price_preserves_other_suggestions(lines_setu
     calls = received_parts(monkeypatch)
     reply = await owner.browser.delete(f"{path}/prices/repair")
     assert reply.status_code == 200, reply.text
-    assert reply.json() == {**before, "prices": {"source": "suggested", "items": [
+    assert reply.json() == {**before, "revision": reply.json()["revision"], "prices": {"source": "suggested", "items": [
         {"item_id": "visit", **prices[0]}, {"item_id": "inspection", **prices[2]}]}}
     saved = await stored(engine, state["interview_id"])
     assert saved["answers"]["price_items"] == [prices[0], prices[2]]
@@ -249,7 +339,7 @@ async def test_delete_last_suggested_price_clears_list_and_provenance(lines_setu
     calls = received_parts(monkeypatch)
     reply = await owner.browser.delete(f"{path}/prices/visit")
     assert reply.status_code == 200, reply.text
-    assert reply.json() == {**before, "prices": None}
+    assert reply.json() == {**before, "revision": reply.json()["revision"], "prices": None}
     answers = (await stored(engine, state["interview_id"]))["answers"]
     assert answers["price_items"] == []
     assert answers["suggested_fields"] == ["pricing", "intake", "hours", "public_contact"]
@@ -363,7 +453,7 @@ async def test_calendar_conflict_repairs_earlier_parts_without_saving(lines_setu
         return await original(self, route, request, **kwargs)
 
     monkeypatch.setattr(KernelHttp, "_send", conflict_once)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 409, reply.text
     assert reply.json() == {"error": "kernel", "code": "conflict"}
     assert await stored(engine, state["interview_id"]) == before
@@ -399,7 +489,7 @@ async def test_part_refusal_names_item_and_repairs_only_sent_parts(lines_setup, 
         return await original(self, route, request, **kwargs)
 
     monkeypatch.setattr(KernelHttp, "_send", refuse_once)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 422, reply.text
     assert reply.json() == {"error": "line_refused", "key": key}
     assert await stored(engine, state["interview_id"]) == before
@@ -489,7 +579,7 @@ async def test_confirm_save_conflict_repairs_same_parts_from_current_answers(lin
         return reply
 
     monkeypatch.setattr(KernelHttp, "_send", competing_save)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 409, reply.text
     assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"] * 2
     restored = dict(calls[-4:])
@@ -526,7 +616,7 @@ async def test_lost_part_response_repairs_same_parts_under_guard(lines_setup, en
         return result
 
     monkeypatch.setattr(CredentialView, "call", lose_response)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 503, reply.text
     assert await stored(engine, state["interview_id"]) == before
     sent = ["charter", "hours", "calendar", "prices"]
@@ -566,7 +656,7 @@ async def test_lost_prices_response_allows_time_for_every_repair_part(lines_setu
 
     monkeypatch.setattr(CredentialView, "call", slow_repair)
     monkeypatch.setattr(setup, "PUBLIC_PARTS_REPAIR_TIMEOUT_S", 1)
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 503, reply.text
     assert await stored(engine, state["interview_id"]) == before
     assert fake.desks[state["desk_id"]].prices == {}
@@ -951,7 +1041,7 @@ async def test_confirm_owns_only_listed_lines_and_publishes(lines_setup, engine,
                            {"patch": json.dumps({"intake": " ", "suggested_fields": [
                                "summary", "pricing", "intake", "how_we_help", "hours", "price_items", "public_contact"]}),
                             "id": state["interview_id"]})
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 200, reply.text
     assert all(line["source"] == "owner" for line in reply.json()["lines"])
     assert "policy:intake" not in {line["key"] for line in reply.json()["lines"]}
@@ -963,6 +1053,19 @@ async def test_confirm_owns_only_listed_lines_and_publishes(lines_setup, engine,
         "policy:service_area", "policy:how_we_help"}
 
 
+async def confirm_shown(client, path, keys=None):
+    shown = await client.get(path)
+    if shown.status_code == 200:
+        public = shown.json()
+        listed = [line["key"] for line in public["lines"]]
+        listed.extend(key for key in ("hours", "prices") if public[key] is not None)
+        body = {"keys": listed if keys is None else keys, "revision": public["revision"]}
+    else:
+        # Admission tests still send a valid body when the projection cannot be read.
+        body = {"keys": ["policy:pricing"], "revision": "unavailable"}
+    return await client.post(f"{path}/confirm", json=body)
+
+
 async def request_lines(client, path, method):
     if method == "get":
         return await client.get(path)
@@ -972,7 +1075,7 @@ async def request_lines(client, path, method):
         return await client.delete(f"{path}/prices/visit")
     if method == "delete":
         return await client.delete(f"{path}/policy:pricing")
-    return await client.post(f"{path}/confirm", json={})
+    return await confirm_shown(client, path)
 
 
 @pytest.mark.parametrize("step", ["questions", "tools", "rules", "situations", "safety_check", "preview", "live"])
@@ -1002,7 +1105,7 @@ async def test_confirm_refusal_names_the_refused_line(lines_setup, engine, fake,
     before = await stored(engine, state["interview_id"])
     published = charter(fake, state["desk_id"])
     refuse_charter(monkeypatch, {"policy:intake": ["lex.en.promise"]})
-    reply = await owner.browser.post(f"{path}/confirm", json={})
+    reply = await confirm_shown(owner.browser, path)
     assert reply.status_code == 422, reply.text
     assert reply.json() == {"error": "line_refused", "key": "policy:intake", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before

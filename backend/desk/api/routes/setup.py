@@ -256,12 +256,13 @@ async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublic
              responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPublicLinesConfirmIn, request: Request,
                                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
-    """Confirm all listed public lines, hours and prices without changing the setup step; publish before saving.
+    """Confirm only the listed keys at the displayed revision; publish before saving without changing the step.
     Allowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming
     the refused key and reason codes when available; a charter cap names no key. A failed save restores the stored
     parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
     state = runtime(request).started()
-    return await _public_lines_answer(setup.confirm_public_lines(ctx, state.database(), interview_id, state.clock()))
+    return await _public_lines_answer(setup.confirm_public_lines(ctx, state.database(), interview_id, state.clock(),
+                                                               keys=body.keys, revision=body.revision))
 
 
 @router.delete("/{id}/public_lines/{key}", response_model=SetupPublicLines,

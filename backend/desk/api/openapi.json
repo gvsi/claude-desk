@@ -3653,7 +3653,7 @@
     "/api/owner/setup/{id}/public_lines/confirm": {
       "post": {
         "summary": "Setup Confirm Public Lines",
-        "description": "Confirm all listed public lines, hours and prices without changing the setup step; publish before saving.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming\nthe refused key and reason codes when available; a charter cap names no key. A failed save restores the stored\nparts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
+        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming\nthe refused key and reason codes when available; a charter cap names no key. A failed save restores the stored\nparts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
         "operationId": "owner_setup_confirm_public_lines",
         "parameters": [
           {
@@ -13176,6 +13176,10 @@
       },
       "SetupPublicLines": {
         "properties": {
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SetupPublicLine"
@@ -13206,6 +13210,7 @@
         },
         "type": "object",
         "required": [
+          "revision",
           "lines",
           "hours",
           "prices"
@@ -13213,9 +13218,27 @@
         "title": "SetupPublicLines"
       },
       "SetupPublicLinesConfirmIn": {
-        "properties": {},
+        "properties": {
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Keys"
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Revision"
+          }
+        },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "keys",
+          "revision"
+        ],
         "title": "SetupPublicLinesConfirmIn"
       },
       "SetupPublicPriceItem": {
