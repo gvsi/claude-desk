@@ -136,7 +136,12 @@ def candidate_model(candidate: Candidate) -> str:
     return SONNET_MODEL if candidate == "sonnet" else decisions.SOFT_PROMISE_MODEL
 
 
+SONNET_PER_CALL_USD = 0.0026     # 1.5x the measured mean of the first Sonnet run (220 checks, $0.00171 each)
+
+
 def per_call_usd(candidate: Candidate) -> float:
+    if candidate == "sonnet":
+        return SONNET_PER_CALL_USD
     # Keep the existing Haiku token allowance, scaled by the candidate's list prices.
     base = price_of(decisions.SOFT_PROMISE_MODEL, "anthropic")
     price = price_of(candidate_model(candidate), "anthropic")

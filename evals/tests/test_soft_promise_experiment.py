@@ -57,7 +57,7 @@ def test_per_arm_estimate_refuses_the_sum_before_client_construction(deps, tmp_p
     from evals.calibration import soft_promise_experiment as exp
     write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
     baseline = commit(deps.root, "freeze the baseline")
-    monkeypatch.setattr(exp, "TOTAL_USD", 0.01)
+    monkeypatch.setattr(exp, "TOTAL_USD", 0.005)
     config = exp.Experiment(baseline_sha=baseline, samples="old:1,new:1,sonnet:1", max_usd=1,
                             arms="old,new,sonnet", output=tmp_path / "experiment.json")
     with pytest.raises(exp.sp.Refused, match="estimate.*remaining"):
@@ -66,8 +66,8 @@ def test_per_arm_estimate_refuses_the_sum_before_client_construction(deps, tmp_p
     output = capsys.readouterr().out
     assert "old: 1 samples/case; 2 calls; estimate $0.0010" in output
     assert "new: 1 samples/case; 2 calls; estimate $0.0010" in output
-    assert "sonnet: 1 samples/case; 2 calls; estimate $0.0200" in output
-    assert "estimate $0.0220" in output
+    assert "sonnet: 1 samples/case; 2 calls; estimate $0.0052" in output
+    assert "estimate $0.0072" in output
 
 
 def test_report_aggregates_call_latency_cost_and_case_counts(deps, monkeypatch):
