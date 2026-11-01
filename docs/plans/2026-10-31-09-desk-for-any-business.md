@@ -251,7 +251,13 @@ The seam setup needs:
 
 ### C2: the demo agent's tasks from the Desk (1.5 h, could)
 
-`DEMO_TASKS` drawn from the Desk's own tools and catalog instead of a water heater visit on every Desk.
+Instead of a water heater visit on every Desk, `DEMO_TASKS` holds a fixed line for each task in each `DemoTaskSet` (#572):
+- `rivera` for the copy's seeded Desk, its three lines unchanged;
+- `trade`, `office`, `landlord` and `other` for a Desk setup made, picked by code from its `app.setup_interviews.business_type` alone (`agents.demo_task_set`); a Desk with no known type reads `other`.
+
+`GET /api/public/desks/{slug}/agent_tasks` answers that key, and the agents page words its task chips from its own copy for it. The owner signed the lines and the chips on 2026-11-01. Two other designs were rejected:
+- (a) Lines built from the Desk's business tool titles or catalog names: that owner text would reach the agent's model, whose requests its launcher sees unchecked, widening that recorded exception.
+- (b) Hiding the agent's words for Desk-built tasks: it would undo the owner's decision to show them.
 
 ---
 
