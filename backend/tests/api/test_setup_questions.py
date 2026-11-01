@@ -1740,6 +1740,16 @@ def test_suggestion_provenance_checks_each_price_and_every_hours_window():
     assert filtered.hours == []
 
 
+async def test_homework_fetches_owner_context_once(app, browser, fake, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE, search_queries=["salon intake", "salon cancellations"])
+    before = len(fake.called("GET /context/{session_id}"))
+    await consent(owner, state["interview_id"], True, model)
+    assert len(fake.called("GET /context/{session_id}")) - before == 1
+    assert len(fake.called("POST /decide")) == 4
+    assert len(fake.called("POST /execute")) == 4
+
+
 async def test_homework_decides_every_read_before_any_execution(
     app, browser, fake, kernel_http, model, monkeypatch,
 ):
@@ -1814,7 +1824,8 @@ async def test_homework_budget_includes_context_and_decisions(
         nonlocal calls
         if request.url.path.startswith(blocked_route):
             calls += 1
-            if calls == 2:  # Memory has an allow; the website's context or decision uses the remaining budget.
+            if calls == (1 if blocked_route == "/context/" else 2):
+                # One shared context, or memory has an allow before the website's decision stalls.
                 try:
                     await asyncio.Event().wait()
                 except asyncio.CancelledError:
@@ -1832,7 +1843,7 @@ async def test_homework_budget_includes_context_and_decisions(
     model.add(after_cancellation)
     state = await consent(owner, state["interview_id"], True, model)
 
-    assert len(fake.called("POST /decide")) == 1
+    assert len(fake.called("POST /decide")) == (0 if blocked_route == "/context/" else 1)
     assert not fake.called("POST /execute")
     assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
         "Couldn't search your Claude memory", "Couldn't read rivera-plumbing.example",

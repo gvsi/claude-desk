@@ -300,6 +300,7 @@ from desk.kernel_api import (
     MemoryItem,
     PolicyConfirmRequest,
     PolicyProbeRequest,
+    SessionContext,
 )
 from desk.presets import PRESETS
 
@@ -847,12 +848,14 @@ async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *
     return await execute_setup_tool(owner, tool, decision, timeout_s=timeout_s)
 
 
-async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> Decision | Literal["not_given"] | None:
+async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *,
+                            context: SessionContext | None = None) -> Decision | Literal["not_given"] | None:
     """Obtain an allow without executing; distinguish a tool not given from a failed or refused read."""
     session_id, generation = owner.owner_session_id, owner.owner_generation
     try:
-        context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
-                                          query={"desk_id": desk_id})
+        if context is None:
+            context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
+                                              query={"desk_id": desk_id})
         if tool not in {profile.tool for profile in context.tools}:
             logger.info("the setup tool %s isn't given on this Desk", tool)
             return "not_given"
@@ -943,9 +946,13 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
     not_given: set[int] = set()
     try:
         async with asyncio.timeout(HOMEWORK_BUDGET_S):
+            context = await owner.kernel.call("GET /context/{session_id}?desk_id=",
+                                              path={"session_id": owner.owner_session_id}, query={"desk_id": desk_id})
+            given = {profile.tool for profile in context.tools}
+            not_given = {index for index, (tool, _, _, _) in enumerate(reads) if tool not in given}
             allowed = []
             for index, (tool, args, _, timeout_s) in enumerate(reads):
-                decision = await decide_setup_tool(owner, desk_id, tool, args)
+                decision = await decide_setup_tool(owner, desk_id, tool, args, context=context)
                 if decision == "not_given":
                     not_given.add(index)
                 elif decision is not None:
@@ -958,6 +965,8 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
                 await asyncio.gather(*tasks.values())
     except TimeoutError:
         pass
+    except (KernelFailed, KernelUnavailable):
+        logger.warning("the setup homework couldn't read the owner's context")
     finally:
         for task in tasks.values():
             if not task.done():
