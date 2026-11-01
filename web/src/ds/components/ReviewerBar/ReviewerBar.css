@@ -1,5 +1,8 @@
 /* ReviewerBar: a slim full-width line above the owner app, on the muted fill with a hairline
-   under it. 36 px tall on one line; on a phone the words wrap and the bar grows with them. */
+   under it. 36 px tall on one line; on a phone the words wrap and the bar grows with them. The
+   screen's controls and Start over sit together at the right, 16 px apart, never wrapping; with
+   controls of the screen's own, on a phone the words take the first line and the controls the
+   next, 4 px under them. */
 
 .cd-reviewer-bar {
   display: flex;
@@ -25,7 +28,26 @@
   color: var(--text-secondary);
 }
 
-.cd-reviewer-bar > .cd-button,
-.cd-reviewer-bar > .cd-skeleton {
+.cd-reviewer-bar__actions {
+  display: flex;
   flex: none;
+  align-items: center;
+  gap: var(--space-16);
+  white-space: nowrap;
+}
+
+.cd-reviewer-bar__actions > * {
+  flex: none;
+}
+
+@media (max-width: 639.98px) {
+  .cd-reviewer-bar--with-actions {
+    flex-wrap: wrap;
+    row-gap: var(--space-4);
+    padding-block: var(--space-2);
+  }
+
+  .cd-reviewer-bar--with-actions > .cd-reviewer-bar__text {
+    flex-basis: 100%;
+  }
 }

@@ -271,14 +271,14 @@ export const SETUP_COPY = {
   live: {
     previewTitle: 'Try it as a customer before anyone else can',
     /** The launch bar's two lines under the preview, the first after an info dot. */
-    previewAnsweringOff: 'Answering stays off until you go live.',
+    previewAnsweringOff: 'Claude takes messages only until you go live.',
     previewOnlyYou: 'Only you can see this preview.',
     goLive: 'Go live',
     /** After the business's name. */
     isLive: ' is live',
     yourDeskIsLive: 'Your Desk is live',
     liveSubtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
-    answeringNow: 'Answering now',
+    answeringNow: 'Acting for you now',
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',

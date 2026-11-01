@@ -11,6 +11,11 @@ import './DemoInboxSheet.css';
 export interface DemoInboxSheetProps extends Omit<DemoInboxPanelProps, 'action' | 'titleFocusable'> {
   /** Hears the sheet open (`true`) and close (`false`), whatever opened or closed it. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * A quiet button (`ghost`, its count 6 px after its words), as a control in the demo bar beside
+   * Start over takes; a secondary button by default.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -20,7 +25,7 @@ export interface DemoInboxSheetProps extends Omit<DemoInboxPanelProps, 'action' 
  * sheet opens itself on the first entry they may see. Focus moves in, stays in, Escape or Close
  * closes it, and focus goes back to whatever had it; the page behind is inert.
  */
-export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpenChange }: DemoInboxSheetProps) {
+export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpenChange, quiet = false }: DemoInboxSheetProps) {
   const copy = INBOX_COPY[language] ?? INBOX_COPY.en;
   // Closed, or open and how: from the button, or by itself on the first entry.
   const [open, setOpen] = useState<false | 'button' | 'itself'>(false);
@@ -60,8 +65,8 @@ export function DemoInboxSheet({ viewer, items, language, onRetry, notice, onOpe
 
   return (
     <>
-      <Button variant="secondary" onClick={() => setOpen('button')}>
-        <span className="cd-demo-inbox-sheet__button">
+      <Button variant={quiet ? 'ghost' : 'secondary'} onClick={() => setOpen('button')}>
+        <span className={quiet ? 'cd-demo-inbox-sheet__button cd-demo-inbox-sheet__button--quiet' : 'cd-demo-inbox-sheet__button'}>
           <span>{copy.title}</span>
           {count > 0 ? <CountPill count={count} label={copy.entries(count)} /> : null}
         </span>

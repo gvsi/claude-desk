@@ -82,6 +82,9 @@ export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_he
 /** The reason the kernel gives a handoff the handoff card opened: its own words, never the visitor's or Claude's. */
 export const CARD_REASON = 'The Desk handed this to you.';
 
+/** What closed a card handoff, as the kernel's `closed_by` names it: the owner taking the chat over or writing in it, or the visitor booking a time. */
+type CardHandoffCloser = 'takeover' | 'owner_message' | 'booking';
+
 type Listener = (seq: number, ev: SseEvent) => void;
 
 /** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
@@ -590,6 +593,7 @@ export class MockWorld {
     const callId = this.id('call');
     const actionId = this.id('act');
     if (spec.outcome === 'allow' && spec.executed) {
+      this.runSideEffects(session, spec.tool);
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
@@ -767,6 +771,7 @@ export class MockWorld {
     let ledgerSeq = approval.seq;
     if (allows(answer)) {
       state = 'executed';
+      this.runSideEffects(session, record.decision.action?.tool);
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
@@ -1120,10 +1125,11 @@ export class MockWorld {
   /**
    * A handoff closed, a call-back request's or the handoff card's, as the kernel records it: a
    * `desk_data` entry naming it, on no chat and with no `kind`. The owner marking it done gives no
-   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff; handling a card
-   * handoff adds `closed_by`, naming the owner's action.
+   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff; closing a card
+   * handoff because the owner handled the chat or the visitor booked a time adds `closed_by`,
+   * naming which.
    */
-  closeHandoff(record: HandoffRecord, replacedBy?: string, closedBy?: 'takeover' | 'owner_message'): void {
+  closeHandoff(record: HandoffRecord, replacedBy?: string, closedBy?: CardHandoffCloser): void {
     const desk = this.desk(record.deskId);
     if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
     record.handoff = { ...record.handoff, status: 'done' };
@@ -1141,13 +1147,26 @@ export class MockWorld {
     });
   }
 
-  /** Handling the conversation closes card handoffs; a promised call-back is still owed. */
-  private closeCardHandoffs(session: SessionRecord, by: 'takeover' | 'owner_message'): void {
+  /**
+   * The owner handling the conversation, or the visitor booking a time in it, closes its card
+   * handoffs; a promised call-back is still owed.
+   */
+  private closeCardHandoffs(session: SessionRecord, by: CardHandoffCloser): void {
     for (const record of this.handoffs.values()) {
       if (record.handoff.session_id === session.state.session_id && record.handoff.status === 'open' && record.handoff.kind === 'card') {
         this.closeHandoff(record, undefined, by);
       }
     }
+  }
+
+  /**
+   * What an action does to its chat as it runs, recorded before its execution entry, as the
+   * kernel's adapter does: a booking (`native.book`, the owner's decision of 2026-11-01) closes the
+   * chat's card handoffs, since the visitor has what they asked for. The mock runs no typed
+   * booking, which closes them the same way in the kernel.
+   */
+  private runSideEffects(session: SessionRecord, tool: string | undefined): void {
+    if (tool === 'native.book') this.closeCardHandoffs(session, 'booking');
   }
 
   /**

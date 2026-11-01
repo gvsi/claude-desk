@@ -37,10 +37,13 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
   keyword web searches (`native.web_search`) on yes. Decisions finish sequentially before concurrent executions;
-  both phases share `HOMEWORK_BUDGET_S`. On no it skips every
+  both phases share `HOMEWORK_BUDGET_S` (35 seconds), and a search's execution waits up to
+  `WEB_SEARCH_EXECUTE_TIMEOUT_S` (32 seconds), past the kernel's own 30 s search deadline. On no it skips every
   read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
-  opening's understanding call. A website the owner names later after no is kept as text.
+  opening's understanding call. A website the owner names later after no is kept as text. The owner's display
+  stream gets each read's start, then each read's label in the same order, then the opening's text; none of it is
+  state.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -66,15 +69,16 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
-fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
-connections. Any turn while busy returns that state without running or counting on the limits.
-The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
-seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
+fails in time, or 202 with the stored busy state. Consent doesn't wait: it answers 202 with the busy state once it is
+stored. Cancelling the request leaves the task working on its own connections. Any turn while busy returns that state without running or counting on the limits.
+The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (110
+seconds: consent's reads, Claude's whole understanding call, then ten seconds to finish and five for a retry). An
+optional `after` hook runs outside that deadline, with no transaction open and its own
 `TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
 Failure, deadline or shutdown before the final commit removes only entries marked by that run. Shutdown after
 the final commit ends the task without rollback. Removing a pending answer immediately
 after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
-`TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
+`TURN_ABANDONED_S` (130 seconds) when this process holds no run for the interview.
 
 Each setup tool call is an owner call on the new Desk (`decide_setup_tool`, `execute_setup_tool`, composed by
 `run_setup_tool`): the tool must be in the owner's `/context`,
@@ -135,9 +139,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
+from desk.api.owner_streaming import current as current_display, failure as display_failure
+from desk.api.turn_runs import TurnRuns
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
 from desk.api.link_notices import tell_cancelled_links
 from desk.api.metrics import record_model_call
@@ -270,6 +275,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk import contracts
 from desk.calendar import WEEK, calendar_slots, minute_of_day
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -290,9 +296,11 @@ from desk.contracts import (
     ProbeResult,
     RuleCard,
     ToolCall,
+    money_tool,
 )
 from desk.db.models import SetupInterview
 from desk.kernel_api import (
+    BusinessToolsRequest,
     CreateDeskRequest,
     DecideRequest,
     DeskAnsweringRequest,
@@ -324,13 +332,25 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 UNDERSTAND_TIMEOUT_S = 60.0
 UNDERSTAND_MAX_TOKENS = 8192
-HOMEWORK_BUDGET_S = 25       # all consent reads share this budget, leaving time for understanding and commit
-WEB_SEARCH_EXECUTE_TIMEOUT_S = 22  # the kernel's 20 s search deadline plus transport slack
+TURN_FINISH_S = 10           # the understanding call ends this long before the run's deadline, for the turn to save
+UNDERSTAND_RETRY_MIN_S = 5   # the least time left worth the understanding call's one retry
+# A consent turn's deadlines nest, each outlasting what it waits for. A search's `POST /execute` waits 2 s past the
+# kernel's 30 s search deadline (`decisions.WEB_SEARCH_TIMEOUT_S`, which this process can't import), so the kernel's
+# fail-closed answer arrives first. All the reads share one budget, `HOMEWORK_DECIDE_S` more, for the owner's context
+# and the decisions that come before them. The run then keeps the whole understanding call and its finish and retry
+# time, and stays below abandonment, including during a deploy's overlap.
+WEB_SEARCH_EXECUTE_TIMEOUT_S = 32
+HOMEWORK_DECIDE_S = 3        # the owner's context and the decisions, before the reads start
+HOMEWORK_BUDGET_S = WEB_SEARCH_EXECUTE_TIMEOUT_S + HOMEWORK_DECIDE_S
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
-TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
+TURN_RUN_TIMEOUT_S = HOMEWORK_BUDGET_S + UNDERSTAND_TIMEOUT_S + TURN_FINISH_S + UNDERSTAND_RETRY_MIN_S   # 110 s
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
 TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
-TURN_ABANDONED_S = 120       # recover only when this process holds no run
+# Recover only when this process holds no run, and only once a run and its cleanup have ended, with
+# `TURN_CLOCK_SLACK_S` to spare for the clocks of a deploy's two tasks and the database's (`updated_at` is the
+# database's time): 130 s. The web's polling (`SETUP_WORK_GIVE_UP_MS` in web/src/setup/useSetupWork.ts) must outlast it.
+TURN_CLOCK_SLACK_S = 10
+TURN_ABANDONED_S = TURN_RUN_TIMEOUT_S + TURN_ROLLBACK_TIMEOUT_S + TURN_CLOCK_SLACK_S
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
@@ -797,13 +817,18 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
+    # An owner display shows the reply (or Rules' answer) of only the run's first call; its retry resets it.
+    display = current_display.get()
+    field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
+    shows = display is not None and field is not None and display.take()
     for attempt in (1, 2):
         bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
         if bound <= 0 or (attempt == 2 and bound < retry_min_s):
             return None
+        on_text = display.begin(field) if shows else None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
-                               timeout_s=bound)
+                               timeout_s=bound, on_text=on_text)
         started = monotonic()
         try:
             async with asyncio.timeout(bound):
@@ -969,19 +994,54 @@ def _web_search_entry(result: ExecResult | None, *, query: str) -> Entry:
 
 
 async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
-    """Decide all reads before executing together; both phases share one budget and keep display order."""
+    """Decide all reads before executing together; both phases share one budget and keep display order.
+
+    The owner's display, when one is open, gets a `reading` for each read once the reads start (memory, the website,
+    then each search given on this Desk, in saved order), then each read's `label` in that same order, as soon as it
+    and every read before it are in. A label is the text its saved entry holds; a failed search whose label the
+    transcript keeps only once repeats that text. None of it is state."""
+    display = current_display.get()
     desk_id = interview.desk_id
     reads: list[tuple[str, dict, Callable[[ExecResult | None], Entry], float | None]] = [
         ("native.read_memory", {"query": MEMORY_QUERY}, _memory_entry, None)]
+    shown_as: list[tuple[str, str | None]] = [("memory", None)]           # each read as the display names it
     site = website_url(interview.transcript[0].website)
     if site is not None:
         url, host = site
         reads.append(("native.fetch_website", {"url": url}, partial(_website_entry, url=url, host=host), None))
+        shown_as.append(("website", host))
+    queries = (interview.transcript[0].search_queries or [])[:3]
     reads.extend(("native.web_search", {"query": query}, partial(_web_search_entry, query=query),
                   WEB_SEARCH_EXECUTE_TIMEOUT_S)
-                 for query in (interview.transcript[0].search_queries or [])[:3])
+                 for query in queries)
+    shown_as.extend(("web_search", None) for _ in queries)
     tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
     not_given: set[int] = set()
+    shown: list[int] | None = None                     # the reads the display shows, once they have started
+    labelled = 0
+
+    def outcome(index: int) -> ExecResult | None:
+        return tasks[index].result() if index in tasks and not tasks[index].cancelled() else None
+
+    def show_reading() -> None:
+        nonlocal shown
+        if shown is not None:
+            return
+        shown = [index for index, (tool, _, _, _) in enumerate(reads)
+                 if not (tool == "native.web_search" and index in not_given)]
+        if display is not None:
+            for index in shown:
+                display.reading(*shown_as[index])
+
+    def show_labels() -> None:
+        nonlocal labelled
+        while display is not None and shown is not None and labelled < len(shown):
+            index = shown[labelled]
+            if index in tasks and not tasks[index].done():
+                return
+            display.label(shown_as[index][0], reads[index][2](outcome(index)).text)
+            labelled += 1
+
     try:
         async with asyncio.timeout(HOMEWORK_BUDGET_S):
             context = await owner.kernel.call("GET /context/{session_id}?desk_id=",
@@ -999,6 +1059,11 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             # Finish every decision first so a long search cannot block a later decision's short timeout.
             for index, tool, decision, timeout_s in allowed:
                 tasks[index] = asyncio.create_task(execute_setup_tool(owner, tool, decision, timeout_s=timeout_s))
+            show_reading()
+            show_labels()
+            for task in tasks.values():                # in saved order: each label once it and those before are in
+                await asyncio.wait({task})
+                show_labels()
             if tasks:
                 await asyncio.gather(*tasks.values())
     except TimeoutError:
@@ -1010,6 +1075,8 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
+    show_reading()                                     # reads cut short before they started still show, then fail
+    show_labels()
     entries = []
     search_failed = False
     for index, (tool, _, entry, _) in enumerate(reads):
@@ -1482,13 +1549,15 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
     def time_left() -> float:
         if interview.turn_deadline is None:
             return UNDERSTAND_TIMEOUT_S
-        return min(UNDERSTAND_TIMEOUT_S, interview.turn_deadline - asyncio.get_running_loop().time() - 10)
+        return min(UNDERSTAND_TIMEOUT_S,
+                   interview.turn_deadline - asyncio.get_running_loop().time() - TURN_FINISH_S)
 
     try:
         answer = await _ask_drafts(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
                                  [_understanding_message(interview, entries)], SetupUnderstanding,
                                  # Fifteen seconds left on the turn: ten to finish, five for a retry.
-                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left, retry_min_s=5)
+                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left,
+                                 retry_min_s=UNDERSTAND_RETRY_MIN_S)
     except ApiProblem as failed:
         if failed.status != 503 or failed.error != "model_unavailable":
             raise
@@ -1570,7 +1639,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                    runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                    check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
                    turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
-                   keep_staged: bool = True,
+                   keep_staged: bool = True, wait: bool = True,
                    after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
                    render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
     """Store staged entries, run a detached owner turn, and return its landed or busy state.
@@ -1578,12 +1647,14 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
-    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state (`wait=False`
+    answers the busy state as soon as it is stored).
     `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
     acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
     is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
-    rolling back the turn.
+    rolling back the turn. The owner's display gets `done` once a committed turn has also run `after`, closed its
+    connections and released the guard; an error is sent after the rollback.
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
@@ -1599,7 +1670,9 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     async def run() -> SetupState:
         nonlocal pending
         interview.turn_deadline = asyncio.get_running_loop().time() + TURN_RUN_TIMEOUT_S
-        run_id = secrets.token_hex(8)
+        display = current_display.get()
+        assert display is not None and display.run is not None
+        run_id = display.run
         busy = None
         committed = False
         try:
@@ -1648,12 +1721,18 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
                     logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
-            if isinstance(failed, TimeoutError):
-                raise ApiProblem(503, "model_unavailable") from None
+            answered = ApiProblem(503, "model_unavailable") if isinstance(failed, TimeoutError) else failed
+            display.finish("error", {"run": run_id, "error": display_failure(answered)["error"]})
+            if answered is not failed:
+                raise answered from None
             raise
         finally:
             guard.close()
             busy_stored.set()                 # a failed busy commit wakes the request to receive its error
+            if committed:
+                # Only now is the turn's work done and the interview free: a refetch reads the final state, and
+                # the next answer is taken.
+                display.finish("done", {"run": run_id})
 
     try:
         await admit()
@@ -1671,6 +1750,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
+    if not wait:
+        return pending
     done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
@@ -1680,7 +1761,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    """Run consent and its reads through the shared turn runner, answering the busy state once it is stored; no
+    reads run after no."""
     def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
@@ -1697,7 +1779,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn,
+                          check=check, stage=stage, turn=turn, wait=False,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
@@ -2166,13 +2248,35 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
-# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
-# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
-_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. It still asks
+# when Markdown emphasis closes right after it ("**When are you open?**"). One inside a link or mid-word
+# ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?[*_]*(?=\s|$|[\"'\u201d\u2019)\]])")
 
 
 def _asks(text: str) -> bool:
     return _ENDS_A_QUESTION.search(text) is not None
+
+
+def _code_next(interview: Interview, answering: QuestionKey | None = None) -> QuestionKey | None:
+    """The topic code asks next by default (`_next_ask` without the model's proposal), taking `answering` as covered."""
+    return next((key for key in QUESTION_KEYS
+                 if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
+
+
+def _hold_unless_kept(interview: Interview, answering: QuestionKey | None = None) -> None:
+    """Show none of this turn's first reply on the owner's display when it could be hidden before it is saved: it
+    reads untrusted text, and the topic code asks next by default is a limit question (`_TurnReplies.before`)."""
+    display = current_display.get()
+    if display is not None and answering not in LIMIT_CHOICES and _code_next(interview, answering) in LIMIT_CHOICES:
+        display.hold()
+
+
+def _unshow(text: str) -> None:
+    """Take a reply that won't be saved as it is off the owner's display, if it is the one showing."""
+    display = current_display.get()
+    if display is not None:
+        display.withdraw(text)
 
 
 @dataclass
@@ -2188,6 +2292,7 @@ class _TurnReplies:
         if question in LIMIT_CHOICES:
             for reply, reads_untrusted in self.entries:
                 if reads_untrusted:
+                    _unshow(reply.text)        # text already streamed clears at once (a reset), before anything else
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
 
@@ -2260,9 +2365,9 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         app = source.next.connector
         existing = [*interview.planned, *(entry.card for entry in interview.transcript if entry.card)]
         if app in get_args(ConnectorKey) and not any(card.connector and card.connector.app == app for card in existing):
+            why = source.question.replace("**", "").replace("__", "").strip()[:200]   # the card shows plain text
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
-                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
-                                                            why=source.question.strip()[:200],
+                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app], why=why,
                                                             connectable=True))
             reply.planned.append(card)
             available.append(card)
@@ -2347,6 +2452,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     payload = card.job.model_dump(mode="json") if card.job else card.connector.model_dump(mode="json")
     decision = json.dumps({"proposal_id": proposal_id,
                            "decision": "waiting" if text is not None else card.state, **payload}, ensure_ascii=False)
+    _hold_unless_kept(interview)
     following = await _next_step(owner, engine, model, interview, decision, text=text)
     if text is not None and following is None:
         raise ApiProblem(503, "model_unavailable")
@@ -2375,7 +2481,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
         if following.decision == "none":
             return
         if not _decide_typed(interview, proposal_id, following.decision == "accept"):
-            interview.transcript.pop()
+            _unshow(interview.transcript.pop().text)
             interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
@@ -2419,6 +2525,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         key = question
         desk_id = interview.desk_id
         said, = staged
+        _hold_unless_kept(interview, key)
         turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                                 [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
@@ -2540,6 +2647,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
+        _unshow(closing.reply)                # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
@@ -2851,7 +2959,42 @@ async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Inte
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
-    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+    """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
+    and names some of its tools, publish it once more without them; any other refusal is raised."""
+    tools = []
+    used = set()
+    configured = [job for job in accepted_jobs if job.config is not None]
+    if len(configured) > 8:
+        logger.warning("%s accepted setup jobs with configurations were left out of the business tools batch",
+                       len(configured) - 8)
+    for job in configured[:8]:
+        slug = item_slug(job.title)
+        slug = re.sub(r"^[^a-z]+", "", slug) or job.config.block.replace("_", "-")
+        slug = slug[:40].rstrip("-")
+        name, number = slug, 2
+        while name in used:
+            suffix = f"-{number}"
+            name = slug[:40 - len(suffix)].rstrip("-") + suffix
+            number += 1
+        used.add(name)
+        tools.append({"tool": f"desk.{name}", "title": job.title[:60],
+                      "description": " ".join(job.how.split())[:300],
+                      "config": job.config.model_dump(mode="json")})
+    if not tools:
+        return
+    try:
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": tools}), path={"id": desk_id})
+    except KernelFailed as failed:
+        # A refusal's detail is keyed "<tool>.<field>", and a tool's name has dots of its own.
+        refused = {tool["tool"] for tool in tools if failed.status == 422
+                   and any(key.startswith(tool["tool"] + ".") for key in failed.detail or {})}
+        if not refused or len(refused) == len(tools):
+            raise
+        logger.warning("%s setup business tools were refused; retrying without them", len(refused))
+        kept = [tool for tool in tools if tool["tool"] not in refused]
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": kept}), path={"id": desk_id})
 
 
 def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
@@ -2913,9 +3056,16 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
         return
-    desk_id = owner.desk(interview.desk_id)
     try:
+        desk_id = owner.desk(interview.desk_id)
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except KernelFailed as failed:
+        if failed.status == 404:
+            logger.warning("setup business tools aren't available (404); keeping words only")
+        elif failed.status == 422:
+            logger.warning("the setup business tools batch was refused (%s); keeping words only", failed.code)
+        else:
+            logger.warning("a setup business tools write failed (%s %s)", failed.status, failed.code)
     except Exception as failed:
         logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 
@@ -2966,7 +3116,7 @@ ITEM_ID_MAX = 40
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
 UTILITY_TOOLS = frozenset(card.applies_to for card in UTILITY_CARDS)
 EFFECT_TARGETS = tuple(f"effect:{effect}" for effect in get_args(Effect))
-MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
+MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in contracts.MONEY_EFFECTS}
 # Where each tool a situation can call acts (as its profile says), for the probe's stand-in resource.
 RESOURCE_KINDS: dict[str, str] = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
@@ -3461,10 +3611,16 @@ def _covering(tool: str, tools: list[dict], effects: frozenset[str] | None = Non
     return frozenset({tool, *(f"effect:{effect}" for effect in offered if effects is None or effect in effects)})
 
 
+def _money_targets(tools: list[dict]) -> frozenset[str]:
+    """Money tools offered by this Desk, and effect targets that cover them."""
+    return MONEY_TARGETS | frozenset(target for tool in tools if money_tool(tool["tool"], tool["effects"])
+                                     for target in _covering(tool["tool"], tools))
+
+
 def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> str | None:
     """The answered limit an auto card goes past, by the tool it names or an effect the tool has, or None: a quote's
     amount (which it must set) and discount past the answered quote and discount limits, a document going out unless
-    verified owners get their own, or a payment link's amount past the lower of the answered link limit and the money
+    verified owners get their own, or a money tool's amount past the lower of the answered link limit and the money
     cap. An unanswered limit is 0."""
     if card.applies_to in _covering("native.quote", tools):
         if card.max_amount_cents is None or card.max_amount_cents > (answers.quote_auto_max_cents or 0):
@@ -3475,7 +3631,8 @@ def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> s
             and answers.documents != "verified_owner"):
         return "documents"
     link_limit = min(answers.payment_link_auto_max_cents or 0, answers.auto_money_cap_cents)
-    if card.applies_to in _covering("native.payment_link", tools) and (card.max_amount_cents or 0) > link_limit:
+    if card.applies_to in _money_targets(tools) and (
+            card.max_amount_cents is None or card.max_amount_cents > link_limit):
         return "link_limit"
     return None
 
@@ -3522,7 +3679,7 @@ def _card_problems(drafted: DraftedRules, tools: list[dict], answers: SetupAnswe
             continue
         if _pays_out(card.applies_to, tools):
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["pay_out"]))
-        elif card.applies_to in MONEY_TARGETS and (card.max_amount_cents or 0) > cap:
+        elif card.applies_to in _money_targets(tools) and (card.max_amount_cents or 0) > cap:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["above_cap"]))
         elif (past := _past_a_limit(card, tools, answers)) is not None:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS[past]))
@@ -3971,10 +4128,21 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 # Tools -------------------------------------------------------------------------------------------------------------
 
 
-async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupTools:
+async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+                      business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
     payments server while it isn't connected."""
-    desk_id = await interview_desk(owner, engine, interview_id)
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    desk_id = owner.desk(interview.desk_id)
+    if (business_tools_enabled and interview.step != "questions"
+            and any(job.config is not None for job in accepted_jobs(interview))
+            and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
+        interview.business_tools_enabled = business_tools_enabled
+        # End the read's transaction before waiting on the kernel; the reads below set the copy again on their own.
+        if owner.ro.conn.in_transaction():
+            await owner.ro.conn.rollback()
+        await after_finish(owner, interview)
     rows = await tool_rows(owner, desk_id, version_from_row(await active_row(owner, desk_id)).cards)
     connected = any(row.tool in MCP_TOOLS for row in rows)
     return SetupTools(tools=rows, connectable=[] if connected else ["mock_payments"])

@@ -15,44 +15,29 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type MouseEvent,
   type RefObject,
 } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 
-import { Card, ConceptFooter, Icon, Mark, MarkAppIcon, Wordmark } from '../ds/index.ts';
+import { Card, ConceptFooter, Icon, MarkAppIcon } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import { AboutBar, useAboutNarrow } from './AboutBar.tsx';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
-import { AboutSwitch } from './AboutSwitch.tsx';
 import { readNext, VISION_ARTICLE, type AboutId, type AboutPage } from './links.ts';
 import { MONTHS } from './months.ts';
 import { prefersReducedMotion } from './motion.ts';
-import { PrototypeLink } from './PrototypeLink.tsx';
 import { moveToSection, useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
 import { usePagePlace } from './usePagePlace.ts';
 
 import './paper.css';
 import './reader.css';
-
-/** Below this width the page takes its phone layout: one column, the contents list folded into one row. */
-const NARROW = '(max-width: 1099.98px)';
-
-function subscribeNarrow(onChange: () => void): () => void {
-  const query = window.matchMedia(NARROW);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-function isNarrow(): boolean {
-  return window.matchMedia(NARROW).matches;
-}
 
 type Heading = Extract<Block, { kind: 'heading' }>;
 
@@ -384,54 +369,6 @@ function ReadNext({ next, compact }: { next: AboutPage; compact: boolean }) {
   );
 }
 
-/** The About set's three pages as links, the one on show marked as the current page. */
-function DocumentSwitch({ current, compact }: { current: AboutId; compact: boolean }) {
-  return (
-    <AboutSwitch
-      current={current}
-      className={`cd-about-switch${compact ? ' cd-about-switch--compact' : ''}`}
-      linkClassName="cd-about-switch__link cd-type-control"
-    />
-  );
-}
-
-/**
- * The app's lockup (owner, 2026-10-30): the bell with no tile and the wordmark, 36 px with the Preview
- * badge on the desktop bar. A phone's top bar carries no badge, so the phone bar shows a 32 px bell
- * and the name alone, on one line at a phone's width. The white tile is the article's app icon. The
- * bell is on the page's paper, so it keeps the drawing's dark ink.
- */
-function Brand({ compact }: { compact: boolean }) {
-  return (
-    <span className="cd-about-brand">
-      <Mark size={compact ? 32 : 36} ground="light" />
-      <Wordmark preview={!compact} />
-    </span>
-  );
-}
-
-/** The bar across the top, which stays while the page scrolls: the product's name, the About set's switch and the link into the prototype. */
-function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
-  if (compact) {
-    return (
-      <>
-        <header className="cd-about-top cd-about-top--compact">
-          <PrototypeLink compact />
-          <Brand compact />
-        </header>
-        <DocumentSwitch current={current} compact />
-      </>
-    );
-  }
-  return (
-    <header className="cd-about-top">
-      <Brand compact={false} />
-      <DocumentSwitch current={current} compact={false} />
-      <PrototypeLink />
-    </header>
-  );
-}
-
 export interface ReaderPageProps {
   id: AboutId;
 }
@@ -440,7 +377,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
   const about = ABOUT_DOCUMENTS[id];
   const other = ABOUT_DOCUMENTS[about.next];
   const alsoRead = id === 'proposal' ? [other, VISION_ARTICLE] : [other];
-  const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+  const compact = useAboutNarrow();
   const sections = about.blocks.filter((block): block is Heading => block.kind === 'heading' && block.depth === 2);
   usePagePlace(id);
 
@@ -451,8 +388,8 @@ export function ReaderPage({ id }: ReaderPageProps) {
   useDocumentTitle(inApp(about.title));
 
   return (
-    <div className={`cd-about-paper cd-about-paper--app cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
-      <TopBar current={id} compact={compact} />
+    <div className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
+      <AboutBar current={id} />
       <main className="cd-about-main">
         <div className="cd-about-hero" data-hero="">
           <MarkAppIcon size={compact ? 'compact' : 'large'} />

@@ -26,7 +26,7 @@ import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
-import { aroundBusiness, setupRulesQuery } from './shared.ts';
+import { aroundBusiness, setupRulesQuery, useOpensAtTop } from './shared.ts';
 import { PublicLinesStep } from './PublicLinesStep.tsx';
 import { DraftRulesSkeleton, SituationsSkeleton } from './StepSkeletons.tsx';
 
@@ -100,6 +100,8 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
   const [view, setView] = useState<'rules' | 'situations' | 'public_lines'>(state.step === 'situations' ? 'situations' : 'rules');
+  // Real situations and What customers will read each open at their top, as setup's steps do.
+  useOpensAtTop(view);
   const draft = useQuery(setupRulesQuery(id));
   const people = useQuery({ ...peopleQuery(state.desk_id), refetchOnWindowFocus: false });
   const situations = useQuery({

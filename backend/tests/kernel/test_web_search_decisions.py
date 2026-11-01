@@ -41,7 +41,7 @@ async def test_search_returns_only_cited_page_text_and_records_usage():
     assert usage.latency_ms >= 0
     [request] = client.requests
     assert request["model"] == decisions.WEB_SEARCH_MODEL == "claude-sonnet-5-5"
-    assert request["timeout"] == decisions.WEB_SEARCH_TIMEOUT_S == 20
+    assert request["timeout"] == decisions.WEB_SEARCH_TIMEOUT_S == 30
     assert request["tools"] == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
     assert request["thinking"] == {"type": "between_tools"}
     assert 1500 <= request["max_tokens"] <= 2500
@@ -82,12 +82,15 @@ async def test_search_preserves_citations_caps_results_and_wraps_the_query():
 
 
 async def test_search_deadline_is_enforced_without_retry(monkeypatch):
+    # The fake ignores the SDK's own timeout and answers after 1 s, so only the outer wait can end it here:
+    # one constant bounds both, read when the call is made.
     monkeypatch.setattr(decisions, "WEB_SEARCH_TIMEOUT_S", 0.02)
     client = FakeAnthropicClient(search_message(), delay=1)
     hits, usage = await decisions.AnthropicDecisions(client).web_search("plumber services")
     assert hits is None and usage.status == "timeout"
     assert (usage.input_tokens, usage.output_tokens) == (0, 0)
-    assert len(client.requests) == 1
+    assert usage.latency_ms < 1000
+    assert [request["timeout"] for request in client.requests] == [0.02]
 
 
 @pytest.mark.parametrize("joined_length", [20_000, 20_001])

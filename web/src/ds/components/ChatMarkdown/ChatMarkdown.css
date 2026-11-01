@@ -1,0 +1,176 @@
+/* ChatMarkdown: Claude's reply as Markdown, in the reply type, as the signed Markdown boards draw
+   it. Headings stay at the reply's size, so a chat reply never gets page-size titles, and a table
+   sits in a hairline card that scrolls sideways on a phone.
+
+   While a reply streams or is revealed, each new word settles in over motion-settle, and a list
+   item's marker with its first word. Nothing moves under reduced motion. */
+
+.cd-md {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-md > * {
+  margin: 0;
+}
+
+.cd-md > * + * {
+  margin-top: var(--space-10);
+}
+
+/* Blocks inside a quote or a list item keep the reply's rhythm. */
+.cd-md :is(blockquote, li) > * {
+  margin: 0;
+}
+
+.cd-md :is(blockquote, li) > * + * {
+  margin-top: var(--space-10);
+}
+
+/* Claude's line breaks inside a paragraph stay, as they did before replies were Markdown. */
+.cd-md p {
+  white-space: pre-line;
+}
+
+.cd-md :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 23px;
+  font-weight: 600;
+  font-variation-settings: "opsz" 20;
+  color: var(--text-primary);
+}
+
+.cd-md :is(h1, h2) {
+  font-size: 17px;
+  line-height: 25px;
+}
+
+.cd-md > * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: var(--space-16);
+}
+
+.cd-md strong {
+  font-weight: 600;
+}
+
+.cd-md em {
+  font-style: italic;
+}
+
+.cd-md :is(ul, ol) {
+  padding-left: 22px;
+}
+
+.cd-md li + li {
+  margin-top: var(--space-4);
+}
+
+.cd-md li::marker {
+  color: var(--text-secondary);
+}
+
+.cd-md > p + :is(ul, ol) {
+  margin-top: var(--space-4);
+}
+
+.cd-md a {
+  color: var(--accent-blue);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentcolor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.cd-md code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 1px 5px;
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+}
+
+/* A block of code keeps its lines and wraps them in the column. */
+.cd-md pre {
+  white-space: pre-wrap;
+}
+
+.cd-md pre code {
+  display: block;
+}
+
+.cd-md blockquote {
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+.cd-md hr {
+  border: 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-md__table {
+  overflow-x: auto;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+.cd-md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 360;
+}
+
+/* The header row, its empty corner cell included. */
+.cd-md :is(th, thead td) {
+  font-weight: 600;
+  text-align: left;
+  background: var(--bg-muted);
+}
+
+.cd-md :is(th, td) {
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--line-hairline);
+  vertical-align: top;
+}
+
+/* Only the body's last row meets the card's edge: the header row's cells, its empty corner
+   included, keep their hairline. */
+.cd-md tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* The settle. Streamdown wraps each new word in a span marked data-sd-animate and marks a list item
+   whose first word is new with data-sd-animate-marker. A word keeps its span as more words arrive,
+   so it settles in once. */
+.cd-md [data-sd-animate] {
+  animation: cd-md-settle var(--motion-settle) var(--motion-ease) both;
+}
+
+.cd-md [data-sd-animate-marker]::marker {
+  animation: cd-md-settle-marker var(--motion-settle) var(--motion-ease) both;
+}
+
+@keyframes cd-md-settle {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A marker can't fade, so its color comes in instead. */
+@keyframes cd-md-settle-marker {
+  from {
+    color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-md [data-sd-animate],
+  .cd-md [data-sd-animate-marker]::marker {
+    animation: none;
+  }
+}

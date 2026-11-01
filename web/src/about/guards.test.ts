@@ -69,9 +69,9 @@ function importsOf(file: string, text: string, files: ReadonlySet<string>): Impo
 // registry with it.
 const READER_ONLY = ['about/documents.ts', 'about/markdown.ts', 'about/ReaderPage.tsx'];
 const READER = (file: string) => file === 'about/ReaderPage.tsx' || /^about\/figures\/[^/]+\.tsx$/.test(file);
-// The page's chrome, which renders when the reader can't (or hasn't yet: the wait while it loads): never the
-// registry or the page, even on demand.
-const CHROME = ['about/ReaderError.tsx', 'about/AboutWait.tsx', 'about/PrototypeLink.tsx', 'about/links.ts'];
+// The page's chrome, which renders when the reader can't (or hasn't yet: the wait while it loads), and the set's top
+// bar, which the Vision article draws too: never the registry or the page, even on demand.
+const CHROME = ['about/ReaderError.tsx', 'about/AboutWait.tsx', 'about/PrototypeLink.tsx', 'about/links.ts', 'about/AboutBar.tsx'];
 // The one `import()` that may load the reader: the router's, of the page itself.
 const ON_DEMAND = { from: 'app/routes.tsx', to: 'about/ReaderPage.tsx' };
 

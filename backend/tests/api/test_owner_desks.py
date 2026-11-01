@@ -186,7 +186,8 @@ async def test_people_update_passes_the_masked_contact_rejection_through(api, br
     leads = (await owner.browser.get(people_path)).json()["leads"]
     assert [(lead["display_name"], lead["note"]) for lead in leads] == [("Ana Ruiz", None),
                                                                         ("Sam Ortiz", "Leaky tap <b>soon</b>")]
-    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at"}
+    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at", "replayed"}
+    assert [lead["replayed"] for lead in leads] == [False, False]           # left in a live conversation
 
     # Another copy's Desk is 404, and nothing is sent to the kernel for it.
     calls = len(fake.calls)

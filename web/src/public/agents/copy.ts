@@ -11,6 +11,7 @@
  */
 import { Fragment, createElement, type ReactNode } from 'react';
 
+import type { DemoTaskSet } from '../../api/views.ts';
 import { AGENT_START_RETRY_COPY, type CopyLanguage } from '../../ds/index.ts';
 
 /** The built-in agent's tasks, as the API names them (`send_agent {task}`). */
@@ -18,19 +19,79 @@ export const DEMO_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] 
 
 export type DemoTask = (typeof DEMO_TASKS)[number];
 
-/** Each task's chip, and the title of the agent's first request once it is sent. */
-export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoTask, string>>>> = {
+export type { DemoTaskSet };
+
+/** The set whose words the panel shows when the Desk's set can't be read: plain words for any business. */
+export const FALLBACK_TASK_SET: DemoTaskSet = 'other';
+
+/**
+ * Each task's chip in each set, and the title of the agent's first request once it is sent. The sets
+ * are the API's (`agent_tasks {task_set}`, plan 09, C2): Rivera's seed keeps its own, and every other
+ * Desk takes its setup business type's. A set the API adds has no words here, and fails to compile.
+ */
+export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoTaskSet, Readonly<Record<DemoTask, string>>>>>> = {
   en: {
-    book_visit: 'Book the earliest visit',
-    quote_and_deposit: 'Get a quote and pay the service call deposit',
-    push_the_limit: 'Try to pay more than its limit',
+    rivera: {
+      book_visit: 'Book the earliest visit',
+      quote_and_deposit: 'Get a quote and pay the service call deposit',
+      push_the_limit: 'Try to pay more than its limit',
+    },
+    trade: {
+      book_visit: 'Book the earliest visit',
+      quote_and_deposit: 'Pay up front, within its limit',
+      push_the_limit: 'Try to pay more than its limit',
+    },
+    office: {
+      book_visit: 'Book the earliest consult',
+      quote_and_deposit: 'Pay up front, within its limit',
+      push_the_limit: 'Try to pay more than its limit',
+    },
+    landlord: {
+      book_visit: 'Book the earliest viewing',
+      quote_and_deposit: 'Pay up front, within its limit',
+      push_the_limit: 'Try to pay more than its limit',
+    },
+    other: {
+      book_visit: 'Book the earliest appointment',
+      quote_and_deposit: 'Pay up front, within its limit',
+      push_the_limit: 'Try to pay more than its limit',
+    },
   },
   es: {
-    book_visit: 'Reservar la primera visita libre',
-    quote_and_deposit: 'Pedir un presupuesto y pagar el depósito de la visita',
-    push_the_limit: 'Intentar pagar más de su límite',
+    rivera: {
+      book_visit: 'Reservar la primera visita libre',
+      quote_and_deposit: 'Pedir un presupuesto y pagar el depósito de la visita',
+      push_the_limit: 'Intentar pagar más de su límite',
+    },
+    trade: {
+      book_visit: 'Reservar la primera visita libre',
+      quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
+      push_the_limit: 'Intentar pagar más de su límite',
+    },
+    office: {
+      book_visit: 'Reservar la primera consulta libre',
+      quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
+      push_the_limit: 'Intentar pagar más de su límite',
+    },
+    landlord: {
+      book_visit: 'Reservar la primera visita libre a un departamento',
+      quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
+      push_the_limit: 'Intentar pagar más de su límite',
+    },
+    other: {
+      book_visit: 'Reservar la primera cita libre',
+      quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
+      push_the_limit: 'Intentar pagar más de su límite',
+    },
   },
 };
+
+/** The sets the page has words for: every set the API names. */
+export const DEMO_TASK_SETS = Object.keys(DEMO_TASK_COPY.en) as readonly DemoTaskSet[];
+
+export function isDemoTaskSet(value: unknown): value is DemoTaskSet {
+  return typeof value === 'string' && (DEMO_TASK_SETS as readonly string[]).includes(value);
+}
 
 /** How a request is signed, one line each, with the API's values as written. */
 export interface SigningLabels {

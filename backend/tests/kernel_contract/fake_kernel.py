@@ -34,7 +34,9 @@ contract test, before the task that first uses them.
   call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
   owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
-  mark of done on a closed one is 409.
+  mark of done on a closed one is 409. A booking, native or typed, closes the session's open handoffs of kind `card`
+  as the owner's mark of done does, each ledgered `desk_data` naming it with `closed_by: "booking"`; a call-back
+  stays open.
   `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
@@ -3069,6 +3071,7 @@ class FakeKernelState:
             self._put("bookings", (booking_id,), {
                 "booking_id": booking_id, **ids, "slot_id": slot.slot_id, "starts_at": slot.starts_at,
                 "person_id": session.person_id, "lead_id": None, "status": "confirmed"})
+            self._close_card_handoffs(session, desk, closed_by="booking")
             facts.append(Fact(fact_id=f"booking:{booking_id}", kind="booking", status="committed", source="kernel",
                               label=label, claims=[
                                   Claim(key="starts_at", kind="datetime", value=slot.starts_at.isoformat()),
@@ -3593,6 +3596,17 @@ class FakeKernelState:
             if fact is not None:
                 self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
             self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "replaced_by": replaced_by})
+
+    def _close_card_handoffs(self, session: Session, desk: Desk, *, closed_by: str) -> None:
+        """Close the session's open handoffs the handoff card opened, as the owner's mark of done closes one, each
+        ledgered `desk_data` naming it and what closed it (`closed_by`); a call-back stays open, since it promises the
+        visitor a call."""
+        for handoff_id, row in self.handoffs.items():
+            if row["session_id"] != session.session_id or row["status"] != "open" or row.get("kind") != "card":
+                continue
+            row["status"] = "done"
+            self._put("handoffs", (handoff_id,), dict(row))
+            self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "closed_by": closed_by})
 
     def _open_handoff(self, session: Session) -> str | None:
         """The ID of the session's open handoff, of either kind; a session holds at most one."""

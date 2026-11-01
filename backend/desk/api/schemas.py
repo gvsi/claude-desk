@@ -34,6 +34,7 @@ from desk.api.prompts import (
     ProposalCard,
     PlannedOutcome,
     DemoTask,
+    DemoTaskSet,
     QuestionKey,
     SituationWho,
     Triage,
@@ -255,13 +256,21 @@ class AgentRunStarted(BaseModel):
     run_id: str
 
 
+class AgentTasks(BaseModel):
+    """Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+    the business type setup stored for it (`other` without one). A key, never words: the page holds every word."""
+
+    task_set: DemoTaskSet
+
+
 class AgentTurn(BaseModel):
     """One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
     with the blocks and signed statuses the kernel checked and the Desk showed the agent.
 
     An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
     2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
-    (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+    (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+    templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
     replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
     Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
     blocks and statuses."""
@@ -417,6 +426,7 @@ class ConversationSummary(BaseModel):
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
     latest_visitor_text: str | None
+    replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
 
 
 class OwnerTranscript(BaseModel):
@@ -428,6 +438,7 @@ class OwnerTranscript(BaseModel):
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
+    replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
@@ -940,6 +951,7 @@ class Lead(BaseModel):
     display_name: str | None
     note: str | None
     created_at: AwareDatetime
+    replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
 
 
 class PeopleOut(BaseModel):

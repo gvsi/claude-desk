@@ -776,6 +776,30 @@ describe('Safety', () => {
     await expect.element(trace.getByText('Handoff closed when you took over. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
+  it('handoff_closed_by_a_booking_says_so', async () => {
+    // The handoff card hands Maria the chat, then the visitor books a time in it, which closes the
+    // card's handoff: the record calls that closing what it was, never her Mark done, and its full
+    // trace reads the row's name as its sentence.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can someone come Tuesday?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'The first one, please.' } });
+    await expect.poll(() => [...mockStore.world.handoffs.values()].map((h) => h.handoff.status), { timeout: 5_000 }).toEqual(['done']);
+    const { entries } = await mockLedger();
+    const closed = entries.find((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && e.event.summary.closed_by === 'booking');
+    if (!closed) throw new Error('the booking closed the card handoff');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, closed.seq).getByText('Handoff closed when they booked a time', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+    await recordRow(screen, closed.seq).click();
+    const trace = region(screen, `Full trace of entry ${closed.seq}`);
+    await expect.element(trace.getByText('Handoff closed when they booked a time. Recorded by the checkpoint.', { exact: true })).toBeVisible();
+  });
+
   it('filters_start_with_all', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const sorted = (summary: string, category: TriageCategory, n: number) =>

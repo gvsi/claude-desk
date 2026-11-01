@@ -11,8 +11,9 @@ the attack and legitimate-task suites).
   says its text is information: the conversation's (`ROW_TAGS`, by transcript row kind, and `wrap_action_update`)
   and its code-built summary (`conversation_so_far` of `summary_line`s, labelled by `SUMMARY_LABELS` and
   `SHOWN_LABELS`), then each other model's (the `*_TAG` names, and `wrap_website`).
-- `DEMO_TASKS`: what the built-in visiting agent is asked to do (Plan 02b), and the agent's own fixed text:
-  `VISITING_AGENT_SYSTEM`, `agent_task(task)` (its first message), its output model `AgentStep` and
+- `DEMO_TASKS`: what the built-in visiting agent is asked to do (Plan 02b), a fixed line for each task in each
+  `DemoTaskSet` (plan 09, C2), and the agent's own fixed text:
+  `VISITING_AGENT_SYSTEM`, `agent_task(task, task_set)` (its first message), its output model `AgentStep` and
   `desk_reply_text(answer)`, how a Desk's answer reads to it (the caller wraps it as `<desk_reply>`).
 - The setup interview (Plan 02b): `SETUP_START_SYSTEM` and its output model `SetupStart` (what the owner's first
   description says), `SETUP_TURN_SYSTEM` and `SETUP_TURNS`, each question's own `SetupTurn` model (one answer turn: a
@@ -54,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.22"
+PROMPT_VERSION = "2026-10-31.24"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -541,11 +542,43 @@ NOTES = {
 }
 
 DemoTask = Literal["book_visit", "quote_and_deposit", "push_the_limit"]
+# Which fixed lines a Desk's agent reads (plan 09, C2): Rivera's seed keeps its own, and every other Desk reads its
+# setup business type's. Code picks the set from that type alone (`agents.demo_task_set`), so no business's, owner's
+# or visitor's text ever reaches the agent's model through its task.
+DemoTaskSet = Literal["rivera", "trade", "office", "landlord", "other"]
 
-DEMO_TASKS: dict[DemoTask, str] = {
-    "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
-    "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
-    "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
+DEMO_TASKS: dict[DemoTaskSet, dict[DemoTask, str]] = {
+    "rivera": {
+        "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
+        "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
+    },
+    # A Desk with nothing to book or pay up front answers with its own next step, and the agent stops there; the
+    # kernel refuses any charge above the agent's signed mandate, whatever the agent asks.
+    "trade": {
+        "book_visit": "Book the earliest visit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
+    },
+    "office": {
+        "book_visit": "Book the earliest consult for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
+    },
+    "landlord": {
+        "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
+    },
+    "other": {
+        "book_visit": "Book the earliest appointment for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
+                             "spending limit.",
+        "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
+    },
 }
 
 # The built-in visiting agent (Plan 02b, Task 5): a stand-in for someone else's agent, sent by a visitor to a Desk.
@@ -575,9 +608,9 @@ RECEIPT_LINE = "Request {state}: {text}"
 DESK_REPLY_TAG = "desk_reply"   # the Desk's answer, as the agent reads it (`agents.py`)
 
 
-def agent_task(task: DemoTask) -> str:
-    """The agent's first message: its task, fixed text from `DEMO_TASKS`."""
-    return AGENT_TASK.format(task=DEMO_TASKS[task])
+def agent_task(task: DemoTask, task_set: DemoTaskSet) -> str:
+    """The agent's first message: its task, the fixed line `DEMO_TASKS` holds for the Desk's set."""
+    return AGENT_TASK.format(task=DEMO_TASKS[task_set][task])
 
 
 class AgentStep(BaseModel):
@@ -705,9 +738,10 @@ _WRITING = """\
 How you write
 Write to be read in seconds: short sentences in plain words the owner would use ("takes the details", "asks you \
 first", "a secure payment link", never "intake", "autonomy", "block", "connector" or "workflow"). Use a short list \
-when you're laying out several things, one item per line starting with "- ". No headings, bold or emoji, and no \
-exclamation marks. The owner reads your messages one after another, so start each one differently from your \
-last few and say things in your own words rather than repeating a stock phrase."""
+when you're laying out several things, one item per line starting with "- ". No exclamation marks. Markdown shows \
+only in your replies, questions and the closing plan; card fields, choices and the lines customers read stay plain \
+text, with no emoji. The owner reads your messages one after another, so start each one differently from your last \
+few and say things in your own words rather than repeating a stock phrase."""
 
 _CAN_DO = """\
 What the Desk can do today: answer questions from the business's facts, which setup gathers as what it does, \
@@ -864,7 +898,7 @@ US cents and only the business's own published prices.
 
 Two illustrative openings (vary the wording; don't copy them):
 
-Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and you're the one people call \
+Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and you're the one people call \
 when water's on the floor, day or night. From your notes, you quote on site and take card payments with Square. \
 I'd guess a lot of your day goes to calls that aren't the work itself.
 → question: "What takes up most of your time that isn't the plumbing? Calls about prices, people asking when you \

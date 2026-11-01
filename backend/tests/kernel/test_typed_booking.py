@@ -228,8 +228,8 @@ async def test_native_booking_keeps_the_existing_card_and_fact(app, client):
     [fact] = result.facts
     assert not any(claim.key.startswith('appointment_') for claim in fact.claims)
     for lang, title, lines in [
-        ('en', 'Monday, November 2', ['Arriving 10:00 am to 11:00 am', 'With Maria Rivera']),
-        ('es', 'lunes 2 de noviembre', ['Llegada de 10:00 a 11:00', 'Con Maria Rivera'])]:
+        ('en', 'Monday, November 2', ['10:00 am to 11:00 am', 'With Maria Rivera']),
+        ('es', 'lunes 2 de noviembre', ['De 10:00 a 11:00', 'Con Maria Rivera'])]:
         card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, lang, DESK)
         assert (card.title, card.lines) == (title, lines)
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))

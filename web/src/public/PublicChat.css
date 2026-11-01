@@ -100,3 +100,12 @@
   grid-template-columns: minmax(0, 1fr) var(--size-sidebar);
   align-items: start;
 }
+
+/* While a reply comes in (its words revealed, then its cards and receipts), the chat places the
+   conversation itself (useNewestInView), so the browser's scroll anchoring stays out of it: an
+   anchor the browser picked mid-arrival made the next change of size, such as the composer
+   growing, jump the conversation. Once the reply is in, the browser picks its anchor afresh. */
+.cd-public-shell__scroll:has(.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following),
+.cd-public-shell--short:has(.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following) {
+  overflow-anchor: none;
+}

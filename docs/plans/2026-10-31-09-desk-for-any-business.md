@@ -251,7 +251,13 @@ The seam setup needs:
 
 ### C2: the demo agent's tasks from the Desk (1.5 h, could)
 
-`DEMO_TASKS` drawn from the Desk's own tools and catalog instead of a water heater visit on every Desk.
+Instead of a water heater visit on every Desk, `DEMO_TASKS` holds a fixed line for each task in each `DemoTaskSet` (#572):
+- `rivera` for the copy's seeded Desk, its three lines unchanged;
+- `trade`, `office`, `landlord` and `other` for a Desk setup made, picked by code from its `app.setup_interviews.business_type` alone (`agents.demo_task_set`); a Desk with no known type reads `other`.
+
+`GET /api/public/desks/{slug}/agent_tasks` answers that key, and the agents page words its task chips from its own copy for it. The owner signed the lines and the chips on 2026-11-01. Two other designs were rejected:
+- (a) Lines built from the Desk's business tool titles or catalog names: that owner text would reach the agent's model, whose requests its launcher sees unchecked, widening that recorded exception.
+- (b) Hiding the agent's words for Desk-built tasks: it would undo the owner's decision to show them.
 
 ---
 
@@ -346,7 +352,7 @@ Work is divided by system area: the setup API owns the conversation engine, card
 - **Money:** `moves_money` and `auto_money` become effect-based for business tools (B3).
 - **Urgent alerts:** urgent alerts reach the owner's Demo inbox at once, whatever the notification settings (see Owner rulings after round 1) (B4).
 - **B6:**
-  - Up to 3 searches per setup, a 20 s deadline each, on `claude-sonnet-5-5`, with usage ledgered.
+  - Up to 3 searches per setup, a 30 s deadline each, on `claude-sonnet-5-5`, with usage ledgered. (Raised from 20 s on 2026-11-01: twelve measured searches took 15.1 s at the median and 18.2 s at most, before the hosted network hop, and a search lost costs setup more than ten seconds' wait.)
   - What it returns is Claude's cited summary, labelled as such.
   - Search spend follows Giovanni's approval of 3 per setup.
 - **B7, new, kernel policy-text checks:** `PUT /desks/{id}/charter` refuses a `policy:` text claim that holds an amount, a percentage, or discount, refund or guarantee words (the reply check's lexicon). Setup pre-filters with the same function and drops an offending claim, logged by key. Tier 1 rows, with no model calls:

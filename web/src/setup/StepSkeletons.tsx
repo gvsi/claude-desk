@@ -1,19 +1,21 @@
 /**
  * Setup's steps as quiet shapes while their reads are out, each built from its own components'
  * classes so the step lands where the shapes were. They draw what a fresh copy's interview shows:
- * the seed's connectors, then the draft, situations and tricks the example answers make. Words the
- * app knows before the read lands (the connectors' names and lines, the always-on rules, the
- * payment limit's and the safety check's own lines) are measured in the current fonts at their real
- * width, so the shapes take the lines the words will, on any platform. Words that come with the read
- * (the rules, the situations, the tricks) are estimates: when they wrap differently, the rows under
- * them move once as they land. A skeleton draws no words.
+ * the seed's connectors, then the draft, situations and tricks the example answers make, and the
+ * lines customers will read. Words the app knows before the read lands (the connectors' names and
+ * lines, the always-on rules, the payment limit's and the safety check's own lines, the public
+ * lines' labels) are measured in the current fonts at their real width, so the shapes take the
+ * lines the words will, on any platform. Words that come with the read (the rules, the situations,
+ * the tricks, the public lines) are estimates: when they wrap differently, the rows under them move
+ * once as they land. A skeleton draws no words.
  */
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { ALWAYS_ON, PageHeaderSkeleton, Skeleton, SkeletonCard, SkeletonScreen, type SkeletonText } from '../ds/index.ts';
 import { connectorByKey, type ConnectorKey } from '../owner/connectors/catalog.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
-import { SETUP_COPY } from './copy.ts';
+import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
+import { publicLineLabel } from './publicLinesFormat.ts';
 
 /**
  * Setup's column while the interview itself is read ("Opening your setup"): a step's header as
@@ -482,6 +484,94 @@ export function SafetyCheckSkeleton() {
       <div className="cd-setup-step__actions">
         <MainButton label={SETUP_COPY.safety.confirm} />
         <MainButton label={SETUP_COPY.safety.runAgain} variant="secondary" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One of the owner's lines customers will read: its key, which names its label, and where each of
+ * its paragraphs' lines ends on a laptop and on a phone, in px. The words come with the read, so
+ * their lines are estimates: a fresh copy's own, the last line of a wrapped value short.
+ */
+interface PublicLineShape {
+  key: (typeof PUBLIC_LINE_KEYS)[number];
+  wide: readonly (readonly number[])[];
+  phone: readonly (readonly number[])[];
+}
+
+/**
+ * A fresh copy's lines, in the step's order: about, getting started, after hours, urgent help, the
+ * service area, and how we help, three short paragraphs Claude writes from the rules.
+ */
+const PUBLIC_LINES: readonly PublicLineShape[] = [
+  { key: 'policy:about', wide: [[477, 310]], phone: [[256, 217, 235, 71]] },
+  { key: 'policy:intake', wide: [[465, 455, 58]], phone: [[250, 252, 225, 248]] },
+  { key: 'policy:after_hours', wide: [[477, 84]], phone: [[255, 218, 84]] },
+  { key: 'policy:urgent', wide: [[486, 135]], phone: [[247, 235, 135]] },
+  { key: 'policy:service_area', wide: [[361]], phone: [[252, 106]] },
+  { key: 'policy:how_we_help', wide: [[265], [365], [378]], phone: [[265], [298, 64], [300, 75]] },
+];
+
+/** How we help is Claude's, from the rules: it has no Edit, and its words take the row's width. */
+const READ_ONLY_LINE = 'policy:how_we_help';
+
+/** A paragraph's lines, a laptop's and a phone's, each shown only at its own width. */
+function ParagraphLines({ wide, phone }: { wide: readonly number[]; phone: readonly number[] }) {
+  return (
+    <>
+      {wide.map((width, i) => (
+        <Skeleton key={`wide-${i}`} shape="line" width={width} className="cd-setup-skeleton__wide-line" />
+      ))}
+      {phone.map((width, i) => (
+        <Skeleton key={`phone-${i}`} shape="line" width={width} className="cd-setup-skeleton__phone-line" />
+      ))}
+    </>
+  );
+}
+
+/**
+ * "What customers will read" while the lines are read: the owner's lines in their card, each its
+ * label, its words and Edit at the row's top right, then "Looks right". Claude's suggestions aren't
+ * drawn: when they come with the read, their card lands above the lines, which move down once.
+ */
+export function PublicLinesSkeleton() {
+  return (
+    <div className="cd-setup-skeleton">
+      <SkeletonCard padding={16} anchor="public-lines-card">
+        <div className="cd-public-lines cd-public-lines--owned">
+          {PUBLIC_LINES.map((line, i) => (
+            <div
+              key={line.key}
+              className={`cd-public-lines__row${line.key === READ_ONLY_LINE ? ' cd-public-lines__row--readonly' : ''}`}
+              data-skeleton-anchor={`public-lines-row-${i}`}
+            >
+              <span className="cd-public-lines__label cd-type-meta" data-skeleton-anchor={`public-lines-label-${i}`}>
+                <MeasuredLines words={publicLineLabel(line.key) ?? ''} text="meta" />
+              </span>
+              <div className="cd-public-lines__text">
+                {line.wide.map((wide, p) => (
+                  <p key={p}>
+                    <ParagraphLines wide={wide} phone={line.phone[p] ?? []} />
+                  </p>
+                ))}
+              </div>
+              {line.key === READ_ONLY_LINE ? null : (
+                <div className="cd-public-lines__actions">
+                  <Skeleton
+                    shape="block"
+                    measure={{ label: SETUP_COPY.publicLines.edit, className: ROW_BUTTON }}
+                    height="var(--size-control)"
+                    anchor={`public-lines-edit-${i}`}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </SkeletonCard>
+      <div className="cd-setup-step__actions">
+        <MainButton label={SETUP_COPY.situations.looksRight} />
       </div>
     </div>
   );

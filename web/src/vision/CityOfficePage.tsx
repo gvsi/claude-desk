@@ -47,7 +47,7 @@ export function CityOfficePage() {
               <VisitorMessage text={t.status} />
             </TranscriptRow>
             <TranscriptRow margin={cityReceipts(51, s.executed, t.codeSent)}>
-              <ClaudeMessage blocks={[...proseOf(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={staff} />
+              <ClaudeMessage plainProse blocks={[...proseOf(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={staff} />
             </TranscriptRow>
             <SystemLine text={t.verified} />
             <TranscriptRow margin={cityReceipts(53, s.executed, t.readFile)}>
@@ -63,7 +63,7 @@ export function CityOfficePage() {
               <VisitorMessage text={t.inspector} />
             </TranscriptRow>
             <TranscriptRow margin={cityReceipts(55, s.executed, t.readCalendar)}>
-              <ClaudeMessage blocks={[...proseOf(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={staff} />
+              <ClaudeMessage plainProse blocks={[...proseOf(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={staff} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.garage} />
