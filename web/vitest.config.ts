@@ -24,6 +24,10 @@ export default defineConfig(async (env) =>
               name: 'unit',
               environment: 'jsdom',
               include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
+              // Vitest gives Node and browser tests separate worker budgets that run at once. Running these
+              // after the browser projects keeps a CI shard's --maxWorkers the ceiling for the whole run,
+              // so the browser tests' timing isn't starved by Node tests beside them.
+              sequence: { groupOrder: 1 },
             },
           },
           {
