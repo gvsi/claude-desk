@@ -252,10 +252,10 @@ const bookedProse: Record<Language, RenderedBlock> = {
   es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
-/** The booked card's words, as the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner}. */
+/** The booked card's words, as the kernel renders a confirmed booking: {date} / {start} to {end} / With {owner}. */
 const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
-  en: { title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With {owner}'] },
-  es: { title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con {owner}'] },
+  en: { title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With {owner}'] },
+  es: { title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con {owner}'] },
 };
 
 /** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Rivera's Desk, the fixtures' card. */

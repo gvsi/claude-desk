@@ -1366,10 +1366,10 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(slug, 'Llámame, por favor')).toEqual([callback('Linda te llamará el lunes, entre las 8:00 y las 9:00')]);
 
     expect((await repliesTo(slug, 'Book the first one')).at(-1)).toEqual(
-      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Linda'] }),
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With Linda'] }),
     );
     expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
-      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con Linda'] }),
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con Linda'] }),
     );
     // Rivera's Desk books with the fixtures' own card.
     expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);

@@ -436,9 +436,9 @@ describe('fixtures', () => {
     const owner = rivera.business.ownerName;
     const card = (language: 'en' | 'es') => rivera.blocks.booking_confirmed[language];
     expect(card('en').title).toBe('Tuesday, November 3');
-    expect(card('en').lines).toEqual(['Arriving 2:00 pm to 4:00 pm', `With ${owner}`]);
+    expect(card('en').lines).toEqual(['2:00 pm to 4:00 pm', `With ${owner}`]);
     expect(card('es').title).toBe('martes 3 de noviembre');
-    expect(card('es').lines).toEqual(['Llegada de 14:00 a 16:00', `Con ${owner}`]);
+    expect(card('es').lines).toEqual(['De 14:00 a 16:00', `Con ${owner}`]);
     // No booking ID in what the visitor sees; the fact it comes from keeps its id.
     for (const language of ['en', 'es'] as const) expect(card(language).text).not.toMatch(/B-77|Booking|Reserva/);
   });
