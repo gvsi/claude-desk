@@ -73,7 +73,7 @@ const meta = {
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       'The signed limit is SignedLimitPanel, as the board draws it: per charge, in total, what the agent has used and for how long, in the screen’s words from the mandate, with whose wallet signed it at the right.',
       'The list column and the conversation head are composed as on the live conversation board (AppShell fill).',
-      'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
+      'The sidebar is the panel with its seam and the Claude acts for you switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
     ].join(' '),
   },
 } satisfies Meta;

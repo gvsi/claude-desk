@@ -2252,7 +2252,7 @@ describe("Today's unfinished setup", () => {
     await expect
       .element(
         card.getByText(
-          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
           { exact: true },
         ),
       )
@@ -2287,7 +2287,7 @@ describe("Today's unfinished setup", () => {
     await expect
       .element(
         card.getByText(
-          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
           { exact: true },
         ),
       )
@@ -2296,7 +2296,7 @@ describe("Today's unfinished setup", () => {
   });
 
   /** The card's line at the rules, with Answering off. */
-  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.";
+  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.";
 
   /**
    * Opens setup at its tools, with the copy's Desks read there, at the tools; then `meanwhile` sets
@@ -2392,7 +2392,7 @@ describe("Today's unfinished setup", () => {
       .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
       .toBeVisible();
     expect(card.element().textContent).not.toMatch(/Answering/);
-    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('a_draft_that_lands_after_leaving_moves_the_card_on', async () => {
@@ -2420,7 +2420,7 @@ describe("Today's unfinished setup", () => {
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .element(card.getByText('Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
 
     release();
@@ -2428,7 +2428,7 @@ describe("Today's unfinished setup", () => {
   });
 
   /** The card's line at the tools, with Answering off. */
-  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.';
+  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.';
 
   /**
    * From Today, setup reopened at its tools; the rules it goes on to can't be checked (the API keeps
@@ -2579,20 +2579,20 @@ describe("Today's unfinished setup", () => {
     };
     await lineAt(
       '3Rules',
-      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupSituations', { params: { id } });
     await lineAt(
       '3Rules',
-      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupSafetyCheck', { params: { id } });
     await lineAt(
       '4Safety check',
-      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupConfirm', { params: { id } });
-    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Answering stays off until then.');
+    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Claude takes messages only until then.');
 
     await mockStore.dispatch('goLive', { params: { id } });
     const live = await renderRoute(`/app/${state.desk_id}/today`);
@@ -2607,14 +2607,14 @@ describe("Today's unfinished setup", () => {
     const atQuestions = await renderRoute(`/app/${next.desk_id}/today`);
     const first = region(atQuestions.screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(first.getByText('Your answers are saved. Pick up at the questions. Answering stays off until your Desk is live.', { exact: true }))
+      .element(first.getByText('Your answers are saved. Pick up at the questions. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
     expect(first.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
     const tools = await deskAtTools();
     const atTools = await renderRoute(`/app/${tools.desk_id}/today`);
     const second = region(atTools.screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(second.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .element(second.getByText('Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
     expect(second.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('2Tools');
   });

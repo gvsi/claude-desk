@@ -3,9 +3,9 @@ import { useId } from 'react';
 import './Switch.css';
 
 export interface SwitchProps {
-  /** What the switch turns on or off: "Answering", "Customers can see this". */
+  /** What the switch turns on or off: "Claude acts for you", "Customers can see this". */
   label: string;
-  /** One line under the label saying what "on" means: "Claude answers under your rules". */
+  /** One line under the label saying what "on" means: "Within your rules". */
   description?: string;
   checked: boolean;
   /** Called with the new value; the switch shows whatever `checked` the screen passes back. */

@@ -44,7 +44,7 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
  * The last step, opened by a confirmed setup. Before going live (step `preview`): the public page
  * in a frame, on the owner's own preview chat, while Answering is off; under it the launch bar, that
  * Answering stays off and only the owner sees the preview, and "Go live", which turns it on. Live:
- * "Answering now" under the title, its handled dot breathing, while the Desk answers; the link to
+ * "Acting for you now" under the title, its handled dot breathing, while the Desk answers; the link to
  * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
  * draws it: the link's QR code, and the website embed, coming later. It is built from the link
  * alone; the printable card and the ready-made words are on Share.
@@ -68,7 +68,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk
-      // is live. The Desks are read again first, so a step that turns live draws with "Answering now"
+      // is live. The Desks are read again first, so a step that turns live draws with "Acting for you now"
       // as they say, rather than gaining it a moment later and moving down.
       const recover = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
       if (recover) await queryClient.refetchQueries({ queryKey: DESKS_KEY });

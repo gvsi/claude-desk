@@ -54,6 +54,7 @@ export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './c
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
+export { ACTING_SWITCH_COPY } from './components/Switch/copy.ts';
 export {
   SegmentedControl,
   type SegmentedControlProps,
