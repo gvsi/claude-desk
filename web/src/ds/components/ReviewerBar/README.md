@@ -23,4 +23,4 @@ The bar is a `role="note"` on `bg-muted` with a `line-hairline` under it, in `me
 
 ## Loading shapes
 
-`ReviewerBarSkeleton()` keeps this bar's ground, hairline, meta line boxes and control-sized Start over shape. It reserves two lines on a phone, following the fresh copy's real bar, and draws no words or controls. Render it in `SkeletonScreen`'s hidden layer. Companion stories compare the real bar and its action with the shapes within 2 px at 1512 and 390.
+`ReviewerBarSkeleton()` keeps this bar's ground, hairline, meta line boxes and control-sized Start over shape. It measures the fresh copy's real text in a temporary hidden paragraph, using the current font and available width, so line boxes follow natural wrapping rather than a viewport breakpoint. It remeasures on resize and font loading, and leaves no words or controls in the shapes. Render it in `SkeletonScreen`'s hidden layer. Companion stories compare the real bar and its action with the shapes within 2 px at 1512 and 390. Browser tests also resize the mounted bar through 390, 440, 480, 540, 620, 639, 640, 768 and 1440 px; frame reload tests cover 390, 620 and 1440 px.
