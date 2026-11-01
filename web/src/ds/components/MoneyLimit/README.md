@@ -46,3 +46,4 @@
 | `onCancel` | `() => void` | Required with `onEdit`. "Cancel". |
 | `disabled` | `boolean` | A draft in flight: the buttons wait. |
 | `prominent` | `boolean` | The limit leads the rules under it (the setup's rules step): its line in weight 520. |
+| `updated` | `boolean` | With `onEdit`. The owner's confirmed change set this limit since they opened the page: an "Updated" `Pill` follows the line, 8 px after its last word, growing from 95% as it fades in on `motion-base`, and the words that changed cross-fade as the new line arrives (`$500` to `$600`). The line takes no fill, since "Change" is a Button and the selected ground can't take one. Under reduced motion it is at its end state at once. The screen keeps it until the owner leaves the page. The limit then carries `cd-money-limit--updated`, so a screen can find it. |

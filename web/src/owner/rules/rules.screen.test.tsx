@@ -409,12 +409,12 @@ describe('rules page', () => {
     // Nothing changes until it is confirmed.
     expect(desk().policy.version).toBe(7);
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    // Confirmed, it goes back to Rules, where the change lands; quotes are still automatic.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     expect(requests('confirmRules').map((r) => r.body)).toEqual([{ version }]);
     expect(desk().policy.version).toBe(version);
     expect(screen.container.textContent).not.toMatch(/\bCustom\b/);
-    // Back on Rules, quotes are still automatic.
-    await screen.getByRole('link', { name: 'See your rules' }).click();
     await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Automatic$/);
   });
 
@@ -815,15 +815,14 @@ describe('rules page', () => {
     await expect.element(screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true })).toBeVisible();
     expect(requests('confirmRules')).toEqual([]);
 
-    // Again, confirmed: $100 in both groups.
+    // Again, confirmed: back on Rules, $100 in both groups, each saying it was updated.
     await lower();
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(requests('confirmRules')).toHaveLength(1);
     expect(desk().policy.auto_money_cap_cents).toBe(10_000);
-    await screen.getByRole('link', { name: 'See your rules' }).click();
     const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
-    for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(limit100, { exact: true })).toBeVisible();
+    for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(`${limit100}Updated`, { exact: true })).toBeVisible();
     // No rule beside it still takes more on its own.
     await expectToolRow(screen.container, /^Payment link: .*, Automatic up to \$100; over \$100, ask me first$/);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
@@ -843,10 +842,9 @@ describe('rules page', () => {
       expect(row.after, row.title).toContain('Your payment limit is $0.');
     }
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
-    await screen.getByRole('link', { name: 'See your rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     for (const name of ['Payments', 'Stripe']) {
-      await expect.element(screen.getByRole('region', { name }).getByText('Every payment asks you first.', { exact: true })).toBeVisible();
+      await expect.element(screen.getByRole('region', { name }).getByText('Every payment asks you first.Updated', { exact: true })).toBeVisible();
     }
     await expectToolRow(screen.container, /^Payment link: .*, Ask me first$/);
     await expectToolRow(screen.container, /^Charge within a signed limit: .*, Ask me first$/);
