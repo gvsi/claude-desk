@@ -219,6 +219,36 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
+  it('leaves_the_owner_where_they_scroll_in_the_same_frame_as_new_words', async () => {
+    const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
+    const words = growingWords(long);
+    mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
+    const first = gate();
+    const second = gate();
+    mockStore.planStream('ruleChat', { holds: [{ after: 400, until: first.until }, { after: 410, until: second.until }] });
+    const { panel } = await ask(viewport);
+    await expect.poll(() => growing(panel)?.textContent, LANDS_WITHIN).toBe(settledWords(words[399] ?? ''));
+    const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
+    expect(log.scrollHeight).toBeGreaterThan(log.clientHeight + 200);
+    // Keep the scroll event pending until growth effects have run, arranging the rendering-step
+    // race without relying on the machine's frame timing. The scroll itself is real.
+    const deferScroll = (event: Event) => event.stopImmediatePropagation();
+    log.addEventListener('scroll', deferScroll, { capture: true });
+    log.scrollTop += 120;
+    const read = log.scrollTop;
+    first.release();
+    await expect.poll(() => growing(panel)?.textContent, LANDS_WITHIN).toBe(settledWords(words[409] ?? ''));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    log.removeEventListener('scroll', deferScroll, { capture: true });
+    log.dispatchEvent(new Event('scroll'));
+    expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
+    second.release();
+    await finalAnswer(panel, 'Part 30 of the answer');
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(growing(panel)).toBeNull();
+    expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
+  });
+
   it('follows_a_follow_up_answer_once_the_conversation_overflows', async () => {
     // A first answer long enough that the conversation scrolls.
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');

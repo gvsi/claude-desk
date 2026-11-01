@@ -145,10 +145,12 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
     const log = turn?.closest<HTMLElement>('[role="log"]');
     if (!turn || !log) return undefined;
     const lead = turnOf(leadId) ?? turn;
-    // Where its own scrolling leaves the conversation, so it is never read as the owner's.
+    // Record only scrolling that moved the conversation: a no-op must not claim the owner's
+    // new position before the browser delivers their scroll event.
     const reveal = (end: Element) => {
+      const before = log.scrollTop;
       revealExchange(log, lead, turn, end);
-      follow.current.at = log.scrollTop;
+      if (log.scrollTop !== before) follow.current.at = log.scrollTop;
     };
     reveal(turn);
     if (!drafted) return undefined;
@@ -163,8 +165,9 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
       // words don't both fit, the buttons win, wholly in view.
       const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - log.getBoundingClientRect().bottom;
       if (short > 0) {
+        const before = log.scrollTop;
         log.scrollTop += short;
-        follow.current.at = log.scrollTop;
+        if (log.scrollTop !== before) follow.current.at = log.scrollTop;
       }
       return true;
     };
@@ -180,7 +183,7 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
 /**
  * How the answer being written is followed: for which question (the owner's turn that leads it),
  * and whether it follows the exchange, keeps to the conversation's end, or stays where the owner
- * scrolled; `at` is where it last left the conversation.
+ * scrolled; `at` is the last position its own scrolling actually moved the conversation to.
  */
 interface Follow {
   lead: number | undefined;
@@ -203,7 +206,7 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
     if (!log) return undefined;
     const onScroll = () => {
       const now = follow.current;
-      // Its own scrolling lands where it left the conversation; anything else is the owner's.
+      // Only a position its own scrolling actually moved to is treated as its own.
       if (now.at !== null && Math.abs(log.scrollTop - now.at) <= 1) return;
       now.at = null;
       now.mode = log.scrollHeight - log.clientHeight - log.scrollTop <= 1 ? 'end' : 'off';
@@ -224,13 +227,14 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
     const answer = root.current?.querySelector<HTMLElement>('.cd-rule-chat__growing');
     const log = answer?.closest<HTMLElement>('[role="log"]');
     if (!answer || !log) return;
+    const before = log.scrollTop;
     if (now.mode === 'end') {
       log.scrollTop = log.scrollHeight - log.clientHeight;
     } else {
       const lead = leadId === undefined ? answer : (root.current?.querySelector<HTMLElement>(`[data-turn="${leadId}"]`) ?? answer);
       revealExchange(log, lead, answer, answer, { upward: false });
     }
-    now.at = log.scrollTop;
+    if (log.scrollTop !== before) now.at = log.scrollTop;
   }, [root, leadId, growing, follow]);
 }
 
