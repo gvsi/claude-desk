@@ -18,6 +18,7 @@ import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, JobKind, ProposalCard as Proposal, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { coarsePointer } from '../ds/test/touch.ts';
 import { pairContrast } from '../ds/contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
@@ -3000,6 +3001,41 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it('focuses_a_failed_choice_retry_and_enter_retries_without_opening_the_phone_keyboard', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toBeVisible();
+    await expect.poll(() => document.activeElement === retry.element()).toBe(true);
+    await userEvent.keyboard('{Enter}');
+    const connect = screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true });
+    await expect.element(connect).toHaveFocus();
+    expect(requests('setupAnswer').map(({ body }) => body)).toEqual([
+      { question: 'what_you_do', text: 'Both, about evenly' }, { question: 'what_you_do', text: 'Both, about evenly' },
+    ]);
+  });
+
+  it.each(['fine', 'coarse'] as const)('returns_a_plain_question_to_the_composer_only_with_a_%s_pointer', async (pointer) => {
+    if (pointer === 'coarse') await coarsePointer();
+    expect(window.matchMedia('(pointer: fine)').matches).toBe(pointer === 'fine');
+    const state = await consultantAt();
+    const next: SetupState = { ...state, pending_card: null, question: SETUP_QUESTIONS[1]!.key, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: SETUP_QUESTIONS[1]!.text, choices: [], card: null },
+    ] };
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    mockStore.inject({ route: 'setupAnswer', status: 200, body: next });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[1]!.text, { exact: true })).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    if (pointer === 'fine') await expect.poll(() => document.activeElement === box.element()).toBe(true);
+    else expect(document.activeElement).not.toBe(box.element());
+  });
+
+
   it.each(['desktop', 'phone'] as const)('answers_the_first_panel_by_keys_after_consent_without_manual_focus_on_%s', async (viewport) => {
     const state = await startInterview(null, CPA_DESCRIPTION);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
@@ -3348,6 +3384,8 @@ describe('consultant setup', () => {
     await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
     await stripe.getByRole('button', { name: 'Connect', exact: true }).click();
     await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
+    const amount = screen.getByRole('article', { name: 'Send a retainer link', exact: true }).getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.poll(() => document.activeElement === amount.element()).toBe(true);
     expect(stripe.getByRole('button').elements()).toHaveLength(0);
     expect(stripe.element().querySelector('.cd-setup-c3__line')).toBeNull();
     expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true });

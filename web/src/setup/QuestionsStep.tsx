@@ -121,7 +121,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (asking || blocked) return;
     if (!waitingForFirstQuestion.current || state.question === null) return;
     waitingForFirstQuestion.current = false;
-    const target = panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE) : composer.current?.querySelector('textarea');
+    const target = panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
+      : window.matchMedia('(pointer: fine)').matches ? composer.current?.querySelector('textarea') : null;
     const focus = document.activeElement;
     if (!target || (focus !== document.body && !step.current?.contains(focus))) return;
     target.focus({ preventScroll: true });
@@ -169,7 +170,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const submit = async (answer: Answer, again = false) => {
     if (composer.current?.contains(document.activeElement)) {
       returnFocus.current = true;
-      returnToTextarea.current = true;
+      if (!again) returnToTextarea.current = true;
     }
     setSending(answer.text);
     setFailed(null);
@@ -319,15 +320,22 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   useEffect(() => {
     if (blocked || !returnFocus.current) return;
     returnFocus.current = false;
-    // A failed answer replaces the field with "Try again" until it can be settled.
-    const target = decisionFailed
-      ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
-      : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
+    const field = composer.current?.querySelector<HTMLElement>('textarea:not(:disabled)');
+    const pending = state.messages.find(({ card }) => card?.proposal_id === state.pending_card)?.card;
+    const config = pending?.job?.config;
+    const unpriced = pending?.job?.job === 'payment'
+      && (config?.block !== 'purpose_payment' || config.amount_cents === null || config.amount_cents <= 0);
+    const cardTarget = pending ? unpriced
+      ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__amount input:not(:disabled):not([readonly])')
+      : step.current?.querySelector<HTMLElement>('.cd-setup-c3__actions button:not(:disabled)') : null;
+    const target = failed ? composer.current?.querySelector<HTMLElement>('button:not(:disabled)')
+      : decisionFailed ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
       : panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
-      : returnToTextarea.current ? composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)')
-      : step.current?.querySelector<HTMLElement>('.cd-setup-c3__actions button:not(:disabled)');
+      : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
+      : returnToTextarea.current ? field
+      : cardTarget ?? (window.matchMedia('(pointer: fine)').matches ? field : null);
     target?.focus({ preventScroll: true });
-  }, [blocked, failed, decisionFailed, closing, panel?.index]);
+  }, [blocked, failed, decisionFailed, closing, panel?.index, state.pending_card, state.messages]);
 
   useLayoutEffect(() => {
     const pane = scroll.current;
