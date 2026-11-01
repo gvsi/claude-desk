@@ -360,6 +360,39 @@ async def test_counts_on_another_question_never_back_hours_through_rules(proposa
     assert (await stored(engine, interview_id))["answers"]["hours"] == []
 
 
+@pytest.mark.parametrize("held", [True, False])
+async def test_a_fact_a_turn_has_no_field_for_never_counts_as_the_owners(proposals, model, engine, monkeypatch, held):
+    from desk.api.prompts import SETUP_TURNS, SetupPatch
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    website = [HoursAnswer(days=["mon"], start="09:00", end="17:00")]
+    if held:
+        async with engine.begin() as conn:
+            interview = await setup._load(conn, owner.copy_id, interview_id)
+            interview.answers.hours = [window.window() for window in website]
+            interview.answers.suggested_fields = ["hours"]
+            await setup._save(conn, interview)
+    await show_card(engine, interview_id, question=True)
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    # what_you_do's turn has no hours field (FIELD_TURNS): a patch that carries the owner's stated hours anyway is
+    # dropped, and so is its claim to who gave them, so held hours stay held for the hours question.
+    monkeypatch.setattr(SETUP_TURNS["what_you_do"], "patch",
+                        lambda self: SetupPatch(summary="We repair plumbing.", hours=hours))
+    reply = await answer(owner, model, interview_id, "We repair plumbing, open 9am to 5pm weekdays.",
+                         turn(summary="We repair plumbing."))
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said["owner_fields"] == ["summary"]
+    assert answers.hours == ([window.window() for window in website] if held else [])
+    assert ("hours" in answers.suggested_fields) is held
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.hours == [] and parts.calendar == []
+
+
 @pytest.mark.parametrize("owner_text,supported", [
     # Off their own question, hours count only in explicit time syntax: a meridiem, a clock time or a range.
     ("We're open 9am to 5pm weekdays", True),

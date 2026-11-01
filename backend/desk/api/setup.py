@@ -1722,10 +1722,12 @@ def _is_fact(name: str) -> bool:
 
 
 def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
-    """Only fact fields this question is allowed to merge, including explicit empty lists."""
+    """Only fact fields this question is allowed to merge, including explicit empty lists: never a field only other
+    questions' turns have (`FIELD_TURNS`, read at each call), which `merged` drops, so it never counts as given."""
     return [name for name, value in patch
             if name in SetupPatch.model_fields and name not in LIMIT_QUESTIONS
             and value is not None and not (isinstance(value, str) and not value.strip())
+            and (name not in FIELD_TURNS or key in FIELD_TURNS[name])
             and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
 
 
