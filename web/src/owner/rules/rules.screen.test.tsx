@@ -6,14 +6,13 @@
 import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import type { RouteObject } from 'react-router';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
-import { observeRequests, RULES_UNAVAILABLE_COPY, TIMEOUT_MS } from '../../api/http.ts';
+import { observeRequests, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
-import { retryDelayMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
@@ -957,6 +956,16 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it('another_business_keeps_the_hold_question_beside_a_failed_rules_read', async () => {
+    renameBusiness('Acme Accounting');
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
+    await expect.element(screen.getByRole('alert')).toBeVisible();
+    await expect.element(screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
+  });
+
   it.each(['desktop', 'phone'] as const)('another_business_draws_the_body_and_delayed_hold_question_together at %s', async (viewport) => {
     renameBusiness('Acme Accounting');
     const reads = holdNeedsYou();
@@ -1037,18 +1046,46 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
   });
 
-  it('another_business_opens_when_an_unanswered_needs_you_read_times_out', { timeout: 30_000 }, async () => {
+  it('another_business_caps_the_needs_you_wait_at_three_seconds_after_rules_settle', async () => {
     renameBusiness('Acme Accounting');
     const reads = holdNeedsYou();
+    let releaseRules!: () => void;
+    const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
+    onTestFinished(() => releaseRules());
+    worker.use(http.get(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      await rulesHeld;
+      return undefined;
+    }));
+    const rulesRead = new Promise<void>((resolve) => {
+      onTestFinished(observeRequests((outcome) => {
+        if (outcome.key === 'rules' && outcome.ok) resolve();
+      }));
+    });
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
-    // Reuse the request layer's real deadline and one retry; never release the held response.
-    const giveUpMs = 2 * TIMEOUT_MS.default + retryDelayMs(0);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' }), { timeout: giveUpMs + 1_000 }).toBeVisible();
-    expect(reads.held()).toBe(2);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+
+    releaseRules();
+    await rulesRead;
+    await vi.advanceTimersByTimeAsync(0);
+    await new Promise(requestAnimationFrame);
+    await vi.advanceTimersByTimeAsync(2_999);
+    await new Promise(requestAnimationFrame);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await new Promise(requestAnimationFrame);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
+
+    vi.useRealTimers();
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
   });
 
   it('rivera_keeps_both_fixed_chips_without_a_hold', async () => {
