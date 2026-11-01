@@ -904,9 +904,13 @@ describe('rules page', () => {
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
     const limit = () => screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true }).element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     limit().scrollIntoView({ block: 'center' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    await heard;
     const place = main.scrollTop;
+    expect(place).toBeGreaterThan(0);
     const shows = limit().getBoundingClientRect().top;
     expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
 
