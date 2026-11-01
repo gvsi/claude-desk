@@ -326,11 +326,10 @@ export const HELD_PROSE: Record<Language, string> = {
   es: heldProse('es', RIVERA_OWNER),
 };
 
-/** Claude's checked words when nothing more specific fits, on Rivera's Desk. */
-const helpProse: Record<Language, RenderedBlock> = {
-  en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
-  es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
-};
+/** Claude's checked words when nothing more specific fits: a question only the Desk's owner can answer. */
+function helpProse(language: Language, owner: DeskOwner): RenderedBlock {
+  return proseBlock(ownerProse(language, owner, 'help'));
+}
 
 /**
  * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
@@ -842,7 +841,7 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'other',
     words: [],
     tools: [],
-    steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
+    steps: [writing, (ctx) => ctx.reply([helpProse(ctx.language, ctx.owner)])],
   },
 ];
 

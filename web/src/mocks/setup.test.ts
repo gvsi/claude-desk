@@ -1195,6 +1195,16 @@ describe('a Desk setup made, speaking for its own owner', () => {
     return events.flatMap((ev) => (ev.type === 'message' ? ev.blocks.filter((b) => b.kind === 'prose').map((b) => b.text) : []));
   }
 
+  it('what_only_the_owner_can_answer_names_that_owner', async () => {
+    // Claude's plain answer when nothing more specific fits: Linda can tell, and the visitor can ask
+    // for her by name, as the page's "Ask for Linda" does.
+    const slug = await liveDesk(CPA);
+    expect(proseOf(await turnOn(slug, 'Should we file jointly this year?'))).toEqual([
+      'Linda can tell you after taking a look. You can ask for Linda here anytime.',
+    ]);
+    expect(proseOf(await turnOn(slug, 'Hola'))).toEqual(['Linda te lo puede decir cuando lo vea. Puedes pedir hablar con Linda aquí cuando quieras.']);
+  });
+
   it('rivera_keeps_her_signed_held_line', async () => {
     // Rivera's Desk keeps the signed boards' words, in either language.
     const asked = await turnOn(RIVERA.slug, 'Can I get 10% off?');
