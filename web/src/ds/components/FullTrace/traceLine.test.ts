@@ -8,7 +8,7 @@ const REPORTED = 'Reported by the chat service, not checked by the checkpoint.';
 
 describe('traceLine', () => {
   it('names_web_search_usage', () => {
-    expect(traceLine({ kind: 'web_search', origin: 'kernel' })).toBe(`Web search. ${RECORDED}`);
+    expect(traceLine({ kind: 'web_search', origin: 'kernel', summary: {} })).toBe(`Web search. ${RECORDED}`);
   });
 
   it('kernel_entries_are_recorded_by_the_checkpoint', () => {
@@ -42,11 +42,11 @@ describe('traceLine', () => {
   });
 
   it.each([
-    ['opened', { kind: 'card' }, 'The Desk handed a chat to you.'],
-    ['done', {}, 'You marked a chat done.'],
-    ['replaced', { replaced_by: 'h-2' }, 'A call-back request replaced the handoff.'],
-    ['took_over', { closed_by: 'takeover' }, 'You took the chat over.'],
-    ['wrote', { closed_by: 'owner_message' }, 'You wrote in the chat.'],
+    ['opened', { kind: 'card' }, 'Chat handed to you.'],
+    ['done', {}, 'Chat marked done.'],
+    ['replaced', { replaced_by: 'h-2' }, 'Chat moved to a call-back.'],
+    ['took_over', { closed_by: 'takeover' }, 'Handoff closed when you took over.'],
+    ['wrote', { closed_by: 'owner_message' }, 'Handoff closed when you wrote in the chat.'],
   ] as const)('names_the_%s_handoff_entry', (_state, details, what) => {
     const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['h-1'], ...details } } as const;
     expect(traceLine({ ...event, origin: 'kernel' })).toBe(`${what} ${RECORDED}`);

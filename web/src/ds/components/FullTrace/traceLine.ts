@@ -26,13 +26,16 @@ const KIND_LINES = {
   web_search: 'Web search.',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
-/** Handoff entries share the owner's history rule; every handoff state has its own words. */
+/**
+ * Handoff entries share the owner's history rule and read the owner's history row names, each as a
+ * sentence: one line per handoff state.
+ */
 const HANDOFF_LINES = {
-  opened: 'The Desk handed a chat to you.',
-  done: 'You marked a chat done.',
-  replaced: 'A call-back request replaced the handoff.',
-  took_over: 'You took the chat over.',
-  wrote: 'You wrote in the chat.',
+  opened: 'Chat handed to you.',
+  done: 'Chat marked done.',
+  replaced: 'Chat moved to a call-back.',
+  took_over: 'Handoff closed when you took over.',
+  wrote: 'Handoff closed when you wrote in the chat.',
 } as const satisfies Record<HandoffEntry, string>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
