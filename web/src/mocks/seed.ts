@@ -338,7 +338,7 @@ export function riveraTools(): ToolRecord[] {
 
 /**
  * Mike's urgent business tool, as the kernel's Turner seed gives every copy (`RIVERA_BUSINESS_TOOLS`):
- * an emergency callback that alerts her at once, whatever her notification settings.
+ * an emergency callback that alerts him at once, whatever his notification settings.
  */
 const RIVERA_URGENT_JOB = {
   title: 'Emergency callback',

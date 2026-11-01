@@ -38,7 +38,7 @@ def test_a_list_from_one_of_at_most_nine_items_shows_no_number_to_scan():
     and its typed markers are blanked from the raw one, wherever its lines put them."""
     read = markdown_text.read(STEPS)
     assert read.visible == "Turn off the main valve\nOpen the lowest tap\nWait for Mike\nKeep the area dry\n"
-    assert read.list_markers == ((0, 2), (27, 29), (50, 52), (68, 70))
+    assert read.list_markers == ((0, 2), (27, 29), (50, 52), (67, 69))
     assert markdown_text.blank_list_markers(STEPS) == (
         "   Turn off the main valve\n   Open the lowest tap\n   Wait for Mike\n   Keep the area dry")
     assert markdown_text.read("1) a\n2) b").list_markers == ((0, 2), (5, 7))
@@ -96,7 +96,7 @@ NINE_STEPS = "\n".join(f"{n}. Check the next fitting" for n in range(1, 10))
     STEPS,
     NINE_STEPS,
     "  1. Turn off the valve\n  2. Open a faucet",
-    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMike looks at it when she's there.",
+    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMike looks at it when he's there.",
     "Before Mike gets there:\n1. Turn off the main valve\n   - It is under the sink\n2. Keep the area dry",
 ])
 async def test_a_numbered_list_from_one_to_nine_passes_by_the_owners_decision(app, client, prose):
@@ -294,7 +294,7 @@ async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_conta
     "Photos of her past jobs are at www.turnerplumbing.example.",
     "Photos are at https://WWW.turnerplumbing.example/photos (or www.turnerplumbing.example).",
     "You can write to mike@turnerplumbing.example about it.",
-    "You can write to MARIA@TurnerPlumbing.example about it.",
+    "You can write to MIKE@TurnerPlumbing.example about it.",
     "The forms are on irs.gov if you need them.",                    # no scheme or www.: no link
     "Pay for it at turnerplumbing.example/pay when you're ready.",
     "Call <!-- note --> us about it.",
@@ -330,7 +330,7 @@ def test_the_links_the_chats_make_of_plain_text_are_read_as_links():
      {"rivera.example"}, {"mike@rivera.example"}),
     ("riverapl.example/photos or https://pay.riverapl.example", {"riverapl.example", "pay.riverapl.example"}, set()),
     ("(510) 555-0142", set(), set()),
-    ("Call Mike any time, she is free", set(), set()),          # not a contact: names nothing
+    ("Call Mike any time, he is free", set(), set()),          # not a contact: names nothing
 ])
 def test_a_public_contact_names_its_hosts_and_emails(contact, hosts, emails):
     assert public_contact.contact_endpoints(contact) == (frozenset(hosts), frozenset(emails))

@@ -99,6 +99,7 @@ NAME_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bMR\b"), "MT"),                                # the owner's initials
     (re.compile(r"riveraplumbing"), "turnerplumbing"),           # sites and emails
     (re.compile(r"\bmaria@"), "mike@"),
+    (re.compile(r"\bMARIA@"), "MIKE@"),                          # an email typed in capitals
     (re.compile(r"rivera-plumbing"), "turner-plumbing"),         # slugs and URLs
     (re.compile(_ALONE_BEFORE + r"Mar[ií]a" + _ALONE_AFTER +             # "Maria's" and "Maria’s" too,
                 r"(?! Guadalupe| Smith)"), "Mike"),                       # but not the other Marias
@@ -184,6 +185,12 @@ FIXUP_EDITS: list[Edit] = [
 
 # Each she, her, hers or herself that refers to the owner, in the text the name rules leave.
 PRONOUN_EDITS: list[Edit] = [
+    ("backend/tests/kernel/test_reply_markdown.py", "Mike looks at it when she's there.", "Mike looks at it when he's there."),
+    ("backend/tests/kernel/test_reply_markdown.py", "Call Mike any time, she is free", "Call Mike any time, he is free"),
+    ("web/src/mocks/seed.ts", "an emergency callback that alerts her at once, whatever her notification settings.",
+     "an emergency callback that alerts him at once, whatever his notification settings."),
+    # "Mike" is one letter shorter than "Maria", so the fourth list marker in this fixture moves back by one.
+    ("backend/tests/kernel/test_reply_markdown.py", "(27, 29), (50, 52), (68, 70))", "(27, 29), (50, 52), (67, 69))"),
     ("README.md", "Claude answers her customers and", "Claude answers his customers and"),
     ("README.md", "allow without asking her.", "allow without asking him."),
     ("backend/desk/kernel_service/fixtures/memory.json", "hold about her business. It", "hold about his business. It"),
