@@ -3554,7 +3554,7 @@
       },
       "put": {
         "summary": "Setup Put Public Line",
-        "description": "Edit one public line and strictly publish the whole charter before saving its owner provenance.\nAllowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. A refused charter is\n422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.\n`policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409.",
+        "description": "Edit one public line and strictly publish the charter before saving its owner provenance.\nAllowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. Every write publishes\nthe confirmed lines and leaves out held lines (`held`), values still suggested, and every policy line while\nsetup's policy claims are switched off; a rewording that is published clears its line's hold. A refused charter\nis 422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.\n`policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409.",
         "operationId": "owner_setup_put_public_line",
         "parameters": [
           {
@@ -3653,7 +3653,7 @@
     "/api/owner/setup/{id}/public_lines/confirm": {
       "post": {
         "summary": "Setup Confirm Public Lines",
-        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before\nthe keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422\n`line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A failed save\nrestores the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
+        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before\nthe keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422\n`line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A held key\nis 422 `line_refused` naming it, with nothing changed: only a rewording can publish it. A failed save restores\nthe stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
         "operationId": "owner_setup_confirm_public_lines",
         "parameters": [
           {

@@ -236,9 +236,11 @@ PUBLIC_LINES_WRITE_RESPONSES = {
 @router.put("/{id}/public_lines", response_model=SetupPublicLines, responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_put_public_line(interview_id: InterviewId, body: SetupPublicLineIn, request: Request,
                                 ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
-    """Edit one public line and strictly publish the whole charter before saving its owner provenance.
-    Allowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. A refused charter is
-    422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.
+    """Edit one public line and strictly publish the charter before saving its owner provenance.
+    Allowed at `rules` or `situations`, without changing the step; 409 `conflict` otherwise. Every write publishes
+    the confirmed lines and leaves out held lines (`held`), values still suggested, and every policy line while
+    setup's policy claims are switched off; a rewording that is published clears its line's hold. A refused charter
+    is 422 `line_refused`, naming the refused key and reason codes when available; a charter cap names no key.
     `policy:how_we_help` is 422 `not_editable`. A failed save restores the stored charter once, then answers 409."""
     state = runtime(request).started()
     return await _public_lines_answer(setup.put_public_line(
@@ -260,8 +262,9 @@ async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPubli
     """Confirm only the listed keys at the displayed revision; publish before saving without changing the step.
     Allowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before
     the keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422
-    `line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A failed save
-    restores the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
+    `line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A held key
+    is 422 `line_refused` naming it, with nothing changed: only a rewording can publish it. A failed save restores
+    the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
     state = runtime(request).started()
     return await _public_lines_answer(setup.confirm_public_lines(
         ctx, state.database(), interview_id, state.clock(), keys=body.keys, revision=body.revision,

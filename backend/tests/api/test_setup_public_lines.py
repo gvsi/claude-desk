@@ -1152,17 +1152,37 @@ async def test_confirm_with_a_held_key_is_refused_without_writing(lines_setup, e
     assert calls == []
 
 
-async def test_writes_follow_the_policy_claim_switch(app, lines_setup, engine, fake, monkeypatch):
+@pytest.mark.parametrize("method", ["put", "confirm", "delete", "delete_price"])
+async def test_writes_follow_the_policy_claim_switch(app, lines_setup, engine, fake, monkeypatch, method):
     owner, state, path = lines_setup
-    await patch_answers(engine, state, suggested_fields=["pricing"])
+    await patch_answers(engine, state, price_items=PRICES, suggested_fields=["pricing", "price_items"])
+    before = await stored(engine, state["interview_id"])
     runtime = app.state.runtime
     runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=False)
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.put(path, json={"key": "policy:intake", "text": "Describe the problem."})
+    reply = await request_lines(owner.browser, path, method)
     assert reply.status_code == 200, reply.text
-    assert calls == [("charter", {"charter": [{"key": "contact", "kind": "text", "value": "hello@example.test"}]})]
-    assert (await stored(engine, state["interview_id"]))["answers"]["intake"] == "Describe the problem."
+    assert [body for part, body in calls if part == "charter"] == [
+        {"charter": [{"key": "contact", "kind": "text", "value": "hello@example.test"}]}]
     assert set(charter(fake, state["desk_id"])) == {"charter:hours", "charter:contact"}
+    assert (await stored(engine, state["interview_id"]))["answers"] != before["answers"]
+
+
+@pytest.mark.parametrize(("key", "text", "still_held"), [
+    ("policy:after_hours", "Leave a voicemail.", True), ("contact", "help@plumbing.example", False),
+])
+async def test_with_policies_off_only_a_published_rewording_clears_its_hold(app, lines_setup, engine, fake, key, text,
+                                                                           still_held):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, suggested_fields=[])
+    await hold_keys(engine, owner, state, [key])
+    runtime = app.state.runtime
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=False)
+    reply = await owner.browser.put(path, json={"key": key, "text": text})
+    assert reply.status_code == 200, reply.text
+    assert next(line["held"] for line in reply.json()["lines"] if line["key"] == key) is still_held
+    assert await held_keys(owner, state) == ([key] if still_held else [])
+    assert (f"charter:{key}" in charter(fake, state["desk_id"])) is not still_held
 
 
 @pytest.mark.parametrize("method", ["put", "confirm"])

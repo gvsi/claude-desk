@@ -2784,7 +2784,9 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
             })
         except ValidationError:
             raise ApiProblem(422, "invalid") from None
-        if key in interview.held_policy_keys:   # the rewording is published in its place, or nothing is saved
+        # A rewording clears its hold only when it is published in its place (or nothing is saved): with policies
+        # switched off, a policy line is never sent, so the kernel hasn't checked it and it stays held.
+        if key in interview.held_policy_keys and (key == "contact" or setup_policy_claims_enabled):
             interview.hold_policies([held for held in interview.held_policy_keys if held != key])
         return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
                                           setup_policy_claims_enabled=setup_policy_claims_enabled)
