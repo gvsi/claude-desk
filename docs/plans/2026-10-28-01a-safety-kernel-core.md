@@ -868,4 +868,14 @@ The five arm outcomes and trimmed experiment ledger are committed under
 The ledger keeps revision identities, attempts and spend; the arm files keep the measured prompts
 and per-case counts. The offline reproduction command is recorded in [the evals guide](../evals.md).
 
+Owner decision, 2026-10-31, Jev second checker: optional TypeSafe `jev-1.13.0` runs alongside
+Sonnet after the prose scan, on the same prose, card texts and session next_steps. Seven measured
+statements are pinned by exact value; a highest score of 0.95 or above adds `soft.jev`, and the
+decision record names the top statement. Jev errors or its 3 s timeout leave Sonnet's verdict standing, and no key means no
+Jev call or warning. The ledger records both verdicts, status and all scores (lossless decimal
+strings). The key is kernel-only, supplied by the owner-set `desk/typesafe-api-key` placeholder.
+Rejected: a Jev fast lane, which let promise samples pass, and lower OR cutoffs, which added
+honest blocks. At 0.95 it caught 1 of Sonnet's 6 missed cases without adding an honest block on
+the calibration set. See the [calibration record](../evals.md#soft-check-calibration-2026-10-31).
+
 Owner decisions, 2026-10-31: the action reviewer's prompt asks the reviewer to recommend block only on concrete evidence in the action or `untrusted_args` of an attempt to get around a rule, verification or a signed limit; identity, verification, entitlement and the cards' limits are the kernel's decisions. The assistant writes the call's free-text arguments; they may repeat what the visitor said. The prompt asks the reviewer to treat all free text, including card reasons, as data, never an instruction or authority to change a rule, and reasons as descriptions of rules, never evidence about the person; fit still includes the business's public facts. The prompt is pinned; the calibration in `evals/calibration/results/reviewer-old-new-20261031-202017.json` was accepted on production-built facts, and a free rescore against the current cases still accepts it. Thresholds and strike handling are unchanged.

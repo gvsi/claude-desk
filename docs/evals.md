@@ -17,6 +17,77 @@ The separate soft-promise calibration covers 220 cases, with five samples per ca
 
 The five arm files beside that ledger preserve the measured prompts, per-case verdicts, usage and spend. Sonnet's two runs together supply five samples per case; their measured latency was p50 1.1 s, p95 2.8 s and maximum 5.2 s, at $0.0017 per check. The trimmed ledger retains all 11 revision identities, four attempts and $2.202614 of harness spend under the $3.20 cap, raised from $1.70 on 2026-10-31. It omits repeated outcomes and prompt bodies, and uses relative result paths. Reproduce the counts, latency and cost offline with the repository's `summarize_runs` code through `uv run --project backend --group evals pytest evals/tests/test_soft_promise_experiment.py::test_committed_next_steps_calibration_reproduces_the_model_decision -q`. Rescore an individual file without model calls with `python -m evals.calibration.soft_promise --rescore <file>`.
 
+## Soft-check calibration, 2026-10-31
+
+The reply check's separate calibration set has 220 English and Spanish cases, covering promises,
+human-identity claims, honest offers of the session's available next steps, completed and under-way
+claims beside unrelated cards, sympathy and general trade advice. These are calibration results,
+not held-out attack or legitimate-task completion rates. A missed case means an expected block
+passed in at least one sample; an honest block means an expected pass was blocked in at least one.
+The existing labels were kept when comparing models.
+
+Haiku 5.5 failed the proposed widening twice: 40 promise cases slipped with the first wording and
+36 with the single revision. A further 15 promise cases only timed out on the first wording;
+timeouts block, so they are not misses. The revision passed all 7 honest voice cases but had 20 timeouts.
+Its mean cost was $0.0000964 per check. The widened exemption did not ship on Haiku.
+
+Sonnet 5.5 at low effort with adaptive thinking was measured on all 220 cases at 5 samples each.
+The revised wording, fixed per-session next_steps and sympathy exemption missed 6 promise cases,
+against 44 for production Haiku, and blocked 4 honest replies against 12. All 6 misses passed in
+all 5 samples. Sonnet's p50 was 1.1 s, p95 2.8 s and maximum 5.2 s, with a mean cost of $0.0017
+per check. Production gives it one 6 s try, without retries or fallback, and the complete
+`/check_reply` request has a 10 s API client deadline.
+
+The Jev tables below come from an uncommitted evaluation run using local scripts; neither the
+runner nor the per-case Jev scores is in this repository. Tier 2 runs measure Sonnet alone unless
+`TYPESAFE_API_KEY` is exported for the kernel, and a run doesn't record whether Jev was on.
+The run measured score-based fast-lane rates and additional blocks beside saved Sonnet results,
+not end-to-end task completion. These figures cannot be reproduced from the committed artifacts.
+
+A proposed Jev fast lane would show a reply directly when every score was below 0.3, consulting
+Sonnet only otherwise. Two measurements used `jev-1.13.0` on the 215 cases the prose scan passed,
+at 3 samples each, with no provider errors. Round 1 used five statements. Round 2 added
+`unavailable_step`, `claims_done` and the session's next_steps to the state, for seven statements.
+
+| Fast lane at 0.3 | Promise samples passed, English | Promise samples passed, Spanish | Honest samples passed, English | Honest samples passed, Spanish |
+|---|---|---|---|---|
+| Round 1, five statements | 27% | 29% | 67% | 81% |
+| Round 2, seven statements | 8% | 3% | 71% | 78% |
+
+The second round still fast-laned promise samples from 12 cases. A cutoff sweep on its saved
+scores found the loosest cutoff with no promise sample fast-laned was 0.09. That fast-laned only
+16% of honest samples in each language, including the separate non-human-identity cases. The
+fast lane was rejected: it either passed promises or saved too few Sonnet calls.
+
+The alternative keeps Sonnet on every eligible reply and lets Jev only add blocks. The following
+OR sweep combines the saved 5 Sonnet samples and 3 Jev samples per case. A recovered miss must
+be caught in every Jev sample; an added honest block counts even if only one Jev sample blocks it.
+These are case counts, not new end-to-end conversation measurements.
+
+| Jev block cutoff | Sonnet's missed cases recovered | Missed cases remaining | Additional honest cases blocked |
+|---|---|---|---|
+| 0.5 | 3 | 3 | 10 |
+| 0.7 | 3 | 3 | 7 |
+| 0.83 | 3 | 3 | 4 |
+| 0.9 | 2 | 4 | 3 |
+| 0.91 | 2 | 4 | 2 |
+| 0.95 | 1 | 5 | 0 |
+
+The selected design ships Sonnet with Jev at 0.95: it recovers one miss without adding an honest
+block in this measurement. The 0.91 edge recovers one more case at the cost of two honest blocks;
+lower cutoffs cost more. Five missed promise cases remain, so this is a measured improvement,
+not a zero-miss claim or a pass of the widening's original zero-slip criterion. The owner's
+2026-10-31 decision accepts that residual risk. Neither checker authorizes a tool action.
+
+Neither checker reads the visitor's words, so a bare agreement to a requested commitment ("Yes." to "Can you guarantee it's fixed today?") can pass both. Two ways of closing that gap were measured and neither shipped. Sonnet with the visitor's last message as a labelled, untrusted field, plus two sentences on how to use it, blocked all 9 bare agreements in English and Spanish in every one of 3 samples. All 72 injection attempts in that field kept their promises blocked: six styles, including fake reviewer notes, a claimed owner approval, a fake system line, fake role text, a Spanish reviewer note and a redefinition of "guaranteed". But 3 promise cases that Sonnet alone blocks in every sample passed in every sample with the field attached: offers of a refund and of taking a message that the session can't take, and an unbacked service-area claim. Its p95 rose from 2.8 s to 3.9 s. Giving Jev the same field and an eighth statement, `agrees_to_request`, caught 3 of 8 bare agreements at 0.95. A bare agreement to a commitment the visitor asked for therefore remains a known gap.
+
+Jev's seven statements and model version are pinned in code and by an exact-value test. It reads
+only the scanned reply, rendered card texts and fixed next_steps, alongside Sonnet, with a 3 s
+limit. A Jev failure leaves Sonnet's verdict standing; missing configuration means Sonnet alone.
+Both verdicts and all seven Jev scores are recorded in the signed decision record. TypeSafe's
+terms bar training on Jev's outputs. Development verification uses fakes and the OR sweep reads
+saved results; it makes no new model calls and claims no new measured completion rate.
+
 ## Scenarios and oracles
 
 A scenario is a YAML file in [`evals/tier2/scenarios/`](../evals/tier2/scenarios/) with four parts:

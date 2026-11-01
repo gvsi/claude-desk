@@ -8,6 +8,11 @@ import time
 from pathlib import Path, PurePosixPath
 
 
+# Lanes connect to Postgres directly at the test bridge's address (testbox0 in bootstrap.sh), which
+# the launcher lets every lane reach on this port. The loopback forwarder on 127.0.0.1:5432 adds
+# about 40 ms to each connection; it stays for clients on older branches, whose workers still use it.
+DATABASE_HOST = "10.200.0.1"
+DATABASE_PORT = 5432
 RESERVED = {".git", ".aws", ".ssh", ".local", ".worktrees", ".plan-runs", ".venv", "node_modules", "target", ".tools", "__pycache__", ".pytest_cache", "test-results", "playwright-report", "cdk.out", ".npmrc", ".pypirc", ".netrc", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
 
 
@@ -60,7 +65,7 @@ def remote_environment(lane: str, repo: str, ci: str | None = None) -> dict[str,
         "RAYON_NUM_THREADS": "8", "VITEST_MAX_THREADS": "8",
     }
     for prefix, user, password in (("ADMIN", "desk_admin", "admin"), ("KERNEL", "desk_kernel", "kernel"), ("API", "desk_api", "api"), ("MOCKPAY", "desk_mockpay", "mockpay")):
-        env[f"{prefix}_DATABASE_URL"] = f"postgresql+psycopg://{user}:change-me-{password}@127.0.0.1:5432/{db}"
+        env[f"{prefix}_DATABASE_URL"] = f"postgresql+psycopg://{user}:change-me-{password}@{DATABASE_HOST}:{DATABASE_PORT}/{db}"
     if ci is not None:
         env["CI"] = ci
     return env

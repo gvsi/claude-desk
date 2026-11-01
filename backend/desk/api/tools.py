@@ -408,6 +408,10 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     repeat answers 409 `conflict` (no stored result to give) is read again and answered from its state, never
     `refused` (`_not_known_yet`)."""
     if decision.outcome == "hold":
+        # The owner may have answered while this turn was interrupted. Never execute a hold again;
+        # approved/unknown still wait, and the resume job publishes the eventual answer.
+        if decision.state not in ("held", "approved", "unknown"):
+            return _from_state(decision, None)
         status = None
         if decision.state == "held":
             status = await _publish(conn, caller, Status(decision, "held"))
