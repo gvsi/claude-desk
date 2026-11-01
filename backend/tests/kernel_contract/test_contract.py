@@ -2730,7 +2730,7 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("stored", ["discount", "other_commitment", "private", "expired"])
-async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
+async def test_public_read_withholds_only_unsafe_stored_policy_lines(kernel, ro_read, arrange, stored):
     http, schema, _ = kernel
     copy = await new_copy(http)
     path = {"desk_slug": desk_slug(ro_read, schema, copy)}
@@ -2750,7 +2750,9 @@ async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read,
                               expired=stored == "expired")
     for language in ("en", "es"):
         page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
-        assert all(block.template != "policy" for block in page.charter)
+        kept = ["charter:policy:first_visit", "charter:policy:service_area"] if stored in (
+            "discount", "other_commitment") else []
+        assert [block.fact_id for block in page.charter if block.template == "policy"] == kept
         assert {"hours", "contact"} <= {block.template for block in page.charter}
     if stored == "other_commitment":
         visitor = await new_visitor(http, path["desk_slug"])

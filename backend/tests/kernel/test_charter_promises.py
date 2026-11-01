@@ -335,7 +335,7 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
     ("Привет мир.", "Ask about our services."),
     ("Portland Beaverton Hillsboro free", "Ask about our services."),
 ])
-async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
+async def test_public_withholds_only_unsafe_legacy_policy_lines(app, client, parts):
     copy = await rivera(app, client)
     # Write historical rows directly so the current write guard cannot sanitize this state.
     async with kernel_ctx(app) as ctx:
@@ -349,7 +349,9 @@ async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
     for language in ("en", "es"):
         page = await client.get(f"/public/{copy.slug}", params={"lang": language})
         assert page.status_code == 200
-        assert not [block for block in page.json()["charter"] if block["template"] == "policy"]
+        kept = ["charter:policy:first_visit"] if parts[1] == "Ask about our services." else []
+        assert [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"] == [
+            *kept, "charter:policy:service_area"]
         assert any(block["template"] == "hours" for block in page.json()["charter"])
 
 
@@ -490,7 +492,8 @@ async def test_other_commitment_policy_refused_on_write_public_read_and_reply(ap
     for language in ("en", "es"):
         page = await client.get(f"/public/{copy.slug}", params={"lang": language})
         assert page.status_code == 200
-        assert all(block["template"] != "policy" for block in page.json()["charter"])
+        assert [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"] == [
+            "charter:policy:arrival", "charter:policy:first_visit"]
     visitor = await open_visitor(client, copy)
     verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
     assert_handed_off(verdict)

@@ -72,6 +72,7 @@ BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
     # Proposed wording awaiting the owner's sign-off.
+    "policy_combined": "it cited a policy line the checkpoint now withholds",
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
 }

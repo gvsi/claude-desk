@@ -314,6 +314,43 @@ async def withheld_alerts(app: FastAPI, copy: Rivera) -> list[str]:
         InboxRow.preview == "Hidden from your public page").order_by(InboxRow.created_at))]
 
 
+@pytest.mark.parametrize("unsafe", ["Free consultations for everyone.", "Bonjour nous vous nous vous nous vous."])
+async def test_public_withholds_only_the_failing_policy_and_alerts_once(app, client, frozen_clock, unsafe):
+    from .test_decide import open_visitor
+    from .test_reply_check import assert_handed_off, checked, clause, public_key, verify_verdict
+
+    copy = await rivera(app, client)
+    honest = "Ask about our services."
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:about", "kind": "text", "value": honest},
+        {"key": "policy:pricing", "kind": "text", "value": "Ask about pricing."}]})
+    assert response.status_code == 200, response.text
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:pricing")))).one()
+        row.claims = [Claim(key="policy:pricing", kind="text", value=unsafe)]
+    for language in ("en", "es"):
+        page = await public_page(client, copy, language)
+        assert [(block.fact_id, block.text) for block in page.charter if block.template == "policy"] == [
+            ("charter:policy:about", honest)]
+    [alert] = await withheld_alerts(app, copy)
+    assert "policy:pricing" in alert and "policy:about" not in alert
+    assert honest not in alert and unsafe not in alert
+    frozen_clock.advance(59 * 60)
+    await public_page(client, copy)
+    assert await withheld_alerts(app, copy) == [alert]
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:about")])
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == [honest]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:pricing")])
+    assert_handed_off(verdict)
+    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("policy_combined", ["charter:policy:pricing"])]
+
+
 async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, frozen_clock):
     copy = await rivera(app, client)
     dana = (await documents(app, copy))["dana-invoice"]
