@@ -28,6 +28,8 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     ("Consultations cost nothing.", "policy.free_price"),
     ("La consulta no le cuesta nada.", "policy.free_price"),
     ("Las consultas no cuestan nada.", "policy.free_price"),
+    ("No te cuesta nada.", "policy.free_price"),
+    ("No les cuesta nada.", "policy.free_price"),
     ("No cobramos nada por la visita.", "policy.free_price"),
     ("Estás hablando con una persona.", "policy.ai_denial"),
     ("You are chatting with a human.", "policy.ai_denial"),
