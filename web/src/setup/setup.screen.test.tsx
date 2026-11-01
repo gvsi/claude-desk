@@ -1447,12 +1447,16 @@ describe('setup', () => {
     await vi.advanceTimersByTimeAsync(108000);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     finish('landed');
-    await vi.advanceTimersByTimeAsync(2000);
+    // Each poll is a real request under a fake clock, and a tick that finds a read still in flight is skipped: step
+    // the clock 100 ms at a time, with real time for the reads to answer, until a poll picks up the landed turn. No
+    // give-up may show on the way, and the poll must come long before the 140 s limit (108 s + 20 s at most).
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await until(() => {
-      vi.advanceTimersByTime(0);
-      expect((box.element() as HTMLTextAreaElement).disabled).toBe(false);
-    });
+    for (let waited = 0; (box.element() as HTMLTextAreaElement).disabled; waited += 100) {
+      expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+      expect(waited, 'a poll picks up the landed turn').toBeLessThan(20_000);
+      await vi.advanceTimersByTimeAsync(100);
+      await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
+    }
     await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
     vi.useRealTimers();
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
