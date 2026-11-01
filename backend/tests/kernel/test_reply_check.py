@@ -21,6 +21,8 @@ import unicodedata
 import desk_kernel
 import httpx
 import pytest
+
+from tests import public_policy_cases as policy_cases
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
@@ -2322,6 +2324,157 @@ def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 
+POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] + [
+    f"{opening} {verb} {preposition} {person}."
+    for opening in ("You are", "You're")
+    for verb in ("chatting", "talking", "speaking")
+    for preposition in ("with", "to")
+    for person in ("a human", "a real person", "a live person")
+] + [
+    "You’re talking to a human.", "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
+    "You are talking with an actual human.", "You're not talking to a bot.", "You aren't chatting with an AI.",
+    "I am a human being.", "I am a human.", "I'm a human.", "I’m a human.", "I'm human.", "I'm a human, not a bot.",
+    "I am a real person.", "I'm a real person.",
+    "I'm not a bot.", "I am not a robot.", "I'm not an AI.", "I’m not AI.",
+    "This is not an AI.", "This is not a bot.", "This isn't a chatbot.",
+    "This is a real person.", "This is a human receptionist.", "This is a human.",
+    "You've reached a real person.", "You have reached a live agent.",
+    "Está hablando con una persona.", "ESTA HABLANDO CON UNA PERSONA.",
+    # Informal and plural Spanish forms of the same claim.
+    "Estás hablando con una persona.", "Estas hablando con una persona.", "Estáis hablando con una persona.",
+    "Están hablando con una persona.", "Está hablando con un humano.", "Estás hablando con un humano.",
+    "Está chateando con un ser humano.", "Estás hablando con una agente humana.",
+    "No estás hablando con un bot.", "No está hablando con una IA.",
+    "Soy una persona real.", "Soy una persona de verdad.", "Soy humano.", "Soy humana.", "Soy un ser humano.",
+    "No soy un bot.", "No soy un robot.", "No soy una IA.",
+    "Esto no es un bot.", "Este chat no es una IA.",
+    "Quien le responde es una persona real.", "Este asistente es una persona.",
+]
+# Directions to reach a person, explicit AI disclosures and role words that name no speaker.
+POLICY_HONEST_PERSON_CASES = [
+    *policy_cases.PAYMENT_TIMING,
+    *policy_cases.HUMAN_OCCUPATIONS,
+    *policy_cases.AI_DENIAL_CONTROLS,
+    "Talk to a real person by phone.", "Call to speak with a live agent.",
+    "This is an AI assistant, not a real person.", "I'm an AI assistant, not a person.",
+    "A human receptionist answers our phone line.", "A real person reads every message.",
+    "Maria is a real person.", "I'm a human resources consultant.", "I am a human rights lawyer.",
+    "A real person will call back in the morning.", "Call to speak with a live person.",
+    "Our photos are not AI-generated.", "This is not AI-generated.", "This is a human-run business.",
+    "Una persona real le devolverá la llamada.",
+    "You're not talking to a real person.",
+    "Habla con una persona real por teléfono.", "Llame para hablar con un agente humano.",
+    "Este asistente es una IA, no una persona real.", "No soy una persona real, soy una IA.",
+    "No está hablando con una persona: soy un asistente de IA.",
+    "Para nosotros eres una persona, no un número.", "Recepcionista humana.", "Persona real.",
+]
+POLICY_FREE_PRICE_CASES = [
+    "Consultations cost nothing.", "It costs nothing.", "At no cost.", "No cost to you.",
+    "Nothing to pay.", "It won't cost you anything.", "It WON’T cost you anything.",
+    "No cuesta nada.", "No le cuesta nada.", "Nada que pagar.",
+    "It costs nothing to ask a question about our services?",
+    # Plural subjects, other pronouns and "we charge nothing" in Spanish.
+    "Las consultas no cuestan nada.", "No les cuesta nada.", "No te cuesta nada.",
+    "No cobramos nada.", "No le cobramos nada por la visita.",
+]
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, ["policy.ai_denial"]) for text in POLICY_AI_DENIAL_CASES],
+    *[(text, []) for text in POLICY_HONEST_PERSON_CASES],
+    *[(text, (["lex.en.promise"] if text in {"At no cost.", "No cost to you."} else [])
+       + ["policy.free_price"]) for text in POLICY_FREE_PRICE_CASES],
+    ("Human resources consulting", []),
+    ("We treat every customer like a person", []),
+    ("Complimentary parking", []),
+    ("Free parking", []),
+    ("Our receptionist will greet you", []),
+    ("Atención personalizada", []),
+    ("A humanist receptionist", []),
+    ("A real personality", []),
+    ("Our mascot is not a botanical illustration", []),
+    ("Our sculpture costs nothingness", []),
+    ("Dinner is on the house", ["lex.en.promise"]),
+    ("No cobramos por adelantado.", []),
+    ("No cobramos nada más que lo acordado.", []),
+    # Payment timing is not a free price.
+    ("Nothing to pay until the job is done.", []),
+    ("You have nothing to pay before you approve the work.", []),
+    ("Nada que pagar hasta que el trabajo esté hecho.", []),
+    ("No tiene nada que pagar antes de aprobar el trabajo.", []),
+    ("Hablamos con cada persona antes de empezar.", []),
+])
+def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert not any(hit.rule_id in {"policy.ai_denial", "policy.free_price"}
+                   for hit in reply_check.scan_prose(text))
+    if text == "Complimentary parking":
+        assert [hit.rule_id for hit in reply_check.scan_prose(text)] == ["lex.en.promise"]
+
+
+FREE_AMENITY_CASES = [
+    *policy_cases.AMENITY_ACCEPTED,
+    "Complimentary parking.", "Free parking.", "Free wi-fi while you wait.", "Complimentary coffee while you wait.",
+    "Estacionamiento gratis.", "Free parking for every visit.", "Free coffee, tea and water.",
+    "Free Wi‑Fi and snacks.", "A free waiting area.", "Wifi y café gratis.", "Sala de espera gratuita.",
+]
+FREE_SERVICE_CASES = [
+    *policy_cases.AMENITY_REFUSALS,
+    ("Consultations are complimentary.", "lex.en.promise"), ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"), ("Consulta gratis.", "lex.es.promise"),
+    ("Complimentary inspection with every visit.", "lex.en.promise"),
+    ("Free parking and consultations.", "lex.en.promise"), ("Free parking and your first visit.", "lex.en.promise"),
+    ("Free parking, coffee, tea, water and estimates.", "lex.en.promise"),
+    ("Consulta y estacionamiento gratis.", "lex.es.promise"), ("Presupuesto gratuito.", "lex.es.promise"),
+]
+
+
+def test_public_policy_many_gratis_scan_is_bounded():
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
+
+    text = ("gratis " * 1_143)[:8_000]
+    start = process_time()
+    fields = reply_check.scan_public_policies({"policy:about": text})
+    elapsed = process_time() - start
+    assert "lex.es.promise" in fields["policy:about"]
+    print(f"8,000-character gratis policy: {elapsed:.6f}s")
+    assert elapsed < 1.5   # the windowless scan this guards against took 41 s at 7.8k characters
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in FREE_AMENITY_CASES], *[(text, [rule]) for text, rule in FREE_SERVICE_CASES],
+])
+def test_public_policy_free_words_pass_only_before_an_amenity(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": "Ask about our services."}) == (
+        {"policy:a": rules} if rules else {})
+    # Claude's own reply prose keeps refusing every one of these words.
+    assert any(hit.rule_id.endswith(".promise") for hit in reply_check.scan_prose(text))
+
+
+def test_public_policy_free_amenity_is_read_within_one_card():
+    assert reply_check.scan_public_policies({"policy:a": "Free", "policy:b": "parking."}) == {
+        "policy:a": ["lex.en.promise"]}
+    assert reply_check.scan_public_policies({"policy:a": "Estacionamiento", "policy:b": "gratis."}) == {
+        "policy:b": ["lex.es.promise"]}
+
+
+@pytest.mark.parametrize(("left", "right", "rule"), [
+    ("You are chatting with", "a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con", "una persona.", "policy.ai_denial"),
+    ("Consultations cost", "nothing.", "policy.free_price"),
+    ("No le cuesta", "nada.", "policy.free_price"),
+])
+def test_public_policy_phrase_attribution(left, right, rule):
+    assert reply_check.scan_public_policies({
+        "policy:a": left, "policy:b": right, "policy:c": "Ask about our services.",
+    }) == {"policy:a": [rule], "policy:b": [rule]}
+    # A denial wholly inside reply prose does not turn an honest policy into a refusal.
+    assert reply_check._scan_public_parts([
+        (None, f"{left} {right}"), ("policy:a", "Ask about our services."),
+    ]) == {}
+
+
 @pytest.mark.parametrize("text", [
     "Within 25 miles of Oakland.", "Within 25 mi of Oakland.", "Within 25 km of Oakland.",
     "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
@@ -2676,3 +2829,17 @@ def test_public_policy_language_ignores_addresses_and_english_non_compounds(text
 ])
 def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
     assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in policy_cases.COST_AMENITIES],
+    *[(text, [rule]) for text, rule in policy_cases.COST_SERVICE_REFUSALS],
+])
+def test_public_policy_no_cost_amenities_require_a_complete_phrase(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:about": text}) == ({"policy:about": rules} if rules else {})
+
+
+def test_public_policy_costs_nothing_amenity_cannot_cross_cards():
+    assert reply_check.scan_public_policies({"policy:a": "Parking", "policy:b": "costs nothing."}) == {
+        "policy:b": ["policy.free_price"]}

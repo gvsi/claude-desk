@@ -94,6 +94,9 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
+from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
@@ -286,9 +289,9 @@ CALLBACK_LINES = [(f"lex.{language}.callback", pattern) for language, entries in
                   for category, pattern in entries if category == "callback"]
 
 
-def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
+def _load_policy_phrases(filename: str) -> dict[bool, list[re.Pattern[str]]]:
     """Policy-only terms; accented entries preserve marks in both pattern and reading."""
-    path = LEXICON_DIR / "other_promises.txt"
+    path = LEXICON_DIR / filename
     entries: dict[bool, list[re.Pattern[str]]] = {False: [], True: []}
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip() or line.startswith("#"):
@@ -302,17 +305,26 @@ def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
     return entries
 
 
-OTHER_PROMISES = _load_other_promises()
+POLICY_PHRASES = {
+    "language": _load_policy_phrases("other_promises.txt"),
+    "policy.ai_denial": _load_policy_phrases("policy_ai_denial.txt"),
+    "policy.free_price": _load_policy_phrases("policy_free_price.txt"),
+}
 
 
-def _other_promise_spans(text: str) -> set[tuple[int, int]]:
-    """Whole commitment spans for policies, independent of the language detector."""
+def _policy_phrase_spans(text: str) -> set[tuple[int, int, str]]:
+    """Whole policy-only phrases with their rule IDs, independent of the language detector."""
     spans = set()
-    for keep_accents, patterns in OTHER_PROMISES.items():
-        for reading, origin in _readings(text, keep_accents=keep_accents).items():
-            for pattern in patterns:
-                for match in pattern.finditer(reading):
-                    spans.add((origin[match.start()], origin[match.end() - 1] + 1))
+    readings = {keep: _readings(text, keep_accents=keep) for keep in (False, True)}
+    for rule, entries in POLICY_PHRASES.items():
+        for keep_accents, patterns in entries.items():
+            for reading, origin in readings[keep_accents].items():
+                for pattern in patterns:
+                    for match in pattern.finditer(reading):
+                        start = origin[match.start()]
+                        if rule == "policy.ai_denial" and future_person_direction(text, start):
+                            continue
+                        spans.add((start, origin[match.end() - 1] + 1, rule))
     return spans
 
 
@@ -532,10 +544,15 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 
 
 def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
-    """Allow real words across case, width and accents, without substituting lookalikes."""
+    """A promise hit in public text passes only as a real word the owner allowed for this key, read across
+    case, width and accents without substituting lookalikes, or as an English or Spanish free-price
+    phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
+    "Consultations are complimentary." don't. `text` is the key's own text."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
-    return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
+    promise = rule.startswith("lex.") and rule.endswith(".promise")
+    return ((promise and word in allow_words)
+            or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -617,8 +634,9 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
                      policy_key: str | None = None) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
-    Both prose lexicons run, whatever the text's language. Positive language evidence or
-    a policy-only other-language commitment is refused; undetermined text keeps passing.
+    Both prose lexicons run, whatever the text's language. Policy-only phrases also refuse
+    AI denials, implied free prices and selected other-language commitments. Positive language
+    evidence is refused; undetermined text keeps passing.
     Format controls are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
@@ -627,7 +645,9 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
              if not _allowed_public_hit(normalized, start, end, rule, allow_words)
              and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
-    if lang.positive_other_language(normalized) or _other_promise_spans(normalized):
+    rules.update(rule for start, end, rule in _policy_phrase_spans(normalized)
+                 if not _allowed_public_hit(normalized, start, end, rule, allow_words))
+    if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
@@ -674,10 +694,15 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                 fields[key].add("language")
     # Attribute lexical commitments only to intersecting policies. A term wholly inside
     # reply prose stays with the existing prose rules, even beside a harmless policy card.
-    for start, end in _other_promise_spans(combined):
+    for start, end, rule in _policy_phrase_spans(combined):
+        if any(key is not None and low <= start and end <= high
+               and _allowed_public_hit(combined[low:high], start - low, end - low, rule,
+                                       allow_words.get(key, frozenset()))
+               for key, low, high in ranges):
+            continue
         for key, low, high in ranges:
             if key is not None and low < high and low < end and start < high:
-                fields[key].add("language")
+                fields[key].add(rule)
     right_context: RightContext = {}
     hits = _prose_hits(combined, right_context=right_context)
     boundaries = [high for _, _, high in ranges]
@@ -695,7 +720,8 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                     break
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
-               and (_allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               and (_allowed_public_hit(combined[low:high], start - low, match_end - low, rule,
+                                        allow_words.get(key, frozenset()))
                     or _allowed_service_area_hit(key, combined[low:high], start - low, match_end - low, rule))
                for key, low, high in contributors):
             continue
@@ -835,6 +861,9 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             continue
         if found := block_canaries(block, canaries):
             violations.append(canary_violation(found))
+            continue
+        if template.name == "contact" and not valid_public_contact(block.text):
+            violations.append(_clause_violation(clause, "unknown_fact", "contact_format"))
             continue
         blocks.append(block)
     return blocks, violations

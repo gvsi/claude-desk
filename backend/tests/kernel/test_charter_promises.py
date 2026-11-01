@@ -4,6 +4,8 @@ import time
 from datetime import timedelta
 
 import pytest
+
+from tests import public_policy_cases as policy_cases
 from sqlalchemy import select
 
 from desk.contracts import Claim
@@ -21,6 +23,67 @@ from .test_reply_check import (PUBLIC_ALLOW_WORD_CASES, assert_handed_off, check
 
 
 POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urgent", "how_we_help", "custom")
+
+
+@pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.COST_SERVICE_REFUSALS,
+    *policy_cases.AI_DENIAL_REFUSALS,
+    *policy_cases.AMENITY_REFUSALS,
+    ("You are chatting with a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con una persona.", "policy.ai_denial"),
+    ("Consultations cost nothing.", "policy.free_price"),
+    ("La consulta no le cuesta nada.", "policy.free_price"),
+    ("Las consultas no cuestan nada.", "policy.free_price"),
+    ("No te cuesta nada.", "policy.free_price"),
+    ("No les cuesta nada.", "policy.free_price"),
+    ("No cobramos nada por la visita.", "policy.free_price"),
+    ("Estás hablando con una persona.", "policy.ai_denial"),
+    ("You are chatting with a human.", "policy.ai_denial"),
+    ("I'm not a bot.", "policy.ai_denial"),
+    ("This is not an AI.", "policy.ai_denial"),
+    ("Soy una persona real.", "policy.ai_denial"),
+    ("No soy un bot.", "policy.ai_denial"),
+    ("Consultations are complimentary.", "lex.en.promise"),
+    ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"),
+    ("Consulta gratis.", "lex.es.promise"),
+])
+async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_reads(app, client, text, rule):
+    copy = await rivera(app, client)
+    claims = [{"key": key, "kind": "text", "value": value} for key, value in (
+        ("policy:about", "Ask about our services."),
+        ("policy:custom", text),
+        ("policy:parking", "Complimentary parking"),
+        ("contact", "(510) 555-0199"),
+    )]
+    response = await put_part(client, copy, "charter", {"charter": claims})
+    assert (response.status_code, response.json()) == (422, {
+        "code": "invalid", "detail": {"policy:custom": [rule]}})
+    # Setup drops exactly the detail's keys and retries the remaining charter lines.
+    kept = [claim for claim in claims if claim["key"] not in response.json()["detail"]]
+    response = await put_part(client, copy, "charter", {"charter": kept})
+    assert response.status_code == 200, response.text
+    assert "charter:policy:parking" in await facts_of(app, copy, "charter")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:about")))).one()
+        row.claims = [Claim(key="policy:about", kind="text", value=text)]
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        # The stored line is withheld on its own; the honest lines beside it stay.
+        policies = [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"]
+        assert "charter:policy:about" not in policies and "charter:policy:parking" in policies
+        assert text not in page.text
+    visitor = await open_visitor(client, copy)
+    for prose in ("", "Here are the details."):
+        verdict = await checked(client, visitor, prose, [clause("policy", "charter:policy:about")])
+        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("policy_combined", ["charter:policy:about"])]
+        assert_handed_off(verdict)
+        verify_verdict(await public_key(client), visitor.session_id, verdict)
+        assert all(block.template != "policy" for block in verdict.blocks)
 
 
 @pytest.mark.parametrize("text", [
@@ -274,6 +337,37 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
 
 
 @pytest.mark.parametrize("text", [
+    *policy_cases.PAYMENT_TIMING,
+    *policy_cases.COST_AMENITIES,
+    *policy_cases.HUMAN_OCCUPATIONS,
+    *policy_cases.AI_DENIAL_CONTROLS,
+    *policy_cases.AMENITY_ACCEPTED,
+    "Human resources consulting",
+    "We treat every customer like a person",
+    "Complimentary parking",
+    "Our receptionist will greet you",
+    "Atención personalizada",
+    "No cobramos por adelantado.",
+    "No cobramos nada más que lo acordado.",
+    # Directions to reach a person, an AI disclosure and payment timing.
+    "Talk to a real person by phone.",
+    "Call to speak with a live agent.",
+    "Call to speak with a live person.",
+    "This is an AI assistant, not a real person.",
+    "A real person will call back in the morning.",
+    "I'm a human resources consultant.",
+    "I am a human rights lawyer.",
+    "Our photos are not AI-generated.",
+    "Nothing to pay until the job is done.",
+    "Habla con una persona real por teléfono.",
+    "Una persona real le devolverá la llamada.",
+    "Nada que pagar hasta que el trabajo esté hecho.",
+    # Free amenities, never free services.
+    "Complimentary parking.",
+    "Free parking.",
+    "Free wi-fi while you wait.",
+    "Complimentary coffee while you wait.",
+    "Estacionamiento gratis.",
     "We work with small businesses and families.",
     "Tell us what you need and we'll suggest next steps.",
     "Ask about our services.",
@@ -444,11 +538,13 @@ async def test_charter_refuses_unsupported_language_policy(client, app, text, ru
 @pytest.mark.parametrize(("count", "length", "code"), [
     (41, 40, "policy_count_limit"),
     (40, 201, "policy_text_limit"),
+    (400, 1, "policy_count_limit"),
 ])
 async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monkeypatch, create, count, length, code):
     copy = await rivera(app, client)
     before = await facts_of(app, copy, "charter")
     desk_ids = set(await desks_of(app, copy))
+    entries = len(await entries_of(app, copy))
     claims = [{"key": f"policy:{index:02d}", "kind": "text", "value": "x" * length} for index in range(count)]
 
     def unexpected_scan(values):
@@ -466,6 +562,34 @@ async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monk
     assert set(await desks_of(app, copy)) == desk_ids
     assert {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()} == {
         key: fact.claims for key, fact in before.items()}
+    [entry] = (await entries_of(app, copy))[entries:]
+    assert entry.event.summary == {
+        "part": "desk" if create else "charter", "refused": "promise", "fields": {"charter": [code]},
+        # The first forty keys and the count of all of them: a huge charter can't grow the entry.
+        "keys": sorted(claim["key"] for claim in claims)[:40], "policy_count": count,
+        "total_characters": count * length, "reason": code,
+    }
+    assert "x" * length not in entry.event.model_dump_json()
+    page = await client.get(f"/ledger/{copy.desk_id}", headers=copy.owner)
+    assert page.status_code == 200, page.text
+    assert page.json()["chain_ok"] is True
+
+
+@pytest.mark.parametrize(("count", "length"), [(41, 40), (40, 201)])
+async def test_policy_cap_refusal_fails_closed_when_ledger_write_fails(app, client, monkeypatch, count, length):
+    copy = await rivera(app, client)
+    before = {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()}
+    entries = len(await entries_of(app, copy))
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(desks, "_ledger_refusal", unavailable)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": f"policy:{index:02d}", "kind": "text", "value": "x" * length} for index in range(count)]})
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert {key: fact.claims for key, fact in (await facts_of(app, copy, "charter")).items()} == before
+    assert len(await entries_of(app, copy)) == entries
 
 
 @pytest.mark.parametrize("hidden", ["private", "expired", "canary"])
