@@ -90,6 +90,26 @@ async def test_native_tool_review_uses_the_served_pin_and_cannot_disable_verific
             desk_id=desk_id, enable=False, tools=[ToolPin(
                 tool=verification.tool, definition_sha256=verification.definition_sha256)]))) == (422, "invalid")
 
+@pytest.mark.parametrize("preview", [True, False], ids=["owner-preview", "visitor"])
+async def test_callback_mirror_leaves_no_open_item_for_the_owners_preview(fake, ro_read, preview):
+    """The fake mirrors a preview's call-back as already done, keeping its fact for the card."""
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    if preview:
+        visitor = await http.owner(copy.owner_token).call("POST /sessions", CreateSessionRequest(
+            desk_slug=state.desks[copy.desk_ids[0]].slug, kind="visitor", preview=True))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    decision = await decide(view, session_id, 0, "call-1", "native.request_callback", {
+        "name": "Sam Lee", "contact": "sam@example.com", "reason": "Water heater"})
+    result = await execute(view, decision, 0)
+    assert result.state == "succeeded"
+    [fact] = result.facts
+    assert fact.fact_id == f"handoff:{result.model_view['handoff_id']}" and fact.status == "committed"
+    assert ro_read(FAKE_RO_SCHEMA, copy.copy_id,
+                   "SELECT handoff_id, session_id, status FROM {ro}.handoffs WHERE session_id = %s", (session_id,)) == [
+        {"handoff_id": result.model_view["handoff_id"], "session_id": session_id,
+         "status": "done" if preview else "open"}]
+
 
 async def test_failures_answer_before_anything_changes(fake):
     http, state = fake
