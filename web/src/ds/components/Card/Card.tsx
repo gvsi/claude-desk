@@ -15,6 +15,12 @@ export interface CardProps {
   /** The card's accessible name (`aria-label`): its heading's words, or what it is about. */
   label?: string;
   /**
+   * The id of the element inside the card that names it (`aria-labelledby`), in place of `label`,
+   * for a name that is shown text rendered from Markdown, so the name reads as the text does,
+   * without its marks.
+   */
+  labelledBy?: string;
+  /**
    * `20` (the default) for a card a screen is about; `16` for compact cards in a grid; `0` for a
    * card of rows that pad themselves, so their hairlines run edge to edge.
    */
@@ -33,7 +39,7 @@ export interface CardProps {
  * in development a nested Card throws, so the mistake shows up in its story. The one exception is a
  * card that `holdsCards`: the cards directly in it are allowed.
  */
-export function Card({ as: Tag = 'div', label, padding = 20, holdsCards = false, children }: CardProps) {
+export function Card({ as: Tag = 'div', label, labelledBy, padding = 20, holdsCards = false, children }: CardProps) {
   const inside = useContext(InsideCard);
   if (import.meta.env.DEV) {
     if (holdsCards && inside !== 'none') {
@@ -47,8 +53,9 @@ export function Card({ as: Tag = 'div', label, padding = 20, holdsCards = false,
     <Tag
       className={`cd-card cd-card--padding-${padding}`}
       // A plain div can't carry a name, so a named div card is a group.
-      role={Tag === 'div' && label !== undefined ? 'group' : undefined}
+      role={Tag === 'div' && (label !== undefined || labelledBy !== undefined) ? 'group' : undefined}
       aria-label={label}
+      aria-labelledby={labelledBy}
     >
       <InsideCard.Provider value={holdsCards ? 'frame' : 'card'}>{children}</InsideCard.Provider>
     </Tag>

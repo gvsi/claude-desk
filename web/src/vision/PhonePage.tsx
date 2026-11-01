@@ -103,7 +103,7 @@ function VisitorPhone() {
             <VisitorMessage text={PHONE_CHAT.asked} />
           </TranscriptRow>
           <TranscriptRow margin={<MarginReceipt source={PHONE_CHAT.receipt.source} plain={PHONE_CHAT.receipt.plain} ledgerSeq={0} />}>
-            <ClaudeMessage blocks={PHONE_CHAT.reply} language="en" ownerName={RIVERA_PUBLIC_DESK.owner_display_name} />
+            <ClaudeMessage plainProse blocks={PHONE_CHAT.reply} language="en" ownerName={RIVERA_PUBLIC_DESK.owner_display_name} />
           </TranscriptRow>
         </Transcript>
       </div>

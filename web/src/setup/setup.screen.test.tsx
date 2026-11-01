@@ -3790,6 +3790,71 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
   });
 
+  it('shows_claudes_markdown_in_the_conversation_as_one_reply', async () => {
+    // A reply whose list has blank lines between its items is one list, with its bold.
+    const state = await consultantAt();
+    const reply = 'Thanks. Here is what I took from that:\n\n- **Individuals** come to you for their returns\n\n- **Small businesses** come for their books';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: reply, choices: [], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const bold = screen.getByRole('log').getByText('Individuals', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect(message.querySelectorAll('ul')).toHaveLength(1);
+    expect([...message.querySelectorAll('li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Individuals come to you for their returns',
+      'Small businesses come for their books',
+    ]);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
+  it('shows_a_docked_question_in_markdown_named_without_its_marks', async () => {
+    const state = await consultantAt();
+    const question = 'Got it.\n\n**Which work comes in most** during tax season?\n\n- Returns for individuals\n- Books for small businesses';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Returns', recommended: true }, { text: 'Books', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Returns', exact: true })).toBeVisible();
+    const dock = screen.container.querySelector('.cd-setup-question-panel section') as HTMLElement;
+    const shown = dock.querySelector('.cd-setup-q3__question') as HTMLElement;
+
+    // The question's bold and list, in the dock's own type, its paragraphs as far apart as before.
+    expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
+    expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
+    const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+
+    // The dock is named by the question as it reads, with none of the Markdown's marks.
+    await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
+  });
+
+  it('enter_on_a_link_in_a_docked_question_is_the_links_own', async () => {
+    const state = await consultantAt();
+    const question = 'Which payments do you take? [Stripe’s guide](https://stripe.com/docs) lists the usual ones.';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Cards', recommended: true }, { text: 'Bank transfers', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const link = screen.getByRole('link', { name: 'Stripe’s guide', exact: true });
+    await expect.element(link).toHaveAttribute('href', 'https://stripe.com/docs');
+    link.element().focus();
+    // The dock's keys leave a focused link alone: Enter opens it and sends no choice.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    link.element().dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
   it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
