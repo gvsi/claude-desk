@@ -197,6 +197,7 @@ from desk.contracts import (
     money_tool,
     money_tools_of,
     moves_money,
+    stored_brand,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -1927,7 +1928,7 @@ class FakeKernelState:
         suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
         desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
                     business_name=business.name, owner_display_name=business.owner_display_name,
-                    brand=dict(business.brand), timezone=business.timezone, name=seed.name,
+                    brand=stored_brand(business.brand), timezone=business.timezone, name=seed.name,
                     slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now,
                     auto_money_cap_cents=seed.auto_money_cap_cents)
         self.desks[desk.desk_id] = desk
@@ -3680,15 +3681,18 @@ class FakeKernelState:
             raise Refusal(422, "invalid") from None
 
     def put_business(self, request: Request, body: DeskBusinessRequest) -> DeskUpdated:
-        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business."""
+        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business; a palette
+        pick is stored as its key and the table's colours, and the ledger names the key."""
         desk = self._owners_desk(request, request.path_params["id"])
         self._check_business(body.owner_display_name, body.timezone)
+        brand = stored_brand(body.brand, body.brand_palette)
         for each in self.desks.values():
             if each.business_id == desk.business_id:
                 each.business_name, each.owner_display_name = body.name, body.owner_display_name
-                each.timezone, each.brand = body.timezone, dict(body.brand)
+                each.timezone, each.brand = body.timezone, dict(brand)
         self._put_business(desk)
-        self.append(desk, "desk_data", {"part": "business", "refs": []})
+        palette = {"palette": brand["palette"]} if "palette" in brand else {}
+        self.append(desk, "desk_data", {"part": "business", "refs": [], **palette})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def answering(self, request: Request, body: DeskAnsweringRequest) -> DeskUpdated:

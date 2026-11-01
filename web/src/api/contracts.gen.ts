@@ -582,6 +582,7 @@ export interface DeskBusinessRequest {
   brand?: {
     [k: string]: string;
   };
+  brand_palette?: ("teal" | "navy" | "forest" | "plum" | "rust" | "slate") | null;
 }
 export interface DeskCalendarRequest {
   calendar_slots: CalendarSlot[];

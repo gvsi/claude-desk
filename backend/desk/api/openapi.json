@@ -9354,6 +9354,25 @@
             "type": "object",
             "title": "Brand",
             "default": {}
+          },
+          "brand_palette": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "teal",
+                  "navy",
+                  "forest",
+                  "plum",
+                  "rust",
+                  "slate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Palette"
           }
         },
         "additionalProperties": false,

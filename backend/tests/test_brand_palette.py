@@ -4,6 +4,10 @@ The owner picks a key (`BrandPalette`) and the colours come only from the code-o
 (`BRAND_PALETTE`), so every pick keeps the public page's header readable. The web draws the
 header's field from `primary` only when both of its text tokens keep 4.5:1 over it
 (web/src/public/brand.ts), so this pins every primary to that bar with the tokens it reads.
+
+A business write either picks a key (`brand_palette`, with an empty `brand`) or passes a brand as
+before; a brand passed back with a `palette` key (setup's renames send the stored one) names one of
+the table's keys, and the kernel stores the table's colours for it, whatever colours came with it.
 """
 
 import json
@@ -12,8 +16,10 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
+from pydantic import ValidationError
 
-from desk.contracts import BRAND_PALETTE, DEFAULT_BRAND_PALETTE, BrandPalette
+from desk.contracts import BRAND_PALETTE, DEFAULT_BRAND_PALETTE, BrandPalette, BusinessSeed, stored_brand
+from desk.kernel_api import DeskBusinessRequest
 
 TOKENS = Path(__file__).resolve().parents[2] / "web" / "src" / "ds" / "tokens.json"
 HEADER_INKS = ("text-primary", "text-secondary")   # brand.ts's INK and INK_SECONDARY, over the field
@@ -75,3 +81,36 @@ def test_the_contrast_check_reads_as_the_web_does():
 def test_every_primary_keeps_the_header_text_readable(key):
     for name, ink in header_inks().items():
         assert contrast(ink, BRAND_PALETTE[key]["primary"]) >= MIN_TEXT_CONTRAST, (key, name)
+
+
+NAMES = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles"}
+
+
+def test_a_business_write_picks_a_key_or_passes_a_brand_not_both():
+    assert DeskBusinessRequest(**NAMES).brand_palette is None                      # today's writes are unchanged
+    for key in get_args(BrandPalette):
+        assert DeskBusinessRequest(**NAMES, brand_palette=key).brand_palette == key
+    assert DeskBusinessRequest(**NAMES, brand={"primary": "#22524D"}).brand == {"primary": "#22524D"}
+    assert DeskBusinessRequest(**NAMES, brand={"palette": "navy", "primary": "#000000"}).brand["palette"] == "navy"
+    refused: list[dict] = [{"brand_palette": key} for key in ("magenta", "Teal", "", "#1F4E4A")]
+    navy = {"palette": "navy", **BRAND_PALETTE["navy"]}
+    refused += [{"brand_palette": "navy", "brand": brand}       # a pick takes its colours from the table alone
+                for brand in ({"primary": "#1F3A5C"}, {"palette": "navy"}, navy)]
+    refused += [{"brand": {"palette": key}} for key in ("magenta", "", "TEAL")]
+    for fields in refused:
+        with pytest.raises(ValidationError):
+            DeskBusinessRequest(**NAMES, **fields)
+    # a new Desk's business holds a passed pick to the same keys
+    assert BusinessSeed(**NAMES, brand={"palette": "rust"}).brand == {"palette": "rust"}
+    with pytest.raises(ValidationError):
+        BusinessSeed(**NAMES, brand={"palette": "magenta"})
+
+
+def test_a_stored_pick_takes_the_tables_colours():
+    navy = {"palette": "navy", **BRAND_PALETTE["navy"]}
+    assert stored_brand({}, "navy") == navy
+    assert stored_brand({"palette": "navy", "primary": "#000000", "extra": "#123456"}) == navy   # passed back
+    assert stored_brand({"primary": "#22524D"}) == {"primary": "#22524D"}                       # no pick: as sent
+    assert stored_brand({}) == {}
+    with pytest.raises(ValueError):
+        stored_brand({"palette": "magenta"})                                                     # fails closed
