@@ -32,16 +32,16 @@ export interface ThingsToTryProps {
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
 /**
- * How a row ended, as it draws it: the line that takes the detail's place; whether it ticked (done,
- * with a check and a Done pill) or only settled (an answer the list doesn't count: its line alone);
- * and whether it was so at load.
+ * How a row ended, as it draws it: the line that takes the detail's place (null keeps the detail);
+ * whether it ticked (done, with a check and a Done pill) or only settled (an answer the list doesn't
+ * count: its line alone); and whether it was so at load.
  */
 interface RowEnd extends Done {
-  line: string;
+  line: string | null;
   ticks: boolean;
 }
 
-function rowDone(done: Done | undefined, line: string): RowEnd | null {
+function rowDone(done: Done | undefined, line: string | null): RowEnd | null {
   return done === undefined ? null : { ...done, line, ticks: true };
 }
 
@@ -137,7 +137,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   // "Answer a held request": done once answered; else waiting while a request is held (or its answer
   // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
   // else empty: where a request will show, with no next step.
-  const answerDone = rowDone(signals.done.answer, ANSWER.done);
+  const answerDone = rowDone(signals.done.answer, signals.onStartingDesk ? ANSWER.done : TODAY_COPY.heldNone);
   const answerEnd: RowEnd | null =
     answerDone ?? (!waiting && settledAs !== null ? {
       line: settledAs === 'refused_at_execution' ? latestAnswer?.owner_plain ?? UNCOUNTED_ANSWER_LINES[settledAs] : UNCOUNTED_ANSWER_LINES[settledAs],
@@ -172,7 +172,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             end={rowDone(signals.done.chat, CHAT.done)}
             step={{ label: 'Open your public page', href: link, external: true }}
           />
-          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, BREAK.done)} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null)} />
           <Thing
             icon="clock"
             title={ANSWER.title}
@@ -371,7 +371,7 @@ function Thing({ icon, title, held = false, detail, below, end = null, step }: T
           {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
         <p id={detailId} className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
-          {end === null ? detail : end.line}
+          {end?.line ?? detail}
         </p>
       </div>
       {/* A settled row has no next step and no pill, so no place for one either; nor has a row with no step yet. */}
