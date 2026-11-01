@@ -17,7 +17,9 @@ import type { RouteObject } from 'react-router';
 import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, JobKind, ProposalCard as Proposal, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { framesWithin } from '../ds/test/framesWithin.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { settled } from '../ds/test/settled.ts';
 import { coarsePointer } from '../ds/test/touch.ts';
 import { pairContrast } from '../ds/contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
@@ -3311,10 +3313,22 @@ describe('consultant setup', () => {
     expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
     expectNoHorizontalScroll();
     const scroll = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
+    // The bar's business name comes from a second read (the Desks) after the panel is drawn; on a
+    // phone it makes the bar's second line 2 px taller, and the transcript re-pins to its new end a
+    // frame later. A Home pressed in between ends 2 px short of the top, so the screen settles first.
+    await expect.element(screen.getByRole('banner').getByText('Chen & Co.', { exact: true })).toBeVisible();
+    await settled(screen.container);
+    const end = () => scroll.scrollHeight - scroll.clientHeight;
+    // Home has somewhere to go: the transcript overflows by more than the pin's 1 px and starts at its end.
+    await expect.poll(() => end() - scroll.scrollTop).toBeLessThanOrEqual(1);
+    expect(end()).toBeGreaterThan(1);
     scroll.focus();
     expect(document.activeElement).toBe(scroll);
     await userEvent.keyboard('{Home}');
     await expect.poll(() => scroll.scrollTop).toBe(0);
+    // Nothing pulls the owner who scrolled back to read down to the end again.
+    await framesWithin('the transcript after Home', 2);
+    expect(scroll.scrollTop).toBe(0);
     await expectScreenBasics(screen.container, { owner: true });
     await panel.getByRole('button', { name: 'Dismiss', exact: true }).click();
     expect(panel.elements()).toHaveLength(0);
