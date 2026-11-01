@@ -1,6 +1,47 @@
 /** Chen & Co. CPA's own tools, as the kernel lists them for setup and the owner's rules. */
-import type { ToolRow } from '../api/views.ts';
+import type { BusinessToolDef, ToolRow } from '../api/views.ts';
+import { placeholderHex } from '../ds/fixtures/index.ts';
+import { isBusinessDef } from '../owner/connectors/businessWords.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
+
+// The fixed sentences and capabilities in the kernel's adapters/blocks.py.
+const BLOCK_SENTENCES = {
+  intake: "Saves the visitor's name, contact and one answer per configured question for the owner to follow up.",
+  typed_booking: 'Books one open calendar slot for the configured appointment type.',
+  purpose_payment: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+  urgent: 'Saves an urgent callback request and alerts the owner.',
+};
+
+/** Accepted setup proposals, structural until the setup proposal contracts land. */
+export function businessToolRows(
+  jobs: readonly { title: string; how: string; config: BusinessToolDef['config'] | null }[],
+  taken: Iterable<string> = [],
+): ToolRow[] {
+  const names = new Set(taken);
+  const rows: ToolRow[] = [];
+  for (const job of jobs) {
+    const definition = { title: job?.title, description: job?.how, config: job?.config };
+    if (!isBusinessDef(definition)) continue;
+    const business = structuredClone(definition);
+    const block = business.config.block;
+    const base = job.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 40) || 'job';
+    let slug = base;
+    for (let index = 2; names.has(`desk.${slug}`); index += 1) {
+      const suffix = `-${index}`;
+      slug = base.slice(0, 40 - suffix.length) + suffix;
+    }
+    const tool = `desk.${slug}` as const;
+    names.add(tool);
+    rows.push({
+      tool, source: 'business', status: 'needs_review', review_reason: 'new', business,
+      effects: [block === 'purpose_payment' ? 'charge' : 'change'], reversible: block !== 'purpose_payment',
+      // Mock identity only: use the existing stable browser/Node hash placeholder, not a signature.
+      description_confirmed: BLOCK_SENTENCES[block], definition_sha256: placeholderHex(JSON.stringify(business), 32),
+      pending_definition_text: null, pending_sha256: null, cards: [],
+    });
+  }
+  return rows;
+}
 
 export const chenBusinessTools: readonly ToolRow[] = [
   {
