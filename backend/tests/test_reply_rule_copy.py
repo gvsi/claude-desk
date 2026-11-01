@@ -14,14 +14,18 @@ from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
     pytest.param(None, id="unavailable"),
     pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True), id="denies-ai"),
 ])
-async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict):
+async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, monkeypatch):
     soft_promise = AsyncMock(return_value=(verdict, None))
-    ctx = SimpleNamespace(decisions=SimpleNamespace(soft_promise=soft_promise))
+    ctx = SimpleNamespace(decisions=SimpleNamespace(soft_promise=soft_promise),
+                          repo=SimpleNamespace(scoped=lambda query: query),
+                          db=SimpleNamespace(scalars=AsyncMock(return_value=SimpleNamespace(one=lambda: None))))
+    monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
     prose = "Here is the information."
 
-    violations, usage = await reply_check.soft_promises(ctx, "en", prose, [])
+    violations, usage = await reply_check.soft_promises(ctx, SimpleNamespace(desk_id="desk"), "en", prose, [])
 
-    soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=[]))
+    soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=[], next_steps=[]))
     assert usage is None
     assert len(violations) == 1 and violations[0].kind == "soft_promise"
     assert {violation.rule_id for violation in violations} <= REPLY_WHY_BY_RULE.keys()
