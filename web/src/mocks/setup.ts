@@ -841,7 +841,7 @@ function completeConsent(interview: Interview): void {
     if (interview.searchFails) {
       say(interview, 'tool_label', "Couldn't search the web just now");
     } else {
-      say(interview, 'tool_label', 'Searched the web: hair salon deposit and cancellation policy');
+      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
       say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
     }
   }
