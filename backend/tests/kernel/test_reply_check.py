@@ -2303,6 +2303,7 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
     ("Trabajamos con pequeños negocios y familias.", []),
     ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
     ("Pregunte por nuestros servicios aquí.", []),
+    ("Se requiere un garante.", []),
 ])
 def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
@@ -2551,7 +2552,7 @@ def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(m
 
 
 @pytest.mark.parametrize("text", [
-    "garanto", "garantimos", "garante", "garantem", "garantia",
+    "garanto", "garantimos", "garantem", "garantia",
     "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
 ])
 def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
@@ -2562,7 +2563,9 @@ def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch)
     assert "language" not in prose_rules  # policy-only vocabulary
 
 
-@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía"])
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía",
+                                  # Spanish for guarantor, a Portuguese verb form too
+                                  "Se requiere un garante.", "El garante firma el contrato."])
 def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
     monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
     assert "language" not in reply_check.scan_public_text(text)

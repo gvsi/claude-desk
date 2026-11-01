@@ -249,6 +249,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Pour-over coffee available",
     "Les ofrecemos envío a domicilio",
     "Emergency service available",
+    "Se requiere un garante.",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
     copy = await rivera(app, client)

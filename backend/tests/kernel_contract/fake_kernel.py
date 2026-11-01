@@ -905,7 +905,7 @@ PUBLIC_POLICY_PATTERNS = (
      r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
     ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
-     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|garant(?:o|imos|em)|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
      r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
     ("lex.en.promise", r"\b(?:(?<!feel )free(?! to\b))\b"),
