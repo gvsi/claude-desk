@@ -128,8 +128,8 @@ def test_system_prompt_uses_the_business_policies():
         "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
         "something you can't do here, such as checking on a case or sending in documents, say plainly that you "
         "can't do that here, and offer to take a message for Maria Rivera or arrange a callback.",
-        "When one of your tools is Rivera Plumbing's own rather than a native one, refer to it by its title "
-        "when you offer it.",
+        "- When one of your tools is Rivera Plumbing's own rather than a native one, refer to it by its title "
+        "when you offer it, the tool for urgent requests excepted.\n",
     ):
         assert instruction in section
 
