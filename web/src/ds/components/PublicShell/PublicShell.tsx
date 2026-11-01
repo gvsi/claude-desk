@@ -253,6 +253,10 @@ function focusInAbout(shell: HTMLElement): (() => void) | null {
  * Where the visitor is reading: the first message under the chat's head, and how far under it.
  * Returns a way to put that message back at the same place, whichever element scrolls the
  * conversation by then. `null` when no message is under the chat's head.
+ *
+ * Read it while the page stands as the visitor sees it, not once a new width has laid it out: by
+ * then the about column, the messages and the chat's head have wrapped onto other lines, and the
+ * browser's scroll anchoring may have moved the conversation to keep some other element still.
  */
 function readingPlace(shell: HTMLElement): (() => void) | null {
   const { head } = partsOf(shell);
@@ -396,9 +400,25 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     fit();
     let beside = fitsBeside();
     setAboutBeside(beside);
+    // Where the visitor is reading, as they last saw it at the width the shell was laid out at
+    // (`laidOutWidth`): read after each scroll, and each time the shell has laid itself out. The
+    // observer below hears of a new size only once the browser has laid the page out at it. At the
+    // same width nothing under the chat's head has moved by then, and the place is read there; at a
+    // new width, as when a phone turns, the about column, the messages and the chat's head have
+    // wrapped onto other lines, and the place put back is this one. A scroll at a new width the
+    // observer hasn't heard of yet isn't read: it may be the browser's, keeping some other element
+    // still. The trade-off: a visitor's own scroll in that very frame is taken for the browser's.
+    let laidOutWidth = el.offsetWidth;
+    let place = readingPlace(el);
+    const notePlace = () => {
+      if (el.offsetWidth === laidOutWidth) place = readingPlace(el);
+    };
     // The column's line steps aside near the head rather than the chat landing past it: the page lands a chat wherever its end falls.
     // Scroll events don't bubble, so the shell listens in the capture phase, for its region and itself.
-    const onScroll = () => markAboutUnderHead(el);
+    const onScroll = () => {
+      markAboutUnderHead(el);
+      notePlace();
+    };
     el.addEventListener('scroll', onScroll, { capture: true, passive: true });
     const stopScroll = () => el.removeEventListener('scroll', onScroll, { capture: true });
     if (typeof ResizeObserver === 'undefined') return stopScroll;
@@ -406,7 +426,7 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
       const wasShort = short.current;
       const wasBeside = beside;
       const restoreFocus = focusInAbout(el);
-      const restorePlace = readingPlace(el);
+      const restorePlace = el.offsetWidth === laidOutWidth ? readingPlace(el) : place;
       // First the about column, by width, at once; then short or tall, with the column in place.
       beside = fitsBeside();
       if (beside !== wasBeside) flushSync(() => setAboutBeside(beside));
@@ -423,6 +443,8 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
       uncoverComposer(el);
       // A scroll the page's later ResizeObserver makes is heard only next frame; that one frame's lag, mid-resize as all moves, is accepted.
       markAboutUnderHead(el);
+      laidOutWidth = el.offsetWidth;
+      place = readingPlace(el);
     });
     const { banner, header, head, composer } = partsOf(el);
     for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);

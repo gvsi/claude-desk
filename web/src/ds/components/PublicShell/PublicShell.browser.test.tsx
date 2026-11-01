@@ -1065,6 +1065,83 @@ it('the_reading_place_survives_a_switch_to_short_and_back', async () => {
   }
 });
 
+it('the_reading_place_survives_a_phone_turning', async () => {
+  // The same visitor reading at message 6 on a phone, who turns it on its side and back. The width
+  // changes as well as the height, so the about column, the messages and the chat's head wrap onto
+  // other lines before the shell hears of the new size, as it switches to short and back. Message 6
+  // still stays where it was under the chat's head, whether the browser's own scroll anchoring
+  // moves the conversation first (keeping still whichever element it picks) or doesn't.
+  const seen = [];
+  for (const anchoring of ['browser', 'none'] as const) {
+    const noAnchoring = document.createElement('style');
+    noAnchoring.textContent = anchoring === 'none' ? '* { overflow-anchor: none; }' : '';
+    document.head.append(noAnchoring);
+    try {
+      await renderLongChat([390, 844]);
+      const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+      const head = one('.cd-public-shell__chat-head');
+      const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+      scroller().scrollTop += offset() - 10;
+      await nextFrames();
+      const before = offset();
+      expect(Math.round(before)).toBe(10);
+
+      for (const size of [[568, 320], [390, 844]] satisfies Size[]) {
+        await page.viewport(...size);
+        await vi.waitFor(() => expect(isShort()).toBe(size[1] < 520));
+        await nextFrames();
+        const drift = offset() - before;
+        seen.push({ anchoring, window: named(size), drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+      }
+    } finally {
+      noAnchoring.remove();
+    }
+  }
+  expect(seen).toEqual([
+    { anchoring: 'browser', window: '568x320', drift: 'within 1 px' },
+    { anchoring: 'browser', window: '390x844', drift: 'within 1 px' },
+    { anchoring: 'none', window: '568x320', drift: 'within 1 px' },
+    { anchoring: 'none', window: '390x844', drift: 'within 1 px' },
+  ]);
+});
+
+it('a_scroll_before_the_shell_hears_of_a_turn_isnt_the_reading_place', async () => {
+  // As the phone turns, something can scroll the conversation before the shell hears of the new
+  // size: the browser's scroll anchoring at a layout a render forces mid-reply, or, as here, a
+  // resize listener. That scroll isn't the visitor's: message 6 goes back where the visitor last
+  // saw it, turning either way.
+  const seen = [];
+  const scrollAsTheWindowResizes = () => {
+    scroller().scrollTop += 40;
+  };
+  for (const [from, to] of [[[390, 844], [568, 320]], [[568, 320], [390, 844]]] satisfies [Size, Size][]) {
+    await renderLongChat(from);
+    const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+    const head = one('.cd-public-shell__chat-head');
+    const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+    // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
+    for (let pass = 0; pass < 2; pass += 1) scroller().scrollTop += offset() - 10;
+    await nextFrames();
+    const before = offset();
+    expect(Math.round(before)).toBe(10);
+
+    window.addEventListener('resize', scrollAsTheWindowResizes, { once: true });
+    try {
+      await page.viewport(...to);
+      await vi.waitFor(() => expect(isShort()).toBe(to[1] < 520));
+      await nextFrames();
+    } finally {
+      window.removeEventListener('resize', scrollAsTheWindowResizes);
+    }
+    const drift = offset() - before;
+    seen.push({ turn: `${named(from)} to ${named(to)}`, drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+  }
+  expect(seen).toEqual([
+    { turn: '390x844 to 568x320', drift: 'within 1 px' },
+    { turn: '568x320 to 390x844', drift: 'within 1 px' },
+  ]);
+});
+
 it('follows_the_visual_viewport_when_the_keyboard_opens', async () => {
   // Safari on an iPhone doesn't shrink the page for the on-screen keyboard; it shrinks the visual
   // viewport and pans it. The shell takes the visual viewport's height and place instead, so it is
