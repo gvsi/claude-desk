@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PAY_CHATS_MAX, payChatFor, recordPayChat } from './payChats.ts';
+import { PAY_CHATS_MAX, payChatFor, payChatKey, recordPayChat } from './payChats.ts';
 
 /** Where the public chat keeps the chats its payment links came from, as `storage.ts` names it. */
 const PAY_CHATS = 'claude-desk.pay-chats';
@@ -15,15 +15,15 @@ describe('the chats payment links came from', () => {
 
   it('records_a_link_against_its_chat', () => {
     recordPayChat('tok_A-1', CHAT);
-    expect(stored()).toEqual([['tok_A-1', CHAT]]);
+    expect(stored()).toEqual([[payChatKey('tok_A-1'), CHAT]]);
     expect(payChatFor('tok_A-1')).toBe(CHAT);
 
     // Another link joins it, newest last; the same link again stores nothing twice.
     recordPayChat('tok_B-2', '/d/rivera-emergencies-abc123');
     recordPayChat('tok_B-2', '/d/rivera-emergencies-abc123');
     expect(stored()).toEqual([
-      ['tok_A-1', CHAT],
-      ['tok_B-2', '/d/rivera-emergencies-abc123'],
+      [payChatKey('tok_A-1'), CHAT],
+      [payChatKey('tok_B-2'), '/d/rivera-emergencies-abc123'],
     ]);
     expect(payChatFor('tok_A-1')).toBe(CHAT);
     expect(payChatFor('tok_B-2')).toBe('/d/rivera-emergencies-abc123');
@@ -31,9 +31,18 @@ describe('the chats payment links came from', () => {
     // An older link shown again moves to the newest place, keeping its chat.
     recordPayChat('tok_A-1', CHAT);
     expect(stored()).toEqual([
-      ['tok_B-2', '/d/rivera-emergencies-abc123'],
-      ['tok_A-1', CHAT],
+      [payChatKey('tok_B-2'), '/d/rivera-emergencies-abc123'],
+      [payChatKey('tok_A-1'), CHAT],
     ]);
+  });
+
+  it('never_stores_the_token', () => {
+    // A link's token pays or cancels it, so the record keeps only a digest of it, never the token.
+    recordPayChat('tok_A-1', CHAT);
+    expect(localStorage.getItem(PAY_CHATS)).not.toContain('tok_A-1');
+    expect(stored()).toEqual([[payChatKey('tok_A-1'), CHAT]]);
+    expect(payChatKey('tok_A-1')).toMatch(/^[0-9a-z]{1,11}$/);
+    expect(payChatFor('tok_A-1')).toBe(CHAT);
   });
 
   it('keeps_the_newest_twenty', () => {
@@ -41,7 +50,7 @@ describe('the chats payment links came from', () => {
     const tokens = Array.from({ length: 25 }, (_, i) => `tok${i}`);
     for (const token of tokens) recordPayChat(token, CHAT);
     // The five oldest went; the twenty newest stay, oldest first.
-    expect(stored()).toEqual(tokens.slice(5).map((token) => [token, CHAT]));
+    expect(stored()).toEqual(tokens.slice(5).map((token) => [payChatKey(token), CHAT]));
     for (const token of tokens.slice(0, 5)) expect(payChatFor(token), token).toBeNull();
     for (const token of tokens.slice(5)) expect(payChatFor(token), token).toBe(CHAT);
 
@@ -69,12 +78,16 @@ describe('the chats payment links came from', () => {
       localStorage.setItem(PAY_CHATS, raw);
       expect(payChatFor('tok_B-2'), raw).toBeNull();
       recordPayChat('tok_C-3', CHAT);
-      expect(stored(), raw).toEqual([['tok_C-3', CHAT]]);
+      expect(stored(), raw).toEqual([[payChatKey('tok_C-3'), CHAT]]);
     }
     // Entries that aren't a token and a path are dropped; the rest still read.
-    localStorage.setItem(PAY_CHATS, JSON.stringify([['tok_B-2', CHAT, 'extra'], 5, ['tok_C-3', CHAT]]));
+    localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey('tok_B-2'), CHAT, 'extra'], 5, [payChatKey('tok_C-3'), CHAT]]));
     expect(payChatFor('tok_B-2')).toBeNull();
     expect(payChatFor('tok_C-3')).toBe(CHAT);
+    // An entry under the token itself, as an earlier build wrote it, reads as no chat.
+    localStorage.setItem(PAY_CHATS, JSON.stringify([['tok_C-3', CHAT]]));
+    expect(payChatFor('tok_C-3')).toBeNull();
+    recordPayChat('tok_C-3', CHAT);
 
     // Storage that can't be read or written: no chat, and nothing throws.
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
@@ -124,7 +137,7 @@ describe('the chats payment links came from', () => {
 
     // One stored by anything else reads as no chat, while a good entry beside it still reads.
     for (const path of BAD_PATHS) {
-      localStorage.setItem(PAY_CHATS, JSON.stringify([['tok_B-2', path], ['tok_C-3', CHAT]]));
+      localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey('tok_B-2'), path], [payChatKey('tok_C-3'), CHAT]]));
       expect(payChatFor('tok_B-2'), JSON.stringify(path)).toBeNull();
       expect(payChatFor('tok_C-3')).toBe(CHAT);
     }

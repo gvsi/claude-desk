@@ -9,7 +9,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { SseEvent } from '../../api/contracts.ts';
 import type { PaymentLinkOut } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import { recordPayChat } from '../../lib/payChats.ts';
+import { payChatKey, recordPayChat } from '../../lib/payChats.ts';
 import { LINK_CANCELLED, type Language } from '../../mocks/script.ts';
 import { BUSINESS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -360,7 +360,7 @@ describe('mock checkout', () => {
     // A record for this link that holds anything but a public chat's own path.
     for (const path of ['https://evil.example/d/rivera', '//evil.example', `${CHAT}?preview=${RIVERA.deskId}`, `${CHAT}/agents`, '/D/Rivera', 'javascript:alert(1)']) {
       const token = issueLink();
-      localStorage.setItem(PAY_CHATS, JSON.stringify([[token, path]]));
+      localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey(token), path]]));
       await paidWithoutALink(token, path);
     }
 

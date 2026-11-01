@@ -16,8 +16,8 @@ function tokenOf(block: RenderedBlock): string | undefined {
 /**
  * Chat-only action state; the stored transcript and every kernel-written word stay untouched.
  * With `chatPath` (the chat's own `/d/<slug>`, when the chat is the page), each payment link card
- * the chat shows notes its token against that path in this browser, so the paid checkout can link
- * back here (`payChats.ts`).
+ * the chat shows notes its token, as a digest, against that path in this browser, so the paid
+ * checkout can link back here (`payChats.ts`).
  */
 export function usePaymentLinks(
   rows: readonly ChatRow[],

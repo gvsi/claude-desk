@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests, request, type RequestOutcome } from '../api/http.ts';
-import { payChatFor } from '../lib/payChats.ts';
+import { payChatFor, payChatKey } from '../lib/payChats.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
@@ -287,22 +287,23 @@ describe('the chat a payment link came from', () => {
   it('records the chat’s own path against the link it shows, and nothing else', async () => {
     expect(record()).toBeNull();
     const { token } = await issue('desktop');
-    // The card's token and the chat's path: no session, no words of the chat, no amount.
-    expect(record()).toEqual([[token, CHAT]]);
+    // The card's token, as a digest, and the chat's path: no session, no words of the chat, no amount.
+    expect(record()).toEqual([[payChatKey(token), CHAT]]);
     expect(payChatFor(token)).toBe(CHAT);
+    expect(localStorage.getItem(PAY_CHATS)).not.toContain(token);
 
     // The same chat drawn again (a reload) records nothing new. Its one read of the open link
     // settles here, so no answer reaches the next test.
     const reload = await renderRoute(CHAT, { strict: true });
     await expect.element(action(reload.screen)).toBeVisible();
     await settledReads(2);
-    expect(record()).toEqual([[token, CHAT]]);
+    expect(record()).toEqual([[payChatKey(token), CHAT]]);
   });
 
   it('an owner’s preview records the chat’s path without its query', async () => {
     const { token } = await issue('desktop', `${CHAT}?preview=${RIVERA.deskId}`);
     expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(true);
     // The chat the preview's cookie names is the one `/d/<slug>` opens, so its path alone leads back.
-    expect(record()).toEqual([[token, CHAT]]);
+    expect(record()).toEqual([[payChatKey(token), CHAT]]);
   });
 });
