@@ -116,11 +116,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [
-  // Setup's consultant conversation, until the API serves proposals and suggestions.
-  'setupProposal',
-  'setupSuggestions',
-] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
@@ -135,9 +131,6 @@ export const NEVER_CALLED = [
   'POST /api/a2a/{slug}',
   // A new Desk goes through setup (`startSetup`).
   'POST /api/owner/desks',
-  // Called by plan 09's setup web (D2), which adds these routes.
-  'POST /api/owner/setup/{id}/proposals/{proposal_id}',
-  'POST /api/owner/setup/{id}/suggestions',
   // Settings is read-only by the owner's ruling, and no plan 04 task edits these parts.
   'PUT /api/owner/desks/{desk_id}/people',
   'PUT /api/owner/desks/{desk_id}/business',
