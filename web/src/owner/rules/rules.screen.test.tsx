@@ -25,6 +25,7 @@ import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { watchTop } from '../../test/watch.ts';
+import { REVIEWER_LINE } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 
@@ -735,6 +736,22 @@ describe('rules page', () => {
     expect(main?.textContent).not.toMatch(/Do it|Ask me(?! first)/);
     await expect.element(screen.getByRole('region', { name: 'Always on' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('all_rules_says_once_under_its_subtitle_what_the_reviewer_is', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Under the subtitle, in the header's text: one quieter line.
+    const lines = [...screen.container.querySelectorAll<HTMLElement>('.cd-house-rules__header .cd-page-header__text > p')];
+    expect(lines.map((line) => line.textContent)).toEqual(['Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules.', REVIEWER_LINE]);
+    const line = lines[1]!;
+    expect(line.classList.contains('cd-type-meta')).toBe(true);
+    const style = getComputedStyle(line);
+    expect(style.color).toBe(getComputedStyle(lines[0]!).color);
+    expect(style.marginTop).toBe('8px');
+    expect(parseFloat(style.maxWidth)).toBeGreaterThan(0);
+    // Once on the page.
+    expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
   });
 
   it('money_cap_shows_and_changes_through_a_draft', async () => {
