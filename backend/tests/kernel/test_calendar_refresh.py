@@ -281,3 +281,22 @@ async def test_a_desk_that_fails_leaves_the_others_refreshed(app, client, monkey
     assert (f"calendar_extend_failed copy_id={failing.copy.copy_id} desk_id={failing.desk_id} kind=RuntimeError"
             in caplog.text)
     assert await slots_of(app, failing) == as_rows(made, failing.copy.copy_id)   # rolled back, left to the next pass
+
+
+async def test_a_stuck_lookup_leaves_the_other_copies_refreshed(app, client, monkeypatch, caplog):
+    made = setup_calendar(days_ago=11)
+    stuck = await setup_desk(app, client, await rivera(app, client), made)
+    other = await setup_desk(app, client, await rivera(app, client), made)
+    look_up = desks.desks_to_extend
+
+    async def stalls_for_one(runtime, copy_id):
+        if copy_id == stuck.copy.copy_id:
+            await asyncio.Event().wait()     # a lookup stuck behind a lock that never goes
+        return await look_up(runtime, copy_id)
+
+    monkeypatch.setattr(desks, "desks_to_extend", stalls_for_one)
+    monkeypatch.setattr(desks, "CALENDAR_LOOKUP_S", 0.2)
+    with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
+        added = await asyncio.wait_for(desks.extend_calendars(app.state.kernel), timeout=5)
+    assert list(added) == [other.desk_id]
+    assert f"calendar_lookup_cut_off copy_id={stuck.copy.copy_id}" in caplog.text

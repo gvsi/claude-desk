@@ -336,6 +336,13 @@ class KernelFailure(Exception):
         self.detail = detail
 
 
+async def limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
+    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
+    owner's write holds makes background work (the rebuild, the calendar pass) try that Desk again
+    later rather than stall the others."""
+    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
+
+
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:
     """Logs `exc` at ERROR as `message` (a fixed event name and kernel-built values, %-formatted
     with `args`), then `kind=<its class>` and the frames it rose through, never its text: an

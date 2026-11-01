@@ -71,7 +71,7 @@ from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins,
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import (REF, KernelCtx, KernelFailure, KernelRuntime, copy_ids, kernel_transaction,
-                                      log_error, new_id, route_template, storable)
+                                      limit_lock_waits, log_error, new_id, route_template, storable)
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -672,6 +672,8 @@ async def _spoken_for(ctx: KernelCtx, desk_id: str) -> set[str]:
 
 CALENDAR_REFRESH_EVERY_S = 24 * 60 * 60   # a pass at the kernel's start, then one a day
 CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row another write holds
+CALENDAR_LOOKUP_S = 10.0                  # the pass's limit on listing the copies or one copy's Desks, as
+                                          # the background rebuild's (`activation.BACKGROUND_LOOKUP_S`)
 # The shipped rule set `POST /desks`, the route setup makes a Desk through, activates as a new Desk's
 # version 1. Rivera's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
 # slots for each copy, so a Desk whose version 1 came from this preset is one setup made. Every
@@ -761,13 +763,18 @@ async def desks_to_extend(runtime: KernelRuntime, copy_id: str) -> list[str]:
 async def extend_calendars(runtime: KernelRuntime) -> dict[str, list[str]]:
     """One pass over every copy (`repo.copy_ids`): each Desk `desks_to_extend` finds gets
     `extend_calendar` in a transaction of its own, whose lock waits are held to
-    `CALENDAR_REFRESH_LOCK_S`. A copy whose lookup fails, or a Desk whose extension fails (one an
-    owner's write holds past that wait, say), is logged and left to the next pass, and the others
-    go on. Returns the slots it added, by Desk."""
+    `CALENDAR_REFRESH_LOCK_S` (`repo.limit_lock_waits`). A copy whose lookup fails or outlasts
+    `CALENDAR_LOOKUP_S` (stuck behind a migration's lock, say), or a Desk whose extension fails
+    (one an owner's write holds past that wait), is logged and left to the next pass, and the
+    others go on; a listing of the copies that outlasts it fails the pass, which the next one
+    repeats. Returns the slots it added, by Desk."""
     added: dict[str, list[str]] = {}
-    for copy_id in await copy_ids(runtime):
+    for copy_id in await asyncio.wait_for(copy_ids(runtime), CALENDAR_LOOKUP_S):
         try:
-            desk_ids = await desks_to_extend(runtime, copy_id)
+            desk_ids = await asyncio.wait_for(desks_to_extend(runtime, copy_id), CALENDAR_LOOKUP_S)
+        except TimeoutError:
+            log.info("calendar_lookup_cut_off copy_id=%s", copy_id)
+            continue
         except Exception as exc:
             log_error(log, exc, "calendar_lookup_failed copy_id=%s", copy_id)
             continue
@@ -775,8 +782,7 @@ async def extend_calendars(runtime: KernelRuntime) -> dict[str, list[str]]:
             try:
                 async with kernel_transaction(runtime) as ctx:
                     ctx.bind(copy_id)
-                    await ctx.db.execute(select(func.set_config(
-                        "lock_timeout", f"{int(CALENDAR_REFRESH_LOCK_S * 1000)}ms", True)))
+                    await limit_lock_waits(ctx, CALENDAR_REFRESH_LOCK_S)
                     refs = await extend_calendar(ctx, desk_id)
             except Exception as exc:
                 log_error(log, exc, "calendar_extend_failed copy_id=%s desk_id=%s", copy_id, desk_id)
