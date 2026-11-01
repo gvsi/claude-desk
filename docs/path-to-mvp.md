@@ -25,12 +25,12 @@ For an MVP, run the database across availability zones, rehearse restores and fa
 
 ## Model integration
 
-Opus handles conversation, Sonnet reviews actions and Haiku checks replies. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
+Opus handles conversation, Sonnet reviews actions and Haiku judges possible promises inside the kernel's reply check. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
 
 | Metric | Value | Source |
 |---|---|---|
-| Reviewer skipped, share of tool decisions | [measured: reviewer skip rate, final held-out pass] | [measured: source, final held-out pass] |
-| Reviewer reached, share of tool decisions | [measured: share of tool decisions reaching the reviewer, final held-out pass] | [measured: source, final held-out pass] |
+| Reviewer skipped, share of tool decisions in legitimate-task conversations | [measured: reviewer skip rate, final held-out pass] | [measured: source, final held-out pass] |
+| Reviewer reached, share of tool decisions in legitimate-task conversations | [measured: share of tool decisions reaching the reviewer, final held-out pass] | [measured: source, final held-out pass] |
 
 The two shares add up to the whole. Today's daily model budget counts the API's model calls but not the kernel's. An MVP needs each Desk's model spend reserved before every call on every route, settled correctly when calls run at once, and limits the owner can see.
 
@@ -53,18 +53,18 @@ Before scaling, load-test three things: slow and reconnecting readers of the liv
 
 ## Latency and cost per conversation
 
-Each source names its report, pass, date and latency run. Cost per conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column sets the [master plan's budget](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) beside a measurement only where it gave one, with the conversation size it assumed.
+Each source names its report, pass, date and latency run. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column gives the [master plan's estimates](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) where specified, with the conversation size it assumed.
 
-| Metric | Environment | Value | Source | Master estimate beside measurement |
+| Metric | Environment | Value | Source | Planned estimate |
 |---|---|---|---|---|
-| Cost per conversation, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | — |
+| Cost per legitimate-task conversation, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
 | Full turn, warm and cold first turns apart, p50 / p95 | Local | [measured: local full-turn latency, final held-out pass] | [measured: source, final held-out pass] | No full-turn estimate specified |
-| Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | — |
+| Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | 0.3–0.8 s, capped at 2 s |
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | No separate estimate specified |
-| Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | — |
+| Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | 0.8–1.5 s, 4 s timeout |
 | Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | No full-turn estimate specified |
-| Reviewer when called, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | Await hosted measurement |
+| Reviewer when called, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | — |
 
 All latency here is local: `make evals-latency PASS=<id>` measures it. Hosted latency wasn't measured. The harness refuses a run against the deployment until the deployment reports what its model calls cost, so that a run can stop at its spending limit.
 
