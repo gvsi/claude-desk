@@ -22,7 +22,7 @@ import { useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
-import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
+import { conversationPath, conversationListStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
 
@@ -113,7 +113,7 @@ export function ConversationsPage() {
               <ConversationListItem
                 name={whoLabel(s)}
                 time={formatListTime(s.last_activity, business.timezone, now)}
-                status={conversationStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id)) ?? undefined}
+                status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id)) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}
