@@ -150,6 +150,7 @@ from desk.api.prompts import (
     CARD_ERROR_LINE,
     CARD_ERRORS,
     CARDS_REFUSED,
+    CLEARABLE,
     CONNECTOR_LABELS,
     DRAFT_RETRY,
     LIMIT_CHOICES,
@@ -1607,10 +1608,11 @@ def _contact_parts(text: str) -> tuple[set[str], list[str]]:
 
 
 def owner_supports(field: Literal["public_contact", "price_items", "hours"],
-                   value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str) -> bool:
+                   value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str, *,
+                   stated_prices: bool = False) -> bool:
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
     needs every part in it (`_contact_parts`): each address whole, each phone by its digits; a contact with no part
-    needs its whole text."""
+    needs its whole text. With `stated_prices`, an amount counts only when written as a price ("$150")."""
     if not value:
         return True
     folded = owner_text.casefold()
@@ -1623,8 +1625,9 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                 digits in re.sub(r"\D", "", owner_text) for digits in phones)
         return contact in folded
     if field == "price_items":
-        amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "")) * 100)
-                   for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)",
+        sign = r"\$\s?" if stated_prices else r"\$?"
+        amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
+                   for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
                                             owner_text)}
         return all(item.unit_cents in amounts for item in cast(list[PriceAnswer], value))
 
@@ -1660,13 +1663,31 @@ def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
             and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
 
 
+def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str) -> set[str]:
+    """The facts this turn gave off their own question that the owner's own words this turn (`said`) back: a list they
+    said to clear (`CLEARABLE`), or a structured value `owner_supports` finds in `said`. Each replaces the stored fact
+    as the owner's (`merged`, `_owner_patch_fields`). Such a turn reads the website and memory, so its prices count
+    only as prices the owner stated, never a bare number such as "a 1-person shop"."""
+    backed = set()
+    for name in _fact_patch_fields(patch, key):
+        if name not in FACT_TOPICS or key in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
+            continue
+        value = getattr(patch, name)
+        if ((name in CLEARABLE and value == [])
+                or (name in {"public_contact", "price_items", "hours"}
+                    and owner_supports(name, value, said, stated_prices=True))):
+            backed.add(name)
+    return backed
+
+
 def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswers,
-                        after: SetupAnswers, owner_text: str) -> list[str]:
-    """Keep explicit clears, topic-matched prose and owner-supported structured facts as owner answers."""
+                        after: SetupAnswers, owner_text: str, *, backed: Collection[str] = frozenset()) -> list[str]:
+    """Keep explicit clears, topic-matched prose, owner-supported structured facts and the off-topic facts this
+    turn's own words back (`backed`) as owner answers."""
     fields = []
     for name in _fact_patch_fields(patch, key):
         value = getattr(patch, name)
-        if name not in FACT_TOPICS or (value == [] and getattr(after, name) == []):
+        if name not in FACT_TOPICS or name in backed or (value == [] and getattr(after, name) == []):
             fields.append(name)
             continue
         if key not in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
@@ -1686,14 +1707,14 @@ def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswer
 
 
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
-           owner_fields: Collection[str] = frozenset()) -> SetupAnswers:
+           owner_fields: Collection[str] = frozenset(), backed: Collection[str] = frozenset()) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
     its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
     on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
     question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
-    logged (by its label or field name, never its value). Off-topic facts cannot replace owner facts, nor refill a
-    fact the owner set or cleared (`owner_fields`).
-    Names are reduced as the Desk takes them."""
+    logged (by its label or field name, never its value). An off-topic fact replaces the stored one when the owner's
+    own words this turn back it (`backed`, from `_backed_off_topic`); any other cannot replace owner facts, nor refill
+    a fact the owner set or cleared (`owner_fields`). Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
@@ -1719,7 +1740,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
             value = reduce_name(value) or None
         elif name == "business_name":
             value = " ".join(value.split()) or None
-        if (name in FACT_TOPICS and FACT_TOPICS[name] != key
+        if (name in FACT_TOPICS and FACT_TOPICS[name] != key and name not in backed
                 and (name in owner_fields or (getattr(answers, name) and name not in answers.suggested_fields))):
             if value != getattr(answers, name):
                 logger.warning("setup dropped off-topic field %s", name)
@@ -2099,9 +2120,10 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
-        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields)
+        backed = _backed_off_topic(patch, key, text)
+        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
         owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
-        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text)
+        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
         for name in _fact_patch_fields(patch, key):
             if name not in FACT_TOPICS:
                 continue

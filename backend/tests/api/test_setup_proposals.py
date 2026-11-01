@@ -296,16 +296,21 @@ async def test_quote_patch_checks_only_named_prices(proposals, model, engine):
     assert [(item.title, item.unit_cents) for item in parts.prices] == [("Repair", 100), ("Drain cleaning", 15000)]
 
 
-async def test_owner_typed_contact_twice_stays_held(proposals, model, engine):
+@pytest.mark.parametrize("first,held", [
+    ("We repair plumbing.", True),
+    # Typed in that turn's own words, the contact is the owner's even off its own question.
+    ("We repair plumbing, call 415-555-0118.", False),
+])
+async def test_owner_typed_contact_is_the_owners(proposals, model, engine, first, held):
     from tests.api.test_setup_questions import answer, turn
 
     owner, state, _ = proposals
     interview_id = state["interview_id"]
     await show_card(engine, interview_id, question=True)
-    reply = await answer(owner, model, interview_id, "We repair plumbing, call 415-555-0118.",
+    reply = await answer(owner, model, interview_id, first,
                          turn(summary="We repair plumbing.", public_contact="(415) 555-0118"))
     assert reply.status_code == 200, reply.text
-    assert "public_contact" in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+    assert ("public_contact" in (await stored(engine, interview_id))["answers"]["suggested_fields"]) is held
     await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
     reply = await answer(owner, model, interview_id, "Call 415-555-0118.", turn(public_contact="(415) 555-0118"),
                          question="contact_and_after_hours")
@@ -373,6 +378,111 @@ async def test_off_topic_hours_never_refill_hours_the_owner_cleared(proposals, m
     assert said["owner_fields"] == ["public_contact"]
     logs = [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"]
     assert logs == ["setup dropped off-topic field hours"]
+
+
+async def test_owner_hours_correction_on_another_question_is_the_owners(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    weekdays = ["mon", "tue", "wed", "thu", "fri"]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "9am to 5pm Monday to Saturday.",
+                         turn(hours=[{"days": [*weekdays, "sat"], "start": "09:00", "end": "17:00"}]),
+                         question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    corrected = [{"days": weekdays, "start": "09:00", "end": "17:00"}]
+    reply = await answer(owner, model, interview_id,
+                         "Call 415-555-0118. Closed Saturdays now, Monday to Friday 9am to 5pm.",
+                         turn(public_contact="415-555-0118", hours=corrected), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.hours == [HoursAnswer(**window).window() for window in corrected]
+    assert "hours" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert set(said["owner_fields"]) == {"public_contact", "hours"}
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.hours == answers.hours and parts.calendar
+    assert all(date.fromisoformat(slot.slot_id[2:10]).weekday() < 5 for slot in parts.calendar)
+
+
+async def test_owner_price_clear_on_another_question_is_the_owners(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, "quote_limit")
+    reply = await answer(owner, model, interview_id, "A repair is $150.",
+                         turn(price_items=[{"title": "Repair", "unit_cents": 15000}]), question="quote_limit")
+    assert reply.status_code == 200, reply.text
+    assert (await stored(engine, interview_id))["answers"]["price_items"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118. Remove all our prices, we quote after a visit now.",
+                         turn(public_contact="415-555-0118", clear_price_items=True), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.price_items == []
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert set(said["owner_fields"]) == {"public_contact", "price_items"}
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.prices == []
+
+
+@pytest.mark.parametrize("text,owned", [
+    ("Call 415-555-0118. A repair is $150 now.", True),
+    ("Call 415-555-0118. We've helped 150 families.", False),
+])
+async def test_off_topic_price_is_the_owners_only_as_a_stated_price(proposals, model, engine, text, owned):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, text, turn(
+        public_contact="415-555-0118", price_items=[{"title": "Repair", "unit_cents": 15000}]),
+        question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert [(item.title, item.unit_cents) for item in answers.price_items] == [("Repair", 15000)]
+    assert ("price_items" in answers.suggested_fields) is not owned
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert ("price_items" in said["owner_fields"]) is owned
+
+
+@pytest.mark.parametrize("field,topic,text,value", [
+    ("public_contact", "hours_and_area", "9am to 5pm weekdays.", "Website: bobs-booking.net"),
+    ("hours", "contact_and_after_hours", "Call 415-555-0118.",
+     [{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "08:00", "end": "20:00"}]),
+])
+async def test_off_topic_website_values_never_replace_owner_facts(proposals, model, engine, field, topic, text, value):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "9am to 5pm weekdays.", turn(hours=hours), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.", turn(public_contact="415-555-0118"),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    before = SetupAnswers.model_validate((await stored(engine, interview_id))["answers"])
+    assert before.suggested_fields == []
+    await ask_topic(owner, engine, interview_id, topic)
+    reply = await answer(owner, model, interview_id, text, turn(**{field: value}), question=topic)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert getattr(answers, field) == getattr(before, field)
+    assert answers.suggested_fields == []
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert field not in said.get("owner_fields", [])
 
 
 @pytest.mark.parametrize("source", ["owner", "suggested", "empty"])
