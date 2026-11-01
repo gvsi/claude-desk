@@ -46,6 +46,7 @@ from desk.api.schemas import (
     AgentCardOut,
     AgentCardSigning,
     AgentRunStarted,
+    AgentTasks,
     CancelAccepted,
     DemoAgentRun,
     MessageAccepted,
@@ -391,6 +392,17 @@ async def agent_key(request: Request, response: Response,
     issued = await _mint_agent(ctx)
     response.headers["Cache-Control"] = NO_STORE
     return issued
+
+
+@router.get("/desks/{slug}/agent_tasks", response_model=AgentTasks, responses=error_responses(401, 422, 503))
+async def agent_tasks(response: Response, ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> AgentTasks:
+    """Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from
+    (`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key
+    the page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached."""
+    task_set = await demo_task_set(ctx.conn, ctx.ro, ctx.ids.desk_id)
+    await ctx.conn.commit()
+    response.headers["Cache-Control"] = NO_STORE
+    return AgentTasks(task_set=task_set)
 
 
 class SendAgentIn(BaseModel):

@@ -34,6 +34,7 @@ from desk.api.prompts import (
     ProposalCard,
     PlannedOutcome,
     DemoTask,
+    DemoTaskSet,
     QuestionKey,
     SituationWho,
     Triage,
@@ -253,6 +254,13 @@ class AgentRunStarted(BaseModel):
     """202: the built-in agent is on its way; poll `GET .../send_agent/{run_id}` for its run (Plan 02b)."""
 
     run_id: str
+
+
+class AgentTasks(BaseModel):
+    """Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+    the business type setup stored for it (`other` without one). A key, never words: the page holds every word."""
+
+    task_set: DemoTaskSet
 
 
 class AgentTurn(BaseModel):

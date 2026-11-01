@@ -585,6 +585,22 @@ async def test_no_desk_or_visitor_text_reaches_the_agent_model(app, browser, fak
         assert mark.lower() not in json.dumps([request.system, request.messages]).lower()
 
 
+async def test_the_agents_page_reads_its_desks_task_set(app, browser, fake, kernel_http, clock, engine):
+    # The page's chips take the Desk's set, a key and no words: Rivera's on the copy's own Desk, the setup business
+    # type on a Desk setup made. Only the visitor's own session reads it, and it is never cached.
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    seed_slug = fake.desks[copy.desk_ids[0]].slug
+    desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, "Maple Street Rentals")
+    await setup_row(engine, copy.copy_id, desk_id, "landlord")
+    for sent_to, expected in ((seed_slug, "rivera"), (slug, "landlord")):
+        client, _, _ = await open_session(app, browser, sent_to)
+        read = await client.get(f"/api/public/desks/{sent_to}/agent_tasks")
+        assert (read.status_code, read.json()) == (200, {"task_set": expected}), sent_to
+        assert read.headers["cache-control"] == "no-store"
+    unknown = await browser(app, ip="198.51.100.45").get(f"/api/public/desks/{slug}/agent_tasks")
+    assert (unknown.status_code, unknown.json()) == (401, {"error": "no_session"})
+
+
 async def test_desk_replies_are_untrusted_in_the_agent_prompt(app, browser, fake, kernel_http, agent_model, desk_model):
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
