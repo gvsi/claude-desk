@@ -1,10 +1,10 @@
 """The reply check on Markdown prose: the chats render Claude's prose as Markdown (the owner's decision
 of 2026-11-01), so the kernel scans what a visitor sees as well as the raw text.
 
-Formatting can't hide a price, date, discount or promise from the scan, and numbers stay refused in
-every Markdown form, list markers included; honest bullets, bold, headings, tables without numbers and
-links to the business's own site pass; a link's target must be the business's own contact; images are
-refused.
+Formatting can't hide a price, date, discount or promise from the scan, and every number stays
+refused but the markers of a numbered list of up to nine steps from 1; honest bullets, bold,
+headings, tables without numbers and links to the business's own site pass; a link that hides its
+target must go to the business's own contact; images are refused.
 """
 
 import pytest
@@ -14,9 +14,19 @@ from desk.contracts import RenderedBlock
 from desk.kernel_service import reply_check
 
 from .test_adapters import visitor_of
-from .test_reply_check import change_fact, checked
+from .test_reply_check import assert_kept, change_fact, checked, clause, own_quote
 
 STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry"
+# The business's contact as its owner might write it: a phone, an email and a website, in its accepted form.
+RIVERA_CONTACT = "Call (510) 555-0142 · Email: maria@riveraplumbing.example · Website: www.riveraplumbing.example"
+
+
+async def with_contact(app, copy, contact: str = RIVERA_CONTACT) -> None:
+    await change_fact(app, copy, "charter:contact", claims=[{"key": "contact", "kind": "text", "value": contact}])
+
+
+def found(verdict) -> list[tuple[str, str, str]]:
+    return [(violation.kind, violation.rule_id, violation.span) for violation in verdict.violations]
 
 
 def test_a_list_from_one_of_at_most_nine_items_shows_no_number_to_scan():
@@ -71,7 +81,7 @@ NINE_STEPS = "\n".join(f"{n}. Check the next fitting" for n in range(1, 10))
     STEPS,
     NINE_STEPS,
     "  1. Turn off the valve\n  2. Open a faucet",
-    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMaria will look at it when she gets there.",
+    "To stop the leak:\n\n1. Turn off the main valve\n2. Open the lowest tap\n\nMaria looks at it when she's there.",
     "Before Maria gets there:\n1. Turn off the main valve\n   - It is under the sink\n2. Keep the area dry",
 ])
 async def test_a_numbered_list_from_one_to_nine_passes_by_the_owners_decision(app, client, prose):
@@ -134,18 +144,6 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
-
-
-# The business's contact as its owner might write it: a phone, an email and a website, in its accepted form.
-RIVERA_CONTACT = "Call (510) 555-0142 · Email: maria@riveraplumbing.example · Website: www.riveraplumbing.example"
-
-
-async def with_contact(app, copy, contact: str = RIVERA_CONTACT) -> None:
-    await change_fact(app, copy, "charter:contact", claims=[{"key": "contact", "kind": "text", "value": contact}])
-
-
-def found(verdict) -> list[tuple[str, str, str]]:
-    return [(violation.kind, violation.rule_id, violation.span) for violation in verdict.violations]
 
 
 @pytest.mark.parametrize(("prose", "span"), [
@@ -238,3 +236,14 @@ async def test_prose_the_parser_cannot_read_whole_is_refused(app, client, monkey
     assert verdict.ok is False
     assert [(kind, rule_id) for kind, rule_id, _ in found(verdict)] == [
         ("number_in_prose", "digit"), ("number_in_prose", "digit"), ("promise_word", "markdown.parse")]
+
+
+async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client):
+    """A link to a site the contact doesn't name is a failure of Claude's own words: the checked card
+    it cited is still shown, without the prose."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    prose = "Here is your quote, and you can [pay here](https://elsewhere.example/pay)."
+    verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
+    assert_kept(verdict, [("quote", quote.fact_id)])
+    assert found(verdict) == [("promise_word", "markdown.link", "pay here")]
