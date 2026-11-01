@@ -100,7 +100,8 @@ def test_owner_supports_price_title_regular_plurals_both_ways(singular, plural):
 
 
 @pytest.mark.parametrize("title,owner_text,supported", [
-    # Off their own question, every title word of three or more letters is the owner's, and there is at least one.
+    # Off their own question, every title word of four or more letters is the owner's, and so is at least one word of
+    # three or more.
     ("No fix no fee", "Callouts are $150.", False),
     ("No fix no fee", "$150", False),
     ("$150", "$150", False),
@@ -111,6 +112,19 @@ def test_owner_supports_price_title_regular_plurals_both_ways(singular, plural):
 def test_off_topic_price_titles_need_one_of_the_owners_words(title, owner_text, supported):
     assert setup.owner_supports("price_items", [setup.PriceAnswer(title=title, unit_cents=15000)], owner_text,
                                 stated=True) is supported
+
+
+# A model's title may add a short word ("per", "for", "fee") the owner never typed; the price is still theirs.
+@pytest.mark.parametrize("title,owner_text,cents", [
+    ("Labor per hour", "An hour of labor is $90.", 9000),
+    ("Callout fee", "Callouts are $150.", 15000),
+    ("Diagnostic fee", "Diagnostics are $89.", 8900),
+    ("Delivery fee", "Delivery is $25.", 2500),
+    ("Haircut for kids", "Kids' haircuts are $25.", 2500),
+])
+def test_off_topic_price_titles_never_need_the_owners_short_words(title, owner_text, cents):
+    assert setup.owner_supports("price_items", [setup.PriceAnswer(title=title, unit_cents=cents)], owner_text,
+                                stated=True)
 
 
 @pytest.mark.parametrize("contact,owner_text,supported", [
@@ -754,6 +768,37 @@ async def test_off_topic_plural_price_title_accepts_singular_owner_correction(pr
     assert "price_items" in said["owner_fields"]
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert [(item.title, item.unit_cents) for item in parts.prices] == [("Repairs", 17500)]
+
+
+# A correction names the stored item in the owner's own words; on the quote question or off it, the new price
+# replaces the old one and is published, never kept beside it or dropped.
+@pytest.mark.parametrize("question", ["quote_limit", "contact_and_after_hours"])
+@pytest.mark.parametrize("stored_title,stored_cents,text,patch_title,cents", [
+    ("Callout fee", 15000, "Callouts are $175 now", "Callout fee", 17500),
+])
+async def test_price_correction_replaces_the_stored_price(
+    proposals, model, engine, question, stored_title, stored_cents, text, patch_title, cents,
+):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers.price_items = [setup.PriceAnswer(title=stored_title, unit_cents=stored_cents)]
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, question)
+    reply = await answer(owner, model, interview_id, text, turn(
+        price_items=[{"title": patch_title, "unit_cents": cents}]), question=question)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert [(item.title, item.unit_cents) for item in answers.price_items] == [(stored_title, cents)]
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert [(item.title, item.unit_cents) for item in parts.prices] == [(stored_title, cents)]
 
 
 async def test_off_topic_website_price_never_demotes_published_owner_prices(proposals, model, engine):
