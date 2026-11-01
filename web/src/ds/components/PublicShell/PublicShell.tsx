@@ -46,8 +46,11 @@ export type PublicOpenStatus = PublicDesk['open_status'];
 
 export interface PublicShellProps {
   brand: PublicBrand;
-  /** `owner_display_name`: "Maria Rivera". */
-  ownerName: string;
+  /**
+   * Whom a visitor can ask for: `owner_display_name`, "Maria Rivera". Null when the owner gave no
+   * name: the shell then asks for "a person" in its own words and names no one.
+   */
+  ownerName: string | null;
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
   language: CopyLanguage;
   /**
@@ -104,40 +107,61 @@ function Name({ children }: { children: string }) {
 /** Shared with the wordless shape's browser measurement. */
 export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as const;
 
-/** The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off. */
+/**
+ * The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off.
+ * `owner` is the owner's name, marked as written by someone, or null when the owner gave none: then
+ * each line asks for "a person" or says "the business owner" instead, in the owner's approved words,
+ * and names no one.
+ */
 const COPY = {
   en: {
     chatWith: (name: ReactNode) => <>Chat with {name}</>,
     /** @param nameText The name's plain text, used only to decide the period. */
-    disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
-      <>
-        You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for ')}{owner} anytime.
-      </>
-    ),
+    disclosure: (name: ReactNode, owner: ReactNode | null, nameText: string) =>
+      owner === null ? (
+        <>
+          You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for a person anytime.')}
+        </>
+      ) : (
+        <>
+          You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for ')}{owner} anytime.
+        </>
+      ),
     /** In the disclosure's place while the owner is in the chat: Claude is still named as an AI. */
-    ownerInChat: (owner: ReactNode) => (
-      <>
-        {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
-      </>
-    ),
-    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.en}{owner}</>,
+    ownerInChat: (owner: ReactNode | null) =>
+      owner === null ? (
+        <>The business owner is in this chat. Claude, an AI, is paused until they hand it back.</>
+      ) : (
+        <>
+          {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
+        </>
+      ),
+    askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.en}a person</> : <>{ASK_OWNER_PREFIX.en}{owner}</>),
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
     /** @param nameText The name's plain text, used only to decide the period. */
-    disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
-      <>
-        Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con ')}{owner} cuando quieras.
-      </>
-    ),
-    ownerInChat: (owner: ReactNode) => (
-      <>
-        {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
-      </>
-    ),
-    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.es}{owner}</>,
+    disclosure: (name: ReactNode, owner: ReactNode | null, nameText: string) =>
+      owner === null ? (
+        <>
+          Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con una persona cuando quieras.')}
+        </>
+      ) : (
+        <>
+          Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con ')}{owner} cuando quieras.
+        </>
+      ),
+    ownerInChat: (owner: ReactNode | null) =>
+      owner === null ? (
+        <>El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat.</>
+      ) : (
+        <>
+          {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
+        </>
+      ),
+    askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.es}una persona</> : <>{ASK_OWNER_PREFIX.es}{owner}</>),
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
   },
@@ -556,7 +580,7 @@ export function PublicShell({
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
   }, [ownerInChat]);
   const name = <Name>{brand.name}</Name>;
-  const owner = <Name>{ownerName}</Name>;
+  const owner = ownerName === null ? null : <Name>{ownerName}</Name>;
 
   // Standalone, the shell is the page: a banner, the main region and a complementary column.
   // Embedded in an owner screen, the same parts as plain blocks and a named region.
@@ -596,7 +620,9 @@ export function PublicShell({
                 </p>
               )
             ) : (
-              <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} />
+              // The charter's cards (hours, policies, contact) never name the owner, so a Desk
+              // whose owner gave no name has nothing to put in their place.
+              <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName ?? ''} />
             ),
           )}
         </div>

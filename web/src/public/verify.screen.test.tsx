@@ -17,6 +17,7 @@ import { worker } from '../mocks/browser.ts';
 import { DEMO_CODE } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
+import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { aPollPasses, closedInboxReads, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { watchFor } from '../test/watch.ts';
@@ -138,6 +139,28 @@ describe('verification', () => {
     await again.screen.getByRole('button', { name: 'I can’t get the code' }).click();
     await expect.element(again.screen.getByText(ask, { exact: true })).toBeVisible();
     await vi.waitFor(() => expect(requests('sendMessage').map((r) => r.body)).toContainEqual({ text: ask }));
+  });
+
+  it('cant_get_the_code_asks_for_a_person_when_the_owner_gave_no_name', async () => {
+    // A Desk whose owner gave no name in setup: the form's way out asks for a person, as the head's
+    // Ask does, in the visitor's language, and never for "Owner".
+    const slug = await liveSetupDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const asks = { en: "I'd like to talk to a person.", es: 'Quiero hablar con una persona.' };
+    for (const [language, browser, invoice, cantGetCode] of [
+      ['en', 'en-US', 'Can you send my invoice?', 'I can’t get the code'],
+      ['es', 'es-MX', 'Necesito mi factura', 'No me llega el código'],
+    ] as const) {
+      const { screen } = await renderRoute(`/d/${slug}`, { language: browser });
+      await ready(screen);
+      const before = mockStore.visitorSession(slug)?.events.length ?? 0;
+      await screen.getByRole('textbox', { name: /^(?:Message|Mensaje para) / }).fill(invoice);
+      await screen.getByRole('button', { name: /^(?:Send|Enviar)$/ }).click();
+      await vi.waitFor(() => expect(mockStore.visitorSession(slug)?.events.slice(before).at(-1)?.ev.type).toBe('turn_end'), { timeout: 5_000 });
+      await screen.getByRole('button', { name: cantGetCode }).click();
+      await expect.element(screen.getByText(asks[language], { exact: true })).toBeVisible();
+      await vi.waitFor(() => expect(requests('sendMessage').at(-1)?.body).toEqual({ text: asks[language] }));
+    }
+    expect(requests('sendMessage').map((r) => JSON.stringify(r.body)).join(' ')).not.toMatch(/Owner|null/);
   });
 
   it('a_late_verify_answer_never_brings_the_owner_back', async () => {
