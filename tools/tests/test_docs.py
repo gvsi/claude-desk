@@ -692,6 +692,60 @@ def test_every_number_has_a_source(tmp_path, row, accepted):
     assert "source column" in out
 
 
+def test_mvp_table_without_boundary_pipes_requires_sources(tmp_path):
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          "Metric | Value | Source\n"
+          "--- | --- | ---\n"
+          "Test metric | 42 ms | Unsourced\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert len(problems) == 1
+    assert problems[0].line == 5
+    assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("leading, trailing", [("", ""), ("|", ""), ("", "|"), ("|", "|")])
+@pytest.mark.parametrize("metric", ["Test metric", "`A | B`", "``A | `B` ``", r"A \| B"])
+@pytest.mark.parametrize("source, accepted", [
+    ("[PR](https://github.com/gvsi/claude-desk/pull/33)", True),
+    ("Unsourced", False),
+])
+def test_mvp_table_boundaries_and_literal_pipes(tmp_path, leading, trailing, metric, source, accepted):
+    rows = ["Metric | Value | Source", ":--- | ---: | :---:", f"{metric} | 42 ms | {source}"]
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          + "\n".join(f"{leading}{row}{trailing}" for row in rows) + "\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert (problems == []) == accepted
+    if not accepted:
+        assert len(problems) == 1
+        assert problems[0].line == 5
+        assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("table, message", [
+    ("Metric | Value\n--- | ---\nTest | 42 ms\n", "source column"),
+    ("Metric | Value | Source\n--- | --- | ---\nMissing cells\n", "cell for every column"),
+    ("Metric | Value | Source\n--- | ---\nTest | 42 ms | Unsourced\n", None),
+    ("Metric | Value | Source\nProse | without | a delimiter\n", None),
+    ("```markdown\nMetric | Value | Source\n--- | --- | ---\nTest | 42 ms | Unsourced\n```\n", None),
+])
+def test_mvp_table_requires_a_header_and_matching_delimiter(tmp_path, table, message):
+    write(tmp_path, "docs/path-to-mvp.md", "## Scaling and what breaks first\n\n" + table)
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    if message is None:
+        assert problems == []
+    else:
+        assert len(problems) == 1
+        assert message in problems[0].message
+
+
 def test_readme_sections():
     text = (REPO / "README.md").read_text()
     lines = [line for line in text.splitlines() if line.strip()]

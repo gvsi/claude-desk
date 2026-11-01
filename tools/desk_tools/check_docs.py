@@ -291,6 +291,20 @@ def _mvp_source(root: Path, source: str) -> bool:
     return False
 
 
+def _table_cells(line: str) -> list[str]:
+    """Split at pipes outside code spans and escapes; boundary pipes are optional."""
+    line = line.strip()
+    masked = _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
+    pipes = [match.start() for match in re.finditer(r"\\.|\|", masked) if match.group(0) == "|"]
+    bounds = [-1, *pipes, len(line)]
+    cells = [line[left + 1:right].strip() for left, right in zip(bounds, bounds[1:])]
+    if pipes and pipes[0] == 0:
+        cells = cells[1:]
+    if pipes and pipes[-1] == len(line) - 1:
+        cells = cells[:-1]
+    return cells
+
+
 def check_mvp_number_sources(root: Path) -> list[Problem]:
     """Every metric row needs its own source, even when the row contains no digits yet."""
     name = "docs/path-to-mvp.md"
@@ -300,22 +314,29 @@ def check_mvp_number_sources(root: Path) -> list[Problem]:
     metric_sections = {"Architecture", "Model integration", "Scaling and what breaks first",
                        "Latency and cost per conversation"}
     problems = []
-    section, header = "", None
+    section, header, candidate = "", None, None
     for number, line, in_fence in _lines(doc.read_text()):
         if in_fence:
+            header, candidate = None, None
             continue
         if line.startswith("## "):
-            section, header = line[3:].strip(), None
-        if section not in metric_sections or not line.strip().startswith("|"):
-            header = None
+            section, header, candidate = line[3:].strip(), None, None
             continue
-        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+        if section not in metric_sections or not line.strip():
+            header, candidate = None, None
+            continue
+        cells = _table_cells(line)
         if header is None:
-            header = [cell.casefold() for cell in cells]
-            if "source" not in header:
-                problems.append(Problem(name, number, "metric table needs a source column"))
-            continue
-        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            # A table starts only when a header is followed by a matching delimiter row.
+            if (candidate is not None and len(cells) == len(candidate[1])
+                    and (len(cells) > 1 or line.lstrip().startswith("|"))
+                    and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)):
+                header = [cell.casefold() for cell in candidate[1]]
+                if "source" not in header:
+                    problems.append(Problem(name, candidate[0], "metric table needs a source column"))
+                candidate = None
+            else:
+                candidate = number, cells
             continue
         if "source" not in header:
             continue
