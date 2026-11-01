@@ -1,6 +1,6 @@
 import { http } from 'msw';
 import { userEvent } from 'vitest/browser';
-import { expect, it, onTestFinished, vi } from 'vitest';
+import { expect, it, onTestFinished } from 'vitest';
 
 import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
@@ -376,23 +376,30 @@ it('reviews Contact after About, saves within its 200-character limit and confir
 
 
 it('scrolls a cross-line refusal Notice into view from a low open row on a phone', async () => {
-  const { screen } = await openLines('phone');
+  const state = await atSituations();
+  const params = { id: state.interview_id };
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  storePublicLines(mockStore.world, state.interview_id, (read.body as SetupPublicLines).lines.map((line) =>
+    line.key === 'policy:about' ? { ...line, text: 'We help local businesses. '.repeat(60).trim() } : line,
+  ));
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
   await screen.getByRole('button', { name: 'Edit', exact: true }).nth(6).click();
   const field = screen.getByRole('textbox', { name: 'Service area', exact: true });
   await field.fill('Clients can reach our team.');
   const save = screen.getByRole('button', { name: 'Save', exact: true });
-  save.element().scrollIntoView({ block: 'end' });
-  expect(screen.getByRole('heading', { name: 'What customers will read', exact: true }).element().getBoundingClientRect().bottom).toBeLessThan(0);
-  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
-  onTestFinished(() => scroll.mockRestore());
-  mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: ['INTERNAL refusal'] } });
+  const refuse = () => mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: ['INTERNAL refusal'] } });
+  refuse();
   await save.click();
   const notice = screen.getByRole('alert');
   await expect.element(notice).toHaveTextContent(REFUSED_COPY);
-  await expect.poll(() => scroll.mock.calls.some(([options], index) =>
-    options !== null && typeof options === 'object' && options.block === 'nearest'
-    && (scroll.mock.contexts[index] as HTMLElement | undefined)?.contains(notice.element()),
-  )).toBe(true);
+  await expect.element(save).not.toHaveAttribute('aria-busy');
+  window.scrollTo(0, document.documentElement.scrollHeight);
+  await expect.poll(() => notice.element().getBoundingClientRect().bottom).toBeLessThan(0);
+  refuse();
+  await save.click();
+  await expect.element(notice).toHaveTextContent(REFUSED_COPY);
   await expect.poll(() => {
     const bounds = notice.element().getBoundingClientRect();
     return bounds.top >= -1 && bounds.bottom <= window.innerHeight + 1;
