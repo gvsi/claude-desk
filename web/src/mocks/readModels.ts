@@ -84,15 +84,17 @@ const LATEST_VISITOR_TEXT_MAX = 200;
 
 /**
  * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
- * to single spaces, and cut to 199 characters and "…" past 200. Null for an agent's or the owner's
- * chat, the owner's preview, and before the visitor writes.
+ * to single spaces, and cut to 199 characters and "…" past 200, with no space left before the
+ * "…". Null for an agent's or the owner's chat, the owner's preview, before the visitor writes,
+ * and when what they wrote last is all whitespace.
  */
 function latestVisitorText(session: SessionRecord): string | null {
   if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
   const newest = session.items.findLast((item) => item.kind === 'visitor_text');
   if (newest?.text == null) return null;
   const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
-  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('')}…` : chars.join('');
+  if (chars.length === 0) return null;
+  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('').trimEnd()}…` : chars.join('');
 }
 
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {

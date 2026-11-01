@@ -1342,6 +1342,14 @@ describe('the scripted Desk', () => {
     await send(`${'a'.repeat(150)} ${'b'.repeat(100)}`);
     await drain();
     expect(await latest(session.session_id)).toBe(`${'a'.repeat(150)} ${'b'.repeat(48)}…`);
+    // A cut that falls just after a space ends on the word before it, with no space before the "…".
+    await send(`${'c'.repeat(198)} ${'d'.repeat(10)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'c'.repeat(198)}…`);
+    // A message that is all whitespace leaves none, as the API's null.
+    await send(' \n\t ');
+    await drain();
+    expect(await latest(session.session_id)).toBeNull();
 
     // The owner's own preview has none, whatever she writes there.
     const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;

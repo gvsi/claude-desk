@@ -298,6 +298,14 @@ describe('agents page', () => {
     await expect.element(es.screen.getByText('El agente terminó.', { exact: true })).toBeVisible();
     const pills = [...es.screen.container.querySelectorAll('.cd-agent-message .cd-pill')].map((pill) => pill.textContent);
     expect(pills).toEqual(['Firmado', 'Firmado']);
+    // The agent's words are its own, in English, the language it writes in: their quote says so,
+    // inside a message that is Spanish like the page.
+    const quotes = [...es.screen.container.querySelectorAll('.cd-agent-message__text')];
+    expect(quotes).toHaveLength(2);
+    for (const quote of quotes) {
+      expect(quote.getAttribute('lang')).toBe('en');
+      expect(quote.closest('.cd-agent-message')?.getAttribute('lang')).toBe('es');
+    }
     await expectScreenBasics(es.screen.container, { owner: false });
 
     // Before the Desk shows, and when it can't be read, the page still says who answers.
@@ -556,6 +564,30 @@ describe('agents page', () => {
     expect(requests[3]?.textContent).toBe('Alex Kim’s assistantSignedSigned requestRequest 4');
     // A Desk turn's words are never shown.
     expect(document.body.textContent).not.toContain('A desk turn’s words never show');
+  });
+
+  it('agent_words_are_capped_at_280_characters', async () => {
+    // 280 characters show whole; 281 or more are cut to 279 and "…", with no space left before
+    // it; words that are all whitespace show no quote, and the row draws as before.
+    const run: DemoAgentRun = {
+      ...plantedRun('done'),
+      task: 'quote_and_deposit',
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [], text: 'e'.repeat(280) },
+        { author: 'agent', n: 2, blocks: [], receipts: [], text: 'f'.repeat(281) },
+        { author: 'agent', n: 3, blocks: [], receipts: [], text: `${'g'.repeat(278)} and more` },
+        { author: 'agent', n: 4, blocks: [], receipts: [], text: ' \n\t ' },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, body: run, times: 100 });
+    const { screen } = await renderRoute(PAGE);
+    await screen.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const requests = [...screen.getByRole('region', { name: 'Send an agent' }).element().querySelectorAll('.cd-agent-message')];
+    expect(requests).toHaveLength(4);
+    const words = requests.map((el) => el.querySelector('.cd-agent-message__text')?.textContent ?? null);
+    expect(words).toEqual(['e'.repeat(280), `${'f'.repeat(279)}…`, `${'g'.repeat(278)}…`, null]);
+    expect(requests[3]?.textContent).toBe('Alex Kim’s assistantSignedSigned requestRequest 4');
   });
 
   it('newest_step_follows_in_view', async () => {
