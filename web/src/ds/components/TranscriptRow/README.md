@@ -35,6 +35,17 @@ A row with `live` lands once, in about half a second, at most 650 ms (the last l
 - The motion is visual only. The log announces the row as it does without it, and the words, order and colors are the same.
 - Under reduced motion nothing moves: the row and everything attached show at once, and the landing is spent, so turning motion back on never plays it.
 
+### Following a revealed reply
+
+A live row whose message reveals itself (`ClaudeMessage`'s `reveal`, Claude's reply on the visitor chat or the owner's live view of it) arrives as the signed visitor reveal boards draw it (N-MD-02, N-MD-03, N-MD-06), instead of rising:
+
+- The message doesn't rise: its words come in on their own, word by word, then its cards fade in (`ClaudeMessage`, "Arriving live").
+- While the words come in, what is attached waits unseen in its place, so nothing below it moves when it comes.
+- Then each line fades and rises `space-4` in, over `motion-base`, `motion-follow` apart, from the beat after the message's last card: the message tells the row that beat (`RowArrival`, in `arrival.ts`). Each line has a beat of its own, however many there are. A receipt's dot grows and its check draws on its line's beat.
+- A line already shown before its row arrived (`MarginReceipt`'s `shownBefore`) is already read: it doesn't wait.
+- Once the last line has come in, the row is like any other, as after a landing.
+- Under reduced motion the reply shows whole and everything attached shows at once.
+
 ## Props
 
 `TranscriptRow`:
@@ -43,7 +54,7 @@ A row with `live` lands once, in about half a second, at most 650 ms (the last l
 | --- | --- | --- |
 | `children` | `ReactNode` | Required. The message. |
 | `margin` | `ReactNode` | Optional. Receipts and notes, attached under the message. An empty list, or only `null` and `false`, attaches nothing. |
-| `live` | `boolean` | Optional. The row arrived live: it lands once (see "Arriving live"). Read when the row is first drawn; spent once the landing has played, or at once under reduced motion. Never for a row read from history. |
+| `live` | `boolean` | Optional. The row arrived live: it lands once, or follows a message that reveals itself (see "Arriving live"). Read when the row is first drawn; spent once the landing has played, or at once under reduced motion. Never for a row read from history. |
 
 `TranscriptHeader`:
 

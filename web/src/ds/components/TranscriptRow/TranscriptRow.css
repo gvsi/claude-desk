@@ -91,10 +91,41 @@
   }
 }
 
+/* A row whose message reveals itself as it arrives (ClaudeMessage's reveal): the message doesn't
+   rise, its words come in on their own. While they do (--waiting), what is attached waits unseen in
+   its place, so nothing below it moves when it comes. Once the words are whole and the message's
+   cards are on their beats (--following), each line fades and rises space-4 in, over motion-base,
+   motion-follow apart, from the beat after the last card (--cd-follow-next, as the message tells
+   the row), each on its own beat (--cd-follow-line, its place among the lines, which the row sets).
+   A line already on screen before its row arrived (MarginReceipt's shownBefore) is already read
+   and shows at once. */
+.cd-transcript-row--waiting > .cd-transcript-row__main,
+.cd-transcript-row--following > .cd-transcript-row__main {
+  animation: none;
+}
+
+.cd-transcript-row--waiting > .cd-transcript-row__margin > :not(.cd-margin-line--shown) {
+  visibility: hidden;
+  animation: none;
+}
+
+.cd-transcript-row--following > .cd-transcript-row__margin > * {
+  animation: cd-transcript-row-follow var(--motion-base) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-next) + var(--cd-follow-line, 1) - 1));
+}
+
+@keyframes cd-transcript-row-follow {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
 /* Reduced motion: the row and everything attached show at once. */
 @media (prefers-reduced-motion: reduce) {
   .cd-transcript-row--live > .cd-transcript-row__main,
-  .cd-transcript-row--live > .cd-transcript-row__margin > * {
+  .cd-transcript-row--live > .cd-transcript-row__margin > *,
+  .cd-transcript-row--following > .cd-transcript-row__margin > * {
     animation: none;
   }
 }

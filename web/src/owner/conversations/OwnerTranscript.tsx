@@ -6,7 +6,8 @@
  * hold with its card right under it names only its state, since the card says why. A receipt opens
  * the full trace of its ledger entry under its row; Escape or the close button returns focus to the
  * receipt. A record that can't be read says so there, with "Try again" and "Close". A reply that
- * arrives while the owner has the chat open lands, its receipts one by one, as on the public page.
+ * arrives while the owner has the chat open is revealed as on the public page: its words, then its
+ * cards and receipts one by one.
  */
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -209,7 +210,7 @@ function ReceiptLine({ source, done, cards, shownBefore, onOpenTrace }: ReceiptL
 
 interface RowViewProps {
   row: OwnerRow;
-  /** The row arrived while the chat was open: it lands. */
+  /** The row arrived while the chat was open: Claude's reply is revealed, as the visitor sees it. */
   live: boolean;
   /** The held requests whose cards are drawn right after this row. */
   cards: readonly string[];
@@ -250,7 +251,7 @@ function RowView({ row, live, cards, shown, agentName, ownerName, timezone, onOp
         item.ev.author === 'owner' ? (
           <PersonMessage name="You" initials={initialsOf(ownerName)} blocks={item.ev.blocks} language={item.ev.language} />
         ) : (
-          <ClaudeMessage blocks={item.ev.blocks} language={item.ev.language} ownerName={ownerName} />
+          <ClaudeMessage blocks={item.ev.blocks} language={item.ev.language} ownerName={ownerName} reveal={live} />
         );
       break;
   }

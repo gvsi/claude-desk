@@ -22,6 +22,7 @@ import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type 
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
+import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
@@ -98,7 +99,10 @@ async function type(screen: RenderResult, text: string): Promise<void> {
   await screen.getByRole('button', { name: /^(?:Send|Enviar)$/ }).click();
 }
 
-/** Waits until the chat's stream has carried a turn's end past `before`, and the page shows every message. */
+/**
+ * Waits until the chat's stream has carried a turn's end past `before`, and the page shows every
+ * message whole: no reply is still being revealed, or bringing its cards in.
+ */
 async function turnEnded(before: number): Promise<void> {
   await vi.waitFor(
     () => {
@@ -108,11 +112,18 @@ async function turnEnded(before: number): Promise<void> {
     },
     { timeout: 5_000 },
   );
-  await vi.waitFor(() => {
-    expect(shownMessages()).toHaveLength(messagesOf(chatEvents()).length);
-    expect(document.querySelector('.cd-writing-indicator')).toBeNull();
-  });
+  await vi.waitFor(
+    () => {
+      expect(shownMessages()).toHaveLength(messagesOf(chatEvents()).length);
+      expect(document.querySelector('.cd-writing-indicator')).toBeNull();
+      expect(document.querySelector(COMING_IN)).toBeNull();
+    },
+    { timeout: 5_000 },
+  );
 }
+
+/** A reply of Claude's still coming in: its words being revealed, or its cards fading in after them. */
+const COMING_IN = '.cd-claude-message--revealing, .cd-claude-message--following';
 
 /**
  * Claude answers `question` in this browser's chat without the page: the visitor's words (sent
@@ -1752,6 +1763,126 @@ describe('public chat page', () => {
     expect(getComputedStyle(main).opacity).toBe('1');
   });
 
+  it('a_live_reply_reveals_its_words_then_its_card_then_its_receipt', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const reply = watchReveal();
+    await say(screen, 'How much is drain clearing?');
+
+    // The kernel checked the whole reply before the page had any of it, while Claude's writing dots
+    // showed. Then its words come in word by word, its quote card a beat after them, and the quote's
+    // receipt a beat after the card.
+    const frames = await reply;
+    expectRevealed(frames, { cards: [0.12], lines: [0.24] });
+    expect(frames.at(-1)?.words).toBe("Here's the price for clearing a drain, from Maria's price list.");
+  });
+
+  it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    await say(first.screen, 'How much is drain clearing?');
+
+    // A reload reads the stored conversation: the reply shows whole from its first frame, its card
+    // and its receipt with it, and nothing on the page is revealed.
+    const revealed = watchRevealing();
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    expectShownWhole(await watchReveal(0));
+    expect(revealed()).toEqual([]);
+  });
+
+  it('under_reduced_motion_a_live_reply_shows_whole_with_its_card_and_receipt_at_once', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(true);
+    onTestFinished(() => reduceMotion(reduced));
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const reply = watchReveal();
+    await say(screen, 'How much is drain clearing?');
+    expectShownWhole(await reply);
+  });
+
+  it('the_end_follows_a_reply_as_its_words_are_revealed', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT.slice(0, 3)) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    const scroller = chatScroller();
+    const { composer, conversation } = conversationAndComposer(screen);
+    // Each time the conversation grows, once the page has answered it: how far its end is from the
+    // composer, and how far it has scrolled.
+    const seen: { gap: number; top: number }[] = [];
+    const watch = new ResizeObserver(() => {
+      seen.push({ gap: conversation.getBoundingClientRect().bottom - composer.getBoundingClientRect().top, top: scroller.scrollTop });
+    });
+    watch.observe(conversation);
+    onTestFinished(() => watch.disconnect());
+
+    // A reply of several lines, revealed at the end of the chat.
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const reply = watchReveal();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(REVEALED_LINES)]));
+    const frames = await reply;
+    watch.disconnect();
+    expect(frames.filter((frame) => frame.revealing).length).toBeGreaterThan(2);
+
+    // As its words came in the conversation grew, and its end stayed right above the composer: it
+    // only ever scrolled on with the words, never back, and never jumped.
+    expect(seen.length).toBeGreaterThan(3);
+    for (const [index, { gap, top }] of seen.entries()) {
+      expect(Math.abs(gap), `the end is ${gap} px from the composer`).toBeLessThanOrEqual(2);
+      if (index > 0) expect(top).toBeGreaterThanOrEqual(seen[index - 1]?.top ?? 0);
+    }
+  });
+
+  it('on_a_phone_the_newest_revealed_words_stay_in_view_above_cards_still_to_come', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT.slice(0, 2)) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    const { composer, conversation } = conversationAndComposer(screen);
+    const scroller = chatScroller();
+    const head = document.querySelector('.cd-public-shell__chat-head');
+    // Each time the conversation grows while the reply's words come in, once the page has answered
+    // it: where the newest words end, and where the reply starts, against the region they show in.
+    const seen: { words: number; top: number; above: number; below: number }[] = [];
+    const watch = new ResizeObserver(() => {
+      const reply = conversation.querySelector('.cd-claude-message--revealing');
+      const words = [...(reply?.querySelectorAll('.cd-claude-message__prose') ?? [])].at(-1);
+      if (!reply || !words) return;
+      seen.push({
+        words: words.getBoundingClientRect().bottom,
+        top: reply.getBoundingClientRect().top,
+        above: Math.max(scroller.getBoundingClientRect().top, head?.getBoundingClientRect().bottom ?? 0),
+        below: composer.getBoundingClientRect().top,
+      });
+    });
+    watch.observe(conversation);
+    onTestFinished(() => watch.disconnect());
+
+    // A reply whose cards, held unseen until its words are whole, are taller than the region.
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const cards = [rivera.blocks.booking_options.en, rivera.blocks.quote.en, rivera.blocks.booking_confirmed.en, rivera.blocks.booking_options.en];
+    const reply = watchReveal();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(REVEALED_LINES), ...cards]));
+    const frames = await reply;
+    watch.disconnect();
+    expect(frames.filter((frame) => frame.revealing).length).toBeGreaterThan(2);
+
+    // As the words came in, the newest of them stayed in view, just above the composer, and the
+    // reply's start never left the top: the cards still to come waited below.
+    expect(seen.length).toBeGreaterThan(2);
+    for (const { words, top, above, below } of seen) {
+      expect(words, `the newest words end at ${words}, the composer starts at ${below}`).toBeLessThanOrEqual(below + 2);
+      expect(words, `the newest words end at ${words}, the region starts at ${above}`).toBeGreaterThan(above);
+      expect(top, `the reply starts at ${top}, the region at ${above}`).toBeGreaterThanOrEqual(above - 2);
+    }
+    // Once the cards have come in, the end of the conversation is back above the composer.
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
   it('reload_during_a_take_over_shows_the_owner_joined', async () => {
     // Dana asks for Maria, and Maria takes the chat over while the page is open.
     const first = await renderRoute(PAGE);
@@ -2010,6 +2141,8 @@ describe('public chat page', () => {
     const messages = shownMessages().length;
     mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(MARKDOWN_REPLY)]));
     await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
+    // It arrived live, so its words are revealed: read it once it shows whole.
+    await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
 
     // Claude's words as Markdown: the bold as bold, the list as a list, and no marks left over.
     const reply = shownMessages()[messages] as HTMLElement;
@@ -2028,6 +2161,8 @@ describe('public chat page', () => {
     const messages = shownMessages().length;
     mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock('You can [Pay here](https://evil.example/pay) today.')]));
     await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
+    // It arrived live, so its words are revealed: read it once it shows whole.
+    await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
 
     const reply = shownMessages()[messages] as HTMLElement;
     expect(reply.querySelectorAll('a')).toHaveLength(0);
@@ -3445,6 +3580,14 @@ function chatScroller(): HTMLElement {
   }
   throw new Error('the conversation has no scroll region of its own');
 }
+
+/** A reply of Claude's several lines long: what helps, as a list, between two paragraphs. */
+const REVEALED_LINES = [
+  'Lukewarm showers from a tank that age are common, and both choices can be sensible.',
+  '**Repair** usually makes sense when:',
+  "- the tank isn't leaking\n- it's one worn part, like the thermostat or a heating element",
+  'The age is on the label on the side of the tank. Would you like Maria to take a look?',
+].join('\n\n');
 
 /** A chat long enough to scroll on any window: prices, a time, a booking, a callback, a discount and a hello. */
 const LONG_CHAT = [

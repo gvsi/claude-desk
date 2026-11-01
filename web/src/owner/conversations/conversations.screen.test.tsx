@@ -21,6 +21,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
+import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
@@ -1650,6 +1651,25 @@ describe('Conversations', () => {
     expect(landed.rows()).toHaveLength(1);
   });
 
+  it('the_owners_live_view_reveals_a_new_reply_and_draws_what_happened_whole', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const revealed = watchRevealing();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    // What happened so far is drawn whole: none of Claude's replies in it is revealed.
+    expect(log(screen).element().querySelectorAll('.cd-claude-message').length).toBeGreaterThan(0);
+    expect(revealed()).toEqual([]);
+
+    // Dana asks while the owner watches, and Claude's reply comes in as Dana sees it: its words, then
+    // its quote card a beat after them, then its two receipts a beat apart.
+    const reply = watchReveal();
+    priceTurn(chat, 'How much is drain clearing?');
+    expectRevealed(await reply, { cards: [0.12], lines: [0.24, 0.36] });
+    expect(revealed()).toHaveLength(1);
+  });
+
   it('a_reply_that_came_while_away_draws_still', async () => {
     const chat = named(DANA_LIVE, DANA);
     const landed = watchLandings();
@@ -1710,9 +1730,12 @@ describe('Conversations', () => {
     await expect.poll(shown).toMatch(/^Automatic\. /);
     const read = shown();
 
-    // The reply comes, and the receipt moves under it, after the reply's own check. The reply and its
-    // check land; the receipt the owner has already read shows at once.
+    // The reply comes, and the receipt moves under it, after the reply's own check. The reply is
+    // revealed, and its own check waits for its words, then follows its quote card; the receipt the
+    // owner has already read shows at once, and never waits.
+    const revealed = watchReveal();
     for (const step of [...rest, turnEnd]) world.emit(chat, step(turn));
+    const frames = await revealed;
     await expect.poll(() => quotes().length).toBe(before + 1);
     const reply = quotes().at(-1)?.closest('.cd-transcript-row');
     if (!reply) throw new Error('the reply has its row');
@@ -1720,7 +1743,13 @@ describe('Conversations', () => {
     const lines = [...reply.querySelectorAll('.cd-margin-receipt')];
     expect(lines).toHaveLength(2);
     expect(lines[1]?.textContent).toBe(read);
-    expect(landed.lines(reply)).toEqual([lines[0]]);
+    const waiting = frames.filter((frame) => frame.revealing);
+    expect(waiting.length).toBeGreaterThan(0);
+    for (const frame of waiting) expect(frame.lines.map((line) => line.visibility)).toEqual(['hidden', 'visible']);
+    expect(frames.find((frame) => !frame.revealing)?.lines).toEqual([
+      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.24s' },
+      { visibility: 'visible', name: 'none', delay: '0s' },
+    ]);
   });
 
   it('the_owners_own_words_never_land', async () => {

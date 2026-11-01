@@ -535,6 +535,12 @@ describe('design tokens', () => {
     expect(tokenValue('motion-settle')).toBe('150ms');
   });
 
+  test('follow_beat_is_a_token', () => {
+    // After a revealed reply's words, its cards and then their receipts fade in 120 ms apart, as the
+    // signed visitor reveal boards draw it.
+    expect(tokenValue('motion-follow')).toBe('120ms');
+  });
+
   test('motion_stays_in_range', () => {
     const loops = ['motion-breathe', 'motion-writing', 'motion-dots', 'motion-spin'];
     const easings = ['motion-ease', 'motion-ease-emphasis', 'motion-ease-bounce'];
