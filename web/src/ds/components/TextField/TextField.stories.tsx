@@ -111,10 +111,11 @@ export const Password: Story = {
     await expect(field).toHaveAttribute('autocomplete', 'current-password');
     await expect(field).not.toHaveAttribute('aria-describedby');
 
-    // Focus shows only the caret, by keyboard too: no ring, and the outline stays as it was.
+    // Focus by keyboard too shows the caret and the outline one step stronger (line-field-focus, the
+    // tertiary ink), never a ring.
     await userEvent.tab();
     await expect(field).toHaveFocus();
-    expectComputed(field, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.36)', boxShadow: 'none' });
+    expectComputed(field, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.6)', boxShadow: 'none' });
     await userEvent.keyboard('demo');
     await expect(args.onChange).toHaveBeenLastCalledWith('demo');
   },

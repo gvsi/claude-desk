@@ -9,34 +9,6 @@ import { Composer } from '../components/Composer/Composer.tsx';
 import { TextField } from '../components/TextField/TextField.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
 
-/** What a focus style could change: the outline, the border, a shadow ring and the fill. */
-const LOOK = [
-  'outlineStyle',
-  'outlineWidth',
-  'outlineColor',
-  'outlineOffset',
-  'borderTopColor',
-  'borderRightColor',
-  'borderBottomColor',
-  'borderLeftColor',
-  'borderTopWidth',
-  'borderRightWidth',
-  'borderBottomWidth',
-  'borderLeftWidth',
-  'boxShadow',
-  'backgroundColor',
-] as const;
-
-/** How `field` and every element around it, up to `top`, are drawn: a ring on the composer's box shows here too. */
-function looks(field: Element, top: Element): Record<string, string>[] {
-  const drawn: Record<string, string>[] = [];
-  for (let el: Element | null = field; el !== null && el !== top; el = el.parentElement) {
-    const style = getComputedStyle(el);
-    drawn.push(Object.fromEntries([['element', el.className], ...LOOK.map((name) => [name, style[name]])]));
-  }
-  return drawn;
-}
-
 /** A color token as the browser resolves it on the page. */
 function tokenColor(token: string): string {
   const probe = document.createElement('span');
@@ -63,36 +35,47 @@ function AfterStart({ children }: { children: ReactNode }) {
 const noop = () => {};
 
 describe('focus', () => {
-  const TEXT_ENTRY: [string, ReactNode][] = [
-    ['a text field', <TextField label="Business name" value="" onChange={noop} />],
-    ['a text area', <TextField label="Your business" multiline value="" onChange={noop} />],
-    ['the owner composer', <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} />],
-    ['the public chat composer', <Composer variant="visitor" label="Message" placeholder="Message" onSend={noop} />],
-    ['the whisper composer', <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude" onSend={noop} />],
+  // Each text entry with how its edge is drawn: a field's own border, or the composer box's inset edge.
+  const TEXT_ENTRY: [string, ReactNode, 'field' | 'composer'][] = [
+    ['a text field', <TextField label="Business name" value="" onChange={noop} />, 'field'],
+    ['a text area', <TextField label="Your business" multiline value="" onChange={noop} />, 'field'],
+    ['the owner composer', <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} />, 'composer'],
+    ['the public chat composer', <Composer variant="visitor" label="Message" placeholder="Message" onSend={noop} />, 'composer'],
+    ['the whisper composer', <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude" onSend={noop} />, 'composer'],
   ];
 
-  it.each(TEXT_ENTRY)('text_entry_shows_only_its_caret: %s', async (_, entry) => {
+  it.each(TEXT_ENTRY)('text_entry_shows_its_caret_and_a_stronger_edge: %s', async (_, entry, kind) => {
+    // No ring on text entry, by pointer or keyboard: its caret, and its own edge one step stronger,
+    // so focus shows even while the caret blinks off (owner, 2026-11-01, WCAG 2.4.7). A field's border
+    // goes from line-field to line-field-focus; the composer's inset edge from line-hairline to line-field.
     const screen = await render(<AfterStart>{entry}</AfterStart>);
     const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
     const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(input, textarea)');
     if (field === null) throw new Error('no text field');
+    const box = kind === 'composer' ? field.closest<HTMLElement>('.cd-composer__box') : field;
+    if (box === null) throw new Error("no composer box");
+    const edge = () => (kind === 'field' ? getComputedStyle(box).borderTopColor : getComputedStyle(box).boxShadow);
+    const [resting, focused] = kind === 'field'
+      ? [tokenColor('--line-field'), tokenColor('--line-field-focus')]
+      : [tokenColor('--line-hairline'), tokenColor('--line-field')];
+    expect(focused).not.toBe(resting);
+    expect(focused).not.toBe(tokenColor('--accent-blue'));
+    expect(edge()).toContain(resting);
 
-    // At rest, with the pointer over it: hover draws what it draws, focus adds nothing to it.
-    await userEvent.hover(field);
-    const atRest = looks(field, screen.container);
-
-    // Clicked: focus, and nothing drawn changes on the field or around it.
+    // Clicked: focus, no ring, and the stronger edge.
     await userEvent.click(field);
     expect(document.activeElement).toBe(field);
-    expect(looks(field, screen.container)).toEqual(atRest);
+    expect(getComputedStyle(field).outlineStyle).toBe('none');
+    expect(edge()).toContain(focused);
 
-    // By keyboard: the same.
+    // Away, the resting edge comes back; by keyboard, the same stronger edge and still no ring.
     start.focus();
-    expect(looks(field, screen.container)).toEqual(atRest);
+    expect(edge()).toContain(resting);
     await userEvent.tab();
     expect(document.activeElement).toBe(field);
     expect(field.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
-    expect(looks(field, screen.container)).toEqual(atRest);
+    expect(getComputedStyle(field).outlineStyle).toBe('none');
+    expect(edge()).toContain(focused);
     await screen.unmount();
   });
 

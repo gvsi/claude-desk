@@ -52,6 +52,7 @@
   --fill-secondary: var(--va-band);
   --accent-blue: var(--va-link);
   --ring-focus: var(--va-ink-2);
+  --line-field-focus: var(--va-ink-2);
   --status-handled: var(--va-done);
   --status-held: var(--va-held);
   --status-refused: var(--va-declined);

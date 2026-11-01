@@ -173,6 +173,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['illustration-ink'], ['illustration-avatar'], 4.5, 'The initials on an intro illustration card.'),
   ...pairs(['illustration-handled'], ['illustration-card'], 3, "The check and the receipt dots on the intro illustration's light cards."),
   ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
+  ...pairs(['line-field-focus'], ['bg-surface', 'bg-app'], 3, "A text field's border while it has focus, one step stronger than its outline, on a dialog or a page."),
   ...pairs(['line-field'], ['fill-card'], 3, "The outline of an inline CopyField's value, such as the agents page's address, in a card.", 'bg-app'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A danger button in a card, such as Deny this time on a held request, at rest and on hover.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['fill-card'], 4.5, 'A danger-ghost button in a card: a refusal in red words with no fill.', 'bg-app'),

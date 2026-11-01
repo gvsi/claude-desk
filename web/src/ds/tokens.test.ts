@@ -79,6 +79,12 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
   });
 
+  test('a_focused_fields_edge_is_the_tertiary_ink', () => {
+    // A text field with focus shows its caret and its own border one step stronger, never a ring and
+    // never blue (owner, 2026-11-01, WCAG 2.4.7): line-field-focus, the tertiary ink.
+    expect(tokenValue('line-field-focus')).toBe('{text-tertiary}');
+  });
+
   test('focus_ring_is_the_secondary_ink', () => {
     // Keyboard focus shows a warm ring, never the link blue: the secondary ink, which the About pages' paper
     // points at its own (owner, 2026-11-01). Text entry draws no ring at all, so no other ring token exists.
@@ -368,6 +374,8 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-card'], 4.5, 'fill-card', 'bg-app');
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
+    // A text field's border while it has focus, one step stronger than its outline.
+    add(['line-field-focus'], ['bg-surface', 'bg-app'], 3);
     // The outlined value of an inline CopyField, in a card on the agents page.
     add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
