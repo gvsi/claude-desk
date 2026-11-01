@@ -1639,8 +1639,9 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
     needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
     it has fewer) in one number the owner typed, plus any words beyond labels and separators. A contact with no part
-    needs its whole text. With `stated`, prices need a dollar sign and their title's words of four or more letters,
-    ignoring regular plurals on both sides; hours need a meridiem, a clock time or a range, never unrelated bare counts."""
+    needs its whole text. With `stated`, prices need a dollar sign and their title's words of three or more letters
+    (at least one), ignoring regular plurals on both sides; hours need a meridiem, a clock time or a range in order,
+    never unrelated bare counts."""
     if not value:
         return True
     folded = owner_text.casefold()
@@ -1659,9 +1660,12 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
         amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
                    for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
                                             owner_text)}
-        return all(item.unit_cents in amounts
-                   and (not stated or all(_singular(word) in title_text
-                                          for word in re.findall(r"[^\W\d_]{4,}", item.title.casefold())))
+
+        def named(title: str) -> bool:
+            words = re.findall(r"[^\W\d_]{3,}", title.casefold())
+            return bool(words) and all(_singular(word) in title_text for word in words)
+
+        return all(item.unit_cents in amounts and (not stated or named(item.title))
                    for item in cast(list[PriceAnswer], value))
 
     def has_time(clock: str, text: str, *, explicit: bool = False) -> bool:

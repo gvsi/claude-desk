@@ -99,6 +99,20 @@ def test_owner_supports_price_title_regular_plurals_both_ways(singular, plural):
                                 f"{plural} are $175 now.", stated=True)
 
 
+@pytest.mark.parametrize("title,owner_text,supported", [
+    # Off their own question, every title word of three or more letters is the owner's, and there is at least one.
+    ("No fix no fee", "Callouts are $150.", False),
+    ("No fix no fee", "$150", False),
+    ("$150", "$150", False),
+    ("Fix a leak", "A leak fix is $150.", True),
+    ("Fix", "Fixes are $150.", True),
+    ("Gas fitting", "Gas fitting is $150.", True),
+])
+def test_off_topic_price_titles_need_one_of_the_owners_words(title, owner_text, supported):
+    assert setup.owner_supports("price_items", [setup.PriceAnswer(title=title, unit_cents=15000)], owner_text,
+                                stated=True) is supported
+
+
 @pytest.mark.parametrize("contact,owner_text,supported", [
     ("415-555-0118 or hello@bobsplumbing.com",
      "Customers can call 415-555-0118 or email hello@bobsplumbing.com.", True),
@@ -753,6 +767,7 @@ async def test_off_topic_website_price_never_demotes_published_owner_prices(prop
 @pytest.mark.parametrize("title,owned", [
     ("Callout", True),
     ("Emergency callout, there in 30 minutes guaranteed", False),
+    ("No fix no fee", False),
 ])
 async def test_off_topic_price_titles_must_be_in_the_owners_words(proposals, model, engine, title, owned):
     from tests.api.test_setup_questions import answer, turn
