@@ -37,6 +37,7 @@ import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { TRANSCRIPT_NOTE } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
+import { latestOf } from './latest.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
@@ -66,19 +67,6 @@ function fallbackName(state: SessionState): string {
 function levelOf(state: SessionState): string {
   if (state.kind === 'agent') return 'Agent';
   return state.verified ? 'Verified' : 'Public';
-}
-
-/**
- * The kernel's line for the last thing that happened in the chat: its newest receipt or message.
- * Where the owner joined or left carries no line of the kernel's, so it is passed over.
- */
-function latestOf(read: OwnerTranscriptRead): string | null {
-  const items = [...read.items].sort((a, b) => b.n - a.n);
-  for (const { event, owner_plain: ownerPlain } of items) {
-    if (event === null || !('visitor_plain' in event)) continue;
-    return event.type !== 'message' && event.state === 'refused_at_execution' && ownerPlain != null ? ownerPlain : event.visitor_plain;
-  }
-  return null;
 }
 
 /** The newest of the visitor's own messages in the chat, by its place: 0 before the first. */
@@ -230,7 +218,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const read = chat.data;
   const { state } = read;
   const who = summary ? whoLabel(summary) : fallbackName(state);
-  const latest = latestOf(read);
+  const latest = latestOf(read.items);
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
 
@@ -243,6 +231,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const kept = [...answers.kept.values()].filter(mine);
   const answered = [...answers.answered.values()].filter((entry) => mine(entry.item));
   const heldIds = [...new Set([...held, ...kept].map((item) => item.decision.decision_id).concat(answered.map((a) => a.decision.decision_id)))];
+  // A request still held in this chat, not answered here: its handoff cards leave Claude's note out.
+  const holdOpen = [...held, ...kept].some((item) => !answers.answered.has(item.decision.decision_id));
   const readAt = needsYou.dataUpdatedAt;
 
   // Each held request answered in place, as Today answers it: one card from held to answered, so the
@@ -335,7 +325,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
         {callbacks.length > 0 ? (
           <div ref={setHandoffCards} className="cd-conversation__handoffs">
             {callbacks.map((item) => (
-              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
+              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} showSummary={!holdOpen} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
             ))}
           </div>
         ) : null}

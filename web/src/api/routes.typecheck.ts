@@ -122,11 +122,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [
-  // The running setup turn's event stream, which the owner-chat streaming backend adds; until it
-  // is served the setup screen falls back to reading the interview while it is busy.
-  'setupEvents',
-] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served

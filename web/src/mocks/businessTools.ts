@@ -9,8 +9,8 @@ import type { DeskRecord, ToolRecord } from './world.ts';
 const BLOCK_SENTENCES = {
   intake: "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up.",
   typed_booking: "Books one open time on the business's calendar for this kind of appointment.",
-  purpose_payment: 'Creates a payment link for the configured purpose and kernel-owned amount.',
-  urgent: 'Saves an urgent callback request and alerts the owner.',
+  purpose_payment: "Creates a secure payment link for this purpose, for the amount the owner set.",
+  urgent: "Saves an urgent callback request and alerts the owner right away.",
 };
 
 /** Accepted setup proposals; unfinished payment amounts fail definition validation below. */

@@ -94,6 +94,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // answer is still out or was lost kept in place. Needs you keeps the ones answered here in their
   // places among them, but they no longer count as open.
   const items = needsYou.data ?? [];
+  // The chats with a handoff open, as Conversations reads them: Live now says "Wants you" for them.
+  const handoffs = new Set(items.flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
   const listed = heldOldestFirst(items);
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
   const kept = [...answers.kept.values()].filter((item) => !listedIds.has(item.decision.decision_id));
@@ -242,7 +244,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 onDismiss={dismissAnswer}
               />
             ) : null}
-            {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} /> : null}
+            {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} openHandoffs={handoffs} /> : null}
             <SinceLastNight sectionRef={sinceLastNight} />
           </div>
           <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />

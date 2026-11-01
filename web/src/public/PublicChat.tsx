@@ -7,7 +7,7 @@
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
  */
-import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Component, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import type { RenderedBlock, SessionState } from '../api/contracts.ts';
 import {
@@ -25,6 +25,7 @@ import {
   PublicShell,
   PublicShellSkeleton,
   RATE_LIMITED_COPY,
+  StatusDot,
   SystemLine,
   SkeletonScreen,
   Transcript,
@@ -33,6 +34,7 @@ import {
   VisitorMessage,
   WritingIndicator,
   evErrorCopy,
+  receiptTone,
   type CopyLanguage,
   type ReceiptView,
 } from '../ds/index.ts';
@@ -98,6 +100,19 @@ function failureLine(failure: SendFailure | undefined, language: CopyLanguage, c
   return copy.notSent;
 }
 
+/**
+ * The receipts a row shows under its message, in order: all of them, but the reply check's own on a
+ * message that doesn't show it (`messageReceiptVisible`). Filtered after grouping, for live and
+ * history alike: the message still settles its turn and keeps every action receipt. Pending
+ * receipts and the writing line are never filtered.
+ */
+function shownReceipts(row: ChatRow, ownerPreview: boolean): readonly ReceiptView[] {
+  const { item } = row;
+  return item.kind === 'message' && !messageReceiptVisible(item.ev, ownerPreview)
+    ? row.receipts.filter((receipt) => receipt.source.kind !== 'reply')
+    : row.receipts;
+}
+
 interface RowProps {
   paymentBlock: (block: RenderedBlock) => RenderedBlock;
   row: ChatRow;
@@ -115,14 +130,8 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, payment
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
-  // Filter after grouping, for live and history alike: the message still settles its turn and
-  // keeps every action receipt. Pending receipts and the writing line are never filtered.
-  const visibleReceipts =
-    item.kind === 'message' && !messageReceiptVisible(item.ev, ownerPreview)
-      ? row.receipts.filter((receipt) => receipt.source.kind !== 'reply')
-      : row.receipts;
   const receipts = [
-    ...visibleReceipts.map((receipt: ReceiptView, index) => (
+    ...shownReceipts(row, ownerPreview).map((receipt: ReceiptView, index) => (
       <MarginReceipt
         key={`${receipt.ledgerSeq}-${index}`}
         source={receipt.source}
@@ -415,6 +424,163 @@ function useNewestInView(
   return { follow, beforeChange };
 }
 
+/** The design system's classes for the chat's head, which stays at the top, and a row of the conversation. */
+const CHAT_HEAD = '.cd-public-shell__chat-head';
+const TRANSCRIPT_ROW = '.cd-transcript-row';
+
+/**
+ * Whether all of `el` is in view in the conversation: within what the element that scrolls it shows
+ * of it on screen, under the chat's head and above the composer area, which both stay put.
+ */
+function inConversationView(el: Element): boolean {
+  const box = el.getBoundingClientRect();
+  const shell = el.closest(SHELL);
+  const scroller = scrollerOf(el);
+  const frame = scroller === document.scrollingElement ? { top: 0, bottom: innerHeight } : scroller.getBoundingClientRect();
+  const top = Math.max(0, frame.top, shell?.querySelector(CHAT_HEAD)?.getBoundingClientRect().bottom ?? 0);
+  const bottom = Math.min(innerHeight, frame.bottom, shell?.querySelector(COMPOSER_AREA)?.getBoundingClientRect().top ?? innerHeight);
+  // A pixel either way for the rounding of fractional layout.
+  return box.top >= top - 1 && box.bottom <= bottom + 1;
+}
+
+/** Where a held request's "Cancel this request" is drawn, attached under its message after the receipts. */
+interface CancelPlace {
+  /** The block that holds the button. */
+  block: HTMLElement;
+  /** Which of the lines attached under the message, from the first, is the request's receipt. */
+  receipt: number;
+}
+
+/** The request's receipt: the line attached under its message at `receipt`, counting the first as 0. */
+function receiptAt({ block, receipt }: CancelPlace): Element | null {
+  return block.parentElement?.children.item(receipt) ?? null;
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
+interface WaitingRequests {
+  /** The ref for hold `id`'s "Cancel this request" block, whose receipt is the `receipt`th line attached with it. */
+  place: (id: string, receipt: number) => (block: HTMLDivElement | null) => void;
+  /** The holds whose "Cancel this request" is drawn and whose receipt is out of view. */
+  away: ReadonlySet<string>;
+  /**
+   * Brings hold `id`'s request into view at once, never animated, and puts focus on its "Cancel this
+   * request", without scrolling again. It does nothing else.
+   */
+  view: (id: string) => void;
+}
+
+/**
+ * Which held requests have their receipt out of view in the conversation, looked at again after
+ * every render, every scroll, and each time the shell or its composer area changes size: the
+ * visitor scrolling, the chat going on, a window or a draft changing size. The page draws a line
+ * above the composer for each of those, which takes it back to the request (`view`).
+ *
+ * Call it after `useNewestInView`, so it looks once the newest message has been brought up to the
+ * composer. Showing a line makes the composer area taller and hiding one makes it shorter, which
+ * only moves a receipt further the way it went, so a line never flickers in and out.
+ */
+function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): WaitingRequests {
+  const places = useRef(new Map<string, CancelPlace>());
+  const [away, setAway] = useState<ReadonlySet<string>>(NONE);
+
+  const look = useCallback(() => {
+    const now = new Set<string>();
+    for (const [id, place] of places.current) {
+      const receipt = receiptAt(place);
+      if (receipt !== null && !inConversationView(receipt)) now.add(id);
+    }
+    setAway((was) => (was.size === now.size && [...now].every((id) => was.has(id)) ? was : now));
+  }, []);
+
+  // After every render: the conversation may have grown, or a request been drawn or taken away.
+  useLayoutEffect(look);
+
+  useEffect(() => {
+    // Captured on the document, so the page's scrolling and an embedding panel's both count.
+    document.addEventListener('scroll', look, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', look, { capture: true });
+  }, [look]);
+
+  useEffect(() => {
+    const shell = shown ? end.current?.closest(SHELL) : null;
+    const area = composer.current?.closest(COMPOSER_AREA);
+    if (!shell) return undefined;
+    shell.addEventListener(PUBLIC_SHELL_SCROLLER_EVENT, look);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(look);
+    observer?.observe(shell);
+    if (area) observer?.observe(area);
+    return () => {
+      shell.removeEventListener(PUBLIC_SHELL_SCROLLER_EVENT, look);
+      observer?.disconnect();
+    };
+  }, [shown, end, composer, look]);
+
+  const place = useCallback(
+    (id: string, receipt: number) => (block: HTMLDivElement | null) => {
+      if (block === null) places.current.delete(id);
+      else places.current.set(id, { block, receipt });
+    },
+    [],
+  );
+
+  const view = useCallback(
+    (id: string) => {
+      const at = places.current.get(id);
+      const receipt = at ? receiptAt(at) : null;
+      if (!at || !receipt) return;
+      // The request's message with its receipt and cancel, centred; a message too tall for that
+      // brings its cancel up to the composer, with the receipt right above it.
+      (at.block.closest(TRANSCRIPT_ROW) ?? receipt).scrollIntoView({ block: 'center', behavior: 'instant' });
+      if (!inConversationView(receipt) || !inConversationView(at.block)) at.block.scrollIntoView({ block: 'end', behavior: 'instant' });
+      at.block.querySelector<HTMLElement>(':scope > .cd-button')?.focus({ preventScroll: true });
+      look();
+    },
+    [look],
+  );
+
+  return { place, away, view };
+}
+
+interface WaitingLineProps {
+  /** The request's latest receipt: its dot and the kernel's line, as written. */
+  receipt: ReceiptView;
+  /** "View request", in the page's language. */
+  label: string;
+  onView: () => void;
+  /** Called as the line leaves the page with focus on "View request". */
+  onLeftWithFocus: () => void;
+}
+
+/**
+ * A held request's line above the composer, while its receipt is out of view: the receipt's own dot
+ * and line, never rewritten, and "View request", which goes back to it. It adds no words about the
+ * request and no action on it.
+ */
+function WaitingLine({ receipt, label, onView, onLeftWithFocus }: WaitingLineProps) {
+  const lineId = useId();
+  const button = useRef<HTMLButtonElement | null>(null);
+  // React lets go of the button before it leaves the page, so whether it had focus can still be read.
+  const buttonRef = useCallback(
+    (element: HTMLButtonElement | null) => {
+      if (element === null && button.current !== null && button.current === button.current.ownerDocument.activeElement) onLeftWithFocus();
+      button.current = element;
+    },
+    [onLeftWithFocus],
+  );
+  return (
+    <div className="cd-public-chat__waiting-row">
+      <span className="cd-status-label cd-type-caption cd-public-chat__waiting-line">
+        <StatusDot tone={receiptTone(receipt.source)} />
+        <span id={lineId}>{receipt.plain}</span>
+      </span>
+      <Button variant="ghost" describedBy={lineId} buttonRef={buttonRef} onClick={onView}>
+        {label}
+      </Button>
+    </div>
+  );
+}
+
 /**
  * Whether the conversation has anything in it yet: a row, receipts before the first message,
  * "Claude is writing", the owner typing, or a notice under it.
@@ -472,6 +638,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // links note no chat to go back to.
   const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
+  // After useNewestInView, so it looks once the newest message is in its place.
+  const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null);
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.
@@ -501,6 +669,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (document.activeElement !== null && document.activeElement !== document.body) return;
     composerRef.current?.querySelector('textarea')?.focus();
   }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
+
+  // A waiting line that goes with focus on its "View request" (the request was answered, or its
+  // receipt came back into view) leaves the visitor's place in the composer, without scrolling.
+  const waitingLeftWithFocus = useRef(false);
+  const noteWaitingLeftWithFocus = useCallback(() => {
+    waitingLeftWithFocus.current = true;
+  }, []);
+  useLayoutEffect(() => {
+    if (!waitingLeftWithFocus.current) return;
+    waitingLeftWithFocus.current = false;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+  });
 
   // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
   // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
@@ -581,15 +762,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on. One cancel is out at a time: while
   // it is, the others wait, their words shown and their clicks ignored, so none goes unanswered.
+  // `receipts` are the lines the message shows, in order, so each request's receipt is found by its
+  // place among them.
   const cancelsUnder = (receipts: readonly ReceiptView[]): ReactNode[] => {
     if (!ready) return [];
     return state.openHolds
-      .filter((id) => {
+      .map((id) => {
         const held = state.latest.get(id);
-        return held !== undefined && receipts.includes(held);
+        return { id, at: held === undefined ? -1 : receipts.indexOf(held) };
       })
-      .map((id) => (
-        <div key={`cancel-${id}`} className="cd-public-chat__cancel">
+      .filter(({ at }) => at >= 0)
+      .map(({ id, at }) => (
+        <div key={`cancel-${id}`} ref={waiting.place(id, at)} className="cd-public-chat__cancel">
           <Button
             variant="ghost"
             busy={chat.cancelling === id}
@@ -679,6 +863,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     chat.resend(id);
   };
 
+  // Above the composer, a line for each held request whose receipt is out of view, oldest first,
+  // while its "Cancel this request" is drawn: the request is the kernel's, still open.
+  const waitingLines = ready
+    ? state.openHolds.flatMap((id) => {
+        const receipt = state.latest.get(id);
+        if (receipt === undefined || !waiting.away.has(id)) return [];
+        return [
+          <WaitingLine key={id} receipt={receipt} label={copy.viewRequest} onView={() => waiting.view(id)} onLeftWithFocus={noteWaitingLeftWithFocus} />,
+        ];
+      })
+    : [];
+
   // The code the chat asked for hasn't been confirmed yet: the inbox is where it arrives.
   const awaitingCode = verifyRow !== null && !verified;
   const inboxColumn = inboxPlacement === 'column' && inboxShown(inbox, awaitingCode);
@@ -695,6 +891,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.
         ownerInChat={chat.ownerInChat}
+        // While a request is open, its waiting line can come and go above the composer: the shell keeps
+        // the room it takes, so the line can't switch the shell between tall and short and the move
+        // that switch makes can't bring the line back.
+        keepComposerRoom={ready && state.openHolds.length > 0}
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
@@ -710,17 +910,20 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
           },
         }}
         composer={
-          <div ref={composerRef} onInput={visitorTyping.onInput}>
-            <Composer
-              variant="visitor"
-              label={copy.message(brand.name)}
-              placeholder={copy.message(brand.name)}
-              sendLabel={copy.send}
-              maxLength={MESSAGE_MAX_LENGTH}
-              disabled={!ready}
-              onSend={send}
-            />
-          </div>
+          <>
+            {waitingLines.length > 0 ? <div className="cd-public-chat__waiting">{waitingLines}</div> : null}
+            <div ref={composerRef} onInput={visitorTyping.onInput}>
+              <Composer
+                variant="visitor"
+                label={copy.message(brand.name)}
+                placeholder={copy.message(brand.name)}
+                sendLabel={copy.send}
+                maxLength={MESSAGE_MAX_LENGTH}
+                disabled={!ready}
+                onSend={send}
+              />
+            </div>
+          </>
         }
       >
         <Transcript label={copy.conversation(brand.name)}>
@@ -745,7 +948,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               ownerName={desk.owner_display_name}
               language={language}
               onResend={resend}
-              after={[...cancelsUnder(row.receipts), ...verifyUnder(row)]}
+              after={[...cancelsUnder(shownReceipts(row, ownerPreview)), ...verifyUnder(row)]}
             />
           ))}
           {state.writing ? <WritingIndicator language={language} /> : null}

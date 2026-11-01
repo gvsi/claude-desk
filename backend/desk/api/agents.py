@@ -17,10 +17,11 @@ a final `done` followed by one A2A request. The Desk's answer reaches the agent'
 (`prompts.wrap`), as information. A model that can't answer, an A2A answer other than a 200 `A2AResponse`, an issued
 key that isn't one or, in production, today's model budget spent before a step ends the run `failed`.
 
-What the launcher's panel reads (`DemoAgentRun`): each exchange as the agent's turn, which carries nothing (the
-agent's words go to the Desk but never back to the panel, so no text the kernel didn't check reaches the visitor),
-then the Desk's, with the blocks and signed statuses the kernel checked. Runs live in this process's memory
-(`DemoAgents`): the 50 newest, for an hour, each readable by its launching session alone.
+What the launcher's panel reads (`DemoAgentRun`): each exchange as the agent's turn, carrying the message it signed
+and sent, exactly as sent (the agent's own untrusted words, echoed to its launcher as a visitor's own message is, and
+shown quoted as the agent's: owner decision, 2026-11-01), then the Desk's, with the blocks and signed statuses the
+kernel checked and no text of its own. Runs live in this process's memory (`DemoAgents`): the 50 newest, for an hour,
+each readable by its launching session alone.
 
 Each send carries the client's idempotency key (one per click, required) and claims it in the copy before the kernel
 mints the agent (`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the
@@ -206,12 +207,12 @@ async def run_demo_agent(issued: DemoAgentIssued, task: DemoTask, slug: str, a2a
             raw = A2ARequest(desk_slug=slug, session_id=session_id, message=step.message,
                              mandate=mandate if session_id is None else None).model_dump_json().encode()
             headers = signed_headers(key, agent_key_id, slug, raw, signed_time(clock()), secrets.token_hex(16))
-            run.turns.append(AgentTurn(author="agent", n=n, blocks=[], receipts=[]))
+            run.turns.append(AgentTurn(author="agent", n=n, text=step.message, blocks=[], receipts=[]))
             answer = await _send(a2a, path, raw, headers)
             if session_id is not None and answer.session_id != session_id:
                 raise RunFailed("the Desk answered for another session")
             session_id = answer.session_id
-            run.turns.append(AgentTurn(author="desk", n=n, blocks=answer.blocks, receipts=answer.receipts))
+            run.turns.append(AgentTurn(author="desk", n=n, text=None, blocks=answer.blocks, receipts=answer.receipts))
             messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
                          _user(wrap(DESK_REPLY_TAG, desk_reply_text(answer)))]
     except ModelUnavailable:

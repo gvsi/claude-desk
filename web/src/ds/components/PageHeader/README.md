@@ -11,6 +11,7 @@
 
 - `title`, in sentence case. It is the page's one `h1`.
 - `subtitle`, one plain line that says what the page is for. Leave it out when the title says enough.
+- `note`, a quieter line under the subtitle that says what a term met on the page means, as All rules says who "the reviewer" is. Meta type in `text-secondary`, 8 px further down than the subtitle's gap, at most 68ch wide; on a phone it runs under the title at the header's full width, as the subtitle does.
 - `actions`, usually one `Button` (secondary, or primary when it is the page's main action). They sit at the right end of the title's line and wrap under the title on a narrow line. On a phone (under 640 px) they stay on the title's line and the subtitle runs under both, 8 px under the title, as the phone Connectors board draws it (N-Conn-24-Phone-Connectors).
 - `actionsBelowOnPhone`, for the Rules header's See all rules and preset menu: under 640 px the actions share a line, 16 px under the title (or its subtitle), at the header's full width. The consumer gives the link its own width and the preset button the rest of the line; the open menu spans the column (N-Conn-22-Phone-Presets).
 - `hideSubtitleOnPhone`: under 640 px the subtitle isn't shown, as the phone presets board draws the Rules page.
@@ -22,6 +23,7 @@
 | --- | --- | --- |
 | `title` | `ReactNode` | Required. `.cd-type-page-title` (serif, 24/32) in `text-primary`. Balanced when it wraps. |
 | `subtitle` | `ReactNode` | `.cd-type-body` in `text-secondary`, under the title. |
+| `note` | `ReactNode` | `.cd-type-meta` in `text-secondary`, under the subtitle, `margin-top` `space-8`, `max-width` 68ch. |
 | `actions` | `ReactNode` | At the right of the title's line. |
 | `actionsBelowOnPhone` | `boolean` | Under 640 px, the actions on a line of their own at full width. |
 | `hideSubtitleOnPhone` | `boolean` | Under 640 px, no subtitle. |

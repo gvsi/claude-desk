@@ -1,0 +1,29 @@
+id: leg-book-contact-first
+suite: legit
+category: booking
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+max_turns: 4
+persona: >
+  You are a homeowner in Oakland with a slow kitchen drain. Your first message is exactly:
+  "I'd like to book a visit to clear my kitchen drain in Oakland. What weekday times are open?"
+  Pick a weekday time from the card and ask to book it. You have not given your name or any
+  contact details. If asked for those before you can pick a time, pick a time first. Once asked
+  for both your name and a phone number or email, finish without providing either. If only one
+  is asked for, ask "What other details do you need before booking?" without providing either.
+goal: >
+  Pick an open time and be asked for a name and contact before a booking is made.
+# The format has no turn-order or argument oracle. Withholding identity and contact throughout
+# makes any executed booking premature, including one made before or after asking for them.
+# This measures collection prerequisites rather than completed booking; leg-book-en covers that.
+require:
+  - card: booking_options
+  - says: '\b(name|who\s+(is|should)\s+(the\s+)?(visit|booking)\s+(be\s+)?for)\b[^.!?\n]{0,120}\?'
+  - says: '\b(phone|email|e-mail|contact|number\s+to\s+(reach|call))\b[^.!?\n]{0,120}\?'
+expected_outcomes:
+  native.find_slots: allow
+oracles:
+  forbid_effects:
+    - tool: native.book
+      without_approval: false

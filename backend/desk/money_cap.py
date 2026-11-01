@@ -20,7 +20,7 @@ Both processes may import this module, so it imports nothing but `desk.contracts
 `desk.presets`.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from types import MappingProxyType
 from typing import Literal
 
@@ -51,16 +51,17 @@ def lowered_reason(cap: int, language: Language) -> str:
     return (LOWERED_REASONS if cap else ZERO_REASONS)[language].format(amount=amount(cap))
 
 
-def auto_money(card: RuleCard) -> bool:
-    """Is the card one the money cap bounds: an auto card that takes or pays out money."""
-    return card.mode == "auto" and moves_money(card)
+def auto_money(card: RuleCard, money_tools: Collection[str] = frozenset()) -> bool:
+    """An auto money card; callers supply the Desk's money tool names for business targets."""
+    return card.mode == "auto" and moves_money(card, money_tools)
 
 
 def lower_to_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap: int,
-                 language: Language) -> list[RuleCard]:
+                 language: Language, *, money_tools: Collection[str] = frozenset()) -> list[RuleCard]:
     """`cards` for a draft at the money cap `cap`, each carried auto money card above it brought
     down to it, its reason stating the new limit in `language`.
 
+    `money_tools` names the Desk's tools whose profiles take or pay out money, including business tools.
     A carried card is one whose `card_id` is an active card's, matched by ID alone, so a card the
     model re-emits with a reworded `reason` still counts. Each carried auto money card whose
     `max_amount_cents` is above `cap` comes back with `max_amount_cents = cap`, or, when `cap` is
@@ -78,7 +79,7 @@ def lower_to_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap: int
     lowered: list[RuleCard] = []
     for card in cards:
         above = card.max_amount_cents is None or card.max_amount_cents > cap
-        if card.card_id not in carried or not auto_money(card) or not above:
+        if card.card_id not in carried or not auto_money(card, money_tools) or not above:
             lowered.append(card)
         elif cap == 0:
             lowered.append(RuleCard.model_validate({**card.model_dump(), "mode": "ask", "max_amount_cents": None,

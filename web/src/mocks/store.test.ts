@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, HoursWindow, KnowledgeItem, LedgerPage, PublicDesk, RuleCard, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -36,6 +36,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
+import type { DocumentAnswer } from './documents.ts';
 import {
   CALLBACK_WINDOW,
   DECISIONS,
@@ -51,7 +52,7 @@ import {
   turnLanguage,
   type RuleName,
 } from './script.ts';
-import { RIVERA } from './seed.ts';
+import { PRESETS, RIVERA, RIVERA_HOURS, presetCards } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 import { validateContract } from './validate.ts';
@@ -699,14 +700,14 @@ describe('the scripted Desk', () => {
         'en',
         [
           ['prose', null, []],
-          ['card', 'Tuesday, November 3', ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']],
+          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Maria Rivera']],
         ],
       ],
       [
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
+          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
@@ -879,7 +880,7 @@ describe('the scripted Desk', () => {
     expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
     const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
     expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
-      'Book the earliest visit for a leaking water heater for Alex Kim.',
+      'What’s your earliest visit for a leaking water heater? Any day this week.',
     ]);
     expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
 
@@ -1117,8 +1118,9 @@ describe('the scripted Desk', () => {
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
-    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
-    // on every read, not what they had written when it opened.
+    // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
+    // most recently, their previous and last messages joined with " · ", on every read, not what
+    // they had written when it opened.
     const { session } = await openChat();
     const quoted = async () =>
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
@@ -1129,7 +1131,55 @@ describe('the scripted Desk', () => {
     expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    await send('Is   Tuesday\n\nfine?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
+  });
+
+  it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
+    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
+    const { session } = await openChat();
+    const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
+    await send(long);
+    await drain();
+    await send('Can I get 50%   off if I pay cash?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.session_id === session.session_id,
+    );
+    expect(held?.from_the_visitor).toBe(`${'x'.repeat(198)}… · Can I get 50% off if I pay cash?`);
+    expect(Array.from(held?.from_the_visitor?.split(' · ')[0] ?? '')).toHaveLength(199);
+  });
+
+  it('needs_you_summarises_a_handoff_never_a_hold', async () => {
+    // As the API's Needs you sends `claude_summary`: on a handoff, the newest AI-written triage of
+    // its chat's stopped attempts, the summary Safety shows for it; on a held request, never, since
+    // a visitor could steer a summary to sway an approval.
+    const read = async () => (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const [seeded] = await read();
+    if (!seeded?.decision) throw new Error('a fresh copy holds the seeded request');
+    // The seeded chat has the stopped draft Safety lists, and its request still carries no summary.
+    expect(seeded.claude_summary).toBeNull();
+    const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
+    expect(handed?.handoff?.kind).toBe('card');
+    expect(handed?.claude_summary).toBe(triage.summary);
+    expect(handed?.from_the_visitor).toBe(seeded.from_the_visitor);
+
+    // A chat with nothing stopped has no triage to summarise it.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
+    expect(asked?.handoff?.kind).toBe('card');
+    expect(asked?.claude_summary).toBeNull();
   });
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
@@ -1318,6 +1368,132 @@ describe('the scripted Desk', () => {
     expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id).sort()).toEqual(
       [preview.state.session_id, again.state.session_id].sort(),
     );
+  });
+
+  it('summary_carries_the_visitors_newest_words', async () => {
+    const latest = async (sessionId: string) =>
+      ((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).find((c) => c.session_id === sessionId)
+        ?.latest_visitor_text;
+    // Dana's seeded chat, by her newest message; the visiting agent's chat has none.
+    expect(await latest('ses-dana-web')).toBe('Tuesday at 2 works.');
+    expect(await latest('ses-alex-agent')).toBeNull();
+
+    // A new chat has none until the visitor writes, then their newest message, its whitespace
+    // collapsed to single spaces, and cut to 199 characters and "…" past 200.
+    const { session } = await openChat();
+    expect(await latest(session.session_id)).toBeNull();
+    await send('  Do you   work\n\nweekends?  ');
+    await drain();
+    expect(await latest(session.session_id)).toBe('Do you work weekends?');
+    const whole = 'w'.repeat(200);
+    await send(whole);
+    await drain();
+    expect(await latest(session.session_id)).toBe(whole);
+    await send(`${'a'.repeat(150)} ${'b'.repeat(100)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'a'.repeat(150)} ${'b'.repeat(48)}…`);
+    // A cut that falls just after a space ends on the word before it, with no space before the "…".
+    await send(`${'c'.repeat(198)} ${'d'.repeat(10)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'c'.repeat(198)}…`);
+    // A message that is all whitespace leaves none, as the API's null.
+    await send(' \n\t ');
+    await drain();
+    expect(await latest(session.session_id)).toBeNull();
+
+    // The owner's own preview has none, whatever she writes there.
+    const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    await send('Do you work weekends?');
+    await drain();
+    expect(await latest(preview.state.session_id)).toBeNull();
+  });
+});
+
+describe("a verified visitor's document link", () => {
+  /** The headers the API sends with a document and with a refusal on its link, so it is never cached, sniffed, sent on or indexed. */
+  const PRIVATE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' };
+  const USED_OR_EXPIRED = 'This link was already opened or has expired. Ask in the chat for a new one.';
+
+  /** A document link's answer, which must be one with a status (not a dropped connection). */
+  function open(method: 'GET' | 'HEAD', token: string, headers: Record<string, string> = {}): DocumentAnswer {
+    const answer = mockStore.document(method, token, { headers });
+    if ('network' in answer) throw new Error(`${method} ${token} dropped the connection`);
+    return answer;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
+  async function invoiceToken(): Promise<string> {
+    const { events } = await openChat();
+    await send("I'm Dana Whitfield. Please send my last invoice.");
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
+    expect(card?.title).toBe(rivera.blocks.document_link.en.title);
+    const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
+    if (token === undefined) throw new Error('the invoice card links to its document');
+    return token;
+  }
+
+  it('the_first_open_gets_the_document', async () => {
+    // As the API sends the kernel's document: plain text, shown in the tab under its title's file name.
+    const opened = open('GET', await invoiceToken());
+    expect(opened).toEqual({
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
+      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+    });
+  });
+
+  it('a_second_open_is_404', async () => {
+    const token = await invoiceToken();
+    expect(open('GET', token).status).toBe(200);
+    // The API's short static copy, in the browser's language, or its error when JSON is asked for.
+    const refused = { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE, vary: 'accept, accept-language' };
+    expect(open('GET', token)).toEqual({ status: 404, headers: { ...refused, 'content-language': 'en' }, body: USED_OR_EXPIRED });
+    expect(open('GET', token, { 'accept-language': 'es-MX,es;q=0.9,en;q=0.8' })).toEqual({
+      status: 404,
+      headers: { ...refused, 'content-language': 'es' },
+      body: 'Este enlace ya se abrió o caducó. Pide uno nuevo en el chat.',
+    });
+    expect(open('GET', token, { accept: 'application/json' })).toEqual({
+      status: 404,
+      headers: { 'content-type': 'application/json', ...PRIVATE, vary: 'accept, accept-language' },
+      body: '{"error":"link_used_or_expired"}',
+    });
+  });
+
+  it('an_unknown_link_is_404', async () => {
+    // Before any card hands it out, the invoice's link names nothing, as a made-up one doesn't.
+    for (const token of [rivera.blocks.document_link.en.href?.slice('/api/d/'.length) ?? '', 'nothing-here']) {
+      expect([open('GET', token).status, open('GET', token).body], token).toEqual([404, USED_OR_EXPIRED]);
+    }
+    expect(open('GET', 'nothing-here').status).toBe(404);
+    const token = await invoiceToken();
+    expect(open('GET', `${token}x`).status).toBe(404);
+    expect(open('GET', token).status).toBe(200);
+  });
+
+  it('each_card_hands_out_a_link_of_its_own', async () => {
+    // Dana asks again and gets a new card: its link is a new one, which opens once, and the link
+    // she already opened stays used.
+    const first = await invoiceToken();
+    expect(open('GET', first).status).toBe(200);
+    const second = await invoiceToken();
+    expect(second).not.toBe(first);
+    expect(open('GET', first).status).toBe(404);
+    expect(open('GET', second).status).toBe(200);
+    expect([open('GET', first).status, open('GET', second).status]).toEqual([404, 404]);
+  });
+
+  it('a_look_before_opening_never_uses_the_link', async () => {
+    // A link checker's HEAD answers 200 with the document's privacy headers and no body, whatever
+    // the token names, and the link still opens once after it.
+    const token = await invoiceToken();
+    for (const named of [token, token, 'nothing-here']) expect(open('HEAD', named)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(200);
+    expect(open('HEAD', token)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(404);
   });
 });
 
@@ -1536,7 +1712,7 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
+      ['business', 'cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
     );
     // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
     const quote = rivera.ruleCards['rv-quote'];
@@ -1576,6 +1752,62 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
+    // Rivera's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
+    // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
+    const preset = async () => (await call('draftPreset', { params: { desk_id: deskId }, body: { preset: 'auto' } })).body as RulesDraft;
+    const bookings = (cards: readonly RuleCard[]) => cards.filter((card) => card.applies_to === 'native.book');
+    const [shipped] = bookings(PRESETS.auto);
+    if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
+    const draft = await preset();
+    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
+    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
+    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+
+    // A Desk with no hours books weekdays 9 to 5: the preset's cards as they are.
+    mockStore.reset('rivera');
+    const desk = mockStore.world.desk(deskId);
+    if (desk === undefined) throw new Error("Rivera's Desk is in the copy");
+    desk.summary.hours = [];
+    expect((await rules()).preset).toBeNull();
+    const fallback = await preset();
+    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect((await confirm(fallback.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+  });
+
+  it('preset_cards_match_the_apis', () => {
+    // The mock drafts a preset as the API does (`desk.api.rules.preset_cards`): a booking card per
+    // weekday window, numbered by first day and then hours, none for hours only at weekends, and the
+    // presets' cards as they are for no hours at all or exactly 9 to 5.
+    const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
+    const bookings = (hours: HoursWindow[]) => presetCards('auto', hours).filter((card) => card.applies_to === 'native.book').map((card) => [card.card_id, card.hours]);
+    const monToThu = window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00');
+    const friday = window(['fri'], '08:00:00', '16:00:00');
+    expect(bookings([friday, window(['sat'], '09:00:00', '13:00:00'), monToThu])).toEqual([
+      ['preset-book-weekday-1', monToThu],
+      ['preset-book-weekday-2', friday],
+    ]);
+    expect(bookings([window(['thu', 'fri'], '08:00:00', '18:00:00'), window(['sun', 'wed', 'tue', 'mon'], '08:00:00', '18:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')],
+    ]);
+    expect(bookings([window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '00:00:00', '00:00:00')],
+    ]);
+    for (const hours of [[], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto);
+    }
+    // Hours at weekends alone: no booking card, so weekday bookings ask first.
+    for (const hours of [[window(['sat'], '09:00:00', '13:00:00')], [window(['sat', 'sun'], '10:00:00', '16:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto.filter((card) => card.applies_to !== 'native.book'));
+    }
+    expect(presetCards('ask_first', RIVERA_HOURS)).toEqual(PRESETS.ask_first);
   });
 
   it('rule_chat_answers_about_the_hold_a_question_names', async () => {
@@ -2258,6 +2490,7 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
+      answers: 0,
       turned_down: 0,
       total: 0,
       newest: { turned_down: null, booking: null, lead_or_answer: null },
@@ -2291,7 +2524,7 @@ describe("Today's windows", () => {
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, answers: 1, turned_down: 0, total: 2 });
     expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
@@ -2324,7 +2557,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
+    expect(both.briefing).toMatchObject({ conversations: 5, answers: 3, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -2333,7 +2566,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, answers: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -2361,6 +2594,8 @@ describe("Today's windows", () => {
     const full = await list();
     expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
+    // The answers counted are the list's own.
+    expect(answered.briefing.answers).toBe(full.items.filter((item) => item.kind === 'answer').length);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 

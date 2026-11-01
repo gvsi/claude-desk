@@ -469,9 +469,9 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
             responses=error_responses(401, 404, 422, 503))
 async def agent_run(run_id: Annotated[str, Path(max_length=64)], request: Request, response: Response,
                     ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> DemoAgentRun:
-    """The built-in agent's run as it stands, for the session that sent it (any other is 404): what the Desk
-    answered, as the kernel checked it, and never the agent's own words. Kept for an hour. Never cached: a Desk turn
-    can carry a payment link."""
+    """The built-in agent's run as it stands, for the session that sent it (any other is 404): each message the agent
+    sent, exactly as sent, as the agent's own untrusted words, and what the Desk answered, as the kernel checked it.
+    Kept for an hour. Never cached: a Desk turn can carry a payment link."""
     run = runtime(request).started().agents.run(run_id, ctx.ids.session_id)
     if run is None:
         raise ApiProblem(404, "not_found")

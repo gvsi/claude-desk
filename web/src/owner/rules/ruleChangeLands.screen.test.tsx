@@ -6,6 +6,7 @@
  * phone the sheet shows the receipt, and closing it brings Rules to the row. Under reduced motion
  * it is all at its end state at once.
  */
+import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { cdp, page, userEvent, type Locator } from 'vitest/browser';
@@ -15,7 +16,7 @@ import { apiPath, ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { worker } from '../../mocks/browser.ts';
 import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
-import { businessOut } from '../../mocks/readModels.ts';
+import { businessOut, rulesView } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
@@ -372,6 +373,42 @@ function holdNeedsYou(): { held: () => number; release: () => void } {
   return { held: () => waiting, release };
 }
 
+/** The main Desk's rules, as the app reads them. */
+const RULES_PATH = apiPath('rules', { desk_id: RIVERA.deskId });
+
+/** Holds every read of the main Desk's rules until `release()` lets them through to the mock. */
+function holdRules(): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(RULES_PATH, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/**
+ * Whether `root` draws an element matching `selector` (a selector starting with ".") or text holding
+ * `words`, anywhere but in its loading shapes, which are laid out with the page's own classes and
+ * words.
+ */
+function showsOutsideShapes(root: HTMLElement, selectorOrWords: string): boolean {
+  const outside = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('.cd-skeleton-screen__layer') == null;
+  if (selectorOrWords.startsWith('.')) return [...root.querySelectorAll(selectorOrWords)].some(outside);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (node.textContent?.includes(selectorOrWords) && outside(node)) return true;
+  }
+  return false;
+}
+
 /** Text that starts with `words`, whatever follows them. */
 const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
@@ -407,11 +444,138 @@ describe('a preset or a new payment limit', () => {
     // Every row whose rules it changed lands, and those it left alone (the starter's own) don't.
     const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
-    for (const name of changed) expect(fillOf(toolRow(root, name)), name).toBe(SELECTED);
+    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
     for (const name of ['Find open times', 'Save a lead', 'Request a callback']) expect(fillOf(toolRow(root, name)), name).toBe('none');
     expect(flashed).toBe(false);
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(updatedRows(root).sort()).toEqual([...changed].sort());
+  });
+
+  it('a_preset_lands_only_on_the_rows_its_review_listed', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    // The tools its review lists by name, each once: its quote and document rules replace Rivera's
+    // with ones that differ only in their ids, so it lists neither.
+    const listed = [...new Set([...root.querySelectorAll('.cd-change-review__title')].map((title) => title.firstChild?.textContent ?? ''))].sort();
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed).not.toContain('Quote');
+    expect(listed).not.toContain('Share a document');
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Back on Rules, exactly those rows say "Updated" and light up; Quote and Share a document don't.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => updatedRows(root).sort()).toEqual(listed);
+    for (const name of listed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    for (const name of ['Quote', 'Share a document']) {
+      expect(saysUpdated(toolRow(root, name)), name).toBe(false);
+      expect(fillOf(toolRow(root, name)), name).toBe('none');
+    }
+  });
+
+  it('back_on_rules_the_reading_state_shows_until_the_rules_read_has_the_new_version', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    const version = desk().lastVersion;
+    // Every read of the rules after the confirm is held, as on a slow network.
+    const reads = holdRules();
+    // Whether Rules draws any of the old version's rows, or its line, while the read is held.
+    let oldShown = false;
+    const watch = new MutationObserver(() => {
+      if (showsOutsideShapes(root, '.cd-connector-section__tool') || showsOutsideShapes(root, 'Version 7 of your rules')) oldShown = true;
+    });
+    watch.observe(root, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => watch.disconnect());
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Back on Rules, the read held: its reading state, never the old rules.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(reads.held).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await pause(300);
+    watch.disconnect();
+    expect(oldShown).toBe(false);
+    expect(updatedRows(root)).toEqual([]);
+
+    // The read lands: the new version's line, and the rows it changed say so.
+    reads.release();
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
+    expect(showsOutsideShapes(root, 'Version 7 of your rules')).toBe(false);
+  });
+
+  /** Rules, then the "Ask me first" preset's review, ready to confirm. Returns the version it makes. */
+  async function reviewAskMeFirst() {
+    const rendered = await renderRoute(`${DESK}/rules`);
+    await rendered.screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await rendered.screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    return { ...rendered, root: rendered.screen.container, version: desk().lastVersion };
+  }
+
+  /** Rivera's version 7 line, drawn on the page rather than in its loading shapes. */
+  const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Version 7 of your rules');
+
+  it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', async () => {
+    const { screen, root, version } = await reviewAskMeFirst();
+    // Every read after the confirm answers with the rules as they were, as a read that lags behind it might.
+    const older = rulesView(desk());
+    let lagging = true;
+    let olderReads = 0;
+    worker.use(
+      http.get(RULES_PATH, () => {
+        if (!lagging) return undefined;
+        olderReads += 1;
+        return HttpResponse.json(older);
+      }),
+    );
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const back = performance.now();
+
+    // The reading state, while the older rules keep coming, for a few seconds.
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await pause(2_000);
+    expect(olderReads).toBeGreaterThan(1);
+    expect(showsVersion7(root)).toBe(false);
+    // Then Rules draws the rules it has, with nothing marked as updated: they aren't the new ones yet.
+    await expect.poll(() => showsVersion7(root), { timeout: 5_000 }).toBe(true);
+    expect(performance.now() - back).toBeGreaterThan(3_000);
+    expect(updatedRows(root)).toEqual([]);
+
+    // A later read with the confirmed version still lands the change.
+    lagging = false;
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    expect(showsVersion7(root)).toBe(false);
+  });
+
+  it('a_read_waiting_for_the_network_ends_the_reading_state_at_once', async () => {
+    const { screen, root, version } = await reviewAskMeFirst();
+    // Offline as the change is confirmed: the read of the new rules waits for the network.
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const back = performance.now();
+
+    // Rules draws the rules it has well before the wait's deadline, with the network error it
+    // already shows for a read that can't go out, and nothing marked as updated yet.
+    await expect.poll(() => showsVersion7(root)).toBe(true);
+    expect(performance.now() - back).toBeLessThan(3_000);
+    await expect.element(screen.getByRole('button', { name: 'Try again' }).first()).toBeVisible();
+    expect(updatedRows(root)).toEqual([]);
+
+    // Back online, the read goes out, and the change lands.
+    onlineManager.setOnline(true);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
   });
 
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
@@ -520,6 +684,75 @@ describe('a preset or a new payment limit', () => {
     await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
     await expect.poll(() => fillOf(toolRow(root, 'Payment link'))).toBe(SELECTED);
     expect(desk().policy.auto_money_cap_cents).toBe(10_000);
+  });
+});
+
+describe('focus once a review Rules opened returns', () => {
+  /** The words of the payment limit's field. */
+  const LIMIT_FIELD = 'Most a payment can be without asking you, in dollars';
+
+  /**
+   * Rules with Payments at the top of what shows, then its limit's review from Payments' "Change",
+   * by keyboard: 600, then Enter. Returns the place Rules was at.
+   */
+  async function reviewPaymentsLimit() {
+    const rendered = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    const { screen } = rendered;
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    await expect.element(payments.getByRole('button', { name: 'Change' })).toBeVisible();
+    // The shell's main area, once the Desk has opened, which scrolls on its own.
+    const main = screen.getByRole('main').element();
+    payments.element().scrollIntoView({ block: 'start' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const place = main.scrollTop;
+    payments.getByRole('button', { name: 'Change' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(payments.getByRole('textbox', { name: LIMIT_FIELD })).toHaveFocus();
+    await userEvent.keyboard('600{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    return { ...rendered, main, place };
+  }
+
+  /** Presses `name` on the review by keyboard, as the owner tabs to it. */
+  async function press(screen: Awaited<ReturnType<typeof renderRoute>>['screen'], name: string) {
+    screen.getByRole('button', { name }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+  }
+
+  it('keep_my_rules_puts_focus_back_on_the_change_that_opened_it', async () => {
+    const { screen, main, place } = await reviewPaymentsLimit();
+    await press(screen, 'Keep my rules');
+
+    // Back on Rules at its place, focus on Payments' "Change", not the page: the next Tab goes on from there.
+    const change = screen.getByRole('region', { name: 'Payments' }).getByRole('button', { name: 'Change' });
+    await expect.element(change).toHaveFocus();
+    expect(main.scrollTop).toBe(place);
+    await pause(300);
+    expect(document.activeElement).toBe(change.element());
+    expect(main.scrollTop).toBe(place);
+  });
+
+  it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
+    const { screen, main, place } = await reviewPaymentsLimit();
+    await press(screen, 'Confirm change');
+
+    // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    await expect.poll(() => payments.element().querySelector('.cd-money-limit .cd-pill')?.textContent).toBe('Updated');
+    await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
+    await pause(300);
+    expect(main.scrollTop).toBe(place);
+    expect(document.activeElement).toBe(payments.getByRole('button', { name: 'Change' }).element());
+  });
+
+  it('keep_my_rules_on_a_preset_puts_focus_back_on_start_from_a_preset', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    await press(screen, 'Keep my rules');
+    await expect.element(screen.getByRole('button', { name: 'Start from a preset' })).toHaveFocus();
   });
 });
 

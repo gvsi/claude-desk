@@ -2,7 +2,7 @@
  * The mock's setup interview, driven the way its handlers drive it: the business's name it reads
  * from the owner's description, the way a reader would, and the slug and first question that follow;
  * the unfinished setup the owner's Desks name until the Desk goes live; the situations it tries,
- * titled for the business; and the Desk it makes, handing a visitor off to its own owner.
+ * titled for the business; and the Desk it makes, which speaks for its own owner.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,7 +16,10 @@ import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
-import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo } from './setup.ts';
+import {
+  holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo,
+  TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
+} from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -533,6 +536,78 @@ describe('setup consultant run and decisions', () => {
   });
 });
 
+describe('the test-client offer, as the API asks it', () => {
+  const LAKEVIEW = 'Lakeview Accounts. I’m Lee. We help local businesses.';
+  const CONTACT = 'Email me at lee@example.com. After hours, take a message.';
+  const OFFER = {
+    role: 'claude', text: TEST_CLIENT_OFFER, card: null,
+    choices: [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }],
+  };
+
+  /** A scripted run to its end, typing `contact` on the contact question; or, with `suggestions`, using the suggestions once it's typed. */
+  async function finished(contact: string, suggestions = false): Promise<SetupState> {
+    let state = await startState(LAKEVIEW);
+    const id = state.interview_id;
+    state = await setupState('setupConsent', id, { allow: false });
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', id, { question, text: 'Yes' });
+    if (!suggestions) return setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: contact });
+    // An answer that leaves the contact question open keeps it waiting, as a follow-up does.
+    state = await setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: `Not sure yet. ${contact}` });
+    expect(state.question).toBe('contact_and_after_hours');
+    return setupState('setupSuggestions', id, {});
+  }
+
+  it('asks_once_after_the_closing_plan_when_the_owner_typed_their_contact', async () => {
+    const state = await finished(CONTACT);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.slice(-2)).toEqual([{ role: 'claude', text: QUESTIONS_DONE, choices: [], card: null }, OFFER]);
+    // With no contact of the owner's own, as the API reads it: none typed, hours only, another person's or a rejected one.
+    for (const contact of [
+      'Yes', 'The same as on my website.', 'We are open 8.00-17.00', 'Ana: ana@example.test',
+      'Call my assistant Ana at (510) 555-0142 or email ana@example.test.', 'Do not use old@example.test or 510-555-0142.',
+      'Ana’s email is ana@example.test',
+    ]) {
+      const without = await finished(contact);
+      expect([without.step, without.question, without.messages.at(-1)?.text], contact).toEqual(['tools', null, QUESTIONS_DONE]);
+    }
+    for (const contact of ['Ana handles bookings. My own email is lee@example.com.', 'Ana: ana@example.test, Lee: lee@example.com']) {
+      expect((await finished(contact)).question, contact).toBe('test_client');
+    }
+  });
+
+  it('a_yes_says_done_and_not_now_says_nothing_and_both_move_to_tools', async () => {
+    for (const [text, said] of [[TEST_CLIENT_YES, [TEST_CLIENT_ADDED]], [TEST_CLIENT_NO, []], ['Sure, go ahead', [TEST_CLIENT_ADDED]], ["don't add me", []]] as const) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['tools', null]);
+      expect(state.messages.slice(-1 - said.length), text).toEqual([
+        { role: 'owner', text, choices: [], card: null }, ...said.map((line) => ({ role: 'claude', text: line, choices: [], card: null })),
+      ]);
+      expect(await mockStore.dispatch('setupAnswer', { params: { id: offered.interview_id }, body: { question: 'test_client', text } }), text).toMatchObject({ status: 409 });
+    }
+  });
+
+  it('an_answer_that_is_neither_yes_nor_no_gets_the_same_offer_again', async () => {
+    // A question or a conditional yes is no yes, whatever words it holds.
+    for (const text of ['What does that mean?', 'What does add me as a test client mean?', 'What happens if I say yes?', "If it's free, yes"]) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['questions', 'test_client']);
+      expect(state.messages.slice(-2), text).toEqual([{ role: 'owner', text, choices: [], card: null }, OFFER]);
+    }
+  });
+
+  it('use_your_suggestions_reaches_the_same_offer_and_using_them_again_moves_on', async () => {
+    const state = await finished(CONTACT, true);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.at(-2)?.text).toContain('Your plan for Lakeview Accounts:');
+    expect(state.messages.at(-1)).toEqual(OFFER);
+    const moved = await setupState('setupSuggestions', state.interview_id, {});
+    expect([moved.step, moved.question]).toEqual(['tools', null]);
+    expect(moved.messages.slice(-2)).toEqual([OFFER, { role: 'owner', text: 'Use your suggestions', choices: [], card: null }]);
+  });
+});
+
 describe("the business's name, from the description", () => {
   it('a_phrase_like_i_run_names_the_business', async () => {
     // The owner introduces themselves first: the business is the one they say they run, not "I'm Ana".
@@ -877,9 +952,11 @@ describe("the real situations, in the business's own words", () => {
     return { rows: tried.body as SituationResult[], draft };
   }
 
-  /** Where the two bookings the bookings rule (card-2) allows sit: a Tuesday afternoon, and the Saturday morning. */
+  /** Where the two bookings the bookings rule (card-2) decides sit: a Tuesday afternoon, and the Saturday morning. */
   const WEEKDAY = 0;
   const SATURDAY = 4;
+  /** Where the verified customer's own document sits. */
+  const DOCUMENT = 3;
   /**
    * Everything a situation tries and what the kernel said, but its words. Two more fields follow
    * each business's own days and are left out here, then checked on their own: the reason the
@@ -1016,13 +1093,17 @@ describe("the real situations, in the business's own words", () => {
         expect(titles, `${chip}: ${starter.business}`).toEqual(starter.titles);
         if (starter.business === 'Rivera Plumbing') expect(outcomes(rows), chip).toEqual(RIVERA_OUTCOMES);
         else for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
+        // The English CPA run drafts its other cards from its own answers, which never ask about
+        // documents: its document row follows its own documents rule
+        // (`chens_answered_run_changes_only_where_its_draft_asks`), so it isn't compared here.
+        const consultant = language === 'en' && starter.business === 'Chen & Co.';
+        const sameAsRivera = (r: readonly SituationResult[]) => probed(r).filter((_, row) => !consultant || row !== DOCUMENT);
         // Only the words, and the bookings that follow the business's own days, change: what each
         // situation tries, plans and gets is otherwise Rivera's.
-        expect(probed(rows), chip).toEqual(probed(rivera.rows));
+        expect(sameAsRivera(rows), chip).toEqual(sameAsRivera(rivera.rows));
         expectOwnBookings(rows, draft, starter, chip);
-        // Nothing else about the cards changes. The English CPA run drafts its other cards from
-        // its own answers, so only the two rules with the business's words are compared there.
-        const consultant = language === 'en' && starter.business === 'Chen & Co.';
+        // Nothing else about the cards changes. Only the two rules with the business's words are
+        // compared for the English CPA run.
         const compared = (d: RulesDraft) => withoutBusinessWords(d).filter((card) => !consultant || card.card_id === 'card-2' || card.card_id === 'card-7');
         expect(compared(draft), chip).toEqual(compared(rivera.draft));
       }
@@ -1057,6 +1138,87 @@ describe("the real situations, in the business's own words", () => {
       }, description);
       expect(withoutBusinessWords(draft), description).toEqual(withoutBusinessWords(rivera.draft));
     }
+  });
+
+  /**
+   * The situations setup tries on `description`'s draft and the draft itself, after "Use your
+   * suggestions" with the first question unanswered: every limit left unanswered asks first.
+   */
+  async function triedOnSuggestions(description: string): Promise<{ rows: SituationResult[]; draft: RulesDraft }> {
+    const id = (await startState(description)).interview_id;
+    expect((await setupState('setupConsent', id, { allow: false })).question, description).toBe('what_you_do');
+    await setupState('setupSuggestions', id, {});
+    const drafted = await mockStore.dispatch('setupRules', { params: { id } });
+    if ('network' in drafted || drafted.status !== 200) throw new Error('setup must draft its rules');
+    const tried = await mockStore.dispatch('setupSituations', { params: { id } });
+    if ('network' in tried || tried.status !== 200) throw new Error('setup must try its situations');
+    return { rows: tried.body as SituationResult[], draft: drafted.body as RulesDraft };
+  }
+
+  /** A situation's plan and result as the owner reads them, and whether it is what was planned. */
+  const read = (row: SituationResult | undefined) => [row?.situation.expected, row?.result.outcome, row?.result.reason_plain, row?.result.card_ids, row?.matches];
+  /** Where the rows the answers didn't plan for sit. */
+  const flagged = (rows: readonly SituationResult[]) => rows.flatMap((row, at) => (row.matches ? [] : [at]));
+  /** Juniper Hair Studio, Rivera Plumbing, and a business no starter describes. */
+  const SUGGESTED = [
+    START_EXAMPLES.en.examples[0]?.description ?? '',
+    START_EXAMPLES.en.examples[1]?.description ?? '',
+    "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+  ];
+
+  it('a_booking_asks_when_the_suggestions_left_bookings_asking', async () => {
+    // The Rules step showed "Bookings ask you first": the weekday booking asks, as planned.
+    for (const description of SUGGESTED) {
+      const { rows, draft } = await triedOnSuggestions(description);
+      expect(cardOf(draft, 'card-2'), description).toMatchObject({ applies_to: 'native.book', mode: 'ask', reason: 'Bookings ask you first.' });
+      expect(read(rows[WEEKDAY]), description).toEqual(['hold', 'hold', 'Bookings ask you first.', ['card-2'], true]);
+    }
+  });
+
+  it('a_customers_own_document_asks_when_the_suggestions_left_documents_asking', async () => {
+    // Juniper's Rules step showed "Documents ask you first": the client's receipt asks, as planned.
+    const { rows, draft } = await triedOnSuggestions(SUGGESTED[0] ?? '');
+    expect(cardOf(draft, 'card-4'), 'Juniper').toMatchObject({ applies_to: 'native.release_document', mode: 'ask', reason: 'Documents ask you first.' });
+    expect(rows[DOCUMENT]?.situation.title).toBe('A client asks for their last receipt');
+    expect(read(rows[DOCUMENT]), 'Juniper').toEqual(['hold', 'hold', 'Documents ask you first.', ['card-4'], true]);
+  });
+
+  it('nothing_is_flagged_when_the_suggestions_left_bookings_asking', async () => {
+    // The Saturday booking is planned to ask first, as the answers' Saturday rule says. Where the
+    // bookings rule books it on its own, that isn't what was planned (`expectOwnBookings`); where
+    // the suggestions left bookings asking first too, it is, and no row is flagged.
+    for (const description of SUGGESTED) {
+      const { rows } = await triedOnSuggestions(description);
+      expect(flagged(rows), description).toEqual([]);
+      expect(read(rows[SATURDAY]), description).toEqual(['hold', 'hold', 'Bookings ask you first.', ['card-2'], true]);
+    }
+  });
+
+  it('the_suggestions_draft_names_each_rule_once', async () => {
+    // The Saturday rule already asks first, so it keeps its own reason when the suggestions leave
+    // bookings asking first too, and the Rules step lists every reason once.
+    for (const description of SUGGESTED) {
+      const { draft } = await triedOnSuggestions(description);
+      expect(cardOf(draft, 'card-3'), description).toMatchObject({ applies_to: 'native.book', mode: 'ask', reason: 'Saturday bookings ask you first.' });
+      const reasons = draft.cards.map((card) => card.reason);
+      expect(reasons.filter((reason, at) => reasons.indexOf(reason) !== at), description).toEqual([]);
+    }
+  });
+
+  it('chens_answered_run_changes_only_where_its_draft_asks', async () => {
+    // The CPA run never asks about documents, so its draft's documents rule asks first, as its
+    // Rules step shows: the client's return asks, as planned. Every other row is as it was.
+    const { rows, draft } = await triedOn(START_EXAMPLES.en.examples[3]?.description ?? '');
+    expect(cardOf(draft, 'card-4')).toMatchObject({ applies_to: 'native.release_document', mode: 'ask', reason: 'Documents ask you first.' });
+    const bookings = 'Books weekday consults in your hours.';
+    expect(outcomes(rows)).toEqual([
+      ['public', 'allow', 'allow', bookings, ['card-2'], false, true],
+      ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],
+      ['agent', 'allow_if_reviewed', 'hold', 'Within its signed limit, checked by the reviewer.', ['card-7'], true, true],
+      ['verified', 'hold', 'hold', 'Documents ask you first.', ['card-4'], false, true],
+      ['after_hours', 'hold', 'allow', bookings, ['card-2'], false, false],
+      ['public', 'refuse', 'refuse', 'Private data only to its verified owner.', [], false, true],
+    ]);
   });
 });
 
@@ -1135,7 +1297,7 @@ describe("a Desk's unfinished setup, in the owner's Desks", () => {
   });
 });
 
-describe('a Desk setup made, asked for its owner', () => {
+describe('a Desk setup made, speaking for its own owner', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -1159,19 +1321,158 @@ describe('a Desk setup made, asked for its owner', () => {
     return slug;
   }
 
-  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
-  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
-    const opened = await mockStore.dispatch('openSession', { params: { slug } });
-    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+  /** The events this browser's chat with the Desk on `slug` gets while `act` runs and its turn plays out. */
+  async function eventsWhile(slug: string, act: () => Promise<unknown>): Promise<SseEvent[]> {
     const events: SseEvent[] = [];
     const stop = mockStore.listen(slug, 0, (_seq, ev) => events.push(ev));
     const before = events.length;
-    const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
-    if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    await act();
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
     stop();
-    return events.slice(before).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+    return events.slice(before);
   }
+
+  /** The events of the Desk's turn answering `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function turnOn(slug: string, text: string): Promise<SseEvent[]> {
+    const opened = await mockStore.dispatch('openSession', { params: { slug } });
+    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+    return eventsWhile(slug, async () => {
+      const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
+      if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    });
+  }
+
+  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
+    return (await turnOn(slug, text)).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+  }
+
+  /** The visitor's status lines in a turn, in order: each decision's, then each reply's. */
+  function linesOf(events: readonly SseEvent[]): string[] {
+    return events.flatMap((ev) => ('visitor_plain' in ev ? [ev.visitor_plain] : []));
+  }
+
+  /** Claude's own words in a turn's replies. */
+  function proseOf(events: readonly SseEvent[]): (string | null)[] {
+    return events.flatMap((ev) => (ev.type === 'message' ? ev.blocks.filter((b) => b.kind === 'prose').map((b) => b.text) : []));
+  }
+
+  it('the_callback_and_booking_cards_name_that_owner', async () => {
+    // The kernel's cards, of the same kinds, facts and shapes, name the Desk's own owner.
+    const slug = await liveDesk(CPA);
+    const callback = (title: string) => cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title });
+    expect(await repliesTo(slug, 'Can you call me back?')).toEqual([callback('Linda will call you back on Monday, between 8:00 am and 9:00 am')]);
+    expect(await repliesTo(slug, 'Please call me tonight')).toEqual([callback('Linda will call you back')]);
+    expect(await repliesTo(slug, 'Llámame, por favor')).toEqual([callback('Linda te llamará el lunes, entre las 8:00 y las 9:00')]);
+
+    expect((await repliesTo(slug, 'Book the first one')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With Linda'] }),
+    );
+    expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con Linda'] }),
+    );
+    // Rivera's Desk books with the fixtures' own card.
+    expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);
+    expect((await repliesTo(RIVERA.slug, '¿Me reservas la primera?')).at(-1)).toEqual(rivera.blocks.booking_confirmed.es);
+  });
+
+  /** The Desk's card for the newest payment link once a change to the rules cancels it, as the visitor's chat gets it. */
+  async function linkCancelledOn(slug: string): Promise<SseEvent[]> {
+    const newest = [...mockStore.world.links].at(-1);
+    if (newest === undefined) throw new Error('the Desk issued a payment link');
+    const [token, link] = newest;
+    return eventsWhile(slug, async () => mockStore.world.cancelLink(token, link, 'rules_changed'));
+  }
+
+  it('the_owner_in_the_chat_and_a_cancelled_link_name_that_owner', async () => {
+    // A deposit link Linda's rules cancelled says so in the kernel's words, and her own words in
+    // the chat she took over are marked as hers.
+    const slug = await liveDesk(CPA);
+    await turnOn(slug, 'Can I pay the deposit?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(linesOf(cancelled)).toEqual(["Reply checked against Linda's rules"]);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      "This payment link was cancelled because Linda's rules changed. Ask again if you still want to pay.",
+    ]);
+
+    const chat = mockStore.visitorSession(slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    const { session_id, generation } = chat.state;
+    const said = await eventsWhile(slug, async () => {
+      await mockStore.dispatch('takeover', { params: { session_id }, body: { generation } });
+      await mockStore.dispatch('ownerMessage', { params: { session_id }, body: { text: 'Hi, it is Linda.', kind: 'say' } });
+    });
+    expect(linesOf(said)).toEqual(['Written by Linda']);
+  });
+
+  it('a_name_that_ends_in_a_stop_gets_one', async () => {
+    // Setup names an owner by one word, but a Desk's display name can end in a stop: a sentence
+    // that ends on it never gets a second.
+    const slug = await liveDesk(CPA);
+    const desk = mockStore.world.deskBySlug(slug);
+    if (!desk) throw new Error('setup made the Desk');
+    desk.ownerName = 'Bob Smith Jr.';
+    expect(await repliesTo(slug, PUBLIC_COPY.en.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Bob Smith Jr.', lines: ['Bob Smith Jr. will reply here.'] }),
+    ]);
+    expect(await repliesTo(slug, PUBLIC_COPY.es.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Bob Smith Jr.', lines: ['Bob Smith Jr. te responderá aquí.'] }),
+    ]);
+    await turnOn(slug, '¿Puedo pagar el depósito?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      'Este enlace de pago se canceló porque cambiaron las reglas de Bob Smith Jr. Pídelo de nuevo si todavía quieres pagar.',
+    ]);
+  });
+
+  it('what_only_the_owner_can_answer_names_that_owner', async () => {
+    // Claude's plain answer when nothing more specific fits: Linda can tell, and the visitor can ask
+    // for her by name, as the page's "Ask for Linda" does.
+    const slug = await liveDesk(CPA);
+    expect(proseOf(await turnOn(slug, 'Should we file jointly this year?'))).toEqual([
+      'Linda can tell you after taking a look. You can ask for Linda here anytime.',
+    ]);
+    expect(proseOf(await turnOn(slug, 'Hola'))).toEqual(['Linda te lo puede decir cuando lo vea. Puedes pedir hablar con Linda aquí cuando quieras.']);
+  });
+
+  it('rivera_keeps_her_signed_held_line', async () => {
+    // Rivera's Desk keeps the signed boards' words, in either language.
+    const asked = await turnOn(RIVERA.slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Maria Rivera to approve', "Reply checked against Maria Rivera's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Maria to decide, so I've asked her. Her answer will show up here."]);
+    const pedido = await turnOn(RIVERA.slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Maria Rivera', 'Respuesta revisada con las reglas de Maria Rivera']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+  });
+
+  it('a_held_request_waits_for_that_owner_by_name', async () => {
+    // A discount past the quote card's limit waits for Linda. Claude says so naming her, with no
+    // pronoun the Desk can't know, and her answer comes back naming her too.
+    const slug = await liveDesk(CPA);
+    const asked = await turnOn(slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Linda to approve', "Reply checked against Linda's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Linda to decide, so I've asked. The answer will show up here."]);
+    const pedido = await turnOn(slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Linda', 'Respuesta revisada con las reglas de Linda']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Linda, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)).toEqual(['Linda lo aprobó', 'Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+    const retenido = pedido.find((ev) => ev.type === 'held');
+    if (retenido?.type !== 'held') throw new Error('the discount was held');
+    const denied = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: retenido.decision_id }, body: { answer: 'deny_once' } }));
+    expect(linesOf(denied)).toEqual(['Linda decidió no seguir adelante', 'Pasado a Linda para responder']);
+  });
+
+  it('the_status_lines_name_that_owner', async () => {
+    // As the kernel renders them from the Desk's owner_display_name: on Linda's Desk a quote's
+    // receipt and its reply's check name her, in either language.
+    const slug = await liveDesk(CPA);
+    expect(linesOf(await turnOn(slug, 'How much is it?'))).toEqual(["Quoted from Linda's price list", "Reply checked against Linda's rules"]);
+    expect(linesOf(await turnOn(slug, '¿Cuánto cuesta?'))).toEqual(['Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+  });
 
   it('asking_for_the_owner_hands_off_to_that_owner_by_name', async () => {
     // What the public page's "Ask for Linda" sends, in either language, as the kernel's handoff card
@@ -1188,20 +1489,92 @@ describe('a Desk setup made, asked for its owner', () => {
     expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.es]);
   });
 
-  it('with_no_owner_name_the_handoff_names_the_business', async () => {
-    // Setup's fallback, "Owner", is no one's name, and the page never shows it: what "Ask for a
-    // person" sends is handed to the business, with one stop after a name that ends in one.
+  it('asking_for_the_owner_by_first_name_reaches_the_handoff', async () => {
+    // A visitor's own words, not only the page's button: Linda's first name reaches her on her
+    // Desk, and Maria's reaches Maria only on Rivera's.
+    const slug = await liveDesk(CPA);
+    const toLinda = { en: cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }) };
+    const asked = await turnOn(slug, 'Can I speak with Linda?');
+    expect(asked.flatMap((ev) => (ev.type === 'message' ? ev.blocks : []))).toEqual([toLinda.en]);
+    expect(linesOf(asked)).toEqual(['Passed to Linda to answer']);
+    expect(await repliesTo(slug, '¿Está LINDA?')).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    ]);
+    expect(await repliesTo(slug, 'Can I speak with Maria?')).not.toContainEqual(toLinda.en);
+    expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
+  });
+
+  it('the_verification_code_names_that_business', async () => {
+    // The code the kernel sends to the contact on record names the Desk's own business, as its
+    // public page does, in the chat's language; Rivera's reads as before.
+    const codesFor = async (slug: string, text: string) => {
+      await turnOn(slug, text);
+      const sessionId = mockStore.visitorSession(slug)?.state.session_id;
+      return mockStore.world.inbox.filter((record) => record.sessionId === sessionId).map((record) => record.entry.body).at(-1);
+    };
+    const slug = await liveDesk(CPA);
+    expect(await codesFor(slug, 'Can you send my invoice?')).toBe(
+      "Your Chen & Co. code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(slug, 'Necesito mi factura')).toBe('Tu código de Chen & Co. es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.');
+    expect(await codesFor(RIVERA.slug, 'Can you send my invoice?')).toBe(
+      "Your Rivera Plumbing code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+    );
+    expect(await codesFor(RIVERA.slug, 'Necesito mi factura')).toBe(
+      'Tu código de Rivera Plumbing es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
+    );
+  });
+
+  it('the_kept_cards_handoff_names_that_owner', async () => {
+    // The demo command whose checked card is kept with Claude's drafted handoff: the handoff is the
+    // Desk's own, and Rivera's Desk still gets the fixtures' card.
+    const slug = await liveDesk(CPA);
+    expect((await repliesTo(slug, 'cards-kept-handoff')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }),
+    );
+    expect((await repliesTo(slug, 'tarjetas-con-traspaso')).at(-1)).toEqual(
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    );
+    expect(await repliesTo(RIVERA.slug, 'cards-kept-handoff')).toEqual([rivera.blocks.quote.en, rivera.blocks.handoff.en]);
+    expect(await repliesTo(RIVERA.slug, 'tarjetas-con-traspaso')).toEqual([rivera.blocks.quote.es, rivera.blocks.handoff.es]);
+  });
+
+  it('with_no_owner_name_the_lines_name_the_business_owner', async () => {
+    // Setup's fallback, "Owner", is no one's name, and the page never shows it. The lines that would
+    // name the owner say "the business owner" instead, the words the page's "Ask for a person" uses,
+    // and a visitor can ask for a person in their own words.
     const fenster = await liveDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
-    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Fenster & Fenster.', lines: ['Fenster & Fenster will reply here.'] }),
+    const toTheOwner = {
+      en: cardBlock('handoff', { fact_id: null, title: 'Let me check with the business owner.', lines: ['The business owner will reply here.'] }),
+      es: cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con el dueño del negocio.', lines: ['El dueño del negocio te responderá aquí.'] }),
+    };
+    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, PUBLIC_COPY.es.askForOwner(null))).toEqual([toTheOwner.es]);
+    expect(await repliesTo(fenster, 'Can I speak with a person?')).toEqual([toTheOwner.en]);
+    expect(await repliesTo(fenster, '¿Puedo ver a una persona?')).toEqual([toTheOwner.es]);
+
+    expect(linesOf(await turnOn(fenster, 'How much is it?'))).toEqual(["Quoted from the business owner's price list", "Reply checked against the business owner's rules"]);
+    expect(linesOf(await turnOn(fenster, '¿Cuánto cuesta?'))).toEqual([
+      'Cotizado con la lista de precios del dueño del negocio',
+      'Respuesta revisada con las reglas del dueño del negocio',
     ]);
-    const chen = await liveDesk('Chen & Co. is a two-person CPA firm in San Jose.');
-    expect(await repliesTo(chen, PUBLIC_COPY.en.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Let me check with Chen & Co.', lines: ['Chen & Co. will reply here.'] }),
+    expect(proseOf(await turnOn(fenster, 'Should we go with oak or walnut?'))).toEqual([
+      'The business owner can tell you after taking a look. You can ask for a person here anytime.',
     ]);
-    expect(await repliesTo(chen, PUBLIC_COPY.es.askForOwner(null))).toEqual([
-      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Chen & Co.', lines: ['Chen & Co. te responderá aquí.'] }),
+    expect(proseOf(await turnOn(fenster, 'Hola'))).toEqual([
+      'El dueño del negocio te lo puede decir cuando lo vea. Puedes pedir hablar con una persona aquí cuando quieras.',
     ]);
+    expect(await repliesTo(fenster, 'Call me tonight')).toEqual([
+      cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'The business owner will call you back' }),
+    ]);
+
+    const asked = await turnOn(fenster, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for the business owner to approve', "Reply checked against the business owner's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for the business owner to decide, so I've asked. The answer will show up here."]);
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(fenster, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)[0]).toBe('The business owner approved this');
   });
 
   it('an_agent_at_a_desk_not_yet_live_is_handed_to_its_owner', async () => {

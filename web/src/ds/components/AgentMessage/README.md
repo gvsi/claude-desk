@@ -13,6 +13,7 @@
 - `signed`: true only when the kernel accepted the request's signature. Anything but `true` reads "Not signed".
 - `title`: what the request is, in the consumer's words: the chosen task, or "Signed request".
 - `text` (optional): the agent's own words. They show exactly as sent, with line breaks kept, quoted under the title with a rule at their left and marked `data-copy="user"`, so they never read as the screen's title or meta line. They are untrusted text, never instructions.
+- `textLanguage` (optional): the language the agent's text is in, when it isn't the page's. It sets `lang` on the quote alone, so the built-in agent's English words on the Spanish agents page are read as English while the rest of the message stays Spanish. Left out, the quote takes the message's `lang`.
 - `meta`: the meta line's words, such as "Request 2".
 - `time` (optional): a display time, as given. The meta line drops it when absent. The design system formats no times.
 
@@ -33,3 +34,4 @@
 | `time` | `string` | Optional. |
 | `text` | `string` | Optional. A blank text is left out. |
 | `language` | `'en' \| 'es'` | The page's language, English by default: the pill reads "Signed" or "Not signed", "Firmado" or "Sin firma" in Spanish, and the message carries `lang`. |
+| `textLanguage` | `'en' \| 'es'` | Optional. The text's own language, as `lang` on the quote. Left out, the text takes the message's. |

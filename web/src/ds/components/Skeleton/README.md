@@ -6,7 +6,7 @@
 
 - A page or a part of a page whose first read is out: the owner app's full-page loader, a page's list while it is read, the visitor's chat while it opens. The shapes stand where the content will be, so the content lands where they were.
 - Not an action at work, such as a click in flight: that is a busy `Button`. Not someone writing: that is `WritingIndicator`.
-- Not the loaders that keep `LoadingLine`: a customer's page, All rules, a rule draft and its change, the Demo inbox's open sheet, the connector review inside setup's tools step, setup's "Connecting Stripe", setup's live step while its Desks are read on a reload, setup's "What customers will read" step until its skeleton lands, and the agents page's run panel, whose line is an action at work.
+- Not the loaders that keep `LoadingLine`: a customer's page, All rules, a rule draft and its change, the Demo inbox's open sheet, the connector review inside setup's tools step, setup's "Connecting Stripe", setup's live step while its Desks are read on a reload, and the agents page's run panel, whose line is an action at work.
 - A revisit whose reads are cached draws the page at once: `loading` is false from the start, so no skeleton mounts.
 
 ## What the consumer provides
@@ -123,4 +123,4 @@ The signed boards (`UXC-P1201-After`, `#artboard-dec46cf506e4`, and `UXC-P1202-A
 - `Waits`, `FastLoad`, `Lands`, `Continues` and `Fails`: the states, as Customers loads.
 - `Spanish`: the visitor's chat as shapes at 390, with its status in Spanish.
 
-The wait starts after mount observers and checks a monotonic deadline before showing, so a browser timer that fires just short of 200 ms cannot expose an early frame. Unmounting or ending a fast load cancels the pending wait.
+The wait starts after mount observers and checks a monotonic deadline before showing, so a browser timer that fires just short of 200 ms cannot expose an early frame. Unmounting or ending a fast load cancels the pending wait. A wait that comes due just as the part lands, which React can apply after the render that ended the load (a store read through `useSyncExternalStore`, such as React Query's, renders ahead of the wait's update), never brings the shapes back: once the part has landed the region neither waits nor shows, and a part that loads again waits afresh.

@@ -5,7 +5,9 @@
  * next page in the About set. On a phone the contents list folds into one row and the details into a line
  * under the summary.
  *
- * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
+ * It is drawn on the About set's paper (`paper.css`), the Vision article's light reading style, so the set's
+ * three pages read as one. The page is static: it reads its document from `documents.ts`, which only it loads,
+ * and makes no request.
  */
 import {
   Fragment,
@@ -36,6 +38,7 @@ import { moveToSection, useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
 import { usePagePlace } from './usePagePlace.ts';
 
+import './paper.css';
 import './reader.css';
 
 /** Below this width the page takes its phone layout: one column, the contents list folded into one row. */
@@ -395,12 +398,13 @@ function DocumentSwitch({ current, compact }: { current: AboutId; compact: boole
 /**
  * The app's lockup (owner, 2026-10-30): the bell with no tile and the wordmark, 36 px with the Preview
  * badge on the desktop bar. A phone's top bar carries no badge, so the phone bar shows a 32 px bell
- * and the name alone, on one line at a phone's width. The white tile is the article's app icon.
+ * and the name alone, on one line at a phone's width. The white tile is the article's app icon. The
+ * bell is on the page's paper, so it keeps the drawing's dark ink.
  */
 function Brand({ compact }: { compact: boolean }) {
   return (
     <span className="cd-about-brand">
-      <Mark size={compact ? 32 : 36} />
+      <Mark size={compact ? 32 : 36} ground="light" />
       <Wordmark preview={!compact} />
     </span>
   );
@@ -447,7 +451,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
   useDocumentTitle(inApp(about.title));
 
   return (
-    <div className={`cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
+    <div className={`cd-about-paper cd-about-paper--app cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
       <TopBar current={id} compact={compact} />
       <main className="cd-about-main">
         <div className="cd-about-hero" data-hero="">

@@ -100,6 +100,48 @@ export const Phone: Story = {
   },
 };
 
+/** All rules' header: its subtitle, then a note on a term the page uses. */
+const allRulesHeader = {
+  title: 'All rules',
+  subtitle: 'Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules.',
+  note: 'The reviewer is a separate model that reads each request before it runs. It can only hold a request for your answer, never let one through.',
+};
+
+export const WithNote: Story = {
+  args: allRulesHeader,
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'All rules’ header: a quieter line under the subtitle says who “the reviewer” in its rules is. No board draws it.',
+  },
+  play: async ({ canvas }) => {
+    const subtitle = canvas.getByText(allRulesHeader.subtitle);
+    const note = canvas.getByText(allRulesHeader.note);
+    // Meta type in the subtitle's secondary color, 12 px under it (the text's 4 px gap and its own 8 px).
+    expectComputed(note, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px', color: getComputedStyle(subtitle).color, marginTop: '8px' });
+    await expect(Math.round(note.getBoundingClientRect().top - subtitle.getBoundingClientRect().bottom)).toBe(12);
+    // At a reading measure: no wider than 68 of its own characters.
+    await expect(note.getBoundingClientRect().width).toBeLessThanOrEqual(parseFloat(getComputedStyle(note).maxWidth) + 0.5);
+    await expect(note.parentElement).toBe(subtitle.parentElement);
+  },
+};
+
+export const WithNoteOnAPhone: Story = {
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: allRulesHeader,
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'All rules’ header on a phone: the note runs under the subtitle at the header’s width, as the subtitle does.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    const subtitle = canvas.getByText(allRulesHeader.subtitle);
+    const note = canvas.getByText(allRulesHeader.note);
+    await expect(note.getBoundingClientRect().top).toBeGreaterThan(subtitle.getBoundingClientRect().bottom);
+    await expect(Math.round(note.getBoundingClientRect().left)).toBe(Math.round(subtitle.getBoundingClientRect().left));
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
 const RULES_LINE = 'What Claude can do on this Desk, where each tool comes from, and your rules for it.';
 
 /** The Rules page's header, as the web app composes it: the preset menu as its action. */

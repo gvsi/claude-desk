@@ -92,6 +92,15 @@ export interface PublicShellProps {
   footer?: boolean;
   /** The visitor's `Composer`, under the conversation. */
   composer: ReactNode;
+  /**
+   * While true, the shell counts the composer area at the tallest it has been since, when it decides
+   * whether it is short, so a line the page shows above the composer and takes away again (the public
+   * chat's, for a waiting request) can't switch it between tall and short as it comes and goes. Each
+   * switch moves the conversation, which can bring the reason for that line into view and out of it
+   * again. Once it turns false, the shell forgets that height and fits itself again at once. `false`
+   * by default.
+   */
+  keepComposerRoom?: boolean;
   /** Before the first message only. Omit for a conversation with any history. */
   firstView?: boolean;
   /** Localized business content. At most three; a pick uses the page's ordinary send path. */
@@ -399,15 +408,23 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * what the visitor was reading stays where it was under the chat's head (`readingPlace`), and the
  * shell sends `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
  */
-export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
+export function useShellLayout(shell: RefObject<HTMLElement | null>, keepComposerRoom = false): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
   const short = useRef(false);
   const observerRef = useRef<ResizeObserver | null>(null);
   const watchedAbout = useRef<HTMLElement | null>(null);
+  // `keepComposerRoom` as the shell last rendered it, and how to lay the shell out again when the page
+  // lets that room go.
+  const keepRoom = useRef(keepComposerRoom);
+  const relayoutRef = useRef<(() => void) | null>(null);
 
   // After every render, before the page's layout effects: the short class, if the shell is short,
-  // and the about column, watched where it now is and its hairline judged there.
+  // and the about column, watched where it now is and its hairline judged there. Kept room the page
+  // has let go is forgotten, and the shell fits itself again without it.
   useLayoutEffect(() => {
+    const letGo = keepRoom.current && !keepComposerRoom;
+    keepRoom.current = keepComposerRoom;
+    if (letGo) relayoutRef.current?.();
     shell.current?.classList.toggle(SHORT_CLASS, short.current);
     if (!shell.current) return;
     watchAbout(shell.current, observerRef.current, watchedAbout);
@@ -421,6 +438,9 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     // tall (it always is at first), so the room the conversation would have is the same sum
     // whichever way the shell is laid out now.
     const tallPadding = { head: 0, composer: 0 };
+    // The composer area's height inside its padding, at the tallest it has been while the page
+    // keeps its room (`keepComposerRoom`); otherwise as it is now.
+    let composerKept = 0;
     // Short or tall, measured with the about column where it now is: a column still beside a chat
     // that has just become too narrow for it would squeeze the chat's head and the composer.
     const fit = (): void => {
@@ -431,12 +451,14 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
         tallPadding.head = verticalPadding(head);
         tallPadding.composer = verticalPadding(composer);
       }
+      const composerInside = heightOf(composer) - verticalPadding(composer);
+      composerKept = keepRoom.current ? Math.max(composerKept, composerInside) : composerInside;
       const pinned =
         heightOf(banner) +
         heightOf(header) +
         heightOf(footer) +
         heightOf(head) - verticalPadding(head) + tallPadding.head +
-        heightOf(composer) - verticalPadding(composer) + tallPadding.composer;
+        composerKept + tallPadding.composer;
       const room = height - pinned;
       short.current = height < SHORT_BELOW || room < MIN_CONVERSATION + (short.current ? LEAVE_SHORT_MARGIN : 0);
       el.classList.toggle(SHORT_CLASS, short.current);
@@ -470,14 +492,20 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     el.addEventListener('scroll', onScroll, { capture: true, passive: true });
     const stopScroll = () => el.removeEventListener('scroll', onScroll, { capture: true });
     if (typeof ResizeObserver === 'undefined') return stopScroll;
-    const observer = new ResizeObserver(() => {
+    // Lays the shell out again: when it or a pinned part changes size, and when the page lets kept
+    // room go. Only the observer's call (`sync`) moves the about column at once; from the shell's
+    // own layout effect, React is already committing, so the column follows with the next render.
+    const relayout = (sync: boolean) => {
       const wasShort = short.current;
       const wasBeside = beside;
       const restoreFocus = focusInAbout(el);
       const restorePlace = el.offsetWidth === laidOutWidth ? readingPlace(el) : place;
       // First the about column, by width, at once; then short or tall, with the column in place.
       beside = fitsBeside();
-      if (beside !== wasBeside) flushSync(() => setAboutBeside(beside));
+      if (beside !== wasBeside) {
+        if (sync) flushSync(() => setAboutBeside(beside));
+        else setAboutBeside(beside);
+      }
       fit();
       restoreFocus?.();
       const switched = short.current !== wasShort;
@@ -493,7 +521,9 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
       markAboutUnderHead(el);
       laidOutWidth = el.offsetWidth;
       place = readingPlace(el);
-    });
+    };
+    const observer = new ResizeObserver(() => relayout(true));
+    relayoutRef.current = () => relayout(false);
     const { banner, header, head, composer } = partsOf(el);
     for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);
     observerRef.current = observer;
@@ -504,6 +534,7 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     return () => {
       observer.disconnect();
       observerRef.current = null;
+      relayoutRef.current = null;
       watchedAbout.current = null;
       composer?.removeEventListener('focusin', onFocusIn);
       stopScroll();
@@ -590,6 +621,7 @@ export function PublicShell({
   aboutLinks,
   footer = true,
   composer,
+  keepComposerRoom = false,
   firstView = false,
   starters,
   banner,
@@ -602,7 +634,7 @@ export function PublicShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const aboutRef = useRef<HTMLElement>(null);
   useVisualViewportFit(shellRef, embedded);
-  const aboutBeside = useShellLayout(shellRef);
+  const aboutBeside = useShellLayout(shellRef, keepComposerRoom);
   const invitationShown = useFirstView(shellRef, firstView, aboutBeside, starters?.words.length ?? 0);
   // Beside the chat, a column that scrolls on its own is a stop in the tab order, so it scrolls from
   // the keyboard too; it is already named by its heading. It stays one while it has focus, so focus

@@ -26,15 +26,16 @@ With `jobs`, a "Your Desk’s jobs" card comes first. Each `SetupJobRow` has a `
   - `on`: "On" beside a handled dot, 6 px apart, in primary meta. An app reads "On" too once its tools are turned on.
   - `always_on`: "Always on" beside a handled dot, in secondary meta (Verification, on every Desk).
   - `off`: a secondary button, "Add" in "Built in" or "Connect" in "Connect your own", named "Add Documents" or "Connect Stripe" so each says which connector it is for. When the row gives `tools`, "{n} tools" ("1 tool") sits 14 px before the button in secondary meta, as the board draws it for an app.
+  - `needs_review`: an app already connected, its tools listed and none of them on (Stripe once the setup chat has connected it). As a job does, "Needs review" beside a held dot in secondary meta, then a secondary "Review" button named "Review Stripe" that calls `onReview`; the screen opens the review of its tools, and nothing connects again. When the row gives `tools`, "{n} tools" comes first, each part 14 px from the next, on one line at any width. Drawn on N-Live-REV-560 (1512 and 390), signed on 2026-11-01.
 - A state this build doesn't know shows nothing at the right, never a status it can't vouch for.
-- Rows are not links. A button calls the row's `onChoose`; the screen opens the connector's review (or an app's sign-in) from it, and a tool reads "On" only after the owner confirms its change. Nothing turns on from here.
+- Rows are not links. A button calls the row's `onChoose` (or `onReview`); the screen opens the connector's review (or an app's sign-in) from it, and a tool reads "On" only after the owner confirms its change. Nothing turns on from here.
 - It lays out by its own width: under 480 px, as on a phone, where a row stands or its button goes under its words, 8 px down, from the same edge. The signed D4 phone board draws the jobs in this layout.
 
 The screen passes every connector and where it stands; nothing here decides what is on.
 
 ## Types
 
-- `SetupToolsRow`: `{ connector: ConnectorView; state: 'on' | 'always_on' }`, or `{ connector: ConnectorView; state: 'off'; tools?: number; onChoose: () => void }`.
+- `SetupToolsRow`: `{ connector: ConnectorView; state: 'on' | 'always_on' }`, `{ connector: ConnectorView; state: 'off'; tools?: number; onChoose: () => void }`, or `{ connector: ConnectorView; state: 'needs_review'; tools?: number; onReview: () => void }`.
 
 ## Props
 
@@ -42,6 +43,6 @@ The screen passes every connector and where it stands; nothing here decides what
 | --- | --- | --- |
 | `jobs` | `readonly SetupJobRow[]` | Optional. The Desk's jobs, already validated and formatted by the screen. |
 | `builtIn` | `SetupToolsRow[]` | Required. The connectors that are part of Claude Desk, Verification among them, under "Built in"; an `off` row's button says "Add". |
-| `external` | `SetupToolsRow[]` | Required. The apps to connect from outside, under "Connect your own"; an `off` row's button says "Connect". |
+| `external` | `SetupToolsRow[]` | Required. The apps to connect from outside, under "Connect your own"; an `off` row's button says "Connect", a `needs_review` row's "Review". |
 
 The cards are `Card` (`fill-card`, a `line-card` border, `radius-card`); the rows' hairlines are `line-hairline`.

@@ -1,8 +1,8 @@
 /**
  * The Vision article: a long-form page under About this prototype on where a Desk could go next, with four phone
- * screens drawn inline. It is the named exception to the design system, on its own light palette and type scale
- * (`VisionArticle.css`, every rule under `.vision-article`), and it says on the page that it is vision, not the
- * prototype.
+ * screens drawn inline. It is the named exception to the design system, on the About set's light paper
+ * (`paper.css`, which the reading pages share) and its own type scale (`VisionArticle.css`, every rule under
+ * `.vision-article`), and it says on the page that it is vision, not the prototype.
  *
  * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
  * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
@@ -34,6 +34,7 @@ import {
   type Section,
 } from './text.ts';
 
+import '../paper.css';
 import './VisionArticle.css';
 
 /** The article's phone layout (VisionArticle.css): the switch leaves the bar for a row under it. */
@@ -275,7 +276,7 @@ export function VisionArticle() {
   const about = <AboutSwitch current="vision" className="va-switch" linkClassName="va-switch__link" />;
 
   return (
-    <div className="vision-article">
+    <div className="vision-article cd-about-paper">
       <header className="va-bar">
         <span className="va-bar__brand">Claude Desk</span>
         {compact ? null : about}

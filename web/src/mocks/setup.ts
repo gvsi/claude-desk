@@ -78,6 +78,12 @@ export const FOLLOW_UP = "That's fine. Give me your best guess, and you can chan
 
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
+
+/** The test-client offer at the end of setup's plan, its two choices and Claude's line after a yes: the API's own words. */
+export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? I can add you as a test client, with your own contact, so you can check verification and private answers yourself.';
+export const TEST_CLIENT_YES = 'Add me as a test client';
+export const TEST_CLIENT_NO = 'Not now';
+export const TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me.";
 /** The label of the read of the owner's Claude memory, as the API writes it. */
 export const MEMORY_LABEL = 'Searched your Claude memory';
 
@@ -92,6 +98,10 @@ interface Interview {
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
+  /** What the owner typed on the contact question, follow-ups included, which their test-client contact comes from. */
+  contactSaid: string[];
+  /** Whether the test-client offer was asked: it is asked once. */
+  offered: boolean;
   /** The words and booking days of the business the description names, for its situations and draft rules (`situationWordsOf`). */
   words: SituationWords;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
@@ -99,6 +109,8 @@ interface Interview {
   ownerName: string | null;
   about: string | null;
   timezone: string;
+  /** Include "search fails" in the description to preview the API's single search failure label. */
+  searchFails: boolean;
   /** The money limit the owner answered, in cents: 0 until then, as the API's default. */
   capCents: number;
   /** The rules draft the interview made, once it has one. */
@@ -400,7 +412,7 @@ const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 /**
  * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
  * the rules its draft names them in. Only the words and the business's own booking days differ
- * between businesses: what each situation tries, plans and gets is otherwise the same.
+ * between businesses: what each situation tries, plans and gets otherwise follows the draft alone.
  */
 interface SituationWords {
   /**
@@ -586,15 +598,36 @@ function situationMatches(planned: Situation['expected'], r: ProbeResult, cards:
 }
 
 /**
- * The six situations the check runs on the draft (`cards`), one of them not what the answers
- * planned, told in the business's words (`words`).
+ * What the kernel gives a situation the draft's rule `cardId` decides, from that rule as the draft
+ * (`cards`) has it: an ask rule holds it and a never rule refuses it, each with the rule's own
+ * reason; an automatic rule gives `onItsOwn`. Without the rule, `onItsOwn` too.
+ */
+function decidedBy(cards: readonly RuleCard[], cardId: string, p: Probe, onItsOwn: ProbeResult): ProbeResult {
+  const rule = cards.find((c) => c.card_id === cardId);
+  if (rule?.mode === 'ask') return result(p, 'hold', rule.reason, { card_ids: [cardId] });
+  if (rule?.mode === 'never') return result(p, 'refuse', rule.reason, { card_ids: [cardId] });
+  return onItsOwn;
+}
+
+/**
+ * The six situations the check runs on the draft (`cards`), told in the business's words
+ * (`words`). Each one a rule decides follows that rule as the draft has it (`decidedBy`), so a rule
+ * the answers left asking first asks here too, and is what they planned. The Saturday booking is
+ * planned to ask first, so it isn't what the answers planned where the bookings rule books it on
+ * its own.
  */
 function situationsFor(cards: readonly RuleCard[], words: SituationWords): SituationResult[] {
   const rows: [Situation, ProbeResult][] = [];
-  const add = (title: string, who: Situation['who'], expected: Situation['expected'], p: Probe, r: ProbeResult) =>
-    rows.push([{ title, who, probe: p, expected }, r]);
+  /**
+   * A situation planned as `planned` when it happens as `onItsOwn` says; one the draft's rule
+   * `cardId` asks or refuses instead is planned as just that.
+   */
+  const add = (title: string, who: Situation['who'], planned: Situation['expected'], p: Probe, onItsOwn: ProbeResult, cardId?: string) => {
+    const r = cardId === undefined ? onItsOwn : decidedBy(cards, cardId, p, onItsOwn);
+    rows.push([{ title, who, probe: p, expected: r === onItsOwn ? planned : r.outcome }, r]);
+  };
   const weekday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-03T14:00:00-08:00' });
-  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }), 'card-2');
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
   add(words.discount, 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
   // Planned to happen after Claude's second look: the kernel holds it unless the reviewer agrees.
@@ -609,13 +642,17 @@ function situationsFor(cards: readonly RuleCard[], words: SituationWords): Situa
     reviewed
       ? result(deposit, 'hold', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true, card_ids: ['card-7'] })
       : result(deposit, 'hold', 'Charges ask you first.'),
+    reviewed ? 'card-7' : undefined,
   );
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
-  add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
+  add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }), 'card-4');
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
   // Open on Saturdays, a business's Saturday visitor isn't after hours.
   const saturdayWho = words.bookingDays.includes('sat') ? 'public' : 'after_hours';
-  add(words.saturday, saturdayWho, 'hold', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  // Planned to ask first, as the answers' Saturday rule (card-3) says, whatever the bookings rule
+  // does: decided by that rule as the draft has it, it isn't what was planned where it books on its own.
+  const onSaturday = decidedBy(cards, 'card-2', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  rows.push([{ title: words.saturday, who: saturdayWho, probe: saturday, expected: 'hold' }, onSaturday]);
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add(words.someoneElses, 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
   return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));
@@ -857,16 +894,168 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   } else {
     say(interview, 'claude', QUESTIONS_DONE);
   }
+  // With the owner's own contact typed, the test-client offer comes once, after the plan, and the Tools step waits for it.
+  if (!interview.offered && ownerContactOf(interview) !== null) {
+    interview.offered = true;
+    askTestClient(interview);
+    return;
+  }
+  enterTools(world, interview);
+}
+
+/** The Tools step, after the plan and any test-client offer: accepted jobs become business tools, accepted apps connect. */
+function enterTools(world: MockWorld, interview: Interview): void {
+  interview.state.question = null;
   moveTo(interview, 'tools');
+  const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
   if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
 }
 
+// The owner's own contact for the test client, read as the API reads it (setup.py `_owner_contact` and `_whose`): every
+// email and phone typed on the contact question, without the hours beside a phone and without one the owner rejects
+// or gives as another person's, which carries on to every contact after it in its sentence until the owner marks one
+// as their own; of the rest, those marked as the owner's own come first, then the one email, else the one phone.
+const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const CONTACT_PHONE = /(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)/g;
+const HOUR = String.raw`(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?`;
+const TIMES = new RegExp(String.raw`(?<![\w.+-])(?:${HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*${HOUR}|24\s*\/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)(?![\w-]|[.:]\d)`, 'gi');
+const SENTENCE_END = /[;!?\n]|\.(?=\s|$)/g;
+const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
+const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
+const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
+/** A name just before a contact ("Ana at …", "Maria: …") or as a possessive ("Ana's email is …"). */
+const NAMED = /(\p{L}[\p{L}'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$/u;
+const POSSESSIVE = /(\p{L}[\p{L}-]*)'s\b/gu;
+/** The capitalized words that are never a person's name: a contact's labels and other common words (setup.py `_NOT_NAMES`). */
+const NOT_NAMES = new Set([
+  'call', 'us', 'at', 'or', 'text', 'email', 'phone', 'tel', 'mobile', 'office', 'website', 'web', 'llámanos', 'al',
+  'escríbenos', 'a', 'teléfono', 'correo', 'llama', 'móvil', 'celular', 'oficina', 'sitio', 'página', 'electrónico',
+  'ext', 'ask', 'for', 'site', 'and', 'o', 'y',
+  'my', 'me', 'contact', 'contacts', 'customers', 'clients', 'reach', 'use', 'write', 'message', 'our', 'the', 'please',
+  'bookings', 'booking', 'sales', 'orders', 'support', 'info', 'hello', 'emergencies', 'emergency', 'urgent', 'after',
+  'hours', 'business', 'just', 'then', 'otherwise', 'also', 'contacto', 'clientes', 'cliente', 'escríbeme', 'llámame',
+  'escribe', 'reservas', 'urgencias', 'para', 'por', 'favor', 'mi',
+]);
+const wordsOf = (text: string | null): string[] => (text ?? '').toLowerCase().match(/\p{L}+/gu) ?? [];
+const capitalized = (word: string): boolean => word[0] !== undefined && word[0] !== word[0].toLowerCase();
+
+/** What the words before a contact say about whose it is, by the marker closest to it (setup.py `_whose`). */
+function whose(words: string, owner: ReadonlySet<string>, notNames: ReadonlySet<string>): 'owner' | 'rejected' | 'other' | null {
+  const folded = words.toLowerCase();
+  const closest = new Map<'owner' | 'rejected' | 'other', number>();
+  const note = (kind: 'owner' | 'rejected' | 'other', at: number) => closest.set(kind, Math.max(closest.get(kind) ?? -1, at));
+  for (const [pattern, kind] of [[REJECTED, 'rejected'], [OWNERS, 'owner'], [SOMEONE_ELSE, 'other']] as const) {
+    for (const match of folded.matchAll(new RegExp(pattern.source, 'g'))) note(kind, match.index + match[0].length);
+  }
+  const names = [...words.matchAll(POSSESSIVE)].map((match) => [match[1]!, match.index + match[0].length] as const);
+  const named = NAMED.exec(words);
+  if (named) names.push([named[1]!, named.index + named[0].length] as const);
+  for (const [name, at] of names) {
+    if (!capitalized(name)) continue;
+    if (owner.has(name.toLowerCase())) note('owner', at);
+    else if (!notNames.has(name.toLowerCase())) note('other', at);
+  }
+  let found: 'owner' | 'rejected' | 'other' | null = null;
+  for (const [kind, at] of closest) if (found === null || at > closest.get(found)!) found = kind;
+  return found;
+}
+
+/** Each email and phone in `text`, in order, a phone as one number of 7 to 15 digits. */
+function contactsIn(text: string): { start: number; end: number; value: string; email: boolean }[] {
+  const found = [...text.matchAll(CONTACT_EMAIL)].map((match) => ({ start: match.index, end: match.index + match[0].length, value: match[0], email: true }));
+  const blank = (match: string) => ' '.repeat(match.length);
+  const rest = text.replace(CONTACT_EMAIL, blank).replace(/(?:https?:\/\/|www\.)\S+/g, blank).replace(TIMES, blank);
+  for (const match of rest.matchAll(CONTACT_PHONE)) {
+    const phone = (/^(.*\d{3})[\s(]+\d{1,2}$/.exec(match[0])?.[1] ?? match[0]).replace(/[\s(.-]+$/, '');
+    const digits = phone.replace(/\D/g, '').length;
+    if (digits >= 7 && digits <= 15) found.push({ start: match.index, end: match.index + phone.length, value: phone, email: false });
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+
+function ownerContactOf(interview: Interview): string | null {
+  const owner = new Set(wordsOf(interview.ownerName));
+  const notNames = new Set([...NOT_NAMES, ...wordsOf(interview.business)]);
+  const contacts = new Map<string, { value: string; email: boolean; rejected: boolean; someoneElses: boolean; marked: boolean }>();
+  for (const said of interview.contactSaid) {
+    const text = said.replace(/’/g, "'");
+    const ends = [...text.matchAll(SENTENCE_END)].map((match) => match.index + match[0].length);
+    let sentence = -1;
+    let carried: 'rejected' | 'other' | null = null;
+    let previous = 0;
+    for (const { start, end, value, email } of contactsIn(text)) {
+      const begins = Math.max(0, ...ends.filter((stop) => stop <= start));
+      if (begins !== sentence) [sentence, carried, previous] = [begins, null, begins];
+      const marker = whose(text.slice(previous, start), owner, notNames);
+      previous = end;
+      if (marker !== null) carried = marker === 'owner' ? null : marker;
+      const key = email ? value.toLowerCase() : value.replace(/\D/g, '');
+      const contact = contacts.get(key) ?? { value, email, rejected: false, someoneElses: false, marked: false };
+      contact.value = value;
+      contacts.set(key, contact);
+      if (carried === 'rejected') contact.rejected = true;
+      else if (carried === 'other') contact.someoneElses = true;
+      else if (marker === 'owner') contact.marked = true;
+    }
+  }
+  const kept = [...contacts.values()].filter(({ rejected, someoneElses }) => !rejected && !someoneElses);
+  const marked = kept.filter(({ marked }) => marked);
+  const pool = marked.length > 0 ? marked : kept;
+  const emails = pool.filter(({ email }) => email);
+  const phones = pool.filter(({ email }) => !email);
+  if (emails.length > 0) return emails.length === 1 ? emails[0]!.value : null;
+  return phones.length === 1 ? phones[0]!.value : null;
+}
+
+/**
+ * The words a typed answer to the offer is read by (setup.py `_reads_yes`): a question or a conditional yes is
+ * neither, then a "no" one wins; with neither, the offer is asked again.
+ */
+const TYPED_YES = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'please do', 'do it', 'add me', 'sounds good', 'sí', 'si', 'vale', 'claro', 'dale', 'añádeme', 'agrégame'];
+const TYPED_NO = ['no', 'not', "don't", 'dont', 'nope', 'not now', 'later', 'skip', 'no gracias'];
+
+const UNCLEAR = /[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)(?![\p{L}\p{N}])|^\W*do\s+(?:you|i|we|they|he|she|this|that)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])if(?![\p{L}\p{N}])/iu;
+const SI = /(?<![\p{L}\p{N}])si(?![\p{L}\p{N}])/iu;
+const SI_ALONE = /^\W*si\s*(?:$|[,.!])/i;
+
+function readsYes(text: string): boolean | null {
+  if (UNCLEAR.test(text) || (SI.test(text) && !SI_ALONE.test(text))) return null;
+  const said = ` ${(text.toLowerCase().replace(/’/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? []).join(' ')} `;
+  if (TYPED_NO.some((phrase) => said.includes(` ${phrase} `))) return false;
+  if (TYPED_YES.some((phrase) => said.includes(` ${phrase} `))) return true;
+  return null;
+}
+
+function askTestClient(interview: Interview): void {
+  interview.state.question = 'test_client';
+  say(interview, 'claude', TEST_CLIENT_OFFER, [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }]);
+}
+
+/** A yes says Claude's line and a no says nothing, and both move on to the Tools step; anything else gets the offer again. */
+function answerTestClient(world: MockWorld, interview: Interview, text: string): void {
+  const yes = readsYes(text);
+  if (yes === null) {
+    askTestClient(interview);
+    return;
+  }
+  if (yes) say(interview, 'claude', TEST_CLIENT_ADDED);
+  enterTools(world, interview);
+}
+
 /** The reads and first question after the owner gives (or declines) consent. */
 function completeConsent(interview: Interview): void {
-  if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
+  if (interview.state.consent) {
+    say(interview, 'tool_label', MEMORY_LABEL);
+    if (interview.searchFails) {
+      say(interview, 'tool_label', "Couldn't search the web just now");
+    } else {
+      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
+      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+    }
+  }
   if (interview.consultant) openConsultant(interview);
   else {
     const first = SETUP_QUESTIONS[0];
@@ -916,6 +1105,10 @@ export function holdNextDecision(world: MockWorld, interviewId: string): (outcom
 function applyAnswer(world: MockWorld, interview: Interview, text: string, ownerStored = false): void {
   const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
   if (!ownerStored) say(interview, 'owner', text.trim());
+  if (interview.state.question === 'test_client') {
+    answerTestClient(world, interview, text);
+    return;
+  }
   if (interview.state.pending_card) {
     const card = interview.proposals.find((card) => card.proposal_id === interview.state.pending_card)!;
     const words = text.trim();
@@ -965,6 +1158,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
     }
     return;
   }
+  if (interview.state.question === 'contact_and_after_hours') interview.contactSaid.push(text.trim());
   if (FOLLOW_UP_TRIGGER.test(text)) {
     say(interview, 'claude', FOLLOW_UP);
     return;
@@ -1165,8 +1359,9 @@ function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDr
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
   const cards = setupCards(interview.capCents, interview.words).map((rule): RuleCard => {
-    if (!interview.consultant && !interview.usedSuggestions) return rule;
-    // An unanswered or skipped limit never inherits the scripted run's automatic permission.
+    // An unanswered or skipped limit never inherits the scripted run's automatic permission. A rule
+    // that already asks first (Saturday bookings) keeps its own reason, so each is listed once.
+    if ((!interview.consultant && !interview.usedSuggestions) || rule.mode === 'ask') return rule;
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
     if (rule.applies_to === 'native.release_document' && interview.answers.documents_and_payments !== CPA_COPY.documentChoices[1]) return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
     if (rule.applies_to === 'native.book' && !interview.proposals.some(({ state, job }) => state === 'accepted' && job?.job === 'schedule' && job.autonomy === 'auto')) return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
@@ -1231,6 +1426,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     covered: new Set(),
     answers: {},
     usedSuggestions: false,
+    contactSaid: [],
+    offered: false,
     state: {
       interview_id: world.id('setup'),
       desk_id: deskId,
@@ -1253,6 +1450,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     ownerName,
     about: aboutOf(text),
     timezone,
+    searchFails: /search fails/i.test(text),
     capCents: 0,
     draftVersion: null,
     holdNext: false,
@@ -1392,12 +1590,11 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
     const cardAnswer = question === null && typeof card === 'string' && card !== '';
-    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question))) return INVALID;
+    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !(question === 'test_client' || SETUP_QUESTIONS.some((q) => q.key === question)))) return INVALID;
     const { interview } = found;
-    const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
     if (interview.state.step !== 'questions') return CONFLICT;
-    if (cardAnswer ? card !== interview.state.pending_card : at === -1 || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
+    if (cardAnswer ? card !== interview.state.pending_card : interview.state.question === null || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
     if (interview.holdNext) {
@@ -1480,6 +1677,12 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview } = found;
     if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
+    if (interview.state.question === 'test_client') {
+      // The plan is closed already: the suggestions move on with no second plan, and nothing is added.
+      say(interview, 'owner', 'Use your suggestions');
+      enterTools(sv.world, interview);
+      return ok(stateOf(interview, req.query));
+    }
     interview.usedSuggestions = true;
     say(interview, 'owner', 'Use your suggestions');
     const finish = () => {

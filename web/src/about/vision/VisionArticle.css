@@ -1,22 +1,10 @@
 /* The Vision article: the named exception to design system v2, a newsroom-style page on warm paper with phone
-   screens drawn inline. Every rule sits under .vision-article, and every color is a custom property on it, so
-   none of the article's colors or sizes reach the app's tokens or any other page. Clay stays out. Nothing on
-   the page moves. */
+   screens drawn inline. Every rule sits under .vision-article. The page's colors are the About set's paper
+   (../paper.css, on the same root), which the two reading pages share; the phones' are custom properties on the
+   root here. None of the article's colors or sizes reach the app's tokens or any other page. Clay stays out.
+   Nothing on the page moves. */
 
 .vision-article {
-  /* The page. */
-  --va-paper: #f4f2ec;
-  --va-band: #eae6dc;
-  --va-ink: #1c1b19;
-  --va-ink-2: #5c5850;
-  --va-line: rgba(28, 27, 25, 0.13);
-  --va-link: #2d5b8a;
-  --va-bar: rgba(244, 242, 236, 0.94);
-  /* Cards on the page, a shade lighter than the paper, and their edge while pointed at. */
-  --va-tile: #fbfaf7;
-  --va-line-strong: rgba(28, 27, 25, 0.28);
-  /* A control in the bar while pointed at. */
-  --va-hover: rgba(28, 27, 25, 0.06);
   /* The phones: a dark device holding a light, crisp app screen. */
   --va-device: #151513;
   --va-device-shadow: 0 1px 2px rgba(28, 27, 25, 0.18), 0 24px 48px -18px rgba(28, 27, 25, 0.32);
@@ -32,9 +20,6 @@
   --va-card-shadow: 0 1px 2px rgba(28, 27, 25, 0.06);
   --va-control-edge: rgba(28, 27, 25, 0.14);
   --va-tab-line: rgba(28, 27, 25, 0.1);
-  --va-done: #4f8a3b;
-  --va-held: #c79a16;
-  --va-declined: #c2475a;
   /* The businesses' own header colors, and what sits on them. */
   --va-city: #16324d;
   --va-rivera: #1f4e4a;

@@ -33,7 +33,8 @@ class NamedTool(Protocol):
 
 
 def next_steps(tools: Iterable[NamedTool]) -> list[str]:
-    """Tool-name order, with nothing visitor-written and unknown tools omitted."""
+    """Tool-name order, with nothing visitor-written and unknown tools omitted. A step two tools
+    offer (an urgent block beside the native call-back) is listed once, where it first comes."""
     steps = []
     for profile in sorted(tools, key=lambda profile: profile.tool):
         phrase = NEXT_STEPS.get(profile.tool)
@@ -41,6 +42,6 @@ def next_steps(tools: Iterable[NamedTool]) -> list[str]:
             business = getattr(profile, "business", None)
             config = getattr(business, "config", None)
             phrase = BUSINESS_BLOCK_STEPS.get(getattr(config, "block", None))
-        if phrase is not None:
+        if phrase is not None and phrase not in steps:
             steps.append(phrase)
     return steps
