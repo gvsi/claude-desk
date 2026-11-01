@@ -38,8 +38,10 @@ a {
 
 /* Text entry (a text field, a text area, a composer's text box) shows only its caret when it has
    focus, by pointer or keyboard: no ring, and nothing around it changes either. Browsers match
-   :focus-visible on a text field even when it was clicked, so it is turned off here. */
-:is(textarea, input:not([type='button'], [type='checkbox'], [type='color'], [type='file'], [type='image'], [type='radio'], [type='range'], [type='reset'], [type='submit'])):focus-visible {
+   :focus-visible on a text field even when it was clicked, so it is turned off here. Only a field
+   that can be typed in (`:read-write`) has a caret: a held, read-only field, and every checkbox,
+   radio, range or button input, keeps the ring above. */
+:is(input, textarea):read-write:focus-visible {
   outline: none;
   outline-offset: 0;
 }

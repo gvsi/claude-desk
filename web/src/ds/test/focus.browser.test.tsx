@@ -66,7 +66,6 @@ describe('focus', () => {
   const TEXT_ENTRY: [string, ReactNode][] = [
     ['a text field', <TextField label="Business name" value="" onChange={noop} />],
     ['a text area', <TextField label="Your business" multiline value="" onChange={noop} />],
-    ['a held text field', <TextField label="Business name" value="Rivera Plumbing" readOnly onChange={noop} />],
     ['the owner composer', <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} />],
     ['the public chat composer', <Composer variant="visitor" label="Message" placeholder="Message" onSend={noop} />],
     ['the whisper composer', <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude" onSend={noop} />],
@@ -101,6 +100,8 @@ describe('focus', () => {
     ['a button', <Button variant="secondary" onClick={noop}>Save</Button>],
     ['a link', <TextLink href="#rules">See rule</TextLink>],
     ['a chip', <Chip onClick={noop}>Book a visit</Chip>],
+    ['a radio button', <input type="radio" name="probe" aria-label="Sign in with a code" />],
+    ['a checkbox', <input type="checkbox" aria-label="Remember this device" />],
   ];
 
   it.each(CONTROLS)('controls_ring_in_ring_focus_on_keyboard_focus_only: %s', async (_, control) => {
@@ -111,7 +112,7 @@ describe('focus', () => {
 
     const screen = await render(<AfterStart>{control}</AfterStart>);
     const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
-    const target = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(a, button)');
+    const target = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(a, button, input)');
     if (target === null) throw new Error('no control');
 
     // Clicked: focus, and no ring.
@@ -126,6 +127,21 @@ describe('focus', () => {
     expect(document.activeElement).toBe(target);
     const style = getComputedStyle(target);
     expect([style.outlineStyle, style.outlineWidth, style.outlineOffset, style.outlineColor]).toEqual(['solid', '2px', '2px', ring]);
+    await screen.unmount();
+  });
+
+  it('a_held_text_field_rings_on_keyboard_focus', async () => {
+    // A held (read-only) field draws no caret, so caret-only focus would leave it nothing: like any
+    // other control, it shows the warm ring when the keyboard reaches it.
+    const screen = await render(<AfterStart><TextField label="Business name" value="Rivera Plumbing" readOnly onChange={noop} /></AfterStart>);
+    const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
+    const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] input');
+    if (field === null) throw new Error('no held field');
+    start.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(field);
+    const style = getComputedStyle(field);
+    expect([style.outlineStyle, style.outlineWidth, style.outlineOffset, style.outlineColor]).toEqual(['solid', '2px', '2px', tokenColor('--ring-focus')]);
     await screen.unmount();
   });
 });
