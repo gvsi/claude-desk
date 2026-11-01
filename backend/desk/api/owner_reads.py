@@ -258,8 +258,10 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
                 if row["session_id"] in who.sessions]
     asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
-    # AI-written triage never sits on an approval card: only a handoff, which asks the owner for no decision, gets one.
-    handed = [row["session_id"] for row in handoffs]
+    # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
+    # for no decision, and not while the same session has a held request awaiting them.
+    waiting = {decision.session_id for _, decision in held}
+    handed = [row["session_id"] for row in handoffs if row["session_id"] not in waiting]
     summaries = {session_id: triage.summary
                  for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])

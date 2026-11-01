@@ -70,7 +70,12 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
 any of these, and a write to the business its row after the Desk's. The calendar write then takes
 the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
-of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
+of a slot it drops or moves either commits first or waits for it. The kernel's daily calendar
+refresh holds the Desk row the same way, one Desk to a transaction (`desks.extend_calendar`), then
+only reads the Desk's slots and inserts new ones under fresh keys before it takes the ledger head:
+every write that changes or deletes a slot holds the Desk row first, so a booking holding its slot
+`FOR SHARE` and the refresh never wait on each other for a slot; like any two writes to one Desk,
+they take turns only at its ledger head. Closing a handoff holds a Desk row too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.
@@ -354,6 +359,13 @@ class KernelFailure(Exception):
         self.reason = reason or code
         self.persist = persist
         self.detail = detail
+
+
+async def limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
+    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
+    owner's write holds makes background work (the rebuild, the calendar pass) try that Desk again
+    later rather than stall the others."""
+    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
 
 
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:

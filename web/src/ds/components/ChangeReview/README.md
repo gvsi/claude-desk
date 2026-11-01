@@ -50,7 +50,7 @@
 - A card the draft drops goes to the draft's card that covers its whole scope: of the cards that govern its target in the draft (`rulesForTool` for a tool, most specific first; the cards on the same effect for an effect card), the first whose people include the dropped card's (`containsScope`) and whose hours hold all of its hours. It is a `changed` row tagged where `ruleDiff` finds the two different, or no row when they differ only in their id.
 - With no such card, the dropped card falls to the default ask (`after: null`, the screen's default side), tagged `['mode']` only when its outcome changes. A rule the draft covers only in part, such as weekday bookings from 8:00 am to 6:00 pm under a 9-to-5 rule, falls to it too, so no row claims "Automatic" for times that will ask.
 - A draft card no dropped card goes to is an `added` row; one a dropped card goes to shows as that row's After instead.
-- Rows follow `before`'s order, then the added cards in `after`'s; `is_default` cards never show.
+- It returns rows in `before`'s order, then the added cards in `after`'s; `is_default` cards never show. The screen then orders every row by its tool's place (by connector, by tool within one) in one stable pass, so an added rule follows the changed rows of its own tool: a weekday booking rule a preset adds sits right after the booking rules it replaces, not after every changed row.
 - `ReviewChange = { change: 'changed' | 'added'; before: RuleCard | null; after: RuleCard | null; fields: RuleField[] }`.
 
 ## Props

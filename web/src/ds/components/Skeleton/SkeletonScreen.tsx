@@ -80,6 +80,11 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
     setWasLoading(loading);
     setPhase(next);
     setHandingOff(next === 'none' && (phase === 'shown' || phase === 'leaving'));
+  } else if (!loading ? phase === 'waiting' || phase === 'shown' : phase === 'leaving' || phase === 'none') {
+    // An update made in one state can land in the other: the wait coming due just as the part
+    // lands, which React may replay after the render that ended the load. A part that has landed
+    // never waits or shows its shapes again, and a part loading again waits afresh.
+    setPhase(loading ? 'waiting' : 'none');
   }
   const region = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -123,14 +128,16 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Start after the mount's mutation observers have run. A timer can fire just before its
-    // requested fractional deadline, so check the clock rather than showing a frame early.
+    // requested fractional deadline, so check the clock rather than showing a frame early. React
+    // cleans this effect up after the commit that ends the wait, so the timer can still fire after
+    // the part has landed: it shows the shapes only while the region is still waiting.
     queueMicrotask(() => {
       const deadline = performance.now() + SKELETON_DELAY_MS;
       const showWhenDue = () => {
         if (!live) return;
         const remaining = deadline - performance.now();
         if (remaining > 0) timer = setTimeout(showWhenDue, remaining);
-        else setPhase('shown');
+        else setPhase((now) => (now === 'waiting' ? 'shown' : now));
       };
       if (live) timer = setTimeout(showWhenDue, SKELETON_DELAY_MS);
     });

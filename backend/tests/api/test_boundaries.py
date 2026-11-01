@@ -21,7 +21,8 @@ from desk.kernel_api import PaymentLinkView, VerifyCheckRequest, WhoAmI
 
 BACKEND = Path(__file__).resolve().parents[2]
 API = Path(desk.api.__file__).parent
-# The API shares desk.contracts, desk.events, desk.kernel_api and desk.presets with the kernel, and nothing else of it.
+# The API shares desk.always_on, desk.calendar, desk.contracts, desk.env, desk.events, desk.kernel_api, desk.money_cap,
+# desk.presets and desk.rewrites with the kernel, and nothing else of it.
 FORBIDDEN = ("desk.kernel_service", "desk_kernel", "desk.mockpay", "tests")
 
 
