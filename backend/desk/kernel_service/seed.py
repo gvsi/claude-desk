@@ -98,7 +98,7 @@ RIVERA_CARDS: list[RuleCard] = [
     RuleCard(card_id="rv-mandate", applies_to="native.charge_mandate", mode="auto", who="anyone",
              max_amount_cents=2_000, reason="Visiting agents pay up to $20, within the limits of their signed mandate."),
     RuleCard(card_id="rv-urgent", applies_to="desk.emergency-callback", mode="auto", who="anyone",
-             reason="Urgent call-backs go to Maria at once."),
+             reason="Anyone can ask for an urgent callback, which alerts you at once."),
 ]
 
 # Maria's urgent business tool (the urgent block): an emergency call-back that alerts her at once,

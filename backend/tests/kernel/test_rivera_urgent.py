@@ -45,7 +45,7 @@ def test_the_seed_configures_an_urgent_emergency_callback_and_a_card_for_it():
                    "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}}
     [card] = [card for card in seed.RIVERA_CARDS if card.applies_to == TOOL]
     assert card == RuleCard(card_id="rv-urgent", applies_to=TOOL, mode="auto", who="anyone",
-                            reason="Urgent call-backs go to Maria at once.")
+                            reason="Anyone can ask for an urgent callback, which alerts you at once.")
     assert card.max_amount_cents is None and not card.review and card.hours is None
     # the shipped proof covers the tool, enabled and pinned at its definition
     [profile] = [p for p in activation.shipped_profiles("rivera") if p.source == "business"]

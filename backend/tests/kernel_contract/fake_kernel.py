@@ -380,7 +380,8 @@ RIVERA_CARDS = [
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
           "Agents can pay up to $20 from their spending limit.", max_amount_cents=2_000),
-    _card("rv-urgent", "desk.emergency-callback", "auto", "anyone", "Urgent call-backs go to Maria at once."),
+    _card("rv-urgent", "desk.emergency-callback", "auto", "anyone",
+          "Anyone can ask for an urgent callback, which alerts you at once."),
     *(RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                reason="Anything your rules don't cover waits for you.")
       for tool in ("native.release_document", "payments.list_charges", "payments.create_refund")),
