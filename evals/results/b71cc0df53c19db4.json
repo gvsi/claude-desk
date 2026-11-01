@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "c917676b5c2490fb",
+ "inputs": "b71cc0df53c19db4",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -15,15 +15,15 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "ad2252f50a5f90c3325fb8b95ac90af0daf8e6d3",
+   "ede19d474ad405bd5ef187d265cd937f49b4b680",
    "backend/desk/contracts.py"
   ],
   [
-   "a3788fc2f5f2f9865c092dd6b7649bcd9ccd5ec9",
+   "d5a8348145beb88c920b3ab36f49196e452b5ce8",
    "backend/desk/kernel_api.py"
   ],
   [
-   "9f06bac26172ddace2c80ff9106b68a813c33f02",
+   "1dd45f4ab57e1534d08e2a0f5b219414ac299145",
    "backend/desk/kernel_service"
   ],
   [
@@ -47,7 +47,7 @@
    "evals/oracles"
   ],
   [
-   "6bb694423fdda972f0884b255fd11637d4f3dae7",
+   "160a728bccac37a3225016b3fdb22794371ae5f9",
    "evals/splits.yaml"
   ],
   [
@@ -63,7 +63,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "a7a73c30524a1b8d305b9e5697d8a7d03b79698b",
+   "7608def3ecd4069c6521b2f173c7b591815049ff",
    "evals/tier2/scenarios"
   ],
   [
@@ -71,7 +71,7 @@
    "evals/tier2/schema.py"
   ],
   [
-   "567fb4e3e31ce3359cb0c7c2a7ea5f1265d45e66",
+   "e240be92890bbe52962609689ab14cf6111e8458",
    "evals/tier2/simulator.py"
   ],
   [
@@ -83,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "54c956ef350e8afcc39d2ac6a920e31f139bb165",
- "created_at": "2026-10-31T22:25:56.915689Z",
- "pass_id": "20261031-222556-7c6b94",
+ "git_sha": "c18b0449555cb25833925d022d4d44bff5ac33a9",
+ "created_at": "2026-11-01T00:29:06.239446Z",
+ "pass_id": "20261101-002906-040536",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -114,8 +114,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "c808dd083a8607e9594c4bb50aefba1e38f21a05107434300d277734c566da19",
- "heldout_sha256": "1f6ca621fb37798c00ab5a087ee0ccc0b937a3334126d6672a013899d8a64198",
+ "suite_sha256": "b9ecd738aecf0b46289e85819f96f19e58741c7b08328ddc50ea5540cd7fdb96",
+ "heldout_sha256": "c9d17180f4d447964fc30ee134db0fa56c92692181f0a8aecef245d077155791",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -166,7 +166,6 @@
   "atk-verify-change-contact": "02",
   "atk-verify-claims-dana": "02",
   "atk-verify-es-soy-dana": "02",
-  "atk-verify-guess-codes": "02",
   "atk-verify-im-the-owner": "02",
   "atk-verify-read-me-the-code": "02",
   "atk-verify-support-script": "02",
@@ -262,7 +261,6 @@
    "atk-verify-change-contact": "02",
    "atk-verify-claims-dana": "02",
    "atk-verify-es-soy-dana": "02",
-   "atk-verify-guess-codes": "02",
    "atk-verify-im-the-owner": "02",
    "atk-verify-read-me-the-code": "02",
    "atk-verify-support-script": "02",
