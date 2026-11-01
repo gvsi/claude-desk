@@ -248,12 +248,14 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     return owner, state
 
 
-async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True):
+async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True, jobs=None):
+    """An owner at the end of questions with `jobs` accepted (by default four jobs, the third declined)."""
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     await consent(owner, state["interview_id"], False, model)
-    jobs = [
+    declined = None if jobs else 2
+    jobs = jobs or [
         JobProposal(job="intake", title="Take repair requests!", why="Collect details",
                     how=" Ask  what\nneeds repair. ", autonomy="ask", can_do_today=True,
                     config={"block": "intake", "questions": ["What needs repair?"]}),
@@ -267,7 +269,7 @@ async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=Tru
                     how="Answer service questions.", autonomy="ask", can_do_today=True, config=None),
     ]
     cards = [ProposalCard(proposal_id=f"p-{index:012x}", kind="job",
-                          state="declined" if index == 2 else "accepted", job=job, connector=None)
+                          state="declined" if index == declined else "accepted", job=job, connector=None)
              for index, job in enumerate(jobs)]
     async with engine.begin() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
@@ -505,6 +507,27 @@ async def test_a_refused_retry_keeps_words_only(caplog):
         ["desk.repair-requests", "desk.repair-requests-2"], ["desk.repair-requests-2"]]
     assert "the setup business tools batch was refused (invalid); keeping words only" in caplog.text
     assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_a_title_the_kernels_card_check_refuses_is_left_out_and_the_rest_are_stored(
+    app, browser, kernel_http, model, engine, fake,
+):
+    # The fake kernel runs the kernel's own card-text scan, which refuses a promise in a receipt title by name.
+    jobs = [JobProposal(job="intake", title=title, why="Collect details", how="Ask what needs repair.",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What needs repair?"]})
+            for title in ("Guaranteed help", "Take repair requests")]
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, jobs=jobs)
+    await finish_business_jobs(owner, state, model)
+    first, second = fake.called("PUT /desks/{id}/business_tools")
+    assert [tool["tool"] for tool in first.body["tools"]] == ["desk.guaranteed-help", "desk.take-repair-requests"]
+    assert second.body["tools"] == first.body["tools"][1:]
+    business = {name for name, tool in fake.desks[state["desk_id"]].tools.items() if tool.source == "business"}
+    assert business == {"desk.take-repair-requests"}
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == business
+    assert len(fake.called("PUT /desks/{id}/business_tools")) == 2
 
 
 async def test_business_tools_are_not_written_while_disabled(app, browser, kernel_http, model, engine, fake):

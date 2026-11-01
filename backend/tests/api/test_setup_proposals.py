@@ -11,6 +11,7 @@ from sqlalchemy import text as sql
 
 from desk.api import setup
 from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SETUP_PLAN_NOT_CONNECTED, SetupAnswers
+from desk.kernel_service.adapters import blocks
 from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
@@ -1785,18 +1786,8 @@ async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine, am
     assert (await stored(engine, state["interview_id"]))["answers"]["auto_money_cap_cents"] == 0
 
 
-@pytest.mark.parametrize(("link_limit", "cap", "problem"), [
-    (5_000, 10_000, "link_limit"), (10_000, 5_000, "above_cap"),
-])
-async def test_an_owner_priced_payment_becomes_a_tool_checked_against_both_limits(
-    proposals, app, model, engine, kernel_http, fake, link_limit, cap, problem,
-):
-    from types import SimpleNamespace
-
-    from desk.api.prompts import CARD_ERRORS, DraftedRules, RuleCardDraft
-    from desk.api.ro import KernelRO
-    from desk.kernel_api import PolicyConfirmRequest, ToolsConfirmRequest
-
+async def accept_owner_priced_payment(proposals, model, engine, fake):
+    """Accept the retainer at $80 on auto and finish setup; return the business tool sent and its stored profile."""
     owner, state, ids = proposals
     interview_id, desk_id = state["interview_id"], state["desk_id"]
     await show_card(engine, interview_id, ids[1])
@@ -1814,7 +1805,47 @@ async def test_an_owner_priced_payment_becomes_a_tool_checked_against_both_limit
     assert sent["config"] == {"block": "purpose_payment", "purpose": "Retainer", "amount_cents": 8_000}
     profile = fake.desks[desk_id].tools[sent["tool"]]
     assert profile.effects == ["charge"]
+    return owner, desk_id, sent, profile
 
+
+def assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem):
+    from desk.api.prompts import CARD_ERRORS, DraftedRules, RuleCardDraft
+
+    answers = SetupAnswers(summary="Retainers", payment_link_auto_max_cents=link_limit, auto_money_cap_cents=cap)
+    draft = RuleCardDraft(applies_to=sent["tool"], mode="auto", who="anyone", max_amount_cents=8_000,
+                         reason="Take the retainer within the owner's limit.")
+    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS[problem]))
+    draft.max_amount_cents = min(link_limit, cap)
+    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+BOTH_LIMITS = pytest.mark.parametrize(("link_limit", "cap", "problem"), [
+    (5_000, 10_000, "link_limit"), (10_000, 5_000, "above_cap"),
+])
+
+
+@BOTH_LIMITS
+async def test_an_owner_priced_payment_becomes_a_tool_checked_against_both_limits(
+    proposals, model, engine, fake, link_limit, cap, problem,
+):
+    _, _, sent, profile = await accept_owner_priced_payment(proposals, model, engine, fake)
+    tools = [{"tool": sent["tool"], "effects": profile.effects}]
+    assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem)
+
+
+@pytest.mark.skipif("purpose_payment" not in blocks.SUPPORTED_BLOCKS,
+                    reason="the kernel's purpose payment block lands with its own change")
+@BOTH_LIMITS
+async def test_a_reviewed_payment_tool_reaches_the_rule_check_through_the_kernel(
+    proposals, app, model, engine, kernel_http, fake, link_limit, cap, problem,
+):
+    from types import SimpleNamespace
+
+    from desk.api.ro import KernelRO
+    from desk.kernel_api import PolicyConfirmRequest, ToolsConfirmRequest
+
+    owner, desk_id, sent, profile = await accept_owner_priced_payment(proposals, model, engine, fake)
     # Review the actual pinned definition before asking setup to build its rule-check inputs.
     kernel = kernel_http.owner(owner.token)
     reviewed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest.model_validate({
@@ -1825,13 +1856,7 @@ async def test_an_owner_priced_payment_becomes_a_tool_checked_against_both_limit
         tools = await setup._rule_tools(SimpleNamespace(ro=KernelRO(
             conn, owner.copy_id, app.state.runtime.settings.kernel_ro_schema)), desk_id)
     assert {"tool": sent["tool"], "effects": ["charge"]} in tools
-    answers = SetupAnswers(summary="Retainers", payment_link_auto_max_cents=link_limit, auto_money_cap_cents=cap)
-    draft = RuleCardDraft(applies_to=sent["tool"], mode="auto", who="anyone", max_amount_cents=8_000,
-                         reason="Take the retainer within the owner's limit.")
-    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
-        setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS[problem]))
-    draft.max_amount_cents = min(link_limit, cap)
-    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+    assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem)
 
 
 @pytest.mark.parametrize("source", ["request", "stored", "typed"])

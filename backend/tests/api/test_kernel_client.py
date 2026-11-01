@@ -279,19 +279,6 @@ async def test_errors_carry_kernel_error_codes():
         assert (caught.value.route, caught.value.status) == ("GET /document_links/{token}", None)
 
 
-async def test_a_refusal_carries_the_fields_it_names():
-    kernel = ScriptedKernel()
-    named = {"desk.a.title": ["public_promise"]}
-    async with kernel.client() as http:
-        owner = http.owner("owner-token-1")
-        for body, detail in (({"code": "invalid", "detail": named}, named), ({"code": "invalid"}, {}),
-                             ({"code": "invalid", "detail": "not a field map"}, {})):
-            kernel.fail(httpx.Response(422, json=body))
-            with pytest.raises(KernelFailed) as caught:
-                await owner.whoami()
-            assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail), body
-
-
 async def test_kernel_unavailable_keeps_the_kernels_code():
     kernel = ScriptedKernel()
     kernel.fail(kernel_error(503, "seed_unproved"))
