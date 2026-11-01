@@ -104,4 +104,38 @@ def test_command_output_passes_through_byte_for_byte_with_its_exit_status(tmp_pa
         assert testbox_client.relay(holder, received) == 37
         assert received.getvalue() == first + last
     finally:
-        testbox_client.release(holder)
+        testbox_client.release(holder, started=True)
+
+
+def test_a_caller_that_leaves_while_the_lane_is_busy_stops_waiting_at_once(tmp_path):
+    """Another call holds the lane. The waiting holder has no job yet, so EOF from its caller ends the wait now,
+    not when the other call finishes."""
+    import fcntl
+    (tmp_path / 'repo').mkdir()
+    marker = tmp_path / 'ran'
+    job = [sys.executable, '-c', f'from pathlib import Path; Path({str(marker)!r}).touch()']
+    with (tmp_path / 'lock').open('w') as busy:
+        fcntl.flock(busy, fcntl.LOCK_EX)
+        source = testbox_client.transaction_script(str(tmp_path), job, [sys.executable, '-c', 'pass'])
+        holder = subprocess.Popen([sys.executable, '-c', source], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        try:
+            time.sleep(0.5)
+            assert holder.poll() is None   # still waiting for the lane
+            holder.stdin.close()
+            assert holder.wait(timeout=3) == 130
+            assert holder.stdout.read() == b''
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait()
+    assert not marker.exists()
+
+
+def test_before_run_is_sent_the_client_stops_its_holder_without_waiting_for_it(tmp_path):
+    """Before "run" there is no remote job to clean up, so an interrupted client never waits on a remote that is
+    itself still waiting (for a busy lane or the bootstrap lock)."""
+    stuck = testbox_client.start_holder([sys.executable, '-c', 'import signal, time\nwhile True: time.sleep(1)'])
+    start = time.monotonic()
+    testbox_client.release(stuck, started=False)
+    assert time.monotonic() - start < 3
+    assert stuck.returncode is not None

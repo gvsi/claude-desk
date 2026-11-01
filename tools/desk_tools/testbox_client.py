@@ -152,7 +152,15 @@ def interrupted(signum, _frame):
 for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(signum, interrupted)
 with (base / 'lock').open('w') as lock:
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    # Poll rather than block, so a caller that leaves while another call holds the lane stops waiting at once.
+    # The client sends nothing until it has the lane state, so readable stdin here can only be its EOF.
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if select.select([0], [], [], 0.1)[0]:
+                raise SystemExit(130)
     try:
         exec(STATE)
         # Read unbuffered: the same stream remains a lifetime lease after the start byte.
@@ -193,7 +201,7 @@ def prepare_script(base: str) -> str:
     """Remote shell prefix: admit a run only on a ready machine, holding the bootstrap lock shared for its whole life.
     The transaction script follows, quoted, after `python3 -c`. Bash carries on after a failed `exec` redirection,
     so each step fails closed explicitly: without the lock, bootstrap could change the machine under the run."""
-    return (f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock || exit 75; flock -s 8 || exit 75; "
+    return (f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock || exit 75; flock -s -w 30 8 || exit 75; "
             f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c ")
 
 
@@ -220,13 +228,23 @@ def relay(holder, out) -> int:
     return holder.wait()
 
 
-def release(holder):
-    """Close the lease, which tells the remote watchdog to stop this exact call, and wait for its acknowledgement."""
+def release(holder, started):
+    """Close the lease. Once "run" was sent, that tells the remote watchdog to stop this exact call: wait for its
+    acknowledgement. Before it there is no remote job, and the remote end may itself still be waiting (for a busy
+    lane or the bootstrap lock), so stop the holder at once; the remote sees the closed connection and gives up."""
     if not holder.stdin.closed:
         try:
             holder.stdin.close()
         except BrokenPipeError:
             pass
+    if not started:
+        holder.terminate()
+        try:
+            holder.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+            holder.wait()
+        return
     # Drain without writing: a closed caller stdout must not skip acknowledgement.
     while holder.stdout.read(65536):
         pass
@@ -374,8 +392,9 @@ def run(args, root, lane, cache):
     # stop is idempotent even if cancellation happens before the service was created.
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
     transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", f"TESTBOX_TIMING={int(os.environ.get('TESTBOX_TIMING') == '1')}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
-    holder = start_holder(ssh + [prepare_script(base) + shlex.quote(transaction)])
+    holder, started = None, False
     try:
+        holder = start_holder(ssh + [prepare_script(base) + shlex.quote(transaction)])
         remote = read_remote_state(holder)
         if remote is None:
             return 75
@@ -418,15 +437,17 @@ def run(args, root, lane, cache):
             print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", file=sys.stderr, flush=True)
             # Run the worker shipped by this client, even if the selected tree has no tools.
             sys.stdout.flush()
+            started = True   # From here on a remote job may exist, and its cleanup is awaited.
             code = relay(holder, sys.stdout.buffer)
             timing.mark("remote_execution")
             print(f"testbox: lane={lane} exit={code} elapsed={time.monotonic() - start:.2f}s", file=sys.stderr, flush=True)
             return code
     finally:
-        # Wait for the remote acknowledgement before releasing the local lane lock or exiting on INT/TERM.
+        # Finish releasing before the local lane lock is freed or INT/TERM exits.
         handlers = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         try:
-            release(holder)
+            if holder is not None:
+                release(holder, started)
         finally:
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)

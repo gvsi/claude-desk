@@ -309,7 +309,8 @@ def run_prepare(tmp_path, *, lock=True, flock_status=0, ready=True):
 def test_a_ready_machine_admits_the_run_under_the_shared_bootstrap_lock(tmp_path):
     result = run_prepare(tmp_path)
     assert (result.returncode, result.stdout) == (0, 'continued\n')
-    assert (tmp_path / 'flock-args').read_text().split()[0] == '-s'
+    # Shared, and bounded: a caller waiting behind a bootstrap gives up with 75 instead of hanging.
+    assert (tmp_path / 'flock-args').read_text().split() == ['-s', '-w', '30', '8']
 
 
 @pytest.mark.parametrize('failure', ['missing-lock', 'lock-not-taken'])

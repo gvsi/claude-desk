@@ -74,7 +74,9 @@ and the Cargo registry are shared; compilation outputs are not. Cargo builds use
 jobs per lane.
 
 Each call has a unique service and a control-stream lease. Ctrl-C or SIGTERM closes the
-lease; the client waits for remote cleanup before exiting. If the client is killed,
+lease; the client waits for remote cleanup before exiting. A call still waiting for its lane
+(another caller holds it) or for the machine's setup lock has started no job, so it exits
+at once, and its remote side stops waiting. If the client is killed,
 EOF independently triggers the remote watchdog. The lane lock is released only after the
 call's service and its whole process group are stopped, including detached descendants
 in its control group. A killed process itself cannot wait for cleanup before exiting.
