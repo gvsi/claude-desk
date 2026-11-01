@@ -40,7 +40,7 @@ from `config.results` alone, and the inputs it names must be its commit's, read 
 never text, codes or ids beyond scenario ids and the names of waiver signers. It lists the gated map as [object id, path] pairs sorted by path
 (`gated_pairs`), never as an object, so CI's secret scan reads no path and object id as a secret.
 
-**`results-check --base <ref>`** (`make evals-results-check`), with no database, network or key:
+**`results-check --base <ref> [--history-since <rev>]`** (`make evals-results-check`), with no database, network or key:
 exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated path and leaves
 `recorded_rates.json`, `evals/waivers.json` and `evals/results/` alone (without renames, moving a gated file out lists its
 old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
@@ -52,6 +52,8 @@ its splits must hold its suite, and any added or edited results JSON must valida
 their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
 merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
 empty recorded-rate history, append-only rate and waiver histories, and kept landed plans.
+On every readiness path, the actual merge tree must also have exactly one Alembic head when its
+migrations directory exists; revision metadata is parsed as literals without executing migrations.
 Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
@@ -68,6 +70,12 @@ gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
 The push-to-main check uses the root commit as its base, so it validates every historical results
 file still under `evals/results/` against today's schema. A results-file schema change must migrate
 or delete those old files; incompatible historical files fail closed.
+`--history-since <rev>` additionally checks rate, waiver and landed-plan histories against every
+first-parent commit in `<rev>..HEAD` that changes those files. Earlier rate and waiver histories must
+be prefixes of the head's, and every earlier landed plan must be kept. Unreadable files fail closed.
+CI supplies the repository's root commit on pushes and manual runs, so cancelled runs cannot hide a
+rewrite. A force-push to main fails CI because its replaced commits cannot be checked. Pull requests
+use only their normal results base.
 
 **Owner-signed AI-denial waivers.** Only `disclosure.denial` can be waived, for one pass, scenario,
 run and message with its exact text hash and transcript-derived hit count. The gate subtracts the
@@ -103,6 +111,7 @@ written. It never lowers the bar quietly: a lower bound on the same held-out set
 doesn't load), and `results-check` names each lowered rate a change adds (`lowered_notice`).
 """
 
+import ast
 import json
 import subprocess
 import tempfile
@@ -148,6 +157,7 @@ RATES_PATH = "evals/recorded_rates.json"
 LANDED_PATH = "evals/tier1/landed.toml"
 SCENARIOS_PATH = "evals/tier2/scenarios"
 SPLITS_PATH = "evals/splits.yaml"
+MIGRATIONS_PATH = "backend/alembic/versions"
 # The owner's scope (owner decision, 2026-10-30): the kernel, the prompts, the policies, the model settings,
 # and the tier 2 scenarios and judges. Everything else relies on tier 1 and CI.
 GATED_PATHS = (
@@ -157,6 +167,7 @@ GATED_PATHS = (
     "backend/desk/kernel_api.py",           # the requests the kernel decides on and the answers it gives
     "backend/desk/contracts.py",            # the cards, decisions and labels the kernel checks and renders
     "backend/desk/rewrites.py",             # the violations a rewrite can fix: when a handoff opens
+    "backend/desk/next_steps.py",           # the fixed session capabilities exempted by the soft check
     "backend/desk/mockpay",                 # the payment server behind the kernel's money tools
     # The prompts.
     "backend/desk/api/prompts.py",          # every fixed string the Desk's model sees
@@ -266,11 +277,84 @@ def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None 
     return all(required - landed for required in requirements)
 
 
+def _migration_revision(raw: bytes, path: str) -> tuple[str, tuple[str, ...]]:
+    """Read only module-level literal metadata, without importing or executing a migration."""
+    try:
+        module = ast.parse(raw, filename=path)
+    except SyntaxError as error:
+        raise GitError(f"migration {path!r} doesn't parse: {error}") from None
+    values: dict[str, Any] = {}
+    for statement in module.body:
+        if isinstance(statement, ast.Assign):
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in ("revision", "down_revision"):
+                try:
+                    values[target.id] = ast.literal_eval(statement.value)
+                except (ValueError, TypeError) as error:
+                    raise GitError(f"migration {path!r} has non-literal {target.id}: {error}") from None
+    if "revision" not in values or "down_revision" not in values:
+        raise GitError(f"migration {path!r} must assign literal revision and down_revision at module level")
+    revision, parent = values["revision"], values["down_revision"]
+    if not isinstance(revision, str) or not revision:
+        raise GitError(f"migration {path!r} revision must be a nonempty string")
+    parents = () if parent is None else (parent,) if isinstance(parent, str) else parent
+    if not isinstance(parents, (tuple, list)) or any(not isinstance(p, str) or not p for p in parents):
+        raise GitError(f"migration {path!r} down_revision must be None, a string, or a tuple/list of revision strings")
+    return revision, tuple(parents)
+
+
+def _migration_heads(root: Path, tree: str) -> list[str] | None:
+    """Heads in the merged git tree, or None when the migrations directory is absent."""
+    entry = git(root, "ls-tree", "-z", tree, "--", MIGRATIONS_PATH).rstrip("\0")
+    if not entry:
+        return None
+    if entry.split("\t", 1)[0].split()[1] != "tree":
+        raise GitError(f"{MIGRATIONS_PATH} can't be read as a directory in the merge tree")
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    # Like Alembic: only the folder's own .py files, not subfolders, and never an `__init__` file.
+    paths = git(root, "ls-tree", "-z", "--name-only", tree, "--", MIGRATIONS_PATH + "/").split("\0")
+    for path in paths:
+        if not path.endswith(".py") or path.rsplit("/", 1)[-1].startswith("__"):
+            continue
+        raw = show(root, tree, path)
+        if raw is None:
+            raise GitError(f"migration {path!r} can't be read from the merge tree")
+        revision, down_revisions = _migration_revision(raw, path)
+        if revision in revisions:
+            raise GitError(f"migration {path!r} duplicates revision {revision!r}")
+        revisions.add(revision)
+        parents.update(down_revisions)
+    return sorted(revisions - parents)
+
+
 def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """An unarmed union and merge with no recorded rates are ready; otherwise apply the both-sides rule."""
+    """Require one merged migration head, then apply the unarmed or both-sides results rule."""
     head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
     main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
     base = git(root, "merge-base", head_commit, main_commit).strip()
+    done = subprocess.run(
+        ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
+        capture_output=True, text=True,
+    )
+    if done.returncode == 1:
+        # With -z, the tree id and conflicted paths precede an empty field and the messages.
+        paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
+        return False, ("not ready: the PR conflicts with origin/main in "
+                       f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
+    if done.returncode != 0:
+        raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
+    merged = done.stdout.split("\0", 1)[0].strip()
+    heads = _migration_heads(root, merged)
+    if heads is not None and len(heads) != 1:
+        return False, (f"not ready: merged Alembic migrations have {len(heads)} heads: "
+                       f"{', '.join(repr(head) for head in heads) or 'none'}; "
+                       "re-chain the PR's migration onto origin/main's head")
 
     def changed_inputs(commit: str) -> list[str]:
         paths = git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}..{commit}").split("\0")
@@ -290,18 +374,6 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
         except ValueError as error:
             raise GitError(f"merge readiness {RATES_PATH} doesn't load: {error}") from None
         if pending_only and not any(histories):
-            done = subprocess.run(
-                ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
-                capture_output=True, text=True,
-            )
-            if done.returncode == 1:
-                # With -z, the tree id and conflicted paths precede an empty field and the messages.
-                paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
-                return False, ("not ready: the PR conflicts with origin/main in "
-                               f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
-            if done.returncode != 0:
-                raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
-            merged = done.stdout.split("\0", 1)[0].strip()
             try:
                 merged_pending_only = unarmed(merged, root)
             except CheckFailed as error:
@@ -791,10 +863,15 @@ def final_gate(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
 
 # The check CI runs
 
-def results_check(base: str, root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """`make evals-results-check BASE=<ref>`: (passed, the reason). See the module docstring for the order."""
+def results_check(base: str, root: Path = REPO_ROOT, *, history_since: str | None = None) -> tuple[bool, str]:
+    """Judge results against `base`, and with `history_since` hold the head's histories to every
+    first-parent commit since that revision."""
     try:
-        return True, _check(base, root)
+        reason = _check(base, root)
+        if history_since is not None:
+            _check_histories_since(history_since, root)
+            reason += f"; rate, waiver and landed-plan histories extend every first-parent commit since {history_since}"
+        return True, reason
     except CheckFailed as failure:
         return False, str(failure)
     except GitError as failure:
@@ -911,6 +988,27 @@ def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, roo
     if dropped := [plan for plan in base_landed if plan not in landed]:
         raise CheckFailed(f"landed.toml drops plans {base} lists: {', '.join(dropped)}")
     return before
+
+
+def _check_histories_since(since: str, root: Path) -> None:
+    """Every first-parent commit since `since` that changed a history file holds rate and waiver histories that
+    are prefixes of the head's, and landed plans the head keeps: the same checks a base gets, so a rewrite whose
+    own run was cancelled or ignored still fails every later run. A file that doesn't load fails closed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        head = _materialize(root, "HEAD", Path(tmp), only=(RATES_PATH, LANDED_PATH))
+        try:
+            rates = load_recorded_rates(head / RATES_PATH) if (head / RATES_PATH).exists() \
+                else RecordedRates(history=[])
+            landed = load_landed(head / LANDED_PATH) if (head / LANDED_PATH).exists() else ()
+        except ValueError as error:
+            raise CheckFailed(f"the head's rate or landed-plan history doesn't load: {error}") from None
+    commits = git(root, "rev-list", "--first-parent", f"{since}..HEAD", "--", RATES_PATH, WAIVERS_PATH, LANDED_PATH)
+    for commit in commits.split():
+        try:
+            _check_history(rates, landed, commit, root)
+        except ValueError as error:
+            raise CheckFailed(f"{commit}'s rate or landed-plan history doesn't load: {error}") from None
+        _check_waiver_history("HEAD", commit, root)
 
 
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:

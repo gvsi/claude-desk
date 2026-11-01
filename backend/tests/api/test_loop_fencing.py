@@ -20,7 +20,15 @@ from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
 from desk.api.prompts import conversation_system
 from desk.api.runner import TurnRunner
 from desk.api.sse import emit
-from desk.api.store import append_assistant, append_message, has_pending, lock_key, prepare_model_input
+from desk.api.store import (
+    append_assistant,
+    append_message,
+    append_time_note,
+    has_pending,
+    latest_said,
+    lock_key,
+    prepare_model_input,
+)
 from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
@@ -111,6 +119,24 @@ async def turn_locks_held(engine: AsyncEngine, session_id: str) -> int:
 async def pending(caller: Caller, model, engine: AsyncEngine, locks: AsyncEngine, **options):
     """Run the session's pending work as a request would."""
     return await run_pending(caller, model, engine=engine, lock_engine=locks, production=False, **options)
+
+
+@pytest.mark.parametrize("kind", ["visitor", "agent"])
+async def test_a_time_note_alone_starts_no_turn(api_conn, engine, locks, caller, fake, kind):
+    caller = replace(caller, kind=kind)
+    context = await caller.kernel.call("GET /context/{session_id}?desk_id=",
+                                       path={"session_id": caller.session_id})
+    assert await append_time_note(api_conn, caller.ids, context.clock) is not None
+    assert not await has_pending(api_conn, caller.session_id)
+    assert await latest_said(api_conn, caller.session_id) is None
+    await api_conn.commit()
+    fake.calls.clear()
+    model = ScriptedModel()
+
+    assert await pending(caller, model, engine, locks, end_on_reply=kind == "agent") == "idle"
+    assert model.requests == [] and fake.calls == []
+    assert await rows(api_conn, caller.session_id, "model_assistant", "n") == []
+    assert await events(api_conn, caller.session_id) == []
 
 
 async def test_take_over_mid_turn_blocks_everything(api_conn, engine, locks, caller, visitor, fake):
@@ -609,7 +635,7 @@ async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_c
     assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] == [
         ("writing", None), ("error", "internal"), ("turn_end", None)]
 
-    model = ScriptedModel([response(reply("I've asked Maria Rivera, and her answer will show up here."))])
+    model = ScriptedModel([response(reply(prompts.STATUS_LINES["check_status"]["en"]))])
     assert await pending(caller, model, engine, locks) == "done"
     assert len(fake.called("/decide")) == 1                    # never decided again
     (held,) = tool_results(model.requests[0])

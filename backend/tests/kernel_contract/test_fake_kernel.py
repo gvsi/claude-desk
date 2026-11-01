@@ -4,6 +4,7 @@ mirror."""
 
 from collections.abc import AsyncIterator
 from datetime import timedelta
+from hashlib import sha256
 
 import httpx
 import psycopg
@@ -501,6 +502,13 @@ async def test_owner_web_search_is_canned_and_visitor_cannot_call_it(fake):
     assert result.model_view["simulated"] is False and result.model_view["kind"] == "cited_excerpts"
     assert result.model_view["results"] == [{"title": "Plumbing services", "url": "https://plumbing.example/services",
                                                "snippet": "Plumbers repair leaks and clear drains."}]
+    stored = [item for item in state.desks[desk_id].knowledge.values() if item.source == "web_search"]
+    assert [item.model_dump() for item in stored] == [{
+        "item_id": "search-" + sha256(b"https://plumbing.example/services").hexdigest()[:16],
+        "source": "web_search", "title": "Web search: Plumbing services",
+        "text": "Plumbers repair leaks and clear drains.", "label": {"readers": ["owner"], "record_owner": None}}]
+    assert not {item.item_id for item in stored} & {item.item_id for item in (await context(
+        http.session(visitor.session_token), visitor.state.session_id)).knowledge}
     refused = await decide(http.session(visitor.session_token), visitor.state.session_id, 0, "visitor-search",
                            "native.web_search", {"query": "plumber services"})
     assert refused.outcome == "refuse"

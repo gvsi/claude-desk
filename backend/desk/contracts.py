@@ -377,9 +377,12 @@ class Fact(BaseModel):
     label: Label
     expires_at: AwareDatetime | None = None
 
+KnowledgeSource = Literal["website", "upload", "setup", "memory_import", "web_search"]
+
+
 class KnowledgeItem(BaseModel):           # untrusted text; never policy
     item_id: str
-    source: Literal["website", "upload", "setup", "memory_import", "web_search"]
+    source: KnowledgeSource
     title: str
     text: str
     label: Label                          # owner-only until the owner marks it public

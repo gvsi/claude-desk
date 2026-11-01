@@ -51,6 +51,7 @@ from desk.api.store import (
     append_assistant,
     append_message,
     append_stopped_draft,
+    append_time_note,
     append_tool_change,
     append_tool_results,
     clear_wake,
@@ -315,6 +316,7 @@ class _Turn:
         body = context_text(context.facts, context.knowledge)
         if context_hash(body) != await last_context_hash(conn, ids.session_id):
             await append_message(conn, ids, "desk_context", text=body)
+        await append_time_note(conn, ids, context.clock)
         found = await context_tools(conn, ids.session_id)
         delta = tool_delta(None if found is None else FrozenTools.from_context(*found), context)
         for name in delta.remove:

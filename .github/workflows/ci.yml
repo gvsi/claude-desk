@@ -1,4 +1,5 @@
-# The nine checks on main and on pull requests to any base; docs/ci.md says what each one proves.
+# The nine required checks on main and on pull requests to any base; docs/ci.md says what each proves.
+# The changed paths job rules out unaffected suites on pull requests before they take a runner.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
 # Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2" and
@@ -28,22 +29,49 @@ defaults:
     shell: bash
 
 jobs:
+  changes:
+    name: changed paths
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-changes"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+      web: ${{ steps.classify.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Classify the changed paths
+        id: classify
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: PYTHONPATH=tools python3 -m desk_tools.changed_paths
+
   backend:
     name: backend tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    needs: [backend-1, backend-2, backend-3, backend-4]
+    needs: [changes, backend-1, backend-2, backend-3, backend-4]
     if: always()
     steps:
       - name: Require every shard to pass
         env:
+          NEEDED: ${{ needs.changes.outputs.backend }}
           SHARD_1: ${{ needs.backend-1.result }}
           SHARD_2: ${{ needs.backend-2.result }}
           SHARD_3: ${{ needs.backend-3.result }}
           SHARD_4: ${{ needs.backend-4.result }}
-        run: test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
 
   backend-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: backend tests 1/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -91,6 +119,8 @@ jobs:
         run: cd backend && uv run pytest -q
 
   backend-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: backend tests 2/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -138,6 +168,8 @@ jobs:
         run: cd backend && uv run pytest -q
 
   backend-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: backend tests 3/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -185,6 +217,8 @@ jobs:
         run: cd backend && uv run pytest -q
 
   backend-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: backend tests 4/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -232,6 +266,8 @@ jobs:
         run: cd backend && uv run pytest -q
 
   kernel:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: kernel tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -246,6 +282,8 @@ jobs:
         run: cd kernel && cargo test --locked
 
   proofs:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: proofs
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -263,18 +301,25 @@ jobs:
     name: tier 1 evals
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    needs: [tier1-1, tier1-2, tier1-3, tier1-4]
+    needs: [changes, tier1-1, tier1-2, tier1-3, tier1-4]
     if: always()
     steps:
       - name: Require every shard to pass
         env:
+          NEEDED: ${{ needs.changes.outputs.backend }}
           SHARD_1: ${{ needs.tier1-1.result }}
           SHARD_2: ${{ needs.tier1-2.result }}
           SHARD_3: ${{ needs.tier1-3.result }}
           SHARD_4: ${{ needs.tier1-4.result }}
-        run: test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
 
   tier1-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 1 evals 1/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -326,6 +371,8 @@ jobs:
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier1-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 1 evals 2/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -377,6 +424,8 @@ jobs:
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier1-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 1 evals 3/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -428,6 +477,8 @@ jobs:
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier1-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 1 evals 4/4
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -479,6 +530,8 @@ jobs:
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 2 results
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -493,13 +546,22 @@ jobs:
       - name: Check the tier 2 results
         env:
           RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          FORCED: ${{ github.event_name == 'push' && github.event.forced || false }}
         run: |
+          if [ "$FORCED" = "true" ]; then
+            echo "::error::a force-push to main replaced history that CI can't check for rewritten rates or waivers"
+            exit 1
+          fi
+          HISTORY_SINCE=""
           if [ -z "$RESULTS_BASE" ]; then
             RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            HISTORY_SINCE="$RESULTS_BASE"
           fi
-          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
+          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"
 
   web:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
     name: web tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -525,6 +587,8 @@ jobs:
         run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-e2e
 
   infra:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: infra synth
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25

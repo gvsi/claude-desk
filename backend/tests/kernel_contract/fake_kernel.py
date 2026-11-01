@@ -2879,6 +2879,11 @@ class FakeKernelState:
             view = {"results": [{"title": "Plumbing services", "url": "https://plumbing.example/services",
                                   "snippet": "Plumbers repair leaks and clear drains."}],
                     "simulated": False, "kind": "cited_excerpts"}
+            for hit in view["results"]:
+                self._store_knowledge(desk, KnowledgeItem(
+                    item_id="search-" + sha256_hex(hit["url"])[:16], source="web_search",
+                    title="Web search: " + hit["title"], text=hit["snippet"] or hit["title"],
+                    label=Label(readers=["owner"])))
         elif tool == "native.read_memory":
             words = {word.casefold() for word in re.findall(r"\w+", args["query"])}
             memory = desk.simulated_memory if desk.simulated_memory is not None else (
