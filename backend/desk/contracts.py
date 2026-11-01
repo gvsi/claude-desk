@@ -4,7 +4,7 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
@@ -264,6 +264,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
     person_id: str | None = None          # required iff who == "person"
     agent_key_id: str | None = None       # required iff who == "agent"
     max_amount_cents: StrictInt | None = Field(None, ge=0)   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out;
+                                          # a card alone cannot know a business tool's effects: callers supply those money tools;
                                           # the kernel also holds it to its version's auto_money_cap_cents ("Money cap")
     max_discount_bp: StrictInt = Field(0, ge=0, le=10_000)   # auto only; a larger requested discount asks
     hours: HoursWindow | None = None      # auto only
@@ -290,11 +291,14 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
             raise ValueError('a default card is the compiler\'s "ask" card for anyone')
         return self
 
-def moves_money(card: RuleCard) -> bool:
+def moves_money(card: RuleCard, money_tools: Collection[str] = frozenset()) -> bool:
     """Does the card take or pay out money: on a money tool, or on an effect in `MONEY_EFFECTS`.
     Defined here alone: `RuleCard` holds an auto money card to an amount with it, and the money cap
-    (`desk.money_cap`) and the kernel's compiler read it too."""
-    return card.applies_to in MONEY_TOOLS or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS}
+    (`desk.money_cap`) and the kernel's compiler read it too. A card alone cannot know a business
+    tool's effects: callers with the Desk's profiles supply `money_tools`; RuleCard's own validator
+    calls this without that set."""
+    return (card.applies_to in MONEY_TOOLS or card.applies_to in money_tools
+            or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS})
 
 def money_tool(tool: str, effects: Iterable[str]) -> bool:
     """Does a tool with these effects take or pay out money: a money tool, or one with an effect in
@@ -302,6 +306,10 @@ def money_tool(tool: str, effects: Iterable[str]) -> bool:
     auto permit on such a tool with it, and the reference generator, the bounded check and decide
     read it too."""
     return tool in MONEY_TOOLS or not MONEY_EFFECTS.isdisjoint(effects)
+
+def money_tools_of(profiles: Iterable[ToolProfile]) -> frozenset[str]:
+    """Names of profiles that take or pay out money, whatever their source or review status."""
+    return frozenset(p.tool for p in profiles if money_tool(p.tool, p.effects))
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"

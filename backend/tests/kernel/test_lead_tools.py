@@ -514,7 +514,8 @@ async def test_a_start_is_decided_without_the_reviewer(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
     [shipped] = compiler.ALWAYS_ON_CARDS
     cards = [*(c for c in RIVERA_CARDS if c != shipped), card("send-reviewed", "effect:send_message", review=True)]
-    assert compiler.validate_cards(cards, people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    assert compiler.validate_cards(cards, people=(), agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         await activate_cards(ctx, copy.desk_id, cards)

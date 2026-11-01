@@ -194,6 +194,7 @@ from desk.contracts import (
     ToolProfile,
     Violation,
     money_tool,
+    money_tools_of,
     moves_money,
 )
 from desk.kernel_api import (
@@ -3806,10 +3807,12 @@ class FakeKernelState:
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
         cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
+        money_tools = money_tools_of(desk.tools.values())
         ids = [card.card_id for card in body.cards]
         if len(set(ids)) != len(ids) or any(
                 card.is_default or changes_always_on(card)
-                or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
+                or (card.mode == "auto" and moves_money(card, money_tools)
+                    and (card.max_amount_cents is None or card.max_amount_cents > cap))
                 for card in body.cards):
             raise Refusal(422, "invalid")
         profiles = self._draft_profiles(desk, enables)

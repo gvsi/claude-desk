@@ -96,6 +96,7 @@ from desk.contracts import (
     RuleCard,
     ToolProfile,
     money_tool,
+    money_tools_of,
 )
 from desk.db.models import AgentKey, Business, Desk, Person, Tool
 from desk.db.models import DemoInboxEntry as DemoInboxRow
@@ -1184,6 +1185,15 @@ async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *,
     return RebuildSuccess(proof_source)
 
 
+async def _money_tools(ctx: KernelCtx, desk_id: str) -> frozenset[str]:
+    """This copy's Desk money tools, including rows awaiting review or disabled.
+
+    A rule can name a business tool before it is enabled; enabling checks its cards again.
+    """
+    rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id)))
+    return money_tools_of(row.profile for row in rows)
+
+
 async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *,
                    prove: bool) -> tuple[PolicyVersionRow, ProofSource] | str:
     """`row` compiled again as a draft of its own cards would be, at its own cap, over the Desk's
@@ -1195,9 +1205,11 @@ async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *,
         return "invalid_money_cap"
     owned = [card for card in row.cards if not card.is_default]
     people = await desk_people(ctx, desk_id)
+    money_tools = await _money_tools(ctx, desk_id)
     if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
-                               auto_money_cap_cents=cap):
-        return compiler.ABOVE_MONEY_CAP if compiler.above_money_cap(owned, cap) else "invalid_cards"
+                               auto_money_cap_cents=cap, money_tools=money_tools):
+        return (compiler.ABOVE_MONEY_CAP if compiler.above_money_cap(owned, cap, money_tools=money_tools)
+                else "invalid_cards")
     profiles = await desks.enabled_profiles(ctx, desk_id)
     try:
         schema = compiler.desk_schema(profiles)
@@ -1391,10 +1403,11 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         raise KernelFailure(422, "invalid", "invalid_money_cap")
     people = await desk_people(ctx, desk_id)
+    money_tools = await _money_tools(ctx, desk_id)
     if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
-                               auto_money_cap_cents=cap):
+                               auto_money_cap_cents=cap, money_tools=money_tools):
         # the log's reason is read from the cards, never from the wording of the errors
-        above = bool(compiler.above_money_cap(owned, cap))
+        above = bool(compiler.above_money_cap(owned, cap, money_tools=money_tools))
         raise KernelFailure(422, "invalid", compiler.ABOVE_MONEY_CAP if above else "invalid_cards")
     profiles = await draft_profiles(ctx, desk_id, enables)
     schema = compiler.desk_schema(profiles)
@@ -1548,7 +1561,7 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
         raise ConfirmConflict(copy_id, desk_id, version, "pin_changed") from None
     if _proved_against(row) != hashes:
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
-    if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
+    if compiler.above_money_cap(row.cards, row.auto_money_cap_cents, money_tools=await _money_tools(ctx, desk_id)):
         raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
     events: list[LedgerEvent] = []
     for hook in ON_ACTIVATE:

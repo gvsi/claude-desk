@@ -708,6 +708,51 @@ async def test_money_cap_change_drafts_through_the_kernel(app, browser, fake, ke
     assert len(fake.called("POST /policy/draft")) == drafts
 
 
+async def put_deposit(owner, kernel_http):
+    from desk.contracts import BusinessTool
+    from desk.kernel_api import BusinessToolsRequest
+
+    deposit = BusinessTool(tool="desk.deposit", title="Deposit", description="Take a deposit.",
+                           config={"block": "purpose_payment", "purpose": "Deposit", "amount_cents": 5000})
+    await kernel_http.owner(owner.token).call("PUT /desks/{id}/business_tools",
+        BusinessToolsRequest(tools=[deposit]), path={"id": owner.desk_id})
+
+
+async def test_money_cap_lowering_drafts_business_payment_cards_down(app, browser, fake, kernel_http):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    await put_deposit(owner, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    assert desk.tools["desk.deposit"].status == "needs_review"
+    deposit = card("deposit", "desk.deposit", max_amount_cents=5000, reason="Deposits up to $50.")
+    await confirmed(owner, kernel_http, owner.desk_id, [*owner_cards(fake, owner.desk_id), deposit],
+                    desk.policy_version)
+    for cap in (2000, 0):
+        lowered = await drafted(owner, rules_path(owner, "money_cap"), {"auto_money_cap_cents": cap})
+        [after] = [each for each in lowered.cards if each.card_id == "deposit"]
+        assert (after.mode, after.max_amount_cents, after.reason) == (
+            ("auto", 2000, "Up to $20, your payment limit.") if cap
+            else ("ask", None, "Your payment limit is $0."))
+        assert (deposit, after) in lowered.diff.changed
+    assert deposit in owner_cards(fake, owner.desk_id)
+    assert desk.auto_money_cap_cents == 50_000
+
+
+@pytest.mark.parametrize("route", ["draft", "chat"])
+async def test_business_payment_above_cap_is_refused_before_the_kernel(app, browser, fake, kernel_http, model, route):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    await put_deposit(owner, kernel_http)
+    deposit = card("deposit", "desk.deposit", max_amount_cents=50_001)
+    if route == "chat":
+        kept = [chat_card(each) for each in owner_cards(fake, owner.desk_id)]
+        model.add(chatted("Take deposits.", *kept, chat_card(deposit)))
+        body = {"text": "Take deposits yourself."}
+    else:
+        body = adding(deposit)
+    response = await owner.browser.post(rules_path(owner, route), json=body)
+    assert (response.status_code, response.json()) == (422, {"error": "above_money_cap", "cap_cents": 50_000})
+    assert fake.called("POST /policy/draft") == []
+
+
 async def test_the_money_limit_drafts_however_many_cards_the_desk_holds(app, browser, fake, kernel_http):
     # The owner-card bound keeps a draft from growing a Desk past what a rules chat can carry. The money limit adds no
     # card, so a Desk already holding more (an active version of 61 owner cards) can still change its cap.

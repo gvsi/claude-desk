@@ -341,3 +341,25 @@ async def test_probe_treats_a_tools_confirm_drafts_intake_as_on_without_activati
     assert result.outcome == 'refuse' and result.card_ids == []
     ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
     assert not any(entry.event.summary.get('refused') == 'pin_changed' for entry in ledger.entries)
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("status", ["needs_review", "disabled"])
+async def test_business_money_drafts_require_an_amount_within_the_cap(kernel, status):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    deposit = BusinessTool(tool="desk.deposit", title="Deposit", description="Take a deposit.",
+                           config={"block": "purpose_payment", "purpose": "Deposit", "amount_cents": 5000})
+    await owner.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[deposit]), path={"id": desk_id})
+    if status == "disabled":
+        await owner.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[]), path={"id": desk_id})
+    for maximum in (None, 2001):
+        card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone",
+                        max_amount_cents=maximum, reason="Deposits.")
+        request = PolicyDraftRequest(desk_id=desk_id, expected_parent=1, cards=[card], auto_money_cap_cents=2000)
+        assert await refused(owner.call("POST /policy/draft", request)) == (422, "invalid")
+    request.cards = [card.model_copy(update={"max_amount_cents": 2000})]
+    drafted = await owner.call("POST /policy/draft", request)
+    assert drafted.auto_money_cap_cents == 2000
