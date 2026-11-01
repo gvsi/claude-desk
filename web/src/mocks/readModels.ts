@@ -641,6 +641,7 @@ export function rulesView(desk: DeskRecord): RulesView {
     return {
       tool: tool.tool,
       source: tool.source,
+      ...(tool.business === undefined ? {} : { business: structuredClone(tool.business) }),
       effects: [...tool.effects],
       reversible: tool.reversible,
       status: tool.status,

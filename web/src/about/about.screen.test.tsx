@@ -11,7 +11,7 @@ import { writeLocal } from '../lib/storage.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, nextFrames } from '../test/screen.ts';
 
 const PAGES = [
   { path: '/about/proposal', title: 'Product proposal' },
@@ -62,12 +62,16 @@ describe('About pages', () => {
     await expect.poll(() => router.state.location.pathname).toBe('/vision/phone');
     const bar = screen.getByRole('note', { name: 'Vision', exact: true });
     await expect.element(bar).toBeVisible();
+    // The bar can be visible before StrictMode replays the opening effect, which starts this page
+    // at zero again. Let that opening paint before placing the reader for the history checks.
+    await nextFrames();
     await expect.poll(() => window.scrollY).toBe(0);
     const box = bar.element().getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
 
     const phonePlace = await scrollTo(100);
+    expect(phonePlace).toBe(100);
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
     await expect.poll(() => window.scrollY).toBe(articlePlace);

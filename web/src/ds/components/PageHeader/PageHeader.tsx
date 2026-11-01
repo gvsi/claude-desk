@@ -11,7 +11,8 @@ export interface PageHeaderProps {
   actions?: ReactNode;
   /**
    * Under 640 px of the window, the actions take a line of their own under the title, at the
-   * header's full width, 16 px under it: the Rules page's preset menu (N-Conn-22-Phone-Presets).
+   * header's full width, 16 px under it: the Rules page's See all rules and preset menu
+   * (N-Conn-22-Phone-Presets).
    */
   actionsBelowOnPhone?: boolean;
   /** Under 640 px of the window, the subtitle isn't shown, as the phone presets board draws the Rules page. */

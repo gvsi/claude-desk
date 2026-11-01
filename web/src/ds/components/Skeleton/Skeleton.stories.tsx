@@ -37,6 +37,21 @@ const FRAME_MS = 17;
  */
 const PROMPTLY_MS = 250;
 
+/** Animation promises must report which phase stalled before Storybook's whole-story timeout. */
+async function animationWithin<T>(promise: Promise<T>, phase: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`the skeleton fade did not ${phase} within 2000 ms`)), 2000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Each line's type style, its line box and the pill centred in it, as the boards draw them. */
 const LINES: readonly { text: SkeletonText; label: string; box: number; pill: number; width: number }[] = [
   { text: 'caption', label: 'Caption', box: 17, pill: 10, width: 220 },
@@ -673,7 +688,7 @@ async function expectLanded(root: HTMLElement) {
 export const Lands: Story = {
   render: () => (
     <Column>
-      <Loads loadsAfter={1600} status="Loading your customers" skeleton={<CustomersShapes />}>
+      <Loads loadsAfter={600} status="Loading your customers" skeleton={<CustomersShapes />}>
         <CustomersLanded>
           <div>
             <Button variant="secondary" onClick={opened}>
@@ -711,11 +726,14 @@ export const Lands: Story = {
       await expect(opened).toHaveBeenCalledTimes(1);
       await expect(watch.states.at(-1)?.state).toBe('leaving');
 
-      // The fade runs to its end, and the layer goes with it, on the fade's own end.
-      moment?.fade.play();
-      const ended = moment?.fade.finished.then(() => performance.now());
+      // Seek to the end rather than waiting for 120 ms of composited frames. The browser still
+      // delivers the fade's own end, which must remove the layer well before the fallback.
+      if (!moment) throw new Error('no leaving frame to finish');
+      const ended = animationWithin(moment.fade.finished.then(() => performance.now()), 'finish');
+      moment.fade.finish();
+      const endedAt = await ended;
       const gone = await watch.reached('gone', 2000);
-      await expect(gone.at - Number(await ended)).toBeLessThan(PROMPTLY_MS);
+      await expect(gone.at - endedAt).toBeLessThan(PROMPTLY_MS);
       await expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'shown', 'leaving', 'gone']);
       await expectLanded(canvasElement);
       landedList(canvasElement);
@@ -787,7 +805,7 @@ export const Continues: Story = {
 export const Fails: Story = {
   render: () => (
     <Column>
-      <Loads loadsAfter={800} status="Loading your customers" skeleton={<CustomersShapes />}>
+      <Loads loadsAfter={600} status="Loading your customers" skeleton={<CustomersShapes />}>
         <Notice tone="error" action={<Button variant="secondary">Try again</Button>}>
           {UNREACHABLE_COPY.en}
         </Notice>
@@ -807,20 +825,18 @@ export const Fails: Story = {
       const notice = region.querySelector<HTMLElement>('[role="alert"]');
       await expect(notice?.textContent).toBe(`${UNREACHABLE_COPY.en}Try again`);
 
-      // A fade the browser cancels once it has started leaves the layer at its resting opacity, 0,
-      // so it is invisible at once, and the layer goes on the cancel.
-      const layer = moment?.parts.layer as HTMLElement;
-      const started = new Promise<void>((resolve) => {
-        const onStart = (event: AnimationEvent) => {
-          if (event.target !== layer || event.animationName !== 'cd-skeleton-leave') return;
-          layer.removeEventListener('animationstart', onStart);
-          resolve();
-        };
-        layer.addEventListener('animationstart', onStart);
-      });
-      moment?.fade.play();
-      await started;
-      moment?.fade.cancel();
+      // Seek the held fade into its active interval: animationstart can be skipped or delivered
+      // before a listener attaches. Sampling its opacity proves it started without that event or
+      // real-time frames. Cancelling it must reveal opacity 0 and remove it before the fallback.
+      if (!moment) throw new Error('no leaving frame to cancel');
+      const { fade } = moment;
+      const layer = moment.parts.layer as HTMLElement;
+      await animationWithin(fade.ready, 'pause');
+      fade.currentTime = 60;
+      const fadingOpacity = Number(getComputedStyle(layer).opacity);
+      await expect(fadingOpacity).toBeGreaterThan(0);
+      await expect(fadingOpacity).toBeLessThan(1);
+      fade.cancel();
       const cancelled = performance.now();
       expectComputed(layer, { opacity: '0' });
       const gone = await watch.reached('gone', 2000);

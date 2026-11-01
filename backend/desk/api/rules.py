@@ -22,7 +22,7 @@ from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.kernel_client import KernelFailed
 from desk.api.link_notices import tell_cancelled_links
 from desk.api.model import ModelClient
-from desk.api.owner_reads import people, utc
+from desk.api.owner_reads import people, refusal_reason, utc
 from desk.api.prompts import (
     CHAT_CARD_ERROR_LINE,
     CHAT_ERRORS,
@@ -462,7 +462,9 @@ async def tool_decisions(owner: OwnerCtx, desk_id: str, tool: str, *, before: st
                          limit: int) -> ToolDecisions:
     """A page of the Desk's decisions on `tool`, newest first, from the `before` cursor: 404 for a tool the Desk
     doesn't have. Each is marked `replayed` when it is recorded history, failing closed (`decision_replayed`): one
-    whose ledger entry can't be read is marked too, so a decision of unknown origin never shows as live."""
+    whose ledger entry can't be read is marked too, so a decision of unknown origin never shows as live.
+    Owner-only refusal reasons are read concurrently and cached by final decision version; an unavailable or
+    refused kernel read leaves that reason null while the rest of the history still renders."""
     if await owner.ro.one("tools", desk_id=desk_id, tool=tool) is None:
         raise ApiProblem(404, "not_found")
     rows = await latest_decisions(owner, desk_id, limit + 1, tool=tool,
@@ -470,10 +472,13 @@ async def tool_decisions(owner: OwnerCtx, desk_id: str, tool: str, *, before: st
     page = rows[:limit]
     who = await people(owner, desk_id)
     entries = await decision_entries(owner, desk_id, page)
+    reasons = await asyncio.gather(*(refusal_reason(owner, row["decision_id"], row["session_id"], row["state"],
+                                                   row["ledger_seq"]) for row in page))
     return ToolDecisions(
         items=[ToolDecisionRow(decision_id=row["decision_id"], session_id=row["session_id"],
                                display_name=who.name(row["session_id"]), outcome=row["outcome"], state=row["state"],
-                               reason_plain=row["reason_plain"], created_at=row["created_at"],
+                               reason_plain=row["reason_plain"], owner_plain=reason, created_at=row["created_at"],
                                ledger_seq=row["ledger_seq"],
-                               replayed=decision_replayed(row, entries.get(row["ledger_seq"]))) for row in page],
+                               replayed=decision_replayed(row, entries.get(row["ledger_seq"])))
+               for row, reason in zip(page, reasons, strict=True)],
         next_before=_cursor(page[-1]) if len(rows) > limit else None)
