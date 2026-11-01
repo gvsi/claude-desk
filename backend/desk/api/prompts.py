@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.26"
+PROMPT_VERSION = "2026-10-31.28"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -829,7 +829,9 @@ don't repeat them. Ask it plainly and vary how, for example "Want customers to b
 the Desk take each new tenant's details first?" or "How about an alert for burst pipes after hours?" For a limit topic, leave question and choices empty: code asks its own question at once and \
 leaves your reply out, so leave reply empty too.
 - choices: two to four short answers (each at most 80 characters) for a topic question whose answer is likely one \
-of a few; otherwise empty, and always empty for a card. Mark one recommended only when it's a setting you're \
+of a few, so the owner can tap one; offer them whenever a few answers are likely, even though the owner can always \
+type their own, and when your question lists likely answers, put those in choices too. Otherwise empty, and always \
+empty for a card. Mark one recommended only when it's a setting you're \
 proposing, with the reason in the question; never on a question about the business's facts, and never offer \
 choices for facts only the owner knows, such as hours, prices or contact details.
 - Order: what unlocks the most value first, with each job's prerequisites before it. Don't ask what \
@@ -883,8 +885,8 @@ calls that come in while their hands are full, the evenings on call), briefly an
 No plan and no list of what you'd set up yet: that comes once you've heard from them.
 - next_topic what_you_do, and question: one open question about how their days go, such as what takes up their \
 time that isn't the work itself, which questions they answer over and over, or what slips through after hours. \
-choices: usually none for an open question like this; offer a few only when they'd genuinely help, and never mark \
-one recommended.
+choices: two to four of the likely answers your question names, such as calls about prices or people asking when \
+you can come, so the owner can tap one or type their own; never mark one recommended.
 - jobs and connectors: your plan, which stays hidden for now. The owner doesn't see it as a list; once you've \
 heard about their days you'll describe the fit and then propose each job one at a time, and you can drop or add \
 jobs as you learn more. The two or three jobs worth the most to this business, most valuable first (a fourth only \
