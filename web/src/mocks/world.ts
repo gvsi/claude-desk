@@ -1285,17 +1285,26 @@ export class MockWorld {
       ref_id: String(version),
       summary: { version, parent_version: record.parent },
     });
-    // Explicit ask/never rules revoke auto-allowed links in the scopes this mock models.
+    // A never rule or a deciding ask rule revokes auto-allowed links in the scopes this mock models.
     // The script issues only auto-allowed links: it has no owner-approved link provenance or
     // full kernel rule evaluator (limits, hours, reviewer conditions and other principal scopes).
     const linkRules = rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, desk.policy.cards);
+    // Match rulesForTool's ordering: personal tool, personal effect, group tool, group effect.
+    const specificity = (card: RuleCard) => (card.who === 'person' || card.who === 'agent' ? 0 : 2)
+      + (card.applies_to.startsWith('effect:') ? 1 : 0);
     for (const [token, link] of this.links) {
       if (link.deskId !== desk.summary.desk_id || link.view.state !== 'issued') continue;
       const session = this.sessions.get(link.sessionId);
-      if (session && linkRules.some((card) => card.mode !== 'auto' && (
+      if (!session) continue;
+      const applicable = linkRules.filter((card) => (
         card.who === 'anyone' ||
         (card.who === 'verified' && session.state.verified) ||
         (card.who === 'person' && session.person?.personId === card.person_id)
+      ));
+      const mostSpecific = applicable[0];
+      // Never always wins; otherwise only the most specific cards decide, with ask winning ties.
+      if (applicable.some((card) => card.mode === 'never') || (mostSpecific && applicable.some(
+        (card) => card.mode === 'ask' && specificity(card) === specificity(mostSpecific),
       ))) this.cancelLink(token, link, 'rules_changed');
     }
     return { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) };

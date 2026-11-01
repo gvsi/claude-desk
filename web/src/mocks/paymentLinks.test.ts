@@ -61,6 +61,23 @@ it('cancels issued links when a confirmed rule asks the owner first', () => {
   expect(chat.events.some(({ ev }) => ev.type === 'message' && ev.blocks.some((b) => b.template === 'link_cancelled'))).toBe(true);
 });
 
+it('keeps a verified person\'s auto-allowed link when a broader rule asks the owner', () => {
+  const { world } = mockStore;
+  const desk = world.desk(RIVERA.deskId)!;
+  const chat = world.addSession(desk);
+  const person = { personId: 'per-dana', name: 'Dana Whitfield' };
+  world.verify(chat, person);
+  const token = world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+  const base = { ...desk.policy.cards[0]!, applies_to: 'native.payment_link' };
+  const draft = world.draftCards(desk, [
+    { ...base, card_id: 'ask-anyone', mode: 'ask', who: 'anyone' },
+    { ...base, card_id: 'auto-person', mode: 'auto', who: 'person', person_id: person.personId },
+  ]);
+  world.confirmDraft(desk, draft.version);
+  expect(world.links.get(token)?.view.state).toBe('issued');
+  expect(chat.events.some(({ ev }) => ev.type === 'message' && ev.blocks.some((b) => b.template === 'link_cancelled'))).toBe(false);
+});
+
 it('cancels an ended session link without posting a chat card', () => {
   const { world } = mockStore;
   const desk = world.desk(RIVERA.deskId)!;
