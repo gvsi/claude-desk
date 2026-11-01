@@ -686,6 +686,25 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('unnamed_agent_head_says_agent_once', async () => {
+    // An agent with no name on record: the title already says it's an agent, so the head doesn't say
+    // it again in a pill, as the list leaves out its status line. The signed pill stays.
+    const booked = await bookTheEarliestVisit();
+    session(booked).displayName = null;
+    const { screen } = await renderRoute(conversation(booked));
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Agent', exact: true })).toBeVisible();
+    const head = screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    expect([...head.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Signed']);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Named, the pill says what the name doesn't.
+    session(booked).displayName = rivera.conversations.alexAgent.name;
+    const withName = await renderRoute(conversation(booked));
+    await expect.element(withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
+    const namedHead = withName.screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    expect([...namedHead.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Agent', 'Signed']);
+  });
+
   it('receipt_opens_the_trace', async () => {
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const chat = log(screen);
