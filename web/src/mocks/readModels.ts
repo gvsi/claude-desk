@@ -35,7 +35,7 @@ import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { AGENT_CARD_BLOCKS } from './agents.ts';
 import { refusalCause } from './causes.ts';
-import type { Language } from './script.ts';
+import { VISITOR_PLAIN, type Language } from './script.ts';
 import { BUSINESS, PRESETS } from './seed.ts';
 import {
   LEDGER_KEY,
@@ -540,7 +540,13 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       card_ids: [...d.decision.card_ids],
       origin: 'kernel',
       created_at: isoTime(d.createdAt),
-      triage: null,
+      // The scripted agent's over-limit receipt identifies this subject in either language.
+      triage: Object.values(VISITOR_PLAIN).some((words) => words.refused_over_mandate === d.decision.visitor_plain)
+        ? {
+            category: 'limits',
+            summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.',
+          }
+        : null,
       ledger_seq: d.decision.ledger_seq,
       cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
         verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
@@ -553,7 +559,10 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     card_ids: [],
     origin: entry.event.origin,
     created_at: entry.created_at,
-    triage: null,
+    triage: {
+      category: 'wording',
+      summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
+    },
     ledger_seq: entry.seq,
     cause: null,
   }));

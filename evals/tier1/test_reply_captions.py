@@ -34,6 +34,41 @@ def test_prompt_captions_read_as_their_language_and_scan_clean(result, language,
 
 @pytest.mark.requires("01a")
 @pytest.mark.white_box
+@pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])
+@pytest.mark.parametrize(("status", "language", "caption"), [
+    (status, language, caption)
+    for status, captions in prompts.STATUS_LINES.items()
+    for language, caption in captions.items()
+])
+def test_status_lines_read_as_their_language_and_scan_clean(owner, status, language, caption):
+    from desk.kernel_service import lang, reply_check
+
+    names = (*RIVERA_NAMES[:2], owner)
+    assert lang.detect(caption) == language, status
+    assert reply_check.scan_prose(caption, names=names) == [], status
+    identity = RIVERA.model_copy(update={"owner_name": owner})
+    assert caption in prompts.conversation_system(identity)[0]["text"]
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
+@pytest.mark.parametrize(("prose", "names"), [
+    ("I've asked June about this.", ()),
+    ("Maria will call you back tomorrow.", RIVERA_NAMES),
+])
+def test_named_status_and_timing_controls_stay_blocked(prose, names):
+    from desk.kernel_service import reply_check
+
+    # June is also a reserved date word; no name exemption may hide that control.
+    violations = reply_check.scan_prose(prose, names=names)
+    assert "number_in_prose" in {violation.kind for violation in violations}
+    if "June" in prose:
+        named = reply_check.scan_prose(prose, names=(*RIVERA_NAMES[:2], "June Park"))
+        assert "number_in_prose" in {violation.kind for violation in named}
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
 @pytest.mark.parametrize("reserved", ["$89", "Monday", "20%"])
 @pytest.mark.parametrize("caption", [caption for captions in prompts.REPLY_EXAMPLES.values()
                                      for caption in captions.values()])
