@@ -71,10 +71,10 @@ REPLY_STOPPED = "A reply was stopped before it was shown"
 BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
+    "soft.jev": "a second check flagged a promise the business's records don't back",
     # Proposed wording awaiting the owner's sign-off.
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
-    "soft.jev": "a second check flagged a promise the business's records don't back",
 }
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",
