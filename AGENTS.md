@@ -32,7 +32,7 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 
 If a task seems to require breaking one of these, stop and raise it with the project owner instead.
 
-**Prototype calibration (owner, 2026-10-31):** Claude Desk is a prototype, so keep safety work proportionate. The invariants must hold against plain, likely attacks. Contrived edge cases are P3 issues for after the submission, not merge blockers: an unsupported language, lookalike letters, or a bypass that needs a hand-crafted draft. Don't build heavy machinery for a rare case. When a stricter check would also block honest replies, choose the one that lets honest conversations through. If unsure whether a finding is a blocker, ask the owner.
+**Prototype calibration (owner, 2026-10-31):** Claude Desk is a prototype, so keep safety work proportionate. The invariants must hold against plain, likely attacks. Contrived edge cases are filed as GitHub issues labelled `wish` for after the submission, not merge blockers: an unsupported language, lookalike letters, or a bypass that needs a hand-crafted draft. Don't build heavy machinery for a rare case. When a stricter check would also block honest replies, choose the one that lets honest conversations through. If unsure whether a finding is a blocker, ask the owner.
 
 ## Working rules
 
