@@ -47,13 +47,19 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
- * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
- * the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
- * signed statuses the kernel checked and the Desk showed the agent.
+ * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
+ * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
+ *
+ * An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
+ * 2,000 characters, the agent's send limit), echoed to the visitor who launched it as a visitor's own message is
+ * (owner decision, 2026-11-01). It is untrusted plain text, the agent's words and never the Desk's: the page shows
+ * it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
+ * blocks and statuses.
  */
 export interface AgentTurn {
   author: "agent" | "desk";
   n: number;
+  text: string | null;
   blocks: RenderedBlock[];
   receipts: (EvReceipt | EvHeld | EvResolved)[];
 }

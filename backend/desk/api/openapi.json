@@ -4489,7 +4489,7 @@
     "/api/public/desks/{slug}/send_agent/{run_id}": {
       "get": {
         "summary": "Agent Run",
-        "description": "The built-in agent's run as it stands, for the session that sent it (any other is 404): what the Desk\nanswered, as the kernel checked it, and never the agent's own words. Kept for an hour. Never cached: a Desk turn\ncan carry a payment link.",
+        "description": "The built-in agent's run as it stands, for the session that sent it (any other is 404): each message the agent\nsent, exactly as sent, as the agent's own untrusted words, and what the Desk answered, as the kernel checked it.\nKept for an hour. Never cached: a Desk turn can carry a payment link.",
         "operationId": "public_agent_run",
         "parameters": [
           {
@@ -7431,6 +7431,17 @@
             "type": "integer",
             "title": "N"
           },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
           "blocks": {
             "items": {
               "$ref": "#/components/schemas/RenderedBlock"
@@ -7468,11 +7479,12 @@
         "required": [
           "author",
           "n",
+          "text",
           "blocks",
           "receipts"
         ],
         "title": "AgentTurn",
-        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since\nthe agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and\nsigned statuses the kernel checked and the Desk showed the agent."
+        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,\nwith the blocks and signed statuses the kernel checked and the Desk showed the agent.\n\nAn agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most\n2,000 characters, the agent's send limit), echoed to the visitor who launched it as a visitor's own message is\n(owner decision, 2026-11-01). It is untrusted plain text, the agent's words and never the Desk's: the page shows\nit quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked\nblocks and statuses."
       },
       "AlreadyResolved": {
         "properties": {
