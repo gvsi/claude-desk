@@ -147,8 +147,10 @@ export function Composer({
     ownFocusAtSwap.current = false;
     if (!follow) return;
     if (isFailed) failedBoxRef.current?.querySelector<HTMLElement>('button')?.focus();
-    else inputRef.current?.focus();
-  }, [isFailed]);
+    // Sent again and its reply still on its way, the box takes no focus of its own (a phone's
+    // keyboard would open): the screen places it once the reply has come in.
+    else if (!sendHeld) inputRef.current?.focus();
+  }, [isFailed, sendHeld]);
 
   // A click on the box away from its controls (its padding, the row under the text) puts the caret
   // at the end of the text, as on claude.ai. Only a press that starts there counts, so a selection

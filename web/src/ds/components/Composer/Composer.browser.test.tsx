@@ -164,3 +164,18 @@ it('a_click_on_the_box_keeps_a_selection_in_the_text_and_does_nothing_while_disa
   await clickBoxSurface('owner', box);
   expect(document.activeElement).not.toBe(box);
 });
+
+it('a_send_tried_again_and_held_leaves_focus_to_the_screen_until_its_reply_has_come_in', async () => {
+  const props = { variant: 'owner', label: 'Your answer', placeholder: 'Your answer', onSend: () => {} } as const;
+  const failed = { text: 'Both, about evenly', line: 'I couldn’t answer just now. Your answer is still here; try again.', onRetry: () => {} };
+  const screen = await render(<Composer {...props} failed={failed} />);
+  const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+  await retry.click();
+  await expect.element(retry).toHaveFocus();
+  // Sent again, the box comes back while the reply is on its way: it takes no focus of its own, so a
+  // phone's keyboard doesn't open, and the screen places focus once the reply has come in.
+  await screen.rerender(<Composer {...props} sendHeld />);
+  const box = screen.getByRole('textbox', { name: 'Your answer' });
+  await expect.element(box).toBeEnabled();
+  expect(document.activeElement).not.toBe(box.element());
+});
