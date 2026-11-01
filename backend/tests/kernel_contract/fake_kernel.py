@@ -1264,7 +1264,7 @@ class FakeKernelState:
         self._drops: dict[str, int] = {}
         self._scripts: dict[str, Script] = {}
         self._forced: list[str] = []                   # violation kinds the next reply checks carry
-        self._soft_checks: list[str] = []             # scripted soft-check tries, including the internal recheck
+        self._soft_checks: list[str] = []             # scripted soft-check tries, one per reply check that reaches it
         self._in_flight: dict[str, int] = {}           # tool -> executions left that find themselves running
         self._args: dict[str, dict] = {}                # action_id -> the call's args, as the action row binds them
         self.agent_keys: dict[str, AgentKey] = {}       # agent_key_id -> its public key
@@ -1480,7 +1480,10 @@ class FakeKernelState:
         self._forced.extend([kind] * times)
 
     def soft_checks(self, *results: str) -> None:
-        """Stage soft-check tries: pass, flag, denies_ai, error, timeout, unparsable or refusal."""
+        """Stage the soft check's tries, one for each later reply check that reaches it (clean prose, as the kernel's
+        step 5 runs it): `pass`, `flag` (`soft.promise`), `denies_ai` (`soft.denies_ai`), or a try with no verdict,
+        `error`, `timeout`, `unparsable` or `refusal`, which is `check_unavailable` (`soft.unavailable`) at once, as
+        the kernel's one try has no recheck. A check with nothing staged passes."""
         if any(result not in {"pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"}
                for result in results):
             raise ValueError("unknown soft-check result")
@@ -2860,7 +2863,7 @@ class FakeKernelState:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
-                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [],
+                                 [Violation(kind="session_paused", span="", rule_id="session_paused")], [],
                                  final=final)
         detected = detect_language(draft.prose)
         violations = []
@@ -2882,9 +2885,7 @@ class FakeKernelState:
             if card is not None:
                 cards.append(card)
         if not violations and draft.prose.strip() and self._soft_checks:
-            result = self._soft_checks.pop(0)
-            if result in {"error", "timeout", "unparsable"}:
-                result = self._soft_checks.pop(0) if self._soft_checks else "error"
+            result = self._soft_checks.pop(0)              # one try, no recheck (the kernel's `soft_promises`)
             if result != "pass":
                 kind = "soft_promise" if result in {"flag", "denies_ai"} else "check_unavailable"
                 rule_id = {"flag": "soft.promise", "denies_ai": "soft.denies_ai"}.get(result, "soft.unavailable")

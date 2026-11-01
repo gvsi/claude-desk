@@ -134,23 +134,39 @@ async def test_uncertain_caption_gets_one_cause_specific_final_rewrite(api_conn,
         "Here is the information."]
 
 
-@pytest.mark.parametrize("recheck", ["flag", "error"])
-async def test_kernel_soft_recheck_stays_inside_one_check(api_conn, caller, fake, recheck):
+@pytest.mark.parametrize("unavailable", ["error", "timeout", "unparsable", "refusal"])
+async def test_an_unavailable_soft_check_is_one_try_that_keeps_the_cards(api_conn, caller, fake, unavailable):
+    # One soft-check try per reply check: a try with no verdict is final there and then, and the staged pass after
+    # it is never read. The prose fails and the hours card it checked is shown alone, so it isn't a handoff.
     await said(api_conn, caller, "When are you open?")
-    fake.soft_checks("error", recheck)
+    fake.soft_checks(unavailable, "pass")
+    model = ScriptedModel([response(reply("Here is the information.", HOURS)),
+                           response(reply("Here is the information.", HOURS))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert len(fake.called("/check_reply")) == len(model.requests) == 1
+    (entry,) = [entry for entry in fake.desks[caller.desk_id].ledger if entry.event.kind == "reply"]
+    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (
+        ["check_unavailable"], ["soft.unavailable"])
+    message = next(e for e in await events(api_conn, caller.session_id) if e.type == "message")
+    assert not message.handoff and [b.template for b in message.blocks] == ["hours"]
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": message.message_id,
+                                                 "prose_shown": False}
+
+
+async def test_a_soft_check_flag_on_its_one_try_gets_one_correction(api_conn, caller, fake):
+    await said(api_conn, caller, "When are you open?")
+    fake.soft_checks("flag")
     model = ScriptedModel([response(reply("Here is the information.", HOURS)),
                            response(reply("Here is the information.", HOURS))])
     assert await run_turn(api_conn, caller, model) == "done"
     checks = fake.called("/check_reply")
-    if recheck == "flag":
-        assert len(checks) == len(model.requests) == 2
-        assert tool_results(model.requests[1])[0]["content"]["violations"] == [
-            {"kind": "soft_promise", "rule_id": "soft.promise"}]
-        assert checks[1].body["final"] is True
-    else:
-        assert len(checks) == len(model.requests) == 1
-        message = next(e for e in await events(api_conn, caller.session_id) if e.type == "message")
-        assert not message.handoff and [b.template for b in message.blocks] == ["hours"]
+    assert len(checks) == len(model.requests) == 2
+    assert tool_results(model.requests[1])[0]["content"]["violations"] == [
+        {"kind": "soft_promise", "rule_id": "soft.promise"}]
+    assert [check.body["final"] for check in checks] == [False, True]
+    message = next(e for e in await events(api_conn, caller.session_id) if e.type == "message")
+    assert not message.handoff and [b.template for b in message.blocks] == [None, "hours"]
 
 
 async def test_digit_correction_keeps_the_quote_and_never_repeats_its_sibling_action(api_conn, caller, fake):

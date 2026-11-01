@@ -680,7 +680,7 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
         fake.set_mode(visitor.ids.session_id, "paused")
 
     async def unavailable_check(visitor):
-        fake.soft_checks("error", "error")
+        fake.soft_checks("error")
 
     cases = [("canary", canary, "Here's what the invoice says."),
              ("unsupported_language", None, "Bonjour, je peux vous aider."),
