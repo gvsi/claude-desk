@@ -415,11 +415,11 @@ describe('The Vision article', () => {
     // of its own and pushes the page down, and nothing runs past the window's width. The laptop switch keeps its
     // 12 px either side of each name. Measured in the interface's web font, as the page ships, which the other tests
     // here don't load; the sheet goes again after, so they keep measuring as before.
-    await loadWebFonts();
     onTestFinished(() => {
       const want = new URL(FONT_SHEET_URL).href;
       for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
     });
+    await loadWebFonts();
     for (const size of [{ width: 390, height: 844 }, { width: 375, height: 667 }]) {
       const where = `at ${size.width}`;
       const { screen } = await renderRoute(PATH, { viewport: size });
