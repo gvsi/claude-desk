@@ -24,6 +24,8 @@ export class SseParser {
 
   /** Reads the next piece of the body and returns the events it completed, in order. */
   push(chunk: string): SseMessage[] {
+    // An empty piece changes nothing, a CR waiting for its LF included.
+    if (chunk === '') return [];
     let text = chunk;
     if (!this.started && text !== '') {
       this.started = true;

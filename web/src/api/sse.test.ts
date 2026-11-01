@@ -39,6 +39,10 @@ describe('SseParser', () => {
     expect(readAll('event: a\r', '\ndata: 1\r', '\n\r', '\n')).toEqual([{ event: 'a', data: '1' }]);
   });
 
+  it('keeps_a_crlf_whole_across_an_empty_piece', () => {
+    expect(readAll('event: a\r', '', '\ndata: 1\r', '', '\n\r', '', '\n')).toEqual([{ event: 'a', data: '1' }]);
+  });
+
   it('joins_data_lines_and_names_an_unnamed_event_message', () => {
     expect(readAll('data: one\ndata:two\n\n')).toEqual([{ event: 'message', data: 'one\ntwo' }]);
   });
