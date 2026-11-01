@@ -212,7 +212,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.14"                  # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.15"                  # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -355,6 +355,16 @@ def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():
         assert "propose stripe first, then the payment job" in system
         assert "A documents job needs a client on record" in system
         assert "each job's prerequisites before it" in system
+
+
+def test_setup_only_offers_answers_from_facts_it_can_store():
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
+                   SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "there's no place yet for other terms such as deposit or cancellation rules" in system
+
+
+def test_setup_follow_up_asks_about_the_part_still_open():
+    assert "asked as a question about the part still open" in SETUP_TURN_SYSTEM
 
 
 def test_setup_asks_one_thing_at_a_time_and_keeps_limits_after_the_fit_view():

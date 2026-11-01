@@ -53,7 +53,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.14"
+PROMPT_VERSION = "2026-10-31.15"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -595,7 +595,9 @@ exclamation marks. The owner reads your messages one after another, so start eac
 last few and say things in your own words rather than repeating a stock phrase."""
 
 _CAN_DO = """\
-What the Desk can do today: answer questions from the business's facts; take a new request with the business's \
+What the Desk can do today: answer questions from the business's facts, which setup gathers as what it does, \
+its hours and area, its contact, what happens after hours, and its prices; there's no place yet for other terms \
+such as deposit or cancellation rules, so don't propose answering those; take a new request with the business's \
 own questions; book an open slot (each booking holds one hour); quote a fixed published price; send a secure \
 payment link for a named purpose such as a deposit or a fee; and alert the owner at once about something urgent. \
 A booking is with the business, not a named person, so the Desk can't book a particular stylist or staff member; \
@@ -806,8 +808,10 @@ time. auto_money_cap_cents covers every payment, links included: set payment_lin
 amount, and both to 0 when they say to always ask.
 - website: an address the owner gives in this answer, else empty.
 - step_done: true once the answer, with this question's exchange, covers the question, or they want to skip it. \
-While it's false, your follow-up is in reply: set next to the same topic and leave question, choices and plan \
-empty.
+While it's false, reply ends with your follow-up, asked as a question about the part still open (once the hours \
+are in, where the business works; once the contact is in, what happens after hours), since code shows the \
+topic's fixed question, which repeats the part already answered, when reply doesn't end with one. Set next to the \
+same topic and leave question, choices and plan empty.
 
 Illustrative replies (each starts differently; don't reuse their openings):
 - "So customers pick a weekday visit, and you approve each one before it's booked."
