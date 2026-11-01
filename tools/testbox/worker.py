@@ -65,7 +65,11 @@ def main():
         run(["git", "init", "-q", str(repo)])
         run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/gvsi/claude-desk.git"])
     if not (base / "git-signature").exists() or (base / "git-signature").read_text() != request["signature"]:
-        run(["git", "fetch", "--quiet", str(transfer / "source.bundle"), "+HEAD:refs/testbox/source", "+refs/remotes/origin/main:refs/remotes/origin/main"], cwd=repo)
+        if request.get("bundle", True):
+            run(["git", "bundle", "unbundle", str(transfer / "source.bundle")], cwd=repo, stdout=subprocess.DEVNULL)
+        for revision in (request["head"], request["main"]):
+            run(["git", "cat-file", "-e", revision + "^{commit}"], cwd=repo)
+        run(["git", "update-ref", "refs/remotes/origin/main", request["main"]], cwd=repo)
         # Set HEAD and the index, without replacing the caller's uncommitted working files.
         run(["git", "update-ref", "--no-deref", "HEAD", request["head"]], cwd=repo)
         run(["git", "read-tree", request["head"]], cwd=repo)

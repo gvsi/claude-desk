@@ -123,6 +123,22 @@ def warm_instance(cache: Path, region: str) -> str | None:
     return instance if result.returncode == 0 else None
 
 
+def create_bundle(root: Path, bundle: Path, previous: str) -> bool:
+    """Ship only objects absent from the remote's last imported HEAD/main histories."""
+    known = []
+    for revision in previous.split(":"):
+        if re.fullmatch(r"[0-9a-f]{40,64}", revision) and subprocess.run(
+            ["git", "cat-file", "-e", revision + "^{commit}"], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0:
+            known.append(revision)
+    refs = ["HEAD", "refs/remotes/origin/main"] + ["^" + revision for revision in known]
+    if capture(["git", "rev-list", "--count", *refs], cwd=root) == "0":
+        return False  # Ref rewinds need no pack; the remote already has their objects.
+    subprocess.run(["git", "bundle", "create", str(bundle), *refs], cwd=root, check=True, stdout=subprocess.DEVNULL)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", default=os.environ.get("TESTBOX_REGION", "us-east-1"))
@@ -238,11 +254,11 @@ def run(args, root, lane, cache):
             signature = head + ":" + main_ref
             old = remote["git"]
             timing.mark("git_state")
+            bundled = False
             if old != signature:
-                bundle = tmp / "source.bundle"
-                subprocess.run(["git", "bundle", "create", str(bundle), "HEAD", "refs/remotes/origin/main"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+                bundled = create_bundle(root, tmp / "source.bundle", old)
             timing.mark("git_bundle")
-            (tmp / "request.json").write_text(json.dumps({"lane": lane, "command": args.command, "ci": args.ci, "head": head, "main": main_ref, "signature": signature}))
+            (tmp / "request.json").write_text(json.dumps({"lane": lane, "command": args.command, "ci": args.ci, "head": head, "main": main_ref, "signature": signature, "bundle": bundled}))
             rsync = shutil.which("rsync")
             if not rsync:
                 raise RuntimeError("rsync is required (macOS openrsync is supported)")

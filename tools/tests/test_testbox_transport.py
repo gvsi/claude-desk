@@ -86,3 +86,37 @@ def test_cached_instance_is_reused_only_while_its_authenticated_master_is_alive(
     assert warm_instance(tmp_path, 'us-east-1') is None
     cache.write_text(json.dumps({'instance': 'untrusted host -o option'}))
     assert warm_instance(tmp_path, 'us-east-1') is None
+
+
+def test_git_bundle_sends_only_new_objects_and_handles_a_rewind(tmp_path):
+    from desk_tools.testbox_client import create_bundle
+
+    repo, remote = tmp_path / 'source', tmp_path / 'remote'
+    for path in [repo, remote]:
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(path)], check=True)
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
+    (repo / 'source.txt').write_text('first')
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'first')
+    first = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', first)
+    initial = tmp_path / 'initial.bundle'
+    assert create_bundle(repo, initial, '')
+    subprocess.run(['git', '-C', str(remote), 'bundle', 'unbundle', str(initial)], check=True, stdout=subprocess.DEVNULL)
+    (repo / 'source.txt').write_text('second')
+    git('add', '.')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'second')
+    second = git('rev-parse', 'HEAD')
+    incremental = tmp_path / 'incremental.bundle'
+    assert create_bundle(repo, incremental, first + ':' + first)
+    # An incremental pack really requires the previous commit; a fresh repo cannot import it.
+    empty = tmp_path / 'empty'
+    subprocess.run(['git', 'init', '-q', str(empty)], check=True)
+    assert subprocess.run(['git', '-C', str(empty), 'bundle', 'verify', str(incremental)], capture_output=True).returncode != 0
+    subprocess.run(['git', '-C', str(remote), 'bundle', 'unbundle', str(incremental)], check=True, stdout=subprocess.DEVNULL)
+    assert subprocess.check_output(['git', '-C', str(remote), 'show', second + ':source.txt'], text=True) == 'second'
+    git('update-ref', 'refs/heads/main', first)
+    rewind = tmp_path / 'rewind.bundle'
+    assert not create_bundle(repo, rewind, second + ':' + first)
+    assert not rewind.exists()
