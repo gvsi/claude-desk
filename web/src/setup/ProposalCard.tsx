@@ -54,7 +54,7 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
   return <Card as="article" label={connector.label} padding={16}>
     <div className={`cd-setup-c3${connected ? ' cd-setup-c3--set' : ''}${proposal.state === 'declined' ? ' cd-setup-c3--declined' : ''}`}>
       <div className="cd-setup-c3__head">
-        <ConnectorIcon icon={view.icon} size="section" />
+        <ConnectorIcon icon={view.icon} size="section" {...(connector.app === 'stripe' || connector.app === 'google_calendar' ? {} : { glyph: 'connectors' as const })} />
         <div className="cd-setup-c3__titles">
           <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable && proposal.state === 'proposed' ? <Pill>{copy.later}</Pill> : null}</h3>
           {!connector.connectable || proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}

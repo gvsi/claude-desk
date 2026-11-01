@@ -3060,6 +3060,10 @@ describe('consultant setup', () => {
     const decisions: unknown[] = [];
     const props = { proposal, live: true, disabled: false, busyAction: null, failed: false, amountRequired: false, onRetry: () => {}, onDecision: (decision: unknown) => { decisions.push(decision); } };
     const screen = await render(<ProposalCard {...props} />);
+    const tile = screen.container.querySelector('.cd-connector-icon')!;
+    expect(tile.querySelector('svg')).not.toBeNull();
+    expect(tile.getAttribute('aria-hidden')).toBe('true');
+    if (app !== 'stripe' && app !== 'google_calendar') expect(tile.classList.contains('cd-connector-icon--built-in')).toBe(true);
     await screen.getByRole('button', { name: 'Connect', exact: true }).click();
     expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true } }]);
     await screen.rerender(<ProposalCard {...props} proposal={{ ...proposal, state: 'accepted' }} live={false} />);
