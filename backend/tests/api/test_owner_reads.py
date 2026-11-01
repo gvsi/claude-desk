@@ -638,7 +638,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     """A handoff's context for the owner: the visitor's previous and last lines, each a one-line glimpse joined with
     " · ", and the conversation's newest AI-written triage summary, labelled as Claude's on the owner's screen. A
     triage row that doesn't parse is skipped rather than shown. A held request, which asks the owner for a decision,
-    never carries the summary (master plan: AI-written triage is never in approval cards)."""
+    never carries the summary, nor does a handoff in a chat whose request still awaits the owner (master plan:
+    AI-written triage is never in approval cards)."""
     owner = await new_owner(app, browser, fake, kernel_http)
     handed = await guest(kernel_http, fake, owner)
     await write(engine, db, handed.ids, "visitor_text", text="Personal. I started freelancing and I'm not sure what I need.")
@@ -657,17 +658,22 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     held = await guest(kernel_http, fake, owner)
     await write(engine, db, held.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
     await held.decide("native.quote", discounted_quote(fake, owner))
+    # the same chat asks for a call back while its request waits: that handoff waits for its note too
+    await held.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                               "reason": "About the discount"})
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
     assert listed.status_code == 200, listed.text
-    items = {item["session"]["session_id"]: item for item in listed.json()}
+    items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is None}
+    held_items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is not None}
     assert items[handed.session_id]["from_the_visitor"] == (
         "Personal. I started freelancing and I'm not sure what I need. · Monday, November 2, 9:00 am")
     assert items[handed.session_id]["claude_summary"] == "Freelancer asked what to file; a booking reply was stopped."
     assert items[garbled.session_id]["from_the_visitor"] == "x" * 199 + "…"
     assert items[garbled.session_id]["claude_summary"] is None
-    assert items[held.session_id]["decision"] is not None and items[held.session_id]["claude_summary"] is None
+    assert held_items[held.session_id]["claude_summary"] is None
+    assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
