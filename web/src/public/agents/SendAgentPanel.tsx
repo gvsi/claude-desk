@@ -16,7 +16,8 @@
  *
  * The tasks take the Desk's own words (plan 09, C2): the panel reads the Desk's set once, with the
  * visitor's session (`agentTasks`), and offers the tasks once it has it; a set it can't read gives
- * plain words for any business (`FALLBACK_TASK_SET`). The set is a key, so every word is the page's.
+ * plain words for any business (`FALLBACK_TASK_SET`). Only the tasks the Desk lists are offered;
+ * older or unreadable lists offer all three. The set is a key, so every word is the page's.
  *
  * Each of the agent's requests is titled by code, with the chosen task first and "Signed request"
  * after, and quotes the request as the agent sent it (its turn's `text`) under the title: the
@@ -30,7 +31,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/http.ts';
-import type { AgentTurn, DemoAgentRun } from '../../api/views.ts';
+import type { AgentTasks, AgentTurn, DemoAgentRun } from '../../api/views.ts';
 import { agentRunPollMs, sleep } from '../../app/poll.ts';
 import {
   AGENT_START_LOST_COPY,
@@ -155,6 +156,16 @@ interface PanelState {
 
 const IDLE: PanelState = { status: 'idle', task: null, key: null, keyMadeAt: null, runId: null, run: null, readsFailing: false };
 
+const FALLBACK_TASKS: AgentTasks = { task_set: FALLBACK_TASK_SET, tasks: [...DEMO_TASKS] };
+
+/** Read keys only, keeping the page's order and all three tasks when the response isn't usable. */
+function taskChoices(read: unknown): AgentTasks {
+  if (read === null || typeof read !== 'object' || !('task_set' in read) || !isDemoTaskSet(read.task_set)) return FALLBACK_TASKS;
+  const tasks = 'tasks' in read ? read.tasks : undefined;
+  const usable = Array.isArray(tasks) && tasks.includes('book_visit') && tasks.every((task) => DEMO_TASKS.some((known) => known === task));
+  return { task_set: read.task_set, tasks: usable ? DEMO_TASKS.filter((task) => tasks.includes(task)) : [...DEMO_TASKS] };
+}
+
 /** The states that offer the tasks: before a run, after one ended, and after a start that clearly didn't go ahead. */
 const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stopped', 'busy', 'budget', 'not_sent']);
 
@@ -233,16 +244,17 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   const runInView = useRunInView();
   const titleRef = useRef<HTMLHeadingElement>(null);
   // Which words the Desk's tasks take: read once with the visitor's session, null until then.
-  const [taskSet, setTaskSet] = useState<DemoTaskSet | null>(null);
-  const setRead = useRef<Promise<DemoTaskSet> | null>(null);
+  const [choices, setChoices] = useState<AgentTasks | null>(null);
+  const taskSet = choices?.task_set ?? null;
+  const setRead = useRef<Promise<AgentTasks> | null>(null);
   useEffect(() => {
     let live = true;
     setRead.current ??= session.call(() => request('agentTasks', { params: { slug } })).then(
-      (read) => (isDemoTaskSet(read?.task_set) ? read.task_set : FALLBACK_TASK_SET),
-      () => FALLBACK_TASK_SET,
+      taskChoices,
+      () => FALLBACK_TASKS,
     );
     void setRead.current.then((read) => {
-      if (live) setTaskSet(read);
+      if (live) setChoices(read);
     });
     return () => {
       live = false;
@@ -419,7 +431,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       ))}
     </div>
   ) : (
-    <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => words[t])} onPick={pick} />
+    <SuggestionChips label={copy.tasksLabel} suggestions={(choices?.tasks ?? DEMO_TASKS).map((t) => words[t])} onPick={pick} />
   );
   // After a run that finished, failed or is gone, the tasks come at its end, under its last line
   // (boards 04 and 05); otherwise they sit under the signed limit (board 03).
