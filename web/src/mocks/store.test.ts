@@ -879,7 +879,7 @@ describe('the scripted Desk', () => {
     expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
     const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
     expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
-      'Book the earliest visit for a leaking water heater for Alex Kim.',
+      'What’s your earliest visit for a leaking water heater? Any day this week.',
     ]);
     expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
 

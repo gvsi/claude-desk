@@ -688,13 +688,22 @@ export interface AgentRunStarted {
   run_id: string;
 }
 
-/** One turn of a demo agent run. The agent's own words are never returned: its turns are empty. */
+/**
+ * One turn of a demo agent run: the agent's request, with the words it sent (`text`), or the Desk's
+ * checked answer to it, with its blocks and receipts.
+ */
 export interface AgentTurn {
   author: 'agent' | 'desk';
   n: number;
   blocks: RenderedBlock[];
   /** A Desk turn's status events, as its `A2AResponse` carries them. */
   receipts: (EvReceipt | EvHeld | EvResolved)[];
+  /**
+   * An agent turn's request, as the agent sent it to the Desk; null for a Desk turn. Untrusted: on
+   * the hosted site these are a model's own words, at most 2,000 characters. Optional until the API
+   * sends it.
+   */
+  text?: string | null;
 }
 
 export interface DemoAgentRun {
