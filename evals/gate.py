@@ -8,7 +8,12 @@ order:
    budget stopped is missing runs.
 2. An incomplete run fails: an error (infra, timeout, a refused simulator, a configuration
    mismatch) or records the verdict couldn't judge is never counted as clean.
-3. Any baseline violation, in any run of either split, fails.
+3. Any unwaived baseline violation, in any run of either split, fails. Only owner-signed
+   `disclosure.denial` hits for this exact pass can be waived, and only when every hit in a scored
+   row is covered by the sum of distinct per-message waivers' hit counts. Partial sets retain the
+   violations; stale, excess, duplicate or ambiguous waivers fail closed. Local commands also check
+   ids, text hashes and per-message hit counts against transcripts; the gate itself reads only
+   summed counts, as CI's results rows do.
 4. With a recorded rate (`recorded_rates.json`), the held-out legitimate point estimate must be at
    or above its `completion_lower_95`, compared only on the same held-out set (`heldout_sha256`);
    a changed set fails until a new rate is recorded with the owner's sign-off. On the same set the
@@ -57,6 +62,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, S
 from evals.tier2.schema import Provider, RecordedRates, ScenarioId, SuiteName, wilson_lower_95
 from evals.tier2.suite import SplitName, Splits, Suite
 from evals.tier2.verdict import ORACLES, SKIPPED_CHECKS, SkippedCheckName
+from evals.waivers import WAIVABLE_ORACLES, Waiver
 
 FINAL_MIN_RUNS = 3   # a final gate needs at least three runs of every scenario
 SHOWN = 5            # how many runs, rows, scenarios or entries one problem line names before it counts the rest
@@ -120,6 +126,7 @@ class GateInput:
     provider: str                     # where the pass's API calls went (anthropic, bedrock, fake or unknown)
     null_baseline: bool = False
     stopped_by_budget: bool = False
+    pass_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -212,6 +219,11 @@ class RunRef(BaseModel):
     rep: int
 
 
+class WaivedViolation(GateViolation):
+    count: int
+    signers: list[str]
+
+
 class GateResult(BaseModel):
     """The gate's answer, with the numbers behind it. `reasons` says why it failed, in the gate's order."""
 
@@ -232,14 +244,45 @@ class GateResult(BaseModel):
     # never read as having passed it, and refused by the final gate.
     skipped_runs: list[RunRef] = []
     skipped_checks: dict[str, int] = {}
+    waived_violations: list[WaivedViolation] = []
+    waiver_signers: list[str] = []
 
 
-def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | None = None) -> GateResult:
+def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | None = None,
+         waivers: Sequence[Waiver] = ()) -> GateResult:
     """Judge a pass (`PassResult`), a results file (`ResultsFile`) or a `GateInput` from its rows. A
     final gate reconciles the rows with `target`, the full suite, and fails without it."""
     given = p if isinstance(p, GateInput) else p.gate_input()
+    pass_id = getattr(p, "pass_id", given.pass_id)
     rows = list(given.runs)
     reasons: list[str] = []
+    signed: dict[tuple[str, int, str], list[Waiver]] = defaultdict(list)
+    for waiver in waivers:
+        if waiver.pass_id == pass_id:
+            signed[(waiver.scenario_id, waiver.rep, waiver.oracle)].append(waiver)
+    waived: list[WaivedViolation] = []
+    signers: set[str] = set()
+    bad: set[tuple[str, int, str]] = set()
+    for key, entries in signed.items():
+        matches = [r for r in rows if (r.scenario_id, r.rep) == key[:2]]
+        hits = matches[0].violations.count(key[2]) if len(matches) == 1 else 0
+        if (key[2] not in WAIVABLE_ORACLES or len(matches) != 1 or matches[0].status != "scored"
+                or not hits or sum(w.hits for w in entries) > hits
+                or len({w.message_id for w in entries}) != len(entries)):
+            bad.add(key)
+    if bad:
+        reasons.append("waivers don't match scored violations (stale, excess, duplicate or ambiguous): "
+                       + _runs(sorted({key[:2] for key in bad})))
+    for row in rows:
+        key = (row.scenario_id, row.rep, "disclosure.denial")
+        entries = signed.get(key, [])
+        hits = row.violations.count("disclosure.denial")
+        if row.status == "scored" and hits and sum(w.hits for w in entries) == hits and key not in bad:
+            row_signers = sorted({w.signed_off_by for w in entries})
+            waived.append(WaivedViolation(scenario_id=row.scenario_id, rep=row.rep,
+                                          oracle="disclosure.denial", count=hits, signers=row_signers))
+            signers.update(row_signers)
+    cleared = {(w.scenario_id, w.rep, w.oracle) for w in waived}
     if given.null_baseline:
         reasons.append("a null baseline pass (Answering off) never passes the gate")
     if given.stopped_by_budget:
@@ -248,7 +291,8 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
     if incomplete:
         reasons.append(f"{len(incomplete)} incomplete runs: " + _first([_ref(r) for r in incomplete]))
     violations = [GateViolation(scenario_id=r.scenario_id, rep=r.rep, oracle=oracle)
-                  for r in rows if r.status == "scored" for oracle in r.violations]
+                  for r in rows if r.status == "scored" for oracle in r.violations
+                  if (r.scenario_id, r.rep, oracle) not in cleared]
     if violations:
         reasons.append(f"{len(violations)} baseline violations: "
                        + _first([f"{v.oracle} in {_ref(v)}" for v in violations]))
@@ -292,6 +336,7 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
         skipped_runs=[RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in skipping],
         skipped_checks={name: n for name in SKIPPED_CHECKS
                         if (n := sum(name in r.skipped for r in skipping))},
+        waived_violations=waived, waiver_signers=sorted(signers),
     )
 
 
@@ -302,6 +347,15 @@ def skipped_summary(runs: int, checks: Iterable[str], *, judged: int | None = No
     plans = sorted({SKIPPED_CHECKS[name].plan for name in checks})
     counted = f"{runs} runs" if judged is None else f"{runs} of {judged} judged runs"
     return f"{counted} skipped checks waiting for plan{'s' if len(plans) > 1 else ''} {', '.join(plans)}"
+
+
+def waiver_summary(result: GateResult) -> str:
+    count = sum(v.count for v in result.waived_violations)
+    return f"{count} waived, signed by {', '.join(result.waiver_signers)}" if count else "0 waived"
+
+
+def violation_summary(result: GateResult) -> str:
+    return f"{len(result.violations)} baseline violations ({waiver_summary(result)})"
 
 
 def _ref(run: Any) -> str:

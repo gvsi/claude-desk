@@ -1,4 +1,5 @@
-import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
+import type { Effect, RuleCard } from '../../../api/contracts.ts';
+import type { AnyToolName } from '../../../api/views.ts';
 import { containsScope, rulesForTool } from '../ToolRulesCard/toolRules.ts';
 import { ruleDiff, type RuleField } from './ruleDiff.ts';
 
@@ -49,10 +50,10 @@ function coversScope(card: RuleCard, dropped: RuleCard): boolean {
  * no card does: then the default ask decides at least part of it, and the row says it asks, so it
  * never claims an outcome the draft doesn't enforce.
  */
-function governingCard(dropped: RuleCard, draft: readonly RuleCard[], effectsOf: (tool: ToolName) => readonly Effect[]): RuleCard | undefined {
+function governingCard(dropped: RuleCard, draft: readonly RuleCard[], effectsOf: (tool: AnyToolName) => readonly Effect[]): RuleCard | undefined {
   const candidates = dropped.applies_to.startsWith('effect:')
     ? draft.filter((card) => card.is_default !== true && card.applies_to === dropped.applies_to)
-    : rulesForTool({ tool: dropped.applies_to as ToolName, effects: effectsOf(dropped.applies_to as ToolName) }, draft);
+    : rulesForTool({ tool: dropped.applies_to as AnyToolName, effects: effectsOf(dropped.applies_to as AnyToolName) }, draft);
   return candidates.find((card) => coversScope(card, dropped));
 }
 
@@ -72,7 +73,7 @@ function governingCard(dropped: RuleCard, draft: readonly RuleCard[], effectsOf:
 export function reviewChanges(
   before: readonly RuleCard[],
   after: readonly RuleCard[],
-  effectsOf: (tool: ToolName) => readonly Effect[],
+  effectsOf: (tool: AnyToolName) => readonly Effect[],
 ): ReviewChange[] {
   const owned = (cards: readonly RuleCard[]) => cards.filter((card) => card.is_default !== true);
   const draft = owned(after);

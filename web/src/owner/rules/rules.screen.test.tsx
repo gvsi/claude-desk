@@ -14,6 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -180,6 +181,86 @@ async function expectToolRow(root: HTMLElement, words: RegExp): Promise<HTMLElem
 }
 
 describe('rules page', () => {
+  it('rules_header_links_to_all_rules_before_the_preset_and_keeps_the_lower_link', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const header = screen.container.querySelector('.cd-rules__header');
+    const all = header?.querySelector<HTMLAnchorElement>('a');
+    expect(all, 'See all rules in the header').not.toBeNull();
+    expect(all?.textContent).toBe('See all rules');
+    const actions = all?.closest('.cd-page-header__actions');
+    const preset = screen.getByRole('button', { name: 'Start from a preset' }).element();
+    expect(actions?.contains(preset)).toBe(true);
+    expect(all!.compareDocumentPosition(preset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'See all rules' }).elements()).toHaveLength(2);
+    const lower = screen.container.querySelector('.cd-rules__all .cd-text-link');
+    expect(lower?.getAttribute('href')).toBe(`${DESK}/rules/all`);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await userEvent.click(all!);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
+  });
+
+  it('rules_phone_preset_menu_spans_the_actions_row_and_keeps_keyboard_navigation', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const actions = screen.container.querySelector('.cd-rules__header .cd-page-header__actions')!;
+    const button = screen.getByRole('button', { name: 'Start from a preset' });
+    await button.click();
+    const menu = screen.getByRole('menu', { name: 'Start from a preset' });
+    await expect.element(menu).toBeVisible();
+    const rowBox = actions.getBoundingClientRect();
+    const menuBox = menu.element().getBoundingClientRect();
+    expect(Math.round(menuBox.width), 'the menu spans the full actions row').toBe(Math.round(rowBox.width));
+    expect(menuBox.left).toBe(rowBox.left);
+    expect(menuBox.top - rowBox.bottom, 'the menu opens 6 px under the row').toBe(6);
+    expectNoHorizontalScroll();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.element(menu.getByRole('menuitem', { name: 'Recommended rules' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(menu).not.toBeInTheDocument();
+    await expect.element(button).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(menu.getByRole('menuitem', { name: 'Ask me first' })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(button).toHaveFocus();
+  });
+
+  it('rules_header_link_has_a_rounded_keyboard_focus_ring', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
+    await expectTabOrderFromTop([link]);
+    link.focus();
+    expect(link.matches(':focus-visible')).toBe(true);
+    expect(getComputedStyle(link).outlineStyle).toBe('solid');
+    expect(getComputedStyle(link).borderRadius).toBe('8px');
+  });
+
+  it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const header = screen.container.querySelector('.cd-rules__header .cd-page-header')!;
+    const actions = header.querySelector('.cd-page-header__actions')!;
+    const all = actions.querySelector('a')!;
+    const preset = screen.getByRole('button', { name: 'Start from a preset' }).element();
+    const linkBox = all.getBoundingClientRect();
+    const presetBox = preset.getBoundingClientRect();
+    expect(linkBox.height, 'a 40 px link hit area').toBeGreaterThanOrEqual(40);
+    expect(presetBox.top).toBe(linkBox.top);
+    expect(presetBox.left - linkBox.right).toBe(16);
+    expect(Math.round(presetBox.right)).toBe(Math.round(actions.getBoundingClientRect().right));
+    expect(actions.scrollWidth).toBeLessThanOrEqual(actions.clientWidth);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await page.viewport(1512, 982);
+    expect(header.getBoundingClientRect().height).toBe(56);
+    expect(preset.getBoundingClientRect().left - all.getBoundingClientRect().right).toBe(16);
+    expectNoHorizontalScroll();
+  });
+
   it('rules_page_groups_outcomes_by_connector', async () => {
     // Refund's definition changed and waits for review.
     desk().tools = desk().tools.map((tool) =>
@@ -237,7 +318,7 @@ describe('rules page', () => {
     expect(screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
     // Nor has the sidebar a Connectors row; "See all rules" still links to every rule.
     expect(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Connectors' }).elements()).toEqual([]);
-    const all = screen.getByRole('link', { name: 'See all rules' });
+    const all = screen.getByRole('link', { name: 'See all rules' }).last();
     await expect.element(all).toHaveAttribute('href', `${DESK}/rules/all`);
 
     // Tab passes them by: in the connectors it stops only on the payment limit's two "Change".
@@ -461,13 +542,20 @@ describe('rules page', () => {
     };
 
     // With room beside the panel, the menu stays at the right of the title's line (N-Conn-12-Chat).
+    // Beside both actions the subtitle may take a third line, but never leaves its last word alone
+    // (`text-wrap: pretty`; where the lone word falls depends on the platform's text, so the rule is
+    // checked as well as the lines).
     for (const width of [1440, 1280]) {
-      const { title, menu } = await at(width);
+      const { title, header, menu } = await at(width);
       expect(lines(title), `${width}`).toBe(1);
       expect(box(menu).left, `${width}`).toBeGreaterThan(box(title).right);
       expect(Math.round(box(menu).top - box(title).top), `${width}`).toBe(4);
+      const subtitle = header.querySelector<HTMLElement>('.cd-page-header__subtitle')!;
+      expect(getComputedStyle(subtitle).textWrapStyle, `${width}`).toBe('pretty');
+      const words = lineWords(subtitle);
+      expect(words.at(-1)?.length ?? 0, `${width}: ${JSON.stringify(words)}`).toBeGreaterThan(1);
     }
-    // In the narrowest column beside the panel, 360 px at 1024 px, the menu goes under the title and
+    // In the narrowest column beside the panel, 360 px at 1024 px, the actions go under the title and
     // its subtitle, which keep the column's whole width, and the title stays on one line.
     {
       const { title, header, text, menu } = await at(1024);
@@ -599,12 +687,12 @@ describe('rules page', () => {
         ),
     };
     const { screen, router } = await renderRoute(`${DESK}/rules`);
-    // "See all rules" sits at the end of Rules, so the page is scrolled down to reach it.
+    // The lower "See all rules" stays at the end of Rules, so scroll down to reach it.
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const scroller = screen.getByRole('main').element();
     scroller.scrollTop = scroller.scrollHeight;
     expect(scroller.scrollTop).toBeGreaterThan(0);
-    await screen.getByRole('link', { name: 'See all rules' }).click();
+    await screen.getByRole('link', { name: 'See all rules' }).last().click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
     // All rules opens at its top, its trail and title in view.
@@ -779,7 +867,7 @@ describe('rules page', () => {
     main.scrollTop = main.scrollHeight;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
-    await screen.getByRole('link', { name: 'See all rules' }).click();
+    await screen.getByRole('link', { name: 'See all rules' }).last().click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     expect(main.scrollTop).toBe(0);
     await router.navigate(-1);
@@ -803,7 +891,8 @@ describe('rules page', () => {
     const changes = [...main.querySelectorAll<HTMLElement>('.cd-connector-section .cd-money-limit button')];
     expect(changes).toHaveLength(2);
     await expectOwnerBoard(screen.container, { current: 'Rules' });
-    const reached = await expectTabOrderFromTop([menu, composer, ...chips, ...changes]);
+    const headerLink = main.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
+    const reached = await expectTabOrderFromTop([headerLink, menu, composer, ...chips, ...changes]);
     expect(reached.filter((el) => el.closest('.cd-connector-section') !== null)).toEqual(changes);
 
     // As the board spaces them: the composer 20 px under the header, its suggestions 10 px under
@@ -841,7 +930,7 @@ describe('rules page', () => {
     await expectScreenBasics(all.screen.container, { owner: true });
     const phone = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
     await expect.element(phone.screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
-    // Under 640 px the preset menu takes a line of its own under the title.
+    // Under 640 px the header actions share a line under the title.
     const menu = phone.screen.getByRole('button', { name: 'Start from a preset' }).element();
     const title = phone.screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(Math.round(menu.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);

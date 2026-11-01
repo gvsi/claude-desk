@@ -160,6 +160,25 @@ def signed(decision: Decision) -> dict:
             "ledger_seq": decision.ledger_seq, "signature": decision.signature}
 
 
+@pytest.mark.parametrize("phase", ["receipt", "resolved"])
+async def test_status_clears_owner_reason_before_delivery(kernel_http, fake, phase):
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    visitor = await new_visitor(kernel_http, fake, copy)
+    held = await decide(visitor, "owner-reason", quote(500))
+    fake.never(visitor.ids.desk_id, "native.quote")
+    answered = await kernel_http.owner(copy.owner_token).call(
+        "POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+        path={"decision_id": held.decision_id})
+    original = answered.decision.model_dump(mode="json")
+    assert original["owner_plain"]
+
+    status = Status(answered.decision, phase)
+
+    assert status.decision.owner_plain is None
+    assert signed(status.decision) == signed(answered.decision)
+    assert answered.decision.model_dump(mode="json") == original
+
+
 async def test_status_phases_map_to_events(api_conn, kernel_http, fake, visitor, ro_schema):
     ids = visitor.ids
     done = await executed(visitor, await decide(visitor, "toolu_a", quote()))

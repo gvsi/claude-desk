@@ -33,6 +33,7 @@ import type {
   ToolConfirmEntry,
   ToolConfirmedOut,
   ToolReviewReason,
+  ToolRow,
   TranscriptItem,
   TranscriptKind,
 } from '../api/views.ts';
@@ -107,7 +108,7 @@ export interface SessionRecord {
  * it does), which the contract types don't have yet. Every record carries the reason, so the profile
  * a tool confirm answers with always has it.
  */
-export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
+export type ToolRecord = Omit<ToolProfile, 'tool' | 'source'> & Pick<ToolRow, 'tool' | 'source' | 'business'> & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
   /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
@@ -155,7 +156,7 @@ export type ToolConfirmRefusal = 'not_found' | 'conflict';
  * at the draft's confirm (the master plan's `/tools/confirm` and `/policy/confirm`): a changed
  * definition's pending hash while it waits for review, else the pinned one.
  */
-function listedHash(tool: ToolProfile): string | null {
+function listedHash(tool: Pick<ToolProfile, 'pending_sha256' | 'definition_sha256'>): string | null {
   return tool.pending_sha256 != null && tool.pending_sha256 !== '' ? tool.pending_sha256 : (tool.definition_sha256 ?? null);
 }
 
@@ -185,6 +186,8 @@ export function canonicalCard(card: RuleCard): string {
 
 export interface DecisionRecord {
   decision: Decision;
+  /** The signed approval snapshot, kept separately from the execution outcome. */
+  approved?: Decision | null;
   deskId: string;
   createdAt: number;
   fromTheVisitor: string | null;
@@ -686,7 +689,7 @@ export class MockWorld {
   /**
    * The owner's answer, as the kernel records it: the approval, with the summary `approvals.py`
    * writes as it takes an answer (the decision, its action, the answer, and `approved` or `denied`),
-   * and the run when it allows.
+   * and the run when it allows. Keep the approval snapshot separate from the run's outcome.
    */
   answer(record: DecisionRecord, answer: ApprovalAnswer): Decision {
     const desk = this.desk(record.deskId);
@@ -705,6 +708,14 @@ export class MockWorld {
         state: allows(answer) ? 'approved' : 'denied',
       },
     });
+    record.approved = allows(answer) ? {
+      ...record.decision,
+      state: 'approved',
+      visitor_plain: VISITOR_PLAIN[session.language].approved,
+      inbox: [],
+      ledger_seq: approval.seq,
+      signature: sign(`${decisionId}:approved`),
+    } : null;
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
     if (allows(answer)) {

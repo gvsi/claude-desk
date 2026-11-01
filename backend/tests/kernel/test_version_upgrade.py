@@ -139,9 +139,9 @@ async def test_a_kernel_core_version_decides_after_the_upgrade(app, client, regi
     assert rebuilt.proof is not None and activation.proved(rebuilt.proof)
     assert sorted(card.card_id for card in rebuilt.cards if not card.is_default) == owner_cards
     # the Desk was given the native tools registered since, and those no card for anyone covers ask by default:
-    # the document release, and the payments plan's mandate charge
+    # the document release, the payments plan's mandate charge, and setup's web search
     assert [card.card_id for card in rebuilt.cards if card.is_default] == [
-        "default:native.charge_mandate", "default:native.release_document"]
+        "default:native.charge_mandate", "default:native.release_document", "default:native.web_search"]
     policy = await entries_of(client, copy, "policy")
     assert policy[-1] == {"version": 2, "status": "active", "rebuilt": True, "auto_money_cap_cents": KERNEL_CORE_CAP,
                           "cedar_sha256": rebuilt.cedar_sha256,
@@ -225,7 +225,7 @@ async def test_a_seed_version_from_an_earlier_kernel_is_rebuilt_from_its_shipped
 
 # The native tools this plan registered, which a Desk created before it has no rows for.
 NEW_NATIVE_TOOLS = ("native.capture_lead", "native.release_document", "native.request_callback",
-                    "native.start_verification")
+                    "native.start_verification", "native.web_search")
 
 
 async def without_new_native_tools(app: FastAPI, copy: Rivera) -> None:

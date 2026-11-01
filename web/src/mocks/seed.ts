@@ -137,6 +137,7 @@ const STARTER_CARDS: RuleCard[] = [
   }),
   presetCard({ card_id: 'preset-fetch-website', applies_to: 'native.fetch_website', mode: 'auto', who: 'anyone', reason: 'Claude can read your website to learn about your business.' }),
   presetCard({ card_id: 'preset-read-memory', applies_to: 'native.read_memory', mode: 'auto', who: 'anyone', reason: 'Claude can read the notes you brought in to learn about your business.' }),
+  presetCard({ card_id: 'preset-web-search', applies_to: 'native.web_search', mode: 'auto', who: 'anyone', reason: 'Claude can search the web to learn how businesses like yours work.' }),
 ];
 
 const RECOMMENDED_CARDS: RuleCard[] = [
@@ -248,6 +249,7 @@ export function riveraTools(): ToolRecord[] {
     }),
     nativeTool('native.fetch_website', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: "Read the business's website." }),
     nativeTool('native.read_memory', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Read the notes the owner brought in.' }),
+    nativeTool('native.web_search', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Searches the web to learn how businesses like yours work.' }),
     { ...rivera.toolProfiles.listCharges, review_reason: null },
     { ...rivera.toolProfiles.createRefund, review_reason: null },
   ];
