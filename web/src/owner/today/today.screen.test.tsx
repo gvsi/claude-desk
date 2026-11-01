@@ -506,6 +506,7 @@ describe('Today', () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     worker.use(
       http.get(emergenciesToday, async () => {
         reads += 1;
@@ -2083,6 +2084,7 @@ describe("Today's unfinished setup", () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     const screen = await leaveRightAfterAStep(() => {
       worker.use(
         http.get(ROUTES.desks.path, async () => {
@@ -2140,6 +2142,7 @@ describe("Today's unfinished setup", () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     worker.use(
       http.post(ROUTES.setupRules.path.replace('{id}', state.interview_id), async () => {
         await released;

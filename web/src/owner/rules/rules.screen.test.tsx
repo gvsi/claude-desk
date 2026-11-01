@@ -118,6 +118,7 @@ function holdNeedsYou(): { held: () => number; release: () => void } {
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   worker.use(
     http.get(NEEDS_YOU_PATH, async () => {
       waiting += 1;

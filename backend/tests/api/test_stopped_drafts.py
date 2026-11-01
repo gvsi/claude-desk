@@ -21,6 +21,7 @@ from procrastinate.testing import InMemoryConnector
 
 from desk.api.main import create_app
 from tests.api.fakes import ScriptedModel, response, text
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done
 from tests.api.test_loop_fencing import Kernel
 from tests.api.test_public_chat import HOURS, Stream, cookie, events_path, reply, rows, types
@@ -150,8 +151,8 @@ async def test_a_stopped_plain_text_answer_is_kept_with_the_note_claude_reads(ap
         {"kind": "promise_word", "span": DRAFT[:40], "fact_ids": [], "rule_id": "fake.promise_word"}]}
     assert (sent["prose"], sent["clauses"]) == (DRAFT, [])
     # Kept in the same transaction as the note that tells Claude why its text was stopped.
-    assert await rows(engine, chat.session_id, "stopped_draft", "created_at") == await rows(
-        engine, chat.session_id, "note", "created_at")
+    assert await rows(engine, chat.session_id, "stopped_draft", "created_at") == await conversation_notes(
+        engine, chat.session_id, "created_at")
     # Claude's next input holds its text once, in its own answer: the note names the span, never the whole draft.
     _, rewrite_request = model.requests
     assert json.dumps(rewrite_request.messages).count(DRAFT) == 1

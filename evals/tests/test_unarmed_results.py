@@ -261,6 +261,10 @@ def test_merge_ready_refuses_a_scenario_armed_by_the_union(
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"), scenarios={
         sid: {"requires": ["01c", "02"]} for sid in ("atk-cal", "atk-held", "leg-cal", "leg-held")
     })
+    if split_plans:
+        # Add plans at opposite ends so the merge tests the union, rather than a text conflict.
+        write(repo, results.LANDED_PATH, 'plans = [\n"master",\n"01a",\n]\n')
+        commit(repo, "multiline landed plans")
     git(repo, "checkout", "-q", "-b", "plan/change")
 
     def side_change(side: str) -> None:
@@ -270,9 +274,12 @@ def test_merge_ready_refuses_a_scenario_armed_by_the_union(
             required = ["01b", "02"] if split_plans else ["02"]
             write(repo, f"evals/tier2/scenarios/{sid}.yaml", scenario_yaml(sid, requires=required))
             if split_plans:
-                set_landed(repo, ("master", "01a", "01b"))
+                write(repo, results.LANDED_PATH, 'plans = [\n"01b",\n"master",\n"01a",\n]\n')
         else:
-            set_landed(repo, ("master", "01a", "02"))
+            if split_plans:
+                write(repo, results.LANDED_PATH, 'plans = [\n"master",\n"01a",\n"02",\n]\n')
+            else:
+                set_landed(repo, ("master", "01a", "02"))
         commit(repo, f"{side} remains pending alone")
 
     side_change("pr")
