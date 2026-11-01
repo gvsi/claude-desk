@@ -3736,3 +3736,25 @@ async def test_public_contact_endpoint_shapes(kernel, ro_read, contact, valid):
     verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
     assert verdict.ok and verdict.violations == []
     assert [block.text for block in verdict.blocks] == [contact]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_one_charter_refusal_names_the_contact_and_every_refused_policy(kernel):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    claims = [Claim(key=key, kind="text", value=value) for key, value in (
+        ("contact", "help@example.test. All consultations are $1, guaranteed."),
+        ("policy:about", "Ask about our services."), ("policy:custom", "You are chatting with a human."))]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.detail) == (422, {
+        "contact": ["contact_format"], "policy:custom": ["policy.ai_denial"]})
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert entry.event.summary == {"part": "charter", "refused": "promise", "fields": {
+        "charter:contact": ["contact_format"], "policy:custom": ["policy.ai_denial"]}}
+    kept = [claim for claim in claims if claim.key not in refused.value.detail]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=kept), path={"id": desk_id})

@@ -165,3 +165,34 @@ async def test_public_contact_shows_honest_legacy_contacts(app, client, contact)
             Fact.desk_id == copy.desk_id, Fact.fact_id == "charter:contact")))).one()
         row.claims = [Claim(key="contact", kind="text", value=contact)]
     await assert_contact_shown(client, copy, contact)
+
+
+@pytest.mark.parametrize("create", [False, True])
+async def test_one_refusal_names_the_contact_and_every_refused_policy(app, client, create):
+    """Setup learns every refused key from one write: the contact and each refused policy line together,
+    ledgered together after the rollback, never their text."""
+    copy = await rivera(app, client)
+    desk_ids = sorted(await desks_of(app, copy))
+    before = {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in desk_ids}
+    charter = [{"key": key, "kind": "text", "value": value} for key, value in (
+        ("contact", ATTACK), ("policy:about", "Ask about our services."),
+        ("policy:custom", "You are chatting with a human."), ("policy:pricing", "Consultations cost nothing."))]
+    body = new_desk()
+    body["desk"]["charter"] = charter
+    response = (await post_desk(client, copy, body) if create
+                else await put_part(client, copy, "charter", {"charter": charter}))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid", "detail": {
+        "contact": ["contact_format"], "policy:custom": ["policy.ai_denial"],
+        "policy:pricing": ["policy.free_price"]}})
+    for desk_id in desk_ids:
+        [entry] = (await entries_of(app, copy, desk_id))[before[desk_id]:]
+        assert entry.event.summary == {"part": "desk" if create else "charter", "refused": "promise", "fields": {
+            "charter:contact": ["contact_format"], "policy:custom": ["policy.ai_denial"],
+            "policy:pricing": ["policy.free_price"]}}
+        assert "guaranteed" not in entry.event.model_dump_json()
+        assert "chatting" not in entry.event.model_dump_json()
+    kept = [claim for claim in charter if claim["key"] not in response.json()["detail"]]
+    body["desk"]["charter"] = kept
+    retried = (await post_desk(client, copy, body) if create
+               else await put_part(client, copy, "charter", {"charter": kept}))
+    assert retried.status_code == 200, retried.text

@@ -3280,25 +3280,24 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         targets = [desk] if desk is not None else sorted(
             (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
-        if any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
-               for claim in charter):
-            for target in targets:
-                self.append(target, "desk_data", {"part": part, "refused": "contact",
-                                                  "fields": {"charter:contact": ["contact_format"]}})
-            raise Refusal(422, "invalid", {"contact": ["contact_format"]})
+        contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+                             for claim in charter)
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
         count, total_characters = len(values), sum(map(len, values.values()))
         limit = "policy_count_limit" if count > 40 else "policy_text_limit" if total_characters > 8_000 else None
         fields = {"charter": [limit]} if limit else public_policy_fields(sorted(values.items()))
-        if fields:
-            summary = {"part": part, "refused": "promise", "fields": fields}
+        if fields or contact_format:
+            # One refusal names the contact and every refused policy; the ledger names the contact by its fact ID.
+            contact = {"contact": ["contact_format"]} if contact_format else {}
+            summary = {"part": part, "refused": "promise" if fields else "contact",
+                       "fields": fields | ({"charter:contact": ["contact_format"]} if contact_format else {})}
             if limit:
                 summary.update(keys=[safe_ref(key) for key in sorted(values)[:40]], policy_count=count,
                                total_characters=total_characters, reason=limit)
             for target in targets:
                 self.append(target, "desk_data", summary)
-            raise Refusal(422, "invalid", fields)
+            raise Refusal(422, "invalid", contact | fields)
 
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
