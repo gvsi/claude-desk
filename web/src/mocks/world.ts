@@ -44,15 +44,16 @@ import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSe
 import {
   DECISIONS,
   EVENT_GAP_MS,
-  VISITOR_PLAIN,
   allows,
   answersFor,
   linkCancelledBlock,
   statusLine,
   turnEnd,
   turnLanguage,
+  visitorLine,
   writing,
   type DecisionSpec,
+  type DeskOwner,
   type Language,
   type Step,
   type TurnContext,
@@ -339,17 +340,12 @@ export class MockWorld {
 
   /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
   ownerNameOf(session: SessionRecord): string {
-    return this.deskOf(session).ownerName ?? BUSINESS.owner_display_name;
+    return ownerNameOfDesk(this.deskOf(session));
   }
 
-  /**
-   * Whom the session's Desk hands a visitor to on its handoff card: its owner, by display name, or
-   * the business when the owner gave no name and the Desk carries setup's fallback, "Owner", which
-   * is no one's name and which the public page never shows (`brandFrom`).
-   */
-  handoffNameOf(session: SessionRecord): string {
-    const owner = this.ownerNameOf(session);
-    return owner === OWNER_NAME_FALLBACK ? this.deskOf(session).summary.business_name : owner;
+  /** Whom the visitor's lines on the session's Desk name, its handoff card's among them (`deskOwner`). */
+  ownerOf(session: SessionRecord): DeskOwner {
+    return deskOwner(this.deskOf(session));
   }
 
   sessionsOf(deskId: string): SessionRecord[] {
@@ -485,7 +481,8 @@ export class MockWorld {
   say(session: SessionRecord, text: string): OwnerMessageResult {
     const messageId = this.id('msg');
     const { language } = session;
-    const checked = this.appendLedger(this.deskOf(session), {
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -495,7 +492,7 @@ export class MockWorld {
     this.closeCardHandoffs(session, 'owner_message');
     const blocks = [cardBlock('owner_said', { fact_id: `owner:${messageId}`, title: text })];
     const signature = sign(messageId);
-    const visitorPlain = VISITOR_PLAIN[language].owner_said;
+    const visitorPlain = visitorLine(language, 'owner_said', deskOwner(desk));
     this.emit(session, {
       type: 'message',
       message_id: messageId,
@@ -626,7 +623,7 @@ export class MockWorld {
       review: null,
       reason_plain: spec.reasonPlain,
       owner_plain: null,
-      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool),
+      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool, deskOwner(desk)),
       answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,
@@ -756,7 +753,7 @@ export class MockWorld {
     record.approved = allows(answer) ? {
       ...record.decision,
       state: 'approved',
-      visitor_plain: VISITOR_PLAIN[session.language].approved,
+      visitor_plain: visitorLine(session.language, 'approved', deskOwner(desk)),
       inbox: [],
       ledger_seq: approval.seq,
       signature: sign(`${decisionId}:approved`),
@@ -778,7 +775,7 @@ export class MockWorld {
       ...record.decision,
       state,
       owner_plain: null,
-      visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
+      visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
       ledger_seq: ledgerSeq,
       signature: sign(`${decisionId}:${state}`),
@@ -794,7 +791,7 @@ export class MockWorld {
         answer, state: 'refused_at_execution', reason, check },
     });
     record.decision = { ...decision, state: 'refused_at_execution', owner_plain: ownerPlain,
-      visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null),
+      visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [], ledger_seq: entry.seq, signature: sign(`${decision.decision_id}:refused_at_execution`) };
     return record.decision;
   }
@@ -818,7 +815,7 @@ export class MockWorld {
       ...record.decision,
       state,
       owner_plain: null,
-      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
+      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
       ledger_seq: entry.seq,
       signature: sign(`${record.decision.decision_id}:${state}`),
@@ -842,7 +839,7 @@ export class MockWorld {
     record.decision = {
       ...record.decision,
       state: 'cancelled',
-      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null),
+      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
       ledger_seq: cancelled.seq,
       signature: sign(`${decisionId}:cancelled`),
@@ -863,7 +860,8 @@ export class MockWorld {
     const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
     if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
-    const checked = this.appendLedger(this.deskOf(session), {
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -878,7 +876,7 @@ export class MockWorld {
       language,
       handoff,
       blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
-      visitor_plain: VISITOR_PLAIN[language][handoff ? 'reply_handed_off' : 'reply_checked'],
+      visitor_plain: visitorLine(language, handoff ? 'reply_handed_off' : 'reply_checked', deskOwner(desk)),
       ledger_seq: checked.seq,
       signature: sign(messageId),
     };
@@ -886,16 +884,16 @@ export class MockWorld {
 
   /** The step context for one turn of `session`, in `language`. */
   context(session: SessionRecord, language: Language, text: string): TurnContext {
-    // Looked up only when a step hands off, so making a context still never reads the Desk.
-    const handoffName = () => this.handoffNameOf(session);
+    // Looked up only when a step names the owner, so making a context still never reads the Desk.
+    const owner = () => this.ownerOf(session);
     return {
       language,
       text,
       get person() {
         return session.person;
       },
-      get handoffName() {
-        return handoffName();
+      get owner() {
+        return owner();
       },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
@@ -977,7 +975,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`)]);
+    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`, this.ownerOf(session))]);
   }
 
   /**
@@ -987,7 +985,8 @@ export class MockWorld {
   private fromTheDesk(session: SessionRecord, blocks: RenderedBlock[]): ReplyVerdict {
     const messageId = this.id('msg');
     const { language } = session;
-    const checked = this.appendLedger(this.deskOf(session), {
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -995,7 +994,7 @@ export class MockWorld {
       summary: { author: 'desk', ok: true, language, violations: [] },
     });
     const signature = sign(messageId);
-    const visitorPlain = VISITOR_PLAIN[language].reply_checked;
+    const visitorPlain = visitorLine(language, 'reply_checked', deskOwner(desk));
     this.emit(session, {
       type: 'message',
       message_id: messageId,
@@ -1412,6 +1411,21 @@ function shortName(name: string): string {
   const last = words.length > 1 ? words.at(-1) : undefined;
   const initial = last === undefined ? '' : (Array.from(last)[0] ?? '');
   return initial === '' ? first : `${first} ${initial}.`;
+}
+
+/** The owner's display name on `desk`: its own, or Rivera's on a seeded Desk. */
+function ownerNameOfDesk(desk: DeskRecord): string {
+  return desk.ownerName ?? BUSINESS.owner_display_name;
+}
+
+/**
+ * Whom the visitor's lines on `desk` name: its owner, by display name, or no one by name when the
+ * Desk carries setup's fallback, "Owner", which is no one's name and which the public page never
+ * shows (`brandFrom`).
+ */
+function deskOwner(desk: DeskRecord): DeskOwner {
+  const name = ownerNameOfDesk(desk);
+  return { name: name === OWNER_NAME_FALLBACK ? null : name, business: desk.summary.business_name };
 }
 
 function statusEvent(type: StatusEvent['type'], decision: Decision): StatusEvent {
