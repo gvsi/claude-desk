@@ -544,8 +544,8 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
 
 def test_reply_prompt_explains_when_only_cards_were_shown():
     text = conversation_system(RIVERA)[0]["text"]
-    assert ('If send_reply answers "delivered" with prose_shown false, only the cards were shown; '
-            "don't refer to that prose later.") in text
+    assert ('If send_reply answers "delivered" or "delivered_handoff" with prose_shown false, your prose wasn\'t '
+            "shown, only the cards or the handoff; don't refer to that prose later.") in text
 
 
 def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():

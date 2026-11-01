@@ -182,7 +182,7 @@ async def test_a_prose_failure_shows_the_kept_cards_then_the_drafted_handoff_and
     assert "$89" not in json.dumps([b.model_dump() for b in message.blocks])
     assert card_handoffs(fake, caller) == ["open"]
     *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
-    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff", "prose_shown": False}
 
 
 async def test_a_soft_check_flag_on_its_one_try_gets_one_correction(api_conn, caller, fake):
@@ -900,7 +900,9 @@ async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller,
     assert await run_turn(api_conn, caller, first) == "handoff"
     assert len(first.requests) == 1                       # a shown handoff, like any shown reply, ends the turn
     ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
-    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    # the canary's handoff showed in the draft's place; Claude's own handoff clause passed beside its prose
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff", **({"prose_shown": False} if blocked
+                                                                                   else {})}
     if not blocked:
         assert fake.called("/check_reply")[0].body["draft"]["clauses"] == [{"template": "handoff", "fact_id": None}]
     assert len(fake.handoffs) == 1 and card_handoffs(fake, caller) == ["open"]

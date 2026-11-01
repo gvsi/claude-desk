@@ -696,7 +696,7 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
     (message,) = await events(api_conn, caller.session_id)
     assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
     assert message.blocks[0].text == "Let me check with Maria Rivera."
-    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert len(check_drafts(fake)) == 2                                     # the verdict's handoff, no third check
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_2", message.message_id, 1)]
     # The second try's draft is kept with the handoff shown in its place, naming that verdict; the handoff, not the
@@ -725,7 +725,7 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
 
         outcome = await send_reply(api_conn, caller, 0, {"prose": prose, "clauses": []}, 1, call_id="toolu_" + kind)
 
-        assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff"}, True,
+        assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True,
                                                                          "handoff"), kind
         assert len(fake.called("/check_reply")) == checks + 1, kind               # one check, no rewrite
         (message,) = await events(api_conn, caller.session_id)
@@ -817,7 +817,7 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     # wrong twice: the handoff, checked as the API's own draft and recorded as what the call put on screen
     twice = await send_reply(api_conn, caller, 0, cases[0][0], 2, call_id="toolu_bad")
     assert (twice.result, twice.is_error, twice.delivered) == (
-        {"outcome": "delivered_handoff"}, True, "handoff")
+        {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     (message,) = await events(api_conn, caller.session_id)
@@ -831,7 +831,7 @@ async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, call
     bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
     outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
     assert (outcome.result, outcome.is_error, outcome.delivered) == (
-        {"outcome": "delivered_handoff"}, True, "handoff")
+        {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     assert [call.body.get("final", True) for call in fake.called("/check_reply")] == [True]

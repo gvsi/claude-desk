@@ -116,7 +116,7 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
     draft = {"prose": "It comes to $89 for the visit.",
              "clauses": [{"template": "hours", "fact_id": "charter:hours"}, {"template": "handoff"}]}
     outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept_then_handoff")
-    assert outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.result == {"outcome": "delivered_handoff", "prose_shown": False}
     assert outcome.delivered == "handoff" and outcome.is_error
     assert [check["final"] for check in caller.kernel.checks] == [True]
     assert await delivered(conn, session_id) == [["hours", "handoff"]]
@@ -168,7 +168,7 @@ async def test_a_first_draft_no_rewrite_fixes_opens_the_handoff_the_visitor_sees
     outcome = await tools.send_reply(conn, caller, 0, {"prose": f"Your invoice reference is {canary}.",
                                                        "clauses": []}, 1)
 
-    assert outcome.delivered == "handoff" and outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.delivered == "handoff" and outcome.result == {"outcome": "delivered_handoff", "prose_shown": False}
     assert [check["final"] for check in caller.kernel.checks] == [False]
     assert await finals_recorded(http, copy, session_id) == [False]
     assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
@@ -210,4 +210,4 @@ async def test_payment_caption_rewrites_through_the_api_and_keeps_final_cards(ke
     assert all(not payload["handoff"] for (payload,) in stored)
     control = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Bonjour, je peux vous aider."}, 1,
                                       call_id="toolu_unsupported")
-    assert control.result == {"outcome": "delivered_handoff"} and control.delivered == "handoff"
+    assert control.result == {"outcome": "delivered_handoff", "prose_shown": False} and control.delivered == "handoff"

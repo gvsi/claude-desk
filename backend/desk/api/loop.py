@@ -70,15 +70,16 @@ from desk.api.store import (
     unanswered_tool_use,
 )
 from desk.api.tools import (
-    DELIVERED_HANDOFF,
     SEND_REPLY,
     UNAVAILABLE,
     Caller,
     FrozenTools,
     ToolOutcome,
+    delivered_result,
     hand_off,
     model_tools,
     not_run,
+    prose_unshown,
     recover_call,
     route_call,
     send_reply,
@@ -791,7 +792,7 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
     outcomes = []
     for block in open_tool_use.tool_uses:
         if block["name"] == SEND_REPLY:
-            outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"])))
+            outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"]), block))
             await conn.commit()
         else:
             outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation,
@@ -804,13 +805,14 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
     return outcomes
 
 
-def _recovered_reply(shown: Any | None) -> ToolOutcome:
-    """A `send_reply` call's result from its delivered event, including its handoff flag."""
+def _recovered_reply(shown: Any | None, block: dict) -> ToolOutcome:
+    """A `send_reply` call's (`block`'s) result from its delivered row, as `send_reply` answered it: its event's
+    handoff flag, and `prose_shown` false when the prose the call drafted isn't among the shown blocks."""
     if shown is None:
         return not_run()
-    if shown.handoff:
-        return ToolOutcome(dict(DELIVERED_HANDOFF), True, delivered="handoff", message_id=shown.ref_id)
-    return ToolOutcome({"outcome": "delivered", "message_id": shown.ref_id}, False, delivered="reply",
+    result = delivered_result(shown.handoff, shown.ref_id, prose_shown=not prose_unshown(
+        block["input"], [shown_block.kind for shown_block in shown.blocks or []]))
+    return ToolOutcome(result, shown.handoff, delivered="handoff" if shown.handoff else "reply",
                        message_id=shown.ref_id)
 
 

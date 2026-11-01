@@ -631,32 +631,48 @@ async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clau
         return _unavailable()
 
 
+def prose_unshown(tool_input: Any, kinds: Iterable[str | None]) -> bool:
+    """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
+    shown blocks (their `kinds`) holds: the check failed and showed the kept cards or a handoff in its place."""
+    prose = tool_input.get("prose") if isinstance(tool_input, dict) else None
+    return isinstance(prose, str) and bool(prose.strip()) and "prose" not in kinds
+
+
+def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True) -> dict:
+    """What Claude reads for a shown reply: `delivered_handoff` when it showed the handoff clause, else `delivered`
+    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown."""
+    result = dict(DELIVERED_HANDOFF) if handoff else {"outcome": "delivered", "message_id": message_id}
+    if not prose_shown:
+        result["prose_shown"] = False
+    return result
+
+
 async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, call_id: str | None,
-                **timing: int) -> ToolOutcome:
+                tool_input: Any = None, **timing: int) -> ToolOutcome:
     """Deliver a checked reply. A verdict whose generation the session has left (a take-over while it was checked)
-    is dropped by `deliver()`: nothing is shown, and the turn stops."""
+    is dropped by `deliver()`: nothing is shown, and the turn stops. `tool_input` is the `send_reply` input the
+    verdict answers, if any, for `prose_shown`."""
     reply = Reply(verdict, "claude", "model" if call_id is not None else "api", call_id=call_id)
     seq = await deliver(conn, caller.ids, reply, ro_schema=caller.ro_schema)
     await conn.commit()
     if seq is None:
         return ToolOutcome(dict(NOT_RUN), True, fenced=True, **timing)
-    result = dict(DELIVERED_HANDOFF) if reply.handoff else {"outcome": "delivered", "message_id": verdict.message_id}
-    if not verdict.ok and not reply.handoff:
-        result["prose_shown"] = False
+    result = delivered_result(reply.handoff, verdict.message_id, prose_shown=not prose_unshown(
+        tool_input, [block.kind for block in verdict.blocks]))
     return ToolOutcome(result, reply.handoff, delivered="handoff" if reply.handoff else "reply",
                        message_id=verdict.message_id, **timing)
 
 
 async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
-                   call_id: str | None = None) -> ToolOutcome:
+                   call_id: str | None = None, tool_input: Any = None) -> ToolOutcome:
     """Hand the conversation to the owner: the handoff clause alone, checked like any reply (a paused session's
     check answers with the handoff verdict too), then shown. `call_id` is the `send_reply` call it answers, if any,
-    so the delivered row records what that call put on screen."""
+    so the delivered row records what that call put on screen, and `tool_input` that call's input."""
     started = time.monotonic()
     verdict = await _check(caller, generation, "", [Clause(template="handoff")])
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, check_reply_ms=_ms(started))
-    shown = await _show(conn, caller, verdict, call_id, check_reply_ms=_ms(started))
+    shown = await _show(conn, caller, verdict, call_id, tool_input, check_reply_ms=_ms(started))
     return replace(shown, stopped=_stopped(verdict))
 
 
@@ -672,8 +688,8 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     `session_paused`) or a final check's, shows the verdict's blocks with no further kernel call: the checked cards
     when they survive (with Claude's drafted handoff clause after them, when it drafted one), otherwise the handoff
     the kernel opened for the owner. Any shown handoff clause ends the turn as `delivered_handoff`, even when the
-    draft passed. A failed check that keeps only cards answers `delivered` with `prose_shown` false, so Claude knows
-    its prose wasn't shown.
+    draft passed. Either outcome carries `prose_shown` false when the prose Claude drafted wasn't shown (the kept
+    cards, or a handoff in its place), so Claude never refers to it.
     Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.
@@ -688,18 +704,18 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     if isinstance(draft, list):
         if not final:
             return _blocked(draft)
-        return await hand_off(conn, caller, generation, call_id=call_id)
+        return await hand_off(conn, caller, generation, call_id=call_id, tool_input=tool_input)
     started = time.monotonic()
     verdict = await _check(caller, generation, *draft, final=final)
     timing = {"check_reply_ms": _ms(started)}
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, **timing)
     if verdict.ok:
-        return await _show(conn, caller, verdict, call_id, **timing)
+        return await _show(conn, caller, verdict, call_id, tool_input, **timing)
     if not final and all(violation.kind in REWRITABLE for violation in verdict.violations):
         return replace(_blocked(_feedback(verdict, draft[1]), **timing), stopped=_stopped(verdict),
                        kept=_kept(*draft, verdict, rewritable=True))
     await run_lock(conn, caller.session_id)            # before the events lock, as the handoff's delivery takes them
     await append_stopped_draft(conn, caller.ids, _kept(*draft, verdict, rewritable=False))
-    shown = await _show(conn, caller, verdict, call_id, **timing)
+    shown = await _show(conn, caller, verdict, call_id, tool_input, **timing)
     return replace(shown, stopped=_stopped(verdict))

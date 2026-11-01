@@ -32,7 +32,7 @@ from desk.api.store import (
     transcript,
 )
 from desk.api.tools import Caller, send_reply
-from desk.contracts import Clause, ReplyDraft, ToolCall
+from desk.contracts import Clause, RenderedBlock, ReplyDraft, ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.events import EvOwnerJoined
 from desk.kernel_api import CheckReplyRequest, DecideRequest, KernelError
@@ -62,12 +62,20 @@ Hook = Callable[[httpx.Request], Awaitable[None]]
 
 
 @pytest.mark.parametrize("handoff", [True, False])
-def test_recovered_reply_reads_the_delivered_handoff_flag(handoff):
-    shown = SimpleNamespace(ref_id="msg-recovered", handoff=handoff, blocks=[
-        SimpleNamespace(template="quote"), SimpleNamespace(template="handoff")])
-    outcome = loop._recovered_reply(shown)
+@pytest.mark.parametrize("prose_shown", [True, False])
+def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_showed(handoff, prose_shown):
+    # The delivered row's blocks, as stored: the prose Claude drafted shows as a prose block only when it passed.
+    blocks = [*([RenderedBlock(kind="prose", text="Here is the quote.")] if prose_shown else []),
+              RenderedBlock(kind="card", template="quote", text="Drain clearing"),
+              RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")]
+    shown = SimpleNamespace(ref_id="msg-recovered", handoff=handoff, blocks=blocks)
+    outcome = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "Here is the quote.", "clauses": []}))
     assert outcome.delivered == ("handoff" if handoff else "reply")
     assert outcome.result["outcome"] == ("delivered_handoff" if handoff else "delivered")
+    assert outcome.result.get("prose_shown", True) is prose_shown
+    # a draft with no prose, or input that wasn't a draft, had no prose to leave out
+    for tool_input in ({"prose": "", "clauses": []}, {"prose": 7}):
+        assert "prose_shown" not in loop._recovered_reply(shown, tool_use("send_reply", tool_input)).result
 
 
 @pytest.fixture
@@ -968,22 +976,26 @@ async def test_new_visitor_message_joins_the_next_call(api_conn, engine, locks, 
 
 
 @pytest.mark.parametrize("end_on_reply", [True, False], ids=["agent", "visitor"])
-async def test_recovered_cards_plus_handoff_ends_the_request_without_another_call(api_conn, engine, locks, caller, fake,
-                                                                                end_on_reply):
+@pytest.mark.parametrize("drafted_handoff", [True, False], ids=["cards-then-handoff", "cards-alone"])
+async def test_recovered_final_prose_failure_ends_the_request_without_another_call(
+        api_conn, engine, locks, caller, fake, end_on_reply, drafted_handoff):
     # A turn stopped after its final reply was delivered and before the results row: only the prose failed, so the
-    # kernel's verdict keeps the checked hours card and, after it, the handoff clause Claude drafted. Recovery answers
-    # the call from that delivery and asks Claude nothing more, for an agent's request and a visitor's alike.
+    # kernel's verdict keeps the checked hours card and, after it, the handoff clause Claude drafted, when it drafted
+    # one. Recovery answers the call from that delivery, saying its prose wasn't shown, and asks Claude nothing more,
+    # for an agent's request and a visitor's alike.
     await said(api_conn, caller, "Hello")
     assert await pending(caller, ScriptedModel([response(reply("Hello, how can I help?"))]), engine, locks) == "done"
     await said(api_conn, caller, "When are you open?")
     await prepare_model_input(api_conn, caller.session_id)
-    block = reply("Here is $89.", HOURS, {"template": "handoff"}, id="toolu_crashed")
+    clauses = [HOURS, *([{"template": "handoff"}] if drafted_handoff else [])]
+    block = reply("Here is $89.", *clauses, id="toolu_crashed")
     await append_assistant(api_conn, caller.ids, [block], generation=0)
     await api_conn.commit()
     verdict = await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
         session_id=caller.session_id, generation=0, prose=block["input"]["prose"],
-        clauses=[Clause(**HOURS), Clause(template="handoff")]), final=True))
-    assert not verdict.ok and [b.template for b in verdict.blocks] == ["hours", "handoff"]
+        clauses=[Clause(**clause) for clause in clauses]), final=True))
+    templates = ["hours", "handoff"] if drafted_handoff else ["hours"]
+    assert not verdict.ok and [b.template for b in verdict.blocks] == templates
     await deliver(api_conn, caller.ids, Reply(verdict, "claude", "model", call_id=block["id"]),
                   ro_schema=caller.ro_schema)
     await api_conn.commit()
@@ -991,10 +1003,12 @@ async def test_recovered_cards_plus_handoff_ends_the_request_without_another_cal
     assert await pending(caller, model, engine, locks, end_on_reply=end_on_reply) == "idle"
     assert model.requests == [] and len(fake.called("/check_reply")) == 2
     results = (await rows(api_conn, caller.session_id, "model_tool_results", "model_content"))[-1][0]
-    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    assert json.loads(results[0]["content"]) == (
+        {"outcome": "delivered_handoff", "prose_shown": False} if drafted_handoff else
+        {"outcome": "delivered", "message_id": verdict.message_id, "prose_shown": False})
     item = next(item for item in await transcript(api_conn, caller.ids, "owner")
                 if item.kind == "delivered" and item.event.message_id == verdict.message_id)
-    assert item.event.handoff and [b.template for b in item.event.blocks] == ["hours", "handoff"]
+    assert item.event.handoff is drafted_handoff and [b.template for b in item.event.blocks] == templates
 
 
 async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine, locks, caller, fake):
