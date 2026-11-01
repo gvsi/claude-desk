@@ -418,7 +418,7 @@ describe('Safety', () => {
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
-    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.fromTheVisitor === ask)?.decision;
+    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.decision.action?.discount_bp === 5000)?.decision;
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');

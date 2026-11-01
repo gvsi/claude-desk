@@ -918,13 +918,17 @@ describe('Conversations', () => {
     (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
     const column = scrollerOf(log(screen).element());
     expect(column.contains(head.element())).toBe(true);
-    const at = column.scrollTop;
+    const on = Math.round(lastReceipt.element().getBoundingClientRect().top);
 
-    // A message arrives while focus is in the transcript: nothing moves under her.
+    // A message arrives while focus is in the transcript: nothing moves under her. The held cards
+    // now quote her two latest lines, so the one above her can change height; the receipt she's on
+    // stays where it was on screen.
     mockStore.world.visitorText(chat, 'Are you still there?');
     await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
+    await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
     await readsMore('conversation', 2);
-    expect(column.scrollTop).toBe(at);
+    expect(column.contains(lastReceipt.element())).toBe(true);
+    expect(Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
     expect(document.activeElement).toBe(lastReceipt.element());
   });
 
