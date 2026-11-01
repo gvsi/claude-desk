@@ -8,11 +8,14 @@ to the business's own contact; images are refused.
 """
 
 import pytest
+from sqlalchemy import select
 
 from desk import markdown_text, public_contact
 from desk.contracts import RenderedBlock
+from desk.db.models import Document
 from desk.kernel_service import reply_check
 
+from .helpers import rows_of
 from .test_adapters import visitor_of
 from .test_reply_check import assert_kept, change_fact, checked, clause, own_quote
 
@@ -375,3 +378,30 @@ async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, cli
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert_kept(verdict, [("quote", quote.fact_id)])
     assert found(verdict) == [("promise_word", "markdown.link", span) for span in spans]
+
+
+async def test_no_markdown_span_echoes_a_document_canary(app, client):
+    """A canary in a link's text, in a URL, or at the start of prose the parser can't read whole is
+    refused as a canary, and the Markdown violations' spans never quote it."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    [canary, _] = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
+    for prose in (f"See [{canary} details](https://elsewhere.example).", f"See https://elsewhere.example/{canary}.",
+                  ">" * 25 + f" {canary}"):
+        verdict = await checked(client, visitor, prose)
+        assert verdict.ok is False and "canary" in {violation.kind for violation in verdict.violations}
+        assert {violation.rule_id for violation in verdict.violations} & {"markdown.link", "markdown.parse"}
+        assert canary not in verdict.model_dump_json(), prose
+
+
+async def test_a_canary_only_the_rendered_text_shows_is_named_beside_the_raw_one(app, client):
+    """A second document's canary that only the rendered text joins up (its tag dropped) is named
+    too, beside the one the raw text holds."""
+    copy, visitor = await visitor_of(app, client)
+    documents = await rows_of(app, copy.copy_id, select(Document))
+    [plain, hidden] = [row.canary for row in documents]
+    verdict = await checked(client, visitor, f"Your references are {plain} and {hidden[:8]}<b></b>{hidden[8:]}.")
+    named = {fact_id for violation in verdict.violations if violation.kind == "canary"
+             for fact_id in violation.fact_ids}
+    assert named == {f"document:{row.document_id}" for row in documents}
+    assert plain not in verdict.model_dump_json() and hidden not in verdict.model_dump_json()
