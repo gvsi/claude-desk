@@ -135,7 +135,10 @@ const AGENT_DECISIONS = {
   },
 } as const satisfies Record<string, DecisionSpec>;
 
-/** One exchange: the agent's signed request (its words, for the owner's view only) and the Desk's checked answer. */
+/**
+ * One exchange: the agent's signed request (its words, which the owner's view of the chat keeps and
+ * the run's agent turn carries) and the Desk's checked answer.
+ */
 interface Exchange {
   request: string;
   decision: DecisionSpec;

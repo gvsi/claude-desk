@@ -454,7 +454,10 @@ export class MockWorld {
     session.visitorTypedAt = null;
   }
 
-  /** A visiting agent's signed request: its words reach the owner's view only, never a visitor's page. */
+  /**
+   * A visiting agent's signed request: its words join the owner's view of the chat. The built-in
+   * agent's run also quotes them to the page that sent it, on its agent turn (`AgentTurn.text`).
+   */
   agentText(session: SessionRecord, text: string): void {
     this.addItem(session, 'agent_text', text, null);
     session.lastVisitorText = text;

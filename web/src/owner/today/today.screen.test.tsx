@@ -268,7 +268,7 @@ const REFUSAL: BriefingItem = {
   session_id: 'ses-agent-1',
   display_name: null,
   ref_id: 'dec-refused-1',
-  line: "Alex Kim's assistant tried to charge $250.00 in one go, over its signed limit of $20 a charge.",
+  line: "Alex Kim's assistant tried to charge $185.00 in one go, over its signed limit of $20 a charge.",
   cause: 'agent_limit',
 };
 const BOOKING: BriefingItem = {
