@@ -219,6 +219,16 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
 
+  const renderRemove = (key: string, row: string, describedBy: string, itemId?: string) => {
+    const label = <>{copy.remove}{key === 'hours' ? <span className="cd-sr-only"> {copy.hours}</span> : null}</>;
+    return editingKey !== null ? (
+      <Button variant="ghost" disabled describedBy={describedBy}>{label}</Button>
+    ) : (
+      <Button variant="ghost" waiting={busy !== null} busy={removing === row} describedBy={describedBy}
+        onClick={() => void remove(key, row, itemId)}>{label}</Button>
+    );
+  };
+
   const renderLine = (line: SetupPublicLine) => (
     <div className={`cd-public-lines__row${canEdit(line) || line.source === 'suggested' ? '' : ' cd-public-lines__row--readonly'}`} key={line.key}>
       <label id={`${fieldId}-${line.key}`} htmlFor={editingKey === line.key ? fieldId : undefined} className="cd-public-lines__label cd-type-meta">
@@ -275,17 +285,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                   {copy.edit}
                 </Button>
               ) : null}
-              {line.source === 'suggested' ? (
-                <Button
-                  variant="ghost"
-                  waiting={editingKey !== null || busy !== null}
-                  busy={removing === line.key}
-                  describedBy={`${fieldId}-${line.key}`}
-                  onClick={() => void remove(line.key, line.key)}
-                >
-                  {copy.remove}
-                </Button>
-              ) : null}
+              {line.source === 'suggested' ? renderRemove(line.key, line.key, `${fieldId}-${line.key}`) : null}
             </div>
           ) : null}
         </>
@@ -296,17 +296,9 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={`${key}-${index}`}>
       <span className="cd-public-lines__label cd-type-meta">{label}</span>
       <div id={`${fieldId}-${key}-${index}`} className="cd-public-lines__text" data-copy="user">{value}</div>
-      <div className="cd-public-lines__actions">
-        <Button
-          variant="ghost"
-          waiting={editingKey !== null || busy !== null}
-          busy={removing === `${key}-${index}`}
-          describedBy={`${fieldId}-${key}-${index}`}
-          onClick={() => void remove(key, `${key}-${index}`, itemId)}
-        >
-          {copy.remove}
-        </Button>
-      </div>
+      {key !== 'hours' || index === 0 ? <div className="cd-public-lines__actions">
+        {renderRemove(key, `${key}-${index}`, `${fieldId}-${key}-${index}`, itemId)}
+      </div> : null}
     </div>
   );
 
@@ -345,9 +337,13 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
             <Card padding={16}><div className="cd-public-lines cd-public-lines--owned">{owned.map(renderLine)}</div></Card>
           ) : null}
           <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" waiting={editingKey !== null || unknown || (busy !== null && busy !== 'confirm')} busy={busy === 'confirm'} onClick={() => void confirm()}>
-              {SETUP_COPY.situations.looksRight}
-            </Button>
+            {editingKey !== null || unknown ? (
+              <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
+            ) : (
+              <Button variant="primary" size="main" waiting={busy !== null && busy !== 'confirm'} busy={busy === 'confirm'} onClick={() => void confirm()}>
+                {SETUP_COPY.situations.looksRight}
+              </Button>
+            )}
           </div>
         </>
       )}
