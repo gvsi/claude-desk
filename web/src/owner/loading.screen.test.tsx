@@ -948,44 +948,69 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'conversation-row-2', page: '.cd-conversations__items > li:nth-child(3) > .cd-conversation-item', size: true },
 ];
 
+/** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
+const CHAT_PARTS = {
+  name: { name: 'conversation-name', page: '.cd-conversation__name' },
+  head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height'] },
+  visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height'] },
+  reply: { name: 'reply-card', page: '.cd-conversation .cd-transcript .cd-reply-card', dimensions: ['height'] },
+  receipt0: { name: 'receipt-0', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :first-child', dimensions: ['height'] },
+  receipt1: { name: 'receipt-1', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :nth-child(2)', dimensions: ['height'] },
+  held: { name: 'held-card', page: '.cd-conversation .cd-transcript > .cd-conversation__held', dimensions: ['height'] },
+} as const satisfies Record<string, SkeletonAnchor>;
+
 /**
- * The open conversation's parts the skeleton draws, in a wide window, where a fresh copy's chat fits
- * and opens at its top: who it is with, and its first message.
+ * In a wide window a fresh copy's held chat fits its region and opens at its top: every part of it
+ * is in view as it lands, so each one's top and bottom (its top and height) and each receipt line
+ * is anchored to its shape.
  */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'conversation-name', page: '.cd-conversation__name' },
-  { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message' },
+  CHAT_PARTS.name,
+  CHAT_PARTS.head,
+  CHAT_PARTS.visitor,
+  CHAT_PARTS.reply,
+  CHAT_PARTS.receipt0,
+  CHAT_PARTS.receipt1,
+  CHAT_PARTS.held,
 ];
 
 /**
- * On a phone, where a fresh copy's chat is taller than its region and opens at its latest: who it
- * is with, and the chat's last part (its held request) at the foot of the region, over the owner's
- * controls.
+ * On a phone the chat is taller than its region and opens at its latest, over the owner's
+ * controls: in view as it lands are the foot of Claude's reply, its two receipt lines and the held
+ * request, each anchored to its shape by its top and bottom.
  */
-const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'conversation-name', page: '.cd-conversation__name' },
-  { name: 'last-message', page: '.cd-conversation .cd-transcript > :last-child', bottom: true },
-];
+const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PARTS.reply, CHAT_PARTS.receipt0, CHAT_PARTS.receipt1, CHAT_PARTS.held];
 
 /**
- * The chat's parts in view as the pane lands, each where it was first drawn, from the commit that
- * puts the chat on the page under the fading shapes. Take over and the whisper box arrive with it,
- * and the transcript settles at its end; `expectStill` checks nothing in view moved through that.
+ * From the moment the pane's shapes start to leave, each anchored part of the chat, every frame
+ * until it has settled, against where its shape was at that moment: Take over and the whisper box
+ * arrive with the chat and the transcript settles at its end, and nothing moves from its shape by
+ * more than 2 px on its top, left or height. `expectStill` checks every frame it saw.
  */
-function watchMessagesInView() {
-  const first = new Map<Element, DOMRect>();
+function watchPaneLanding(anchors: readonly SkeletonAnchor[]) {
+  let shapes: DOMRect[] | null = null;
+  const worst = anchors.map(() => ({ top: 0, left: 0, height: 0 }));
+  let frames = 0;
   const look = () => {
-    const region = landedElement('.cd-conversation__scroll');
-    if (region === null) return;
-    const view = region.getBoundingClientRect();
-    for (const part of region.querySelectorAll('.cd-transcript > *')) {
-      if (first.has(part)) continue;
-      const box = part.getBoundingClientRect();
-      if (box.bottom > view.top && box.top < view.bottom) first.set(part, box);
+    const layer = document.querySelector<HTMLElement>('.cd-conversation-pane .cd-skeleton-screen__layer');
+    if (shapes === null) {
+      if (layer?.dataset.state !== 'leaving') return;
+      shapes = anchors.map(({ name }) => {
+        const shape = layer.querySelector(`[data-skeleton-anchor="${name}"]`);
+        if (shape === null) throw new Error(`No shape for ${name}`);
+        return shape.getBoundingClientRect();
+      });
     }
+    anchors.forEach(({ page }, i) => {
+      const real = landedElement(page);
+      if (real === null) return;
+      const box = real.getBoundingClientRect();
+      for (const edge of ['top', 'left', 'height'] as const) worst[i]![edge] = Math.max(worst[i]![edge], Math.abs(box[edge] - shapes![i]![edge]));
+    });
+    frames += 1;
   };
   const observer = new MutationObserver(look);
-  observer.observe(document.body, { subtree: true, childList: true });
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
   let frame = 0;
   const sample = () => {
     look();
@@ -999,15 +1024,15 @@ function watchMessagesInView() {
   onTestFinished(stop);
   return {
     expectStill: async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
       stop();
-      expect(first.size, 'the chat was in view as it landed').toBeGreaterThan(0);
-      for (const [part, box] of first) {
-        const now = part.getBoundingClientRect();
+      expect(shapes, 'the shapes were read as they started to leave').not.toBeNull();
+      expect(frames).toBeGreaterThan(1);
+      anchors.forEach(({ name }, i) => {
         for (const edge of ['top', 'left', 'height'] as const) {
-          expect(Math.abs(now[edge] - box[edge]), `${part.className || part.localName} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+          expect(worst[i]![edge], `${name} ${edge}, at its furthest from its shape while the pane landed`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
-      }
+      });
     },
   };
 }
@@ -1033,10 +1058,11 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   // The fresh copy's held chat opens in place too: at its top in a wide window, where it fits, and
   // at its latest on a phone, over the owner's controls.
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const inView = watchMessagesInView();
+  const anchors = viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS;
+  const inView = watchPaneLanding(anchors);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
-    anchors: viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS,
+    anchors,
     stays: ['.cd-conversations__footer'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
@@ -1161,7 +1187,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
   const names = PHONE_PANE_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
-  const inView = watchMessagesInView();
+  const inView = watchPaneLanding(PHONE_PANE_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     continues: true,

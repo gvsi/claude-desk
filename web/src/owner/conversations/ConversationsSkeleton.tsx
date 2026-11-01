@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { ConceptFooter, Skeleton, SkeletonCard } from '../../ds/index.ts';
-import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
+import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { rivera } from '../../ds/fixtures/index.ts';
+import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { publicLink } from '../customerLink.ts';
 import { TRANSCRIPT_NOTE } from './copy.ts';
 
@@ -14,51 +15,48 @@ const FRESH_LINK = publicLink('rivera-plumbing-abc123').replace(/^https?:\/\//, 
 const VISITOR = { text: 'Visitor', className: 'cd-user-name' } as const;
 
 /**
- * Lines that wrap differently by the open conversation's width, for words not known before the
- * read lands: `wide` of them where the column is wide, `narrow` where it is a phone's
- * (`cd-conversation-skeleton__narrow-line` and `__wide-line`).
+ * The words of the fresh copy's held chat, from the seed the copy is made from, as the Today
+ * preview takes them (`owner/arrival/preview.ts`). They are only measured, so each shape is as
+ * many lines, and as tall, as its part lands; none of them is ever drawn.
  */
-function Lines({ wide, narrow, text, width = '100%' }: { wide: number; narrow: number; text: 'caption' | 'meta' | 'summary' | 'reply'; width?: string }) {
-  const count = Math.max(wide, narrow);
-  return (
-    <div>
-      {Array.from({ length: count }, (_, i) => (
-        <Skeleton
-          key={i}
-          shape="line"
-          text={text}
-          width={i === count - 1 && count > 1 ? '60%' : width}
-          className={[i >= wide ? 'cd-conversation-skeleton__narrow-line' : '', i >= narrow ? 'cd-conversation-skeleton__wide-line' : ''].join(' ').trim()}
-        />
-      ))}
-    </div>
-  );
-}
+const QUESTION = rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? '';
+const HELD_CHAT = {
+  question: QUESTION,
+  handoff: { label: CARD_CHROME.handoff.en.label, headline: rivera.blocks.handoff.en.title ?? '', detail: rivera.blocks.handoff.en.lines?.[0] ?? '' },
+  reason: rivera.decisions.held.reason_plain,
+  context: `From the visitor: “${QUESTION}”`,
+  heldBy: `Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`,
+} as const;
+
+type LineText = 'caption' | 'meta' | 'section' | 'summary';
 
 /**
  * The page's own words, known before the read lands, as many lines as they wrap to here in this
- * browser's fonts (`useTextLines`). With `drawn` false it only holds their height, with no shape.
+ * browser's fonts (`useTextLines`), in a box with the part's own classes for its margins. With
+ * `drawn` false it only holds their height, with no shape.
  */
 function MeasuredLines({
   parts,
   className,
   text,
-  fallback,
+  fallback = 1,
   width = '100%',
   drawn = true,
+  boxClassName,
 }: {
   parts: readonly TextPart[];
   className: string;
-  text: 'caption';
-  fallback: number;
+  text: LineText;
+  fallback?: number;
   width?: string;
   drawn?: boolean;
+  boxClassName?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const count = useTextLines(box, { parts, className }, fallback);
   if (!drawn) {
     return (
-      <div ref={box}>
+      <div ref={box} className={boxClassName}>
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className={`cd-conversation-skeleton__room-line cd-type-${text}`} />
         ))}
@@ -66,7 +64,7 @@ function MeasuredLines({
     );
   }
   return (
-    <div ref={box}>
+    <div ref={box} className={boxClassName}>
       {Array.from({ length: count }, (_, i) => (
         <Skeleton key={i} shape="line" text={text} width={i === count - 1 && count > 1 ? '60%' : width} />
       ))}
@@ -74,10 +72,101 @@ function MeasuredLines({
   );
 }
 
-/** A receipt under a message: its dot, and its line as a pill. */
-function Receipt({ width }: { width: number }) {
+/**
+ * The visitor's message: their bubble at the right, as wide as its words on one line, never wider
+ * than the bubble's 85 %, and as tall as they wrap to there, padding included.
+ */
+function VisitorShape({ words, anchor }: { words: string; anchor?: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const { height } = useTextBox(box, { parts: [words], className: 'cd-visitor-message__bubble cd-type-message' }, 1);
   return (
-    <div className="cd-margin-line">
+    <div className="cd-transcript-row">
+      <div className="cd-transcript-row__main">
+        <div className="cd-visitor-message" data-skeleton-anchor={anchor}>
+          <div ref={box} className="cd-conversation-skeleton__bubble">
+            <Skeleton
+              shape="block"
+              measure={{ label: words, className: 'cd-visitor-message__bubble cd-type-message', tagName: 'span' }}
+              height={height}
+              radius="card"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Claude's handoff card, as `ReplyCard` lays one out: a compact card at most 520 px wide, its
+ * label's icon and words, then its headline and its line, each as many lines as its words take.
+ */
+function HandoffCardShape({ anchor }: { anchor?: string }) {
+  return (
+    <div className="cd-claude-message">
+      <div className="cd-reply-card" data-skeleton-anchor={anchor}>
+        <SkeletonCard padding={16}>
+          <div className="cd-reply-card__label cd-type-caption">
+            <Skeleton shape="block" width={16} height={16} />
+            <Skeleton shape="line" text="caption" width={110} />
+          </div>
+          <div className="cd-reply-card__data">
+            <MeasuredLines
+              parts={[HELD_CHAT.handoff.headline]}
+              className="cd-type-section"
+              text="section"
+              width="60%"
+              boxClassName="cd-reply-card__headline"
+            />
+            <MeasuredLines parts={[HELD_CHAT.handoff.detail]} className="cd-type-meta" text="meta" width="50%" boxClassName="cd-reply-card__detail" />
+          </div>
+        </SkeletonCard>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The held request's card, as `ApprovalCard` lays one out: its status line, Claude's summary, the
+ * visitor's words and the rule that held it beside its icon, each as many lines as its words take,
+ * then Allow and Deny at the answers' own heights (`cd-conversation-skeleton__answer`).
+ */
+function HeldCardShape({ anchor }: { anchor?: string }) {
+  return (
+    <div className="cd-conversation__held" data-skeleton-anchor={anchor}>
+      <SkeletonCard>
+        <div className="cd-approval-card__top">
+          <Skeleton shape="line" text="caption" width="80%" />
+        </div>
+        <MeasuredLines parts={[HELD_CHAT.reason]} className="cd-type-summary" text="summary" fallback={2} boxClassName="cd-approval-card__reason" />
+        <MeasuredLines parts={[HELD_CHAT.context]} className="cd-type-meta" text="meta" boxClassName="cd-approval-card__context" />
+        <div className="cd-approval-card__held-by">
+          <Skeleton shape="block" width={16} height={16} />
+          <MeasuredLines parts={[HELD_CHAT.heldBy]} className="cd-type-meta" text="meta" boxClassName="cd-conversation-skeleton__rule" />
+        </div>
+        <div className="cd-approval-card__answers">
+          <div className="cd-approval-card__row">
+            <Skeleton
+              shape="block"
+              className="cd-conversation-skeleton__answer"
+              measure={{ label: 'Allow this time', className: 'cd-button cd-button--secondary cd-button--main cd-type-control' }}
+            />
+            <Skeleton
+              shape="block"
+              className="cd-conversation-skeleton__answer"
+              measure={{ label: 'Deny this time', className: 'cd-button cd-button--danger cd-button--main cd-type-control' }}
+            />
+          </div>
+        </div>
+      </SkeletonCard>
+    </div>
+  );
+}
+
+/** A receipt under a message: its dot, and its line as a pill. */
+function Receipt({ width, anchor }: { width: number; anchor?: string }) {
+  return (
+    <div className="cd-margin-line" data-skeleton-anchor={anchor}>
       <span className="cd-margin-line__dot">
         <Skeleton shape="circle" size={6} />
       </span>
@@ -145,9 +234,10 @@ function useOpensAtTheEnd() {
 /**
  * The open conversation's pane as shapes, from its own classes, as a fresh copy's held chat (what
  * Today's "Open the request" opens) draws: who it is with (their name, the level pill and the
- * latest line); the transcript's header lines; the visitor's bubble at the right; Claude's reply
- * at the left with its two receipt lines; and the held request's card. The transcript's region
- * opens at its end, as the chat's does, over the room the owner's controls take.
+ * latest line); the transcript's header lines; the visitor's bubble at the right; Claude's
+ * handoff card at the left with its two receipt lines; and the held request's card, each part as
+ * tall as it lands. The transcript's region opens at its end, as the chat's does, over the room
+ * the owner's controls take.
  */
 export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
@@ -160,7 +250,7 @@ export function ConversationSkeleton() {
       </div>
       <div ref={region} className="cd-conversation__scroll">
         <div className="cd-transcript">
-          <div className="cd-transcript-row cd-transcript-header">
+          <div className="cd-transcript-row cd-transcript-header" data-skeleton-anchor="transcript-head">
             <div className="cd-transcript-row__main">
               <MeasuredLines
                 parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
@@ -174,49 +264,17 @@ export function ConversationSkeleton() {
               <MeasuredLines parts={[TRANSCRIPT_NOTE]} className="cd-transcript-header__caption cd-type-caption" text="caption" fallback={1} width="65%" />
             </div>
           </div>
+          <VisitorShape words={HELD_CHAT.question} anchor="first-message" />
           <div className="cd-transcript-row">
             <div className="cd-transcript-row__main">
-              <div className="cd-visitor-message" data-skeleton-anchor="first-message">
-                <Skeleton shape="block" className="cd-type-message" width="62%" height="calc(1lh + 2 * var(--space-8))" radius="card" />
-              </div>
-            </div>
-          </div>
-          <div className="cd-transcript-row">
-            <div className="cd-transcript-row__main">
-              <div className="cd-claude-message">
-                <Lines wide={2} narrow={3} text="reply" width="90%" />
-              </div>
+              <HandoffCardShape anchor="reply-card" />
             </div>
             <div className="cd-transcript-row__margin">
-              <Receipt width={170} />
-              <Receipt width={80} />
+              <Receipt width={170} anchor="receipt-0" />
+              <Receipt width={80} anchor="receipt-1" />
             </div>
           </div>
-          <div className="cd-conversation__held" data-skeleton-anchor="last-message">
-            <SkeletonCard>
-              <div className="cd-approval-card__top">
-                <Skeleton shape="line" text="caption" width="80%" />
-              </div>
-              <div className="cd-approval-card__reason">
-                <Lines wide={2} narrow={3} text="summary" />
-              </div>
-              <div className="cd-approval-card__context">
-                <Lines wide={1} narrow={2} text="meta" />
-              </div>
-              <div className="cd-approval-card__held-by">
-                <Skeleton shape="block" width={16} height={16} />
-                <div className="cd-conversation-skeleton__rule">
-                  <Lines wide={1} narrow={2} text="meta" />
-                </div>
-              </div>
-              <div className="cd-approval-card__answers">
-                <div className="cd-approval-card__row">
-                  <Skeleton shape="block" width="46%" height="var(--size-control-main)" />
-                  <Skeleton shape="block" width="46%" height="var(--size-control-main)" />
-                </div>
-              </div>
-            </SkeletonCard>
-          </div>
+          <HeldCardShape anchor="held-card" />
         </div>
       </div>
       <ControlsRoom />

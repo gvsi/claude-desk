@@ -328,9 +328,8 @@
 }
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
-   scrolls; lines whose words aren't known yet wrap once on a wide column and twice on a phone's. The
-   owner's controls keep their room with nothing drawn in it: Take over's button and the whisper
-   box at their heights. */
+   scrolls. The owner's controls keep their room with nothing drawn in it: Take over's button and
+   the whisper box at their heights. */
 .cd-conversation-skeleton .cd-conversation__scroll {
   overflow: hidden;
 }
@@ -354,16 +353,22 @@
   height: calc(var(--size-control) + 2 * var(--space-10));
 }
 
-.cd-conversation-skeleton__narrow-line {
-  display: none;
+/* The visitor's bubble at the right, no wider than a bubble can be (85 % of the row). */
+.cd-conversation-skeleton__bubble {
+  display: flex;
+  justify-content: flex-end;
+  width: 85%;
 }
 
-@container cd-open-conversation (max-width: 439.98px) {
-  .cd-conversation-skeleton__narrow-line {
-    display: flex;
-  }
+/* Allow and Deny at a main button's height, and in a narrow card, as ApprovalCard draws them there,
+   equal halves 4 px taller. */
+.cd-conversation-skeleton__answer {
+  height: var(--size-control-main);
+}
 
-  .cd-conversation-skeleton__wide-line {
-    display: none;
+@container cd-approval-answers (max-width: 437.98px) {
+  .cd-approval-card__row > .cd-conversation-skeleton__answer {
+    flex: 1 1 0;
+    height: calc(var(--size-control-main) + var(--space-4));
   }
 }

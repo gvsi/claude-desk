@@ -16,8 +16,6 @@ export interface SkeletonAnchor {
   size?: boolean;
   /** Extra dimensions when only width or height is predictable before data arrives. */
   dimensions?: readonly ('width' | 'height')[];
-  /** Compares the bottom edge instead of the top: a part that lands at the foot of a region opened at its end. */
-  bottom?: boolean;
 }
 export interface SkeletonLoad {
   status: string;
@@ -39,15 +37,8 @@ function landed(selector: string): HTMLElement {
   return element;
 }
 
-function compare(
-  shape: DOMRect,
-  real: DOMRect,
-  label: string,
-  size = false,
-  dimensions: readonly ('width' | 'height')[] = [],
-  vertical: 'top' | 'bottom' = 'top',
-): void {
-  for (const edge of size ? ([vertical, 'left', 'width', 'height'] as const) : ([vertical, 'left', ...dimensions] as const)) {
+function compare(shape: DOMRect, real: DOMRect, label: string, size = false, dimensions: readonly ('width' | 'height')[] = []): void {
+  for (const edge of size ? (['top', 'left', 'width', 'height'] as const) : (['top', 'left', ...dimensions] as const)) {
     expect(Math.abs(shape[edge] - real[edge]), `${label} ${edge}: shape ${shape[edge]}, page ${real[edge]}`).toBeLessThanOrEqual(
       SKELETON_TOLERANCE_PX,
     );
@@ -266,13 +257,12 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
   }
   for (const [i, anchor] of load.anchors.entries()) {
     const moment = still ? watch.replaced() : watch.leaving()?.anchors;
-    const vertical = anchor.bottom === true ? 'bottom' : 'top';
-    compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions, vertical);
-    if (!still) compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions, vertical);
+    compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions);
+    if (!still) compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
     // The tables allow data-dependent sizes relative to the shape. After replacement, the
     // landed anchor's own top, left, width and height must all stay stable.
     compare(watch.replaced()![i]!, final[i]!, `${anchor.name} after gone`, true);
-    compare(anchors[i]!, final[i]!, anchor.name, anchor.size, anchor.dimensions, vertical);
+    compare(anchors[i]!, final[i]!, anchor.name, anchor.size, anchor.dimensions);
   }
   (load.stays ?? []).forEach((selector, i) => compare(stays[i]!, landed(selector).getBoundingClientRect(), selector, true));
   expect(watch.parts().body.hasAttribute('aria-busy')).toBe(false);
