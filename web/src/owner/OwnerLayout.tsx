@@ -224,8 +224,10 @@ function DeskGate({ deskId }: { deskId: string }) {
  * land on Rules' top. Each place is remembered by its history entry as the owner scrolls, since by
  * the time a page has gone its area already holds the next one. A page is its route on this Desk;
  * moving within one page (an attempt or a conversation beside its list) keeps the page's place, as
- * those routes are made to. A place the page can't reach yet, because it is still loading, waits for
- * the page to ask for it once drawn (the `reachPlace` this returns).
+ * those routes are made to. A page still loading asks for its place again once drawn (the
+ * `reachPlace` this returns): it may have been too short to reach the place yet, or what came in
+ * with it above the place (Rules' question about a hold) would otherwise carry the place down with
+ * it as the browser keeps what it showed in view.
  */
 function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): (key: string) => void {
   const matches = useMatches();
@@ -235,8 +237,8 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
   // The main area's place in each history entry, and the entry it is showing.
   const places = useRef(new Map<string, number>());
   const entry = useRef(key);
-  // The place Back or Forward returned to that the page was too short to hold, and its entry.
-  const unreached = useRef<{ key: string; top: number } | null>(null);
+  // The place Back or Forward returned to, and its entry, until the page asks for it once drawn.
+  const returned = useRef<{ key: string; top: number } | null>(null);
 
   // Set before the page's place below, so the scroll that place makes is heard as this entry's.
   useLayoutEffect(() => {
@@ -257,15 +259,15 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
     // `key` and `navigationType` are read only when the page changes: within a page, its place stays.
     const top = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
     main.scrollTop = top;
-    unreached.current = main.scrollTop < top - 1 ? { key, top } : null;
+    returned.current = top > 0 ? { key, top } : null;
   }, [inside, deskId, page]);
 
   return useCallback(
     (at: string) => {
       const main = inside.current?.closest('main');
-      const place = unreached.current;
+      const place = returned.current;
       if (!main || place?.key !== at) return;
-      unreached.current = null;
+      returned.current = null;
       main.scrollTop = place.top;
     },
     [inside],

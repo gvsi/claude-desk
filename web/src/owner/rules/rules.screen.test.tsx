@@ -895,6 +895,38 @@ describe('rules page', () => {
     await expect.poll(() => main.scrollTop).toBe(end);
   });
 
+  it.each(['before', 'after'] as const)('going_back_keeps_the_place_when_the_hold_question_comes_in_above_it_%s_the_shapes_show', async (when) => {
+    // Acme's Rules waits for Needs you, whose held quote puts a question under Ask Claude, above the
+    // connectors. A short window, with Payments' limit in its middle: a place halfway down Rules,
+    // which its shapes can hold while it reads.
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const main = screen.getByRole('main').element();
+    const limit = () => screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true }).element();
+    limit().scrollIntoView({ block: 'center' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const place = main.scrollTop;
+    const shows = limit().getBoundingClientRect().top;
+    expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
+
+    // Back from All rules: the question comes in with the page, above the place, at once or once
+    // Needs you, held, comes after the shapes have shown.
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    const reads = when === 'after' ? holdNeedsYou() : null;
+    await router.navigate(-1);
+    if (reads !== null) {
+      await expect.poll(reads.held).toBeGreaterThan(0);
+      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+      reads.release();
+    }
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await settled(screen.container);
+    expect(main.scrollTop).toBe(place);
+    expect(limit().getBoundingClientRect().top, "Payments' limit where the owner left it").toBe(shows);
+  });
+
   it('rules_page_matches_its_board', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
