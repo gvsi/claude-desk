@@ -1710,6 +1710,38 @@ async def test_suggestions_clear_stored_configs_before_settling_when_tools_are_o
 
 
 @pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("action", ["decision", "suggestions"])
+async def test_proposal_turn_restores_the_runtime_business_tools_flag(
+        proposals, app, monkeypatch, enabled, action):
+    owner, state, ids = proposals
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
+    runner = setup.run_turn
+    inner = setup.card_turn if action == "decision" else setup.close_setup
+    received = []
+
+    async def run(*args, turn, **kwargs):
+        async def refreshed_turn(ctx, interview, staged):
+            # The runner may supply a fresh interview, without check's runtime flag.
+            fresh = replace(interview, business_tools_enabled=not enabled)
+            await turn(ctx, fresh, staged)
+            interview.__dict__.update(fresh.__dict__)
+        return await runner(*args, turn=refreshed_turn, **kwargs)
+
+    async def checked(ctx, engine, model, interview, *args, **kwargs):
+        received.append(interview.business_tools_enabled)
+        assert interview.business_tools_enabled is enabled
+        await inner(ctx, engine, model, interview, *args, **kwargs)
+
+    monkeypatch.setattr(setup, "run_turn", run)
+    monkeypatch.setattr(setup, "card_turn" if action == "decision" else "close_setup", checked)
+    endpoint = f"proposals/{ids[0]}" if action == "decision" else "suggestions"
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/{endpoint}?cards=1",
+                                     json={"accept": True} if action == "decision" else {})
+    assert reply.status_code == 200, reply.text
+    assert received == [enabled]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_after_finish_writes_business_tools_only_when_enabled(monkeypatch, enabled):
     from types import SimpleNamespace
 

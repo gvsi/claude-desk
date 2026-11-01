@@ -1222,6 +1222,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
 
     async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
         nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
         if not business_tools_enabled:
             _clear_configs(interview)
         apply_decision(interview, proposal_id, decision)
@@ -2181,6 +2182,7 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
 
     async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
         nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
         if not business_tools_enabled:
             _clear_configs(interview)
         await close_setup(ctx, engine, model, interview)
