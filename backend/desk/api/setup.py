@@ -2131,14 +2131,22 @@ def finish(interview: Interview) -> None:
     interview.cover(remaining)
     included = []
     used = 0
+    seen = set()
+    skipped = 0
     for job in accepted_jobs(interview):
         if not job.can_do_today:
             continue
         how = " ".join(job.how.split())
+        if how in seen or re.search(r"\d|\bfree\b", how, re.IGNORECASE):
+            skipped += 1
+            continue
+        seen.add(how)
         needed = len(how) + bool(included)
         if how and used + needed <= 1500:
             included.append(how)
             used += needed
+    if skipped:
+        logger.warning("setup skipped %d job descriptions", skipped)
     interview.answers.how_we_help = "\n".join(included) or None
     interview.step = "tools"
 

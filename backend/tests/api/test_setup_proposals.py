@@ -17,7 +17,7 @@ from tests.api.test_setup_questions import (
 
 def job(kind="schedule", **fields):
     return JobProposal(**{
-        "job": kind, "title": "Book an intro", "why": "Meet new clients", "how": "Book a free slot",
+        "job": kind, "title": "Book an intro", "why": "Meet new clients", "how": "Books an open slot",
         "autonomy": "ask", "can_do_today": False,
         "config": {"block": "typed_booking", "appointment_type": "Intro", "minutes": 20}, **fields,
     })
@@ -437,7 +437,7 @@ async def test_connected_apps_add_no_jobs_facts_tools_or_rule_claims(monkeypatch
                                       jobs=setup.owner_job_answers(interview)) is version
     assert len(with_app.connected) == (0 if app_key == "stripe" else 1)
     assert baseline.answers == with_app.answers
-    assert baseline.answers.how_we_help == "Book a free slot"
+    assert baseline.answers.how_we_help == "Books an open slot"
     assert messages[0] == messages[1]
     assert posted[0] == posted[1]
     assert tool_jobs[0] == tool_jobs[1]
@@ -1081,7 +1081,7 @@ async def test_rules_drafting_receives_only_owner_decided_jobs(proposals, model,
     data = json.loads(html.unescape(message.split("<answers>")[1].split("</answers>")[0]))
     expected = [{"job": "schedule", "title": "Book an intro", "autonomy": "ask" if owner_decided == "typed" else "auto"}] if owner_decided else []
     assert data.get("accepted_jobs", []) == expected
-    assert "Book a free slot" not in message
+    assert "Books an open slot" not in message
     assert "Meet new clients" not in message
 
 
@@ -1157,7 +1157,7 @@ def test_how_we_help_omits_jobs_unavailable_today(kind):
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
-    assert state.answers.how_we_help == "Book a free slot"
+    assert state.answers.how_we_help == "Books an open slot"
 
 
 def test_finish_declines_an_unpriced_purpose_payment():
@@ -1170,7 +1170,7 @@ def test_finish_declines_an_unpriced_purpose_payment():
     setup.finish(state)
     assert entries[0].card.state == "declined"
     assert [accepted.title for accepted in setup.accepted_jobs(state)] == ["Book an intro"]
-    assert state.answers.how_we_help == "Book a free slot"
+    assert state.answers.how_we_help == "Books an open slot"
 
 
 @pytest.mark.parametrize("title, expected", [
@@ -1346,18 +1346,31 @@ def test_settling_apps_marks_only_accepted_simulated_connections(app_key, status
 
 
 def test_finish_reads_shown_and_unshown_items():
-    entries = setup.proposal_entries([job(title='Shown'), job('answer', title='Unshown', config=None),
+    entries = setup.proposal_entries([job(title='Shown', how='Books a call'), job('answer', title='Unshown', how='Answers questions', config=None),
                                      job(title='Still waiting')], [])
     entries[0].card.state = entries[1].card.state = 'accepted'
     state = interview_with(SetupAnswers(summary='Tax advice'), [
         setup.Entry(role='claude', text='Understanding', planned=[entry.card.model_copy(deep=True) for entry in entries]),
         entries[0], entries[2]])
     setup.finish(state)
-    assert state.answers.how_we_help == 'Book a free slot\nBook a free slot'
+    assert state.answers.how_we_help == 'Books a call\nAnswers questions'
     assert entries[2].card.state == 'proposed'
     before = setup._stored(state)
     setup.finish(state)
     assert setup._stored(state) == before
+
+
+def test_finish_deduplicates_how_and_skips_unsafe_lines(caplog):
+    descriptions = ["Books a call", "  Books   a call  ", "Offers FREE consultations", "Calls within 2 days",
+                    "Answers carefree questions"]
+    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
+    for entry in entries:
+        entry.card.state = "accepted"
+    state = plan_state(entries)
+    setup.finish(state)
+    assert state.answers.how_we_help == "Books a call\nAnswers carefree questions"
+    assert len(caplog.records) == 1
+    assert caplog.records[0].getMessage() == "setup skipped 3 job descriptions"
 
 
 def test_a_decision_on_a_card_that_isnt_pending_is_409():
@@ -1579,7 +1592,7 @@ async def test_drafting_gets_only_jobs_decided_on_a_shown_card(proposals, model,
     text = request.messages[0]["content"][0]["text"]
     answers = json.loads(html.unescape(text.split("<answers>")[1].split("</answers>")[0]))
     assert answers["accepted_jobs"] == [{"job": "schedule", "title": "Book an intro", "autonomy": "auto"}]
-    assert "Answer tax questions" not in text and "Meet new clients" not in text and "Book a free slot" not in text
+    assert "Answer tax questions" not in text and "Meet new clients" not in text and "Books an open slot" not in text
 
 
 async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_later_enable(proposals, app, model, engine):
