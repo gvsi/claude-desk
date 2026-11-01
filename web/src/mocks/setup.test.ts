@@ -254,6 +254,18 @@ describe('setup consultant run and decisions', () => {
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
   });
 
+  it('refuses_zero_payment_decisions_with_amount_required_and_changes_nothing', async () => {
+    let state = await cpaAt('payment');
+    expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: state.pending_card! }, body: { accept: true, amount_cents: 0 } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
+    expect(await setupState('setup', state.interview_id)).toEqual(state);
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: state.pending_card, text: '$0' });
+    const pending = state.pending_card!;
+    expect(await mockStore.dispatch('setupProposal', { params: { id: state.interview_id, proposal_id: pending }, body: { accept: true } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
+    expect(await setupState('setup', state.interview_id)).toEqual(state);
+    state = await setupState('setupSuggestions', state.interview_id, {});
+    expect(state.messages.find(({ card }) => card?.proposal_id === pending)?.card?.state).toBe('declined');
+  });
+
   it('preserves_atomic_validation_and_payment_amount_requirements', async () => {
     let state = await cpaAt('payment');
     const id = state.interview_id;
@@ -264,7 +276,7 @@ describe('setup consultant run and decisions', () => {
       expect(await setupState('setup', id)).toEqual(state);
     }
     expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
-    for (const amount_cents of [0, 1000000]) {
+    for (const amount_cents of [1, 1000000]) {
       const fresh = await cpaAt('payment');
       const accepted = await setupState('setupProposal', fresh.interview_id, { accept: true, title: 'Updated retainer', autonomy: 'ask', amount_cents }, fresh.pending_card!);
       expect(accepted.messages.find(({ card }) => card?.proposal_id === fresh.pending_card)?.card).toMatchObject({ state: 'accepted', job: { title: 'Updated retainer', autonomy: 'ask', config: { amount_cents } } });

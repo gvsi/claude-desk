@@ -94,9 +94,10 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
   const rows = jobRows(job);
   const decide = (action: CardAction) => {
     if (disabled || !live || proposal.state !== 'proposed') return;
-    const cents = /^\d+(?:\.\d{1,2})?$/.test(amount.trim()) ? Math.round(Number(amount) * 100) : NaN;
+    const dollars = amount.replace(/[$,\s]/g, '');
+    const cents = /^\d+(?:\.\d{1,2})?$/.test(dollars) ? Math.round(Number(dollars) * 100) : NaN;
     const decision = decisionBody({ action, proposal, ...(payment && action === 'accept' ? { amount_cents: cents } : {}) });
-    if (!decision.ok) { setError(decision.code === 'amount_required' ? copy.amountError : decision.message); return; }
+    if (!decision.ok) { setError(copy.amountError); return; }
     onDecision({ proposal_id: proposal.proposal_id, action, body: decision.body });
   };
   return <Card as="article" label={job.title} padding={16}>

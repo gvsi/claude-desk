@@ -3579,6 +3579,16 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each(['$1,500', '1500', '1,500.00', ' $ 1,500.00 '] as const)('accepts_payment_dollars_as_typed_%s', async (dollars) => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill(dollars);
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests('setupProposal').at(-1)?.body).toEqual({ accept: true, amount_cents: 150000 });
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+  });
+
   it('requires_a_payment_amount_and_sends_owner_dollars_as_integer_cents', async () => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -3588,10 +3598,15 @@ describe('consultant setup', () => {
     const setup = card.getByRole('button', { name: 'Set it up', exact: true });
     await expect.element(setup).toBeDisabled();
     const mark = requests('setupProposal').length;
-    await amount.fill('bad');
-    await setup.click();
-    await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
-    expect(requests('setupProposal')).toHaveLength(mark);
+    for (const invalid of ['bad', '0', '$0.00', '-1', '1.234', '10000.01']) {
+      await amount.fill(invalid);
+      await setup.click();
+      await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
+      await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+      expect(requests('setupProposal')).toHaveLength(mark);
+    }
+    await amount.fill('');
+    await expect.element(setup).toBeDisabled();
     await amount.fill('750.00');
     await setup.click();
     await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();

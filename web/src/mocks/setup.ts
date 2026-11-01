@@ -657,7 +657,7 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
   for (const { card } of interview.state.messages) {
     if (card?.state !== 'proposed') continue;
-    card.state = card.job?.config?.block === 'purpose_payment' && card.job.config.amount_cents === null ? 'declined' : 'accepted';
+    card.state = card.job?.config?.block === 'purpose_payment' && (card.job.config.amount_cents === null || card.job.config.amount_cents <= 0) ? 'declined' : 'accepted';
   }
   interview.state.question = null;
   interview.state.pending_card = null;
@@ -776,7 +776,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       say(interview, 'claude', CPA_COPY.updated);
       interview.state.messages.push({ role: 'claude', text: '', choices: [], card: updated });
     } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
-      const unpriced = payment?.amount_cents === null;
+      const unpriced = payment !== null && (payment.amount_cents === null || payment.amount_cents <= 0);
       card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
       connectAcceptedProposal(world, interview, card);
       nextConsultant(interview);
@@ -1132,8 +1132,10 @@ export const SETUP_ROUTES: ServedRoutes = {
       || typeof body.amount_cents !== 'number' || !Number.isInteger(body.amount_cents)
       || body.amount_cents < 0 || body.amount_cents > MONEY_CAP_MAX_CENTS
     )) return INVALID;
-    if (body.accept && proposal.job?.config?.block === 'purpose_payment'
-      && proposal.job.config.amount_cents === null && !hasAmount) return fail(422, 'amount_required');
+    if (body.accept && proposal.job?.config?.block === 'purpose_payment') {
+      const amount = hasAmount ? body.amount_cents : proposal.job.config.amount_cents;
+      if (amount === null || amount === 0) return fail(422, 'amount_required');
+    }
     const apply = () => {
       proposal.state = body.accept ? 'accepted' : 'declined';
       if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;

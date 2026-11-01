@@ -23,7 +23,7 @@ describe('setup conversation', () => {
       expect(result).not.toHaveProperty('body');
     }
     expect(decisionBody({ action: 'decline', proposal: unpriced })).toEqual({ ok: true, body: { accept: false } });
-    for (const amount_cents of [0, 1_000_000]) {
+    for (const amount_cents of [1, 1_000_000]) {
       expect(decisionBody({ action: 'accept', proposal: unpriced, amount_cents })).toEqual({ ok: true, body: { accept: true, amount_cents } });
     }
   });
@@ -33,24 +33,24 @@ describe('setup conversation', () => {
     expect(decisionBody({ action: 'accept', proposal })).toMatchObject({ ok: false, code: 'amount_required' });
     expect(decisionBody({ action: 'decline', proposal })).toEqual({ ok: true, body: { accept: false } });
     expect(decisionBody({ action: 'accept', proposal, amount_cents: 75000 })).toEqual({ ok: true, body: { accept: true, amount_cents: 75000 } });
-    expect(decisionBody({ action: 'accept', proposal, amount_cents: NaN })).toMatchObject({ ok: false, field: 'amount_cents' });
+    expect(decisionBody({ action: 'accept', proposal, amount_cents: NaN })).toMatchObject({ ok: false, field: 'amount_cents', message: 'Enter an amount to accept this.' });
   });
 
   it('returns_field_errors_instead_of_bodies_for_invalid_payment_amounts', () => {
-    for (const amount_cents of [-1, 1_000_001, 0.5, NaN, Infinity]) {
-      expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toMatchObject({ ok: false, field: 'amount_cents' });
+    for (const amount_cents of [0, -1, 1_000_001, 0.5, NaN, Infinity]) {
+      expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toMatchObject({ ok: false, field: 'amount_cents', message: 'Enter an amount to accept this.' });
     }
     const schedule: ProposalCard = { ...payment, job: { ...payment.job!, job: 'schedule', config: { block: 'typed_booking', appointment_type: 'Intro', minutes: 20 } } };
     const connector: ProposalCard = { ...payment, kind: 'connector', job: null, connector: { app: 'stripe', label: 'Stripe', why: 'Payments', connectable: true } };
     for (const proposal of [schedule, connector]) {
-      expect(decisionBody({ action: 'accept', proposal, amount_cents: 100 })).toMatchObject({ ok: false, field: 'amount_cents' });
+      expect(decisionBody({ action: 'accept', proposal, amount_cents: 100 })).toMatchObject({ ok: false, field: 'amount_cents', message: 'Enter an amount to accept this.' });
     }
   });
 
   it('builds_declines_and_accepts_with_only_the_payment_amount', () => {
     expect(decisionBody({ action: 'decline', proposal: payment, amount_cents: -1 })).toEqual({ ok: true, body: { accept: false } });
     expect(decisionBody({ action: 'accept', proposal: payment })).toEqual({ ok: true, body: { accept: true } });
-    for (const amount_cents of [0, 1_000_000]) {
+    for (const amount_cents of [1, 1_000_000]) {
       expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toEqual({ ok: true, body: { accept: true, amount_cents } });
     }
   });
