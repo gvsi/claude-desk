@@ -53,6 +53,64 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
     assert bool(rows) is accepted
 
 
+AMENITY_WORDING = ('Free parking', 'Complimentary coffee', 'Estacionamiento gratis', 'No cost parking')
+INTAKE = {'block': 'intake', 'questions': ['What?']}
+PAYMENT = {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}
+
+
+async def put_card(kernel, ro_read, title, config):
+    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows."""
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    request = BusinessToolsRequest(tools=[BusinessTool(
+        tool='desk.card', title=title, description='Take details.', config=config)])
+    try:
+        await http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools', request,
+                                                path={'id': copy.desk_ids[0]})
+        detail = None
+    except KernelFailed as error:
+        assert (error.status, error.code) == (422, 'invalid')
+        detail = error.detail
+    return detail, ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config,field', [
+    *[('Retainer', {**PAYMENT, 'purpose': purpose}, 'purpose') for purpose in AMENITY_WORDING],
+    *[(title, PAYMENT, 'title') for title in AMENITY_WORDING if title != 'Free parking'],
+    ('Complimentary coffee', INTAKE, 'title'),
+    ('No cost parking', INTAKE, 'title'),
+])
+async def test_business_card_text_gets_no_amenity_exception(kernel, ro_read, title, config, field):
+    # The amenity exception is for charter policy text; a card field passes a promise word only as
+    # an allowed free word in its title or appointment type.
+    detail, rows = await put_card(kernel, ro_read, title, config)
+    assert detail == {f'desk.card.{field}': ['public_promise']}
+    assert rows == []
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_purpose_payment_title_free_parking_is_refused(kernel, ro_read):
+    detail, rows = await put_card(kernel, ro_read, 'Free parking', PAYMENT)
+    assert detail == {'desk.card.title': ['public_promise']}
+    assert rows == []
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config', [
+    ('Book a free intro call', INTAKE),
+    ('Intro call', {'block': 'typed_booking', 'appointment_type': 'Free intro call', 'minutes': 30}),
+    ('Free parking', INTAKE),
+    ('Free consultation', INTAKE),
+])
+async def test_free_word_in_a_title_or_appointment_type_still_passes(kernel, ro_read, title, config):
+    detail, rows = await put_card(kernel, ro_read, title, config)
+    assert detail is None
+    assert [row['tool'] for row in rows] == ['desk.card']
+
+
 @pytest.mark.kernel_plan('01c')
 @pytest.mark.parametrize('title,config,fields,rule', [
     ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000},

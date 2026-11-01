@@ -83,6 +83,24 @@ def test_indexed_card_keys_preserve_render_order_and_return_unindexed_details():
         'desk.x.title': ['format_control', 'public_promise'], 'desk.x.purpose': ['public_promise']}
 
 
+def test_amenity_exception_is_for_charter_policy_text_only():
+    from desk.contracts import RenderedBlock
+    from desk.kernel_service import reply_check
+
+    policy = RenderedBlock(kind='card', template='policy', fact_id='charter:policy:parking', text='Free parking.')
+    assert reply_check.policy_card_rules('', [policy]) == {}                 # the public read keeps the default
+    assert reply_check.scan_public_policies({'policy:parking': 'Free parking.'}) == {}
+    assert reply_check.scan_public_text('Free parking.') == []
+    assert reply_check.scan_public_policies({'policy:parking': 'Free parking.'}, amenities=False) == {
+        'policy:parking': ['lex.en.promise']}
+    assert reply_check.scan_public_text('Free parking.', amenities=False) == ['lex.en.promise']
+    # Card keys allow a free word through allow_words alone, in the per-key and the joined-card passes.
+    fields = {'desk.retainer.0-title': 'Retainer', 'desk.retainer.1-purpose': 'Free parking'}
+    assert reply_check.scan_public_policies(fields, amenities=False) == {'desk.retainer.1-purpose': ['lex.en.promise']}
+    assert reply_check.scan_public_policies({'desk.x.0-title': 'Free parking'}, {'desk.x.0-title': reply_check.FREE_WORDS},
+                                            amenities=False) == {}
+
+
 async def business_rows(app, copy):
     return {row.tool: row for row in await rows_of(app, copy.copy_id, select(Tool).where(
         Tool.desk_id == copy.desk_id, Tool.source == 'business'))}
@@ -618,13 +636,13 @@ async def test_card_text_has_one_combined_scan_per_tool_in_render_order(app, cli
     scanned, checks = [], []
     scan, check = reply_check.scan_public_policies, desks.refuse_public_promises
 
-    def record_scan(values, allow_words={}):
-        scanned.append((sorted(values.items()), dict(allow_words)))
-        return scan(values, allow_words)
+    def record_scan(values, allow_words={}, **options):
+        scanned.append((sorted(values.items()), dict(allow_words), options))
+        return scan(values, allow_words, **options)
 
-    async def record_check(ctx, part, values, desk_id=None, *, allow_words={}):
-        checks.append((part, list(values), set(allow_words)))
-        return await check(ctx, part, values, desk_id, allow_words=allow_words)
+    async def record_check(ctx, part, values, desk_id=None, *, allow_words={}, **options):
+        checks.append((part, list(values), set(allow_words), options))
+        return await check(ctx, part, values, desk_id, allow_words=allow_words, **options)
 
     monkeypatch.setattr(reply_check, 'scan_public_policies', record_scan)
     monkeypatch.setattr(desks, 'refuse_public_promises', record_check)
@@ -635,14 +653,17 @@ async def test_card_text_has_one_combined_scan_per_tool_in_render_order(app, cli
             'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000})])
     assert response.status_code == 200, response.text
     # One shared scan per tool; it reads keys sorted, which is the card's render order.
+    # Card text gets no amenity exception: only allow_words can pass a promise word.
     assert scanned == [([('desk.consult.0-title', 'Free consult'),
                          ('desk.consult.1-appointment_type', 'Consultas gratuitas')],
                         {'desk.consult.0-title': reply_check.FREE_WORDS,
-                         'desk.consult.1-appointment_type': reply_check.FREE_WORDS}),
-                       ([('desk.retainer.0-title', 'Retainer'), ('desk.retainer.1-purpose', 'Initial retainer')], {})]
+                         'desk.consult.1-appointment_type': reply_check.FREE_WORDS}, {'amenities': False}),
+                       ([('desk.retainer.0-title', 'Retainer'), ('desk.retainer.1-purpose', 'Initial retainer')], {},
+                        {'amenities': False})]
     assert checks == [('business_tools', ['desk.consult.0-title', 'desk.consult.1-appointment_type'],
-                       {'desk.consult.0-title', 'desk.consult.1-appointment_type'}),
-                      ('business_tools', ['desk.retainer.0-title', 'desk.retainer.1-purpose'], set())]
+                       {'desk.consult.0-title', 'desk.consult.1-appointment_type'}, {'amenities': False}),
+                      ('business_tools', ['desk.retainer.0-title', 'desk.retainer.1-purpose'], set(),
+                       {'amenities': False})]
 
 
 async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the_scan(app, client, monkeypatch):
@@ -653,9 +674,9 @@ async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the
                                   'purpose_payment': ('title', 'purpose'), 'urgent': ('title',)}
     copy = await rivera(app, client)
     checks, original = [], desks.refuse_public_promises
-    async def record(ctx, part, values, desk_id=None, *, allow_words={}):
+    async def record(ctx, part, values, desk_id=None, *, allow_words={}, **options):
         checks.append((list(values.items()), set(allow_words)))
-        return await original(ctx, part, values, desk_id, allow_words=allow_words)
+        return await original(ctx, part, values, desk_id, allow_words=allow_words, **options)
     monkeypatch.setattr(desks, 'refuse_public_promises', record)
     tools = [intake(title='Free intro call', config={'block': 'intake', 'questions': ['Pay $50?']}),
              intake(tool='desk.consult', title='Consult', config={

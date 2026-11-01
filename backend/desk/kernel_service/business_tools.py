@@ -92,13 +92,15 @@ def card_refusal(tool: BusinessTool, scanned: Mapping[str, Iterable[str]]) -> di
 
 async def _card_text_refusal(ctx: KernelCtx, desk_id: str, tool: BusinessTool) -> dict[str, list[str]]:
     """One combined public-promise scan of a tool's card fields in render order, after the hidden
-    character check; the shared check's own refusal is folded into the batch's."""
+    character check; the shared check's own refusal is folded into the batch's. Card fields get no
+    amenity exception (`amenities=False`): the master plan allows the free words in a title or an
+    appointment type only, and exempts no other hit, while charter policy text keeps that exception."""
     values = public_fields(tool)
     if hidden := hidden_fields(values):
         return hidden
     try:
         await desks.refuse_public_promises(ctx, "business_tools", values, desk_id,
-                                           allow_words=free_allow_words(tool))
+                                           allow_words=free_allow_words(tool), amenities=False)
     except KernelFailure as failure:
         if failure.status != 422 or failure.detail is None:
             raise

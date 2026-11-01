@@ -365,7 +365,8 @@ def test_kernel_error_detail_accepts_emitted_fields_and_bounded_rule_ids():
             tool = BusinessTool(tool='desk.' + 'x' * 40, title=title, description='Take details.', config=config)
             values = business_tools.public_fields(tool)
             detail = business_tools.hidden_fields(values) or business_tools.card_refusal(
-                tool, reply_check.scan_public_policies(values, allow_words=business_tools.free_allow_words(tool)))
+                tool, reply_check.scan_public_policies(values, allow_words=business_tools.free_allow_words(tool),
+                                                  amenities=False))
             assert detail and KernelError(code='invalid', detail=detail).detail == detail
 
     detail = {'charter:policy:service_area': [f'lex.{language}.{category}'

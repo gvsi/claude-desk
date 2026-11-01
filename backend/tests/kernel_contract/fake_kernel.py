@@ -4033,7 +4033,7 @@ class FakeKernelState:
         for tool in batch.tools:
             values = public_fields(tool)
             detail.update(hidden_fields(values) or card_refusal(
-                tool, reply_check.scan_public_policies(values, allow_words=free_allow_words(tool))))
+                tool, reply_check.scan_public_policies(values, allow_words=free_allow_words(tool), amenities=False)))
         if detail:
             refuse("public_promise", detail=detail)
         # Build the entire batch before changing any row.
