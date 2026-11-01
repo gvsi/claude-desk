@@ -1483,6 +1483,63 @@ async function beforeSafety(viewport: 'desktop' | 'phone' = 'phone', retryScale 
   return rendered;
 }
 
+it('safety_paused_first_reads_show_network_errors_and_stay_open_on_reconnect', async () => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await beforeSafety();
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  const keys = [['ledger', RIVERA.deskId], ['health'], ['safety', RIVERA.deskId], todayKey(RIVERA.deskId)];
+  for (const queryKey of keys) client.removeQueries({ queryKey });
+  // Fail live API fetches, while leaving the browser and its mock worker online.
+  let offline = true;
+  const send = window.fetch;
+  const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (offline && url.pathname.startsWith('/api/')) return Promise.reject(new TypeError('Network unavailable'));
+    return send(input, init);
+  });
+  onTestFinished(() => sending.mockRestore());
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  const reads = (['ledger', 'health', 'safety', 'today'] as const).map(key => holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId)));
+  await router.navigate(SAFETY);
+  await vi.waitFor(() => {
+    for (const key of keys) {
+      expect(client.getQueryState(key)?.fetchStatus).toBe('paused');
+      expect(client.getQueryState(key)?.data).toBeUndefined();
+    }
+  });
+  const errors = screen.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true });
+  await expect.element(errors.first(), { timeout: 2_000 }).toBeVisible();
+  expect(errors.elements()).toHaveLength(3); // Headline (Today + attempts), ledger, health.
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(screen.getByText('Checking the record', { exact: true }).elements()).toHaveLength(0);
+  expect(screen.getByText('Reading what was stopped', { exact: true }).elements()).toHaveLength(0);
+  const stopped = screen.getByRole('radio', { name: 'Stopped', exact: true });
+  const entries = screen.getByRole('radio', { name: 'Every entry', exact: true });
+  await entries.click();
+  await expect.element(entries).toHaveFocus();
+  await stopped.click();
+  await expect.element(stopped).toHaveFocus();
+
+  const layers = watchLayers();
+  offline = false;
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(reads.every(read => read.held() > 0)).toBe(true));
+  await nextFrames();
+  await expect.element(stopped).toHaveFocus();
+  await expect.element(errors.first()).toBeVisible();
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  reads.forEach(read => read.release());
+  await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  await vi.waitFor(() => expect(errors.elements()).toHaveLength(0));
+  await nextFrames();
+  expect(layers(), 'reconnecting never brings the skeleton back').toBe(0);
+  await expect.element(stopped).toHaveFocus();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
 it.each(['ledger', 'health', 'today', 'safety'] as const)('safety_waits_for_the_record_and_health: %s alone', async (key) => {
   await withFreshRecord();
   // The frame reads Today too: hold before mounting it, so no cached read can win the delay.

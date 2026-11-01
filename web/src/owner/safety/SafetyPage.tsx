@@ -104,8 +104,8 @@ function anyFailed(...failures: (ReadFailure | null)[]): ReadFailure | null {
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
   const safety = useAttempts(deskId);
-  const todayFailure = useReadFailure(today);
-  const attemptsFailure = useReadFailure(safety);
+  const todayFailure = useReadFailure(today, { pausedRoute: 'today' });
+  const attemptsFailure = useReadFailure(safety, { pausedRoute: 'safety' });
   const failure = anyFailed(todayFailure, attemptsFailure);
   const week = today.data?.this_week;
   const attempts = safety.data;
@@ -203,7 +203,7 @@ interface AttemptsViewProps {
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
-  const failure = useReadFailure(safety);
+  const failure = useReadFailure(safety, { pausedRoute: 'safety' });
   const [filter, setFilter] = useState(ALL);
   // The row the owner last picked. The attempt open on arrival, or after a filter, leaves the
   // focus where it is; a picked one takes it once its address has opened it.
@@ -286,14 +286,19 @@ export function SafetyPage() {
   const [params, setParams] = useSearchParams();
   const view: SafetyView = params.get('view') === 'entries' ? 'entries' : 'attempts';
   const ledger = useLedger(deskId);
-  const ledgerFailure = useReadFailure(ledger);
+  const ledgerFailure = useReadFailure(ledger, { pausedRoute: 'ledger' });
   const health = useHealth();
-  const healthFailure = useReadFailure(health);
+  const healthFailure = useReadFailure(health, { pausedRoute: 'health' });
   const devKey = health.data?.kernel?.dev_signing_key ?? false;
   // Keep every first-view read mounted in either view. Switching back reuses the attempts.
   const attempts = useAttempts(deskId);
   const today = useToday(deskId);
-  const ready = [ledger, health, attempts, today].every((read) => read.isFetched);
+  const settled = [ledger, health, attempts, today].every((read) => read.isFetched || read.isPaused);
+  // A paused first read lands its network error. Reconnecting keeps the page and its view switch
+  // in place while those reads start, even though none has fetched yet.
+  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
+  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
+  const ready = settled || firstReadsEnded;
 
   const changeView = (next: SafetyView) => {
     setParams(
