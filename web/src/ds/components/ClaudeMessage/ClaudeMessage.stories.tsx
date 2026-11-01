@@ -24,6 +24,13 @@ const markdown = proseBlock(
   `Here is what Rivera Plumbing can help with:\n\n- **Drain clearing**, for kitchen and bathroom sinks\n- **Water heaters**, repaired or replaced\n\nWhich one is closest to what you need?`,
 );
 
+/** A plain reply of two short paragraphs, a blank line between them and no Markdown marks. */
+const TWO_PARAGRAPHS = [
+  'Maria clears kitchen and bathroom drains, and she repairs and replaces water heaters.',
+  "Tell me a little about what's happening, and I can look for a time she's free to come by.",
+];
+const twoParagraphs = proseBlock(TWO_PARAGRAPHS.join('\n\n'));
+
 const meta = {
   title: 'Conversation/ClaudeMessage',
   component: ClaudeMessage,
@@ -132,6 +139,26 @@ export const Markdown: Story = {
     await expect([...prose.querySelectorAll('li')].map((el) => el.textContent)).toEqual(MARKDOWN_ITEMS);
     await expect(prose.querySelectorAll('p')).toHaveLength(2);
     await expect(prose.textContent).not.toMatch(/\*|^- /m);
+  },
+};
+
+export const TwoParagraphs: Story = {
+  args: { blocks: [twoParagraphs] },
+  parameters: {
+    canvasNote:
+      "The board's replies are one paragraph each; this is a plain reply of two. A blank line in a plain reply is a paragraph break, at the boards' 10 px gap between paragraphs (owner decision, 2026-11-01).",
+  },
+  play: async ({ canvasElement }) => {
+    const prose = canvasElement.querySelector('.cd-claude-message__prose') as HTMLElement;
+    const paragraphs = [...prose.querySelectorAll('p')];
+    await expect(paragraphs.map((paragraph) => paragraph.textContent)).toEqual(TWO_PARAGRAPHS);
+    // The two paragraphs sit space-10 apart, the gap the boards draw between a reply's paragraphs.
+    const gap = Number.parseFloat(getComputedStyle(prose).getPropertyValue('--space-10'));
+    await expect(gap).toBe(10);
+    const first = paragraphs[0] as HTMLElement;
+    const second = paragraphs[1] as HTMLElement;
+    await expect(second.getBoundingClientRect().top - first.getBoundingClientRect().bottom).toBe(gap);
+    expectComputed(second, { marginTop: '10px' });
   },
 };
 
