@@ -481,6 +481,58 @@ describe('Safety', () => {
     expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
   });
 
+  it('a_long_trace_on_a_phone_opens_with_its_title_and_close_in_view', async () => {
+    // On a phone the trace is drawn under the whole list. Opening a trace taller than the window,
+    // from partway down a long list, shows its title and "Close the full trace" just under the
+    // header, never above the window with the owner partway through the recorded JSON (#679).
+    const checks = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
+    const entries = Array.from({ length: 40 }, (_, i) =>
+      entry(i + 1, `2026-10-20T16:${String(10 + i).padStart(2, '0')}:00.000000Z`, { kind: 'session', session_id: `ses-${i}`, summary: { kind: 'visitor' } }),
+    );
+    entries[34] = entry(35, '2026-10-20T16:44:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
+    injectLedger(ledgerPage(entries));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: 'phone' });
+    await expect.element(recordRow(screen, 35)).toBeVisible();
+    const main = recordRow(screen, 35).element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    main.scrollTop = 180;
+
+    await recordRow(screen, 35).click();
+    const trace = region(screen, 'Full trace of entry 35');
+    await expect.element(trace).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(trace.element().getBoundingClientRect().height).toBeGreaterThan(main.clientHeight);
+    const view = main.getBoundingClientRect();
+    const top = trace.element().querySelector<HTMLElement>('.cd-full-trace__top');
+    if (!top) throw new Error('the trace has a title row');
+    const title = top.getBoundingClientRect();
+    expect(title.top).toBeGreaterThanOrEqual(view.top);
+    expect(title.bottom).toBeLessThanOrEqual(view.bottom);
+    await expect.element(trace.getByRole('button', { name: 'Close the full trace' })).toBeInViewport();
+    // The title row sits the main area's own top padding under its edge, as the side-by-side column does.
+    expect(Math.abs(trace.element().getBoundingClientRect().top - view.top - Number.parseFloat(getComputedStyle(main).paddingTop))).toBeLessThanOrEqual(1);
+  });
+
+  it('a_trace_whose_title_already_shows_on_a_phone_leaves_the_page_still', async () => {
+    // With a short list the trace opens under it with its title row in view, so nothing scrolls.
+    injectLedger(ledgerPage(threeEntries()));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: 'phone' });
+    await expect.element(recordRow(screen, 2)).toBeVisible();
+    const main = recordRow(screen, 2).element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    const before = main.scrollTop;
+
+    await recordRow(screen, 2).click();
+    const trace = region(screen, 'Full trace of entry 2');
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const top = trace.element().querySelector<HTMLElement>('.cd-full-trace__top');
+    if (!top) throw new Error('the trace has a title row');
+    expect(top.getBoundingClientRect().bottom).toBeLessThanOrEqual(main.getBoundingClientRect().bottom);
+    expect(main.scrollTop).toBe(before);
+  });
+
   it('dev_key_is_labelled', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
