@@ -1376,6 +1376,34 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await expectScreenBasics(document.body, { owner: true });
 });
 
+it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_matches_the_drawn_column_at_%sx%s', async (width, height) => {
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  onTestFinished(chat.release);
+  const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: { width, height }, pollScale: 100 });
+  const shape = '.cd-conversation-pane .cd-conversation-skeleton';
+  await vi.waitFor(() => expect(document.querySelector(shape)).not.toBeNull());
+  const pane = document.querySelector('.cd-conversations__open')!.getBoundingClientRect();
+  const expectedWidth = Math.min(768, pane.width - (width >= 1024 ? 56 : 32));
+  const bounds = (selector: string) => {
+    const rect = document.querySelector(selector)!.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, width: rect.width };
+  };
+  const before = ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+    const rect = bounds(`${shape} ${part}`);
+    expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
+    expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
+    return rect;
+  });
+  chat.release();
+  await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
+  ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+    const rect = bounds(`.cd-conversation-pane ${part}`);
+    for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
+  });
+  expectNoHorizontalScroll();
+});
+
 it('conversation_shapes_follow_the_answer_buttons_height', async () => {
   // Change the real answer rule only. Shapes must measure it rather than repeat its height.
   const style = document.createElement('style');
