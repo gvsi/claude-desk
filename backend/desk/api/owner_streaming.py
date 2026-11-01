@@ -113,7 +113,8 @@ class StringField:
 
 class Display:
     """Only the current display snapshot is retained; slow subscribers may coalesce deltas. A turn's few read events
-    are kept in order, so every subscriber, a late one too, gets each of them before the reply's text."""
+    are kept in order, so every subscriber, a late one too, gets each of them before the reply's text. A run shows at
+    most one model call's text (`take`), so a reset only ever means a retry of that call, or text taken back."""
 
     def __init__(self, run: str | None = None):
         self.run = run
@@ -123,12 +124,29 @@ class Display:
         self._text: str | None = None
         self._terminal: tuple[str, dict] | None = None
         self._reads: list[tuple[str, dict]] = []
+        self._open = True
         self._waiters: set[asyncio.Event] = set()
 
     def _wake(self) -> None:
         self._version += 1
         for waiter in self._waiters:
             waiter.set()
+
+    def take(self) -> bool:
+        """Whether a structured call shows its text: only the run's first one does, unless the run holds it."""
+        taken, self._open = self._open, False
+        return taken
+
+    def hold(self) -> None:
+        """Show no model text in this run: its first reply could still be hidden before it's saved."""
+        self._open = False
+
+    def withdraw(self, text: str) -> None:
+        """Take back the text shown (a reset) when it is `text`, a reply that won't be saved as it showed."""
+        if text.strip() and self._text is not None and self._text.strip() == text.strip():
+            self._generation += 1
+            self._text = None
+            self._wake()
 
     def begin(self, field: str):
         if self._begun:

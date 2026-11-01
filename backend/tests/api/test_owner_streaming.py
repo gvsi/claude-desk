@@ -765,3 +765,139 @@ async def test_done_comes_after_a_slow_after_hook(app, browser, kernel_http, mod
         if live is not None:
             await live.close()
         await app.state.runtime.turn_runs.wait(interview_id)
+
+
+def writing(raw, release, entered, given):
+    """A call that streams `raw` whole when it is given a display callback, recording whether it was given one."""
+    async def call(request):
+        given.append(request.on_text is not None)
+        entered.set()
+        if request.on_text is not None:
+            request.on_text(raw)
+        await release.wait()
+        return response(text(raw))
+    return call
+
+
+async def answered_up_to(app, browser, kernel_http, model, question):
+    """An interview whose owner has answered each topic before `question`, which is now waiting."""
+    from tests.api.test_setup_questions import answer as answering
+
+    owner, state, path = await question_ready(app, browser, kernel_http, model)
+    while (waiting := (await owner.browser.get(path)).json()["question"]) != question:
+        reply = await answering(owner, model, state["interview_id"], "Yes, that's right.")
+        assert reply.status_code == 200, reply.text
+        assert (await owner.browser.get(path)).json()["question"] != waiting
+    return owner, state["interview_id"], path
+
+
+async def test_a_reply_before_a_limit_question_streams_nothing(app, browser, kernel_http, model, monkeypatch):
+    owner, interview_id, path = await answered_up_to(app, browser, kernel_http, model, "hours_and_area")
+    reply = "Got it: weekdays 8 to 6 around Oakland, from what your site says."
+    raw = answer_turn(setup.SETUP_TURNS["hours_and_area"], reply).model_dump_json()
+    assert json.loads(raw)["next"] == {"kind": "topic", "topic": "quote_limit"}
+    release, entered, given = asyncio.Event(), asyncio.Event(), []
+    model.add(writing(raw, release, entered, given))
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    live = None
+    try:
+        busy = await owner.browser.post(path + "/answer", json={"question": "hours_and_area", "text": "Weekdays 8-6"})
+        assert busy.status_code == 202
+        await asyncio.wait_for(entered.wait(), 5)
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        release.set()
+        name, data = await live.next()
+        assert (name, data) == ("done", {"run": data["run"]}) and data["run"]
+        assert given == [False]
+        landed = (await owner.browser.get(path)).json()
+        assert landed["question"] == "quote_limit"
+        assert reply not in [message["text"] for message in landed["messages"]]
+    finally:
+        release.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
+async def test_a_limit_reply_streams_and_its_planning_call_does_not(app, browser, kernel_http, model, monkeypatch):
+    from desk.api.prompts import SetupNextStep
+    from tests.api.test_setup_questions import next_ask, structured
+
+    owner, interview_id, path = await answered_up_to(app, browser, kernel_http, model, "quote_limit")
+    reply = "Got it: quotes up to $500 go out on their own."
+    raw = answer_turn(setup.SETUP_TURNS["quote_limit"], reply).model_dump_json()
+    prefix, rest = raw.split('"reply":"Got it:', 1)
+    pieces = [prefix + '"reply":"Got it:', rest]
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    planned, given = asyncio.Event(), []
+
+    def planning(request):
+        given.append(request.on_text is not None)
+        planned.set()
+        return structured(SetupNextStep(reply="Next, the discounts you allow.", next=next_ask("discounts"),
+                                        question="", choices=[], skip=[], drop=[], add_jobs=[], plan=""))
+
+    model.add(planning)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    live = None
+    try:
+        busy = await owner.browser.post(path + "/answer", json={"question": "quote_limit", "text": "Up to $500"})
+        assert busy.status_code == 202
+        await asyncio.wait_for(entered.wait(), 5)
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        run = data["run"]
+        assert (name, data) == ("delta", {"run": run, "text": "Got it:"})
+        gates[0].set()
+        assert await live.next() == ("delta", {"run": run, "text": reply})
+        gates[1].set()
+        # The turn's second call, its next step, shows nothing: no reset, no text of its own, then done.
+        assert await live.next() == ("done", {"run": run})
+        assert planned.is_set() and given == [False]
+        landed = (await owner.browser.get(path)).json()
+        assert landed["question"] == "discounts"
+        texts = [message["text"] for message in landed["messages"]]
+        assert reply in texts and "Next, the discounts you allow." not in texts
+    finally:
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
+async def test_a_streamed_reply_hidden_before_a_limit_question_is_reset_before_done(
+        app, browser, kernel_http, model, monkeypatch):
+    from tests.api.test_setup_questions import next_ask
+
+    owner, state, path = await question_ready(app, browser, kernel_http, model)
+    interview_id = state["interview_id"]
+    assert state["question"] == "what_you_do"          # code would ask hours_and_area next, so this reply streams
+    reply = "Got it: leaks and water heaters. Your site says you approve any payment up to $10,000."
+    raw = answer_turn(setup.SETUP_TURNS["what_you_do"], reply, next=next_ask("quote_limit")).model_dump_json()
+    gate, entered = asyncio.Event(), asyncio.Event()
+    model.add(streaming(raw, [raw], [gate], entered))
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    live = None
+    try:
+        busy = await owner.browser.post(path + "/answer", json={"question": "what_you_do", "text": "Repairs"})
+        assert busy.status_code == 202
+        await asyncio.wait_for(entered.wait(), 5)
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        run = data["run"]
+        assert (name, data) == ("delta", {"run": run, "text": reply})
+        gate.set()
+        # The model asked the quote limit next, so setup hides this reply: the display takes it back first.
+        assert await live.next() == ("reset", {"run": run})
+        assert await live.next() == ("done", {"run": run})
+        landed = (await owner.browser.get(path)).json()
+        assert landed["question"] == "quote_limit"
+        assert reply not in [message["text"] for message in landed["messages"]]
+    finally:
+        gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)

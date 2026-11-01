@@ -750,13 +750,15 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
+    # An owner display shows the reply (or Rules' answer) of only the run's first call; its retry resets it.
+    display = current_display.get()
+    field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
+    shows = display is not None and field is not None and display.take()
     for attempt in (1, 2):
         bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
         if bound <= 0 or (attempt == 2 and bound < retry_min_s):
             return None
-        display = current_display.get()
-        field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
-        on_text = display.begin(field) if display is not None and field is not None else None
+        on_text = display.begin(field) if shows else None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
                                timeout_s=bound, on_text=on_text)
@@ -2030,6 +2032,27 @@ def _asks(text: str) -> bool:
     return _ENDS_A_QUESTION.search(text) is not None
 
 
+def _code_next(interview: Interview, answering: QuestionKey | None = None) -> QuestionKey | None:
+    """The topic code asks next by default (`_next_ask` without the model's proposal), taking `answering` as covered."""
+    return next((key for key in QUESTION_KEYS
+                 if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
+
+
+def _hold_unless_kept(interview: Interview, answering: QuestionKey | None = None) -> None:
+    """Show none of this turn's first reply on the owner's display when it could be hidden before it is saved: it
+    reads untrusted text, and the topic code asks next by default is a limit question (`_TurnReplies.before`)."""
+    display = current_display.get()
+    if display is not None and answering not in LIMIT_CHOICES and _code_next(interview, answering) in LIMIT_CHOICES:
+        display.hold()
+
+
+def _unshow(text: str) -> None:
+    """Take a reply that won't be saved as it is off the owner's display, if it is the one showing."""
+    display = current_display.get()
+    if display is not None:
+        display.withdraw(text)
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -2043,6 +2066,7 @@ class _TurnReplies:
         if question in LIMIT_CHOICES:
             for reply, reads_untrusted in self.entries:
                 if reads_untrusted:
+                    _unshow(reply.text)        # text already streamed clears at once (a reset), before anything else
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
 
@@ -2202,6 +2226,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     payload = card.job.model_dump(mode="json") if card.job else card.connector.model_dump(mode="json")
     decision = json.dumps({"proposal_id": proposal_id,
                            "decision": "waiting" if text is not None else card.state, **payload}, ensure_ascii=False)
+    _hold_unless_kept(interview)
     following = await _next_step(owner, engine, model, interview, decision, text=text)
     if text is not None and following is None:
         raise ApiProblem(503, "model_unavailable")
@@ -2230,7 +2255,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
         if following.decision == "none":
             return
         if not _decide_typed(interview, proposal_id, following.decision == "accept"):
-            interview.transcript.pop()
+            _unshow(interview.transcript.pop().text)
             interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
@@ -2269,6 +2294,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         key = question
         desk_id = interview.desk_id
         said, = staged
+        _hold_unless_kept(interview, key)
         turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                                 [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
@@ -2383,6 +2409,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
+        _unshow(closing.reply)                # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
