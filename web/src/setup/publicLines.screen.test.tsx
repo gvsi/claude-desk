@@ -73,6 +73,31 @@ it('opens a held line with the owner’s words and signed refusal, and publishes
   expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: saved.lines.map((line) => line.key), revision: saved.revision });
 });
 
+it('keeps a successful save open in the refused state when its returned line is still held', async () => {
+  const { screen, state } = await openLines('phone');
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const field = screen.getByRole('textbox', { name: 'About us', exact: true });
+  const text = 'The owner’s revised words.';
+  await field.fill(text);
+  const current = storedPublicState(mockStore.world, state.interview_id)!;
+  const saved = { ...structuredClone(current), revision: 'saved-but-held', lines: current.lines.map((line) =>
+    line.key === 'policy:about' ? { ...line, text, source: 'owner', held: true } : line,
+  ) };
+  mockStore.inject({ route: 'setupPublicLine', status: 200, body: saved });
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).not.toHaveAttribute('aria-busy');
+  await expect.element(field).toHaveValue(text);
+  await expect.element(field).toHaveAttribute('aria-invalid', 'true');
+  await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect.element(field).not.toBeInTheDocument();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await expect.element(field).toHaveValue(text);
+  await expect.element(field).toHaveAttribute('aria-invalid', 'true');
+});
+
 it('opens the first held row in display order, preserves canceled holds and confirms only other lines', async () => {
   const state = await atSituations();
   const held = [

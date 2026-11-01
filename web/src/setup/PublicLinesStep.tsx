@@ -114,9 +114,11 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     setRefused(false);
     try {
       const saved = checkedLines(await request('setupPublicLine', { params: { id }, body: { key: editingKey, text } }));
-      if (!saved.lines.some((line) => line.key === editingKey)) throw new Error('missing edited line');
+      const savedLine = saved.lines.find((line) => line.key === editingKey);
+      if (!savedLine) throw new Error('missing edited line');
       queryClient.setQueryData(queryKey, saved);
-      cancel();
+      if (savedLine.held) setRefused(true);
+      else cancel();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) await reread();
       if (err instanceof ApiError && err.status === 422 && err.code === 'line_refused') {
