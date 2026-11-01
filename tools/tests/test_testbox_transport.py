@@ -205,3 +205,32 @@ def test_client_rejects_old_python_before_importing_annotations():
     assert result.returncode == 1
     assert 'Python 3.10 or newer is required' in result.stderr
     assert 'Traceback' not in result.stderr
+
+
+def test_runner_transfer_is_independent_of_the_selected_repository(tmp_path):
+    import importlib.util
+    from desk_tools.testbox_client import stage_runner
+
+    stage_runner(tmp_path)
+    tools = tmp_path / 'tools'
+    assert (tools / 'testbox/database.py').is_file()
+    assert (tools / 'desk_tools/testbox_client.py').is_file()
+    # The worker must import its helpers with no tools in the synchronized repository.
+    result = subprocess.run(['python3', '-c',
+        "import runpy; runpy.run_path(" + repr(str(tools / 'testbox/worker.py')) + ", run_name='fixture')"],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_launcher_accepts_current_and_previous_protocol_only():
+    import os
+    from desk_tools.testbox_client import PROTOCOL_VERSION
+
+    launcher = Path(__file__).parents[1] / 'testbox/lane-exec.py'
+    for version in (PROTOCOL_VERSION, PROTOCOL_VERSION - 1, 0, PROTOCOL_VERSION + 1):
+        result = subprocess.run(['python3', str(launcher), 'INVALID', 'a' * 32, 'true'],
+            env={**os.environ, 'TESTBOX_PROTOCOL': str(version)}, capture_output=True, text=True)
+        if version in (PROTOCOL_VERSION, PROTOCOL_VERSION - 1):
+            assert 'Invalid lane name' in result.stderr
+        else:
+            assert "update your branch's tools/testbox or re-provision" in result.stderr

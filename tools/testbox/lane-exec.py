@@ -11,6 +11,12 @@ import signal
 import subprocess
 import sys
 
+# Versions 1 and 2 share the lane/call-id/command envelope. Keep one previous
+# client generation usable when a newer branch provisions the machine.
+PROTOCOL_VERSION = 2
+if os.environ.get("TESTBOX_PROTOCOL") not in {str(PROTOCOL_VERSION), str(PROTOCOL_VERSION - 1)}:
+    raise SystemExit("update your branch's tools/testbox or re-provision")
+
 lane = sys.argv[1]
 call_id = sys.argv[2]
 if not re.fullmatch(r"[0-9a-f]{32}", call_id):

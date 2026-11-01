@@ -19,6 +19,19 @@ import time
 from desk_tools.testbox import Timings, lane_name, selected_files
 
 
+PROTOCOL_VERSION = 2
+
+
+def stage_runner(transfer: Path):
+    """Carry the client's worker and imports, independent of the selected Git tree."""
+    tools = Path(__file__).resolve().parents[1]
+    for name in ('testbox/worker.py', 'testbox/database.py', 'desk_tools/__init__.py',
+                 'desk_tools/testbox.py', 'desk_tools/testbox_client.py'):
+        target = transfer / 'tools' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(tools / name, target)
+
+
 def capture(cmd, **kwargs):
     return subprocess.check_output(cmd, text=True, **kwargs).strip()
 
@@ -107,7 +120,7 @@ def lane_state_script(base: str) -> str:
     return """import json, subprocess, sys
 from pathlib import Path
 base = Path(BASE)
-sys.path.insert(0, str(base / 'repo/tools'))
+sys.path.insert(0, str(base / 'transfer/tools'))
 try:
     from desk_tools.testbox_client import source_state
     files = json.loads((base / 'manifest.json').read_text())
@@ -299,7 +312,7 @@ def run(args, root, lane, cache):
     unit = f"desk-testbox-run-{lane}-{call_id}"
     # stop is idempotent even if cancellation happens before the service was created.
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
-    transaction = transaction_script(base, ["sudo", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/repo/tools/testbox/worker.py", base], cancel)
+    transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
     prepare = f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
     holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
     try:
@@ -310,6 +323,7 @@ def run(args, root, lane, cache):
         timing.mark("remote_lock")
         with tempfile.TemporaryDirectory(prefix="desk-testbox-") as tmp:
             tmp = Path(tmp)
+            stage_runner(tmp)
             files = source_files(root)
             state = source_state(root, files)
             delta = changed_files(state, remote["sources"])
@@ -343,7 +357,7 @@ def run(args, root, lane, cache):
                 subprocess.run([rsync, "-rlpt", "--ignore-times", "--from0", "--files-from=" + str(tmp / "files"), "-e", transport, str(root) + "/", host + ":" + base + "/repo/"], check=True)
             timing.mark("source_transfer")
             print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", flush=True)
-            # Install the runner from this synced tree, so uncommitted client changes are testable.
+            # Run the worker shipped by this client, even if the selected tree has no tools.
             holder.stdin.write("run\n")
             holder.stdin.flush()
             for line in holder.stdout:

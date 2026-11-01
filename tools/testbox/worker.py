@@ -125,7 +125,7 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         timing.mark("database_lock")
         # Use the lane venv's psycopg. SQL identifiers are constructed by psycopg, never interpolated.
-        helper = str(repo / "tools/testbox/database.py")
+        helper = str(Path(__file__).resolve().with_name("database.py"))
         run([str(repo / "backend/.venv/bin/python"), helper, str(base), template, database, schema], env=env)
     timing.mark("database_setup")
     command = request["command"]
