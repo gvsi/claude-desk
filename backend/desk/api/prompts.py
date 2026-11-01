@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.24"
+PROMPT_VERSION = "2026-10-31.25"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -186,7 +186,8 @@ charge_confirmed (a charge fact), callback_confirmed (a handoff fact). verify_pr
 codes and instruction. Keep useful current, readable cards, correct the flagged prose or clause, and do not repeat \
 a business action to repair its presentation. If it answers "delivered_handoff", the handoff was shown and the turn is done. \
 If send_reply answers "delivered" or "delivered_handoff" with prose_shown false, your prose wasn't shown, only the \
-cards or the handoff; don't refer to that prose later.
+cards, the handoff, or the words in shown_instead; don't refer to that prose later. When shown_instead is there, the \
+visitor saw those words from you, so carry on from them: a yes to that callback offer means arrange the callback.
 
 Acting for the business
 - Help the visitor complete the task using the capabilities this session has. Availability is capability, not \

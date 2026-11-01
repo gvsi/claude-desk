@@ -337,7 +337,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.24"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.25"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -761,7 +761,9 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
 def test_reply_prompt_explains_when_only_cards_were_shown():
     text = conversation_system(RIVERA)[0]["text"]
     assert ('If send_reply answers "delivered" or "delivered_handoff" with prose_shown false, your prose wasn\'t '
-            "shown, only the cards or the handoff; don't refer to that prose later.") in text
+            "shown, only the cards, the handoff, or the words in shown_instead; don't refer to that prose later. When "
+            "shown_instead is there, the visitor saw those words from you, so carry on from them: a yes to that callback "
+            "offer means arrange the callback.") in text
 
 
 def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
