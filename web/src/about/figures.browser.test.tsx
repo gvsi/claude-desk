@@ -10,7 +10,7 @@ import { render } from 'vitest-browser-react';
 
 import { assertCleanCopy } from '../ds/test/copy.ts';
 import { AXE_TAGS, tokenColor } from '../test/screen.ts';
-import { ABOUT_DOCUMENTS, type Block } from './documents.ts';
+import { ABOUT_DOCUMENTS, inlineText, type Block } from './documents.ts';
 import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
@@ -453,13 +453,7 @@ describe('ReadinessScale', () => {
 
 describe('MeasuresTable', () => {
   const measures = tableOf(ABOUT_DOCUMENTS.proposal.blocks, null);
-  const MEASURES = [
-    'Baseline violations',
-    'Legitimate tasks completed',
-    'False holds',
-    'Cost per conversation',
-    'Reveal delay, p50 and p95',
-  ];
+  const MEASURES = measures.rows.map((row) => inlineText(row[0] ?? []));
 
   it('measures_table_reads_as_a_list_on_a_phone', async () => {
     // On a desktop, a table: its header, then a row per measure led by the measure's name.
