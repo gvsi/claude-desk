@@ -229,8 +229,50 @@ def test_different_output_cannot_reset_the_experiment_budget(deps, tmp_path, mon
     with pytest.raises(exp.sp.Refused, match="remaining"):
         asyncio.run(exp.experiment(config.model_copy(update={"output": tmp_path / "second.json"}), deps))
     assert len(deps.client.client.requests) == count
-    canonical = deps.root / "evals/out/soft-promise" / f"{baseline}.json"
+    canonical = deps.root / exp.LEDGER_PATH
     assert json.loads(canonical.read_text())["cumulative_spend_usd"] == history["cumulative_spend_usd"]
+
+
+def test_frozen_baseline_cannot_be_replaced_to_reset_cap(deps, tmp_path, monkeypatch):
+    from evals.calibration import soft_promise_experiment as exp
+    monkeypatch.setattr(exp, "TOTAL_USD", 0.0022)
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1,
+                            output=tmp_path / "first.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    count = len(deps.client.client.requests)
+    changed = config.model_copy(update={"baseline_sha": commit(deps.root, "unrelated empty commit"),
+                                        "output": tmp_path / "second.json"})
+    with pytest.raises(exp.sp.Refused, match="baseline is frozen"):
+        asyncio.run(exp.experiment(changed, deps))
+    assert len(deps.client.client.requests) == count
+    ledger = deps.root / "evals/out/soft-promise/experiment.json"
+    assert json.loads(ledger.read_text()) == first
+    assert first["experiment_id"] == "soft-promise-next-steps"
+    assert first["frozen_baseline_sha"] == baseline
+
+
+def test_legacy_ledger_migrates_before_refusing_a_different_baseline(deps, tmp_path):
+    from evals.calibration import soft_promise_experiment as exp
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1, output=tmp_path / "first.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    ledger = deps.root / exp.LEDGER_PATH
+    legacy = ledger.with_name(f"{baseline}.json")
+    ledger.rename(legacy)
+    data = json.loads(legacy.read_text())
+    del data["experiment_id"], data["frozen_baseline_sha"]
+    legacy.write_text(json.dumps(data))
+    count = len(deps.client.client.requests)
+    changed = config.model_copy(update={"baseline_sha": commit(deps.root, "unrelated empty commit"),
+                                        "output": tmp_path / "second.json"})
+    with pytest.raises(exp.sp.Refused, match="baseline is frozen"):
+        asyncio.run(exp.experiment(changed, deps))
+    assert json.loads(ledger.read_text()) == first
+    assert json.loads(legacy.read_text()) == data
+    assert len(deps.client.client.requests) == count
 
 
 def test_experiment_refuses_the_whole_estimate_before_any_call(deps, tmp_path):
@@ -250,7 +292,7 @@ def test_experiment_refuses_concurrent_access_before_any_call(deps, tmp_path):
     import fcntl
     from evals.calibration import soft_promise_experiment as exp
     baseline = "0" * 40
-    ledger = deps.root / "evals/out/soft-promise" / f"{baseline}.lock"
+    ledger = (deps.root / exp.LEDGER_PATH).with_suffix(".lock")
     ledger.parent.mkdir(parents=True)
     with ledger.open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
