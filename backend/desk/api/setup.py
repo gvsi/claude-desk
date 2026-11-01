@@ -336,19 +336,21 @@ TURN_FINISH_S = 10           # the understanding call ends this long before the 
 UNDERSTAND_RETRY_MIN_S = 5   # the least time left worth the understanding call's one retry
 # A consent turn's deadlines nest, each outlasting what it waits for. A search's `POST /execute` waits 2 s past the
 # kernel's 30 s search deadline (`decisions.WEB_SEARCH_TIMEOUT_S`, which this process can't import), so the kernel's
-# fail-closed answer arrives first. All the reads share one budget, 3 s more, for the owner's context and the
-# decisions that come before them. The run then keeps the whole understanding call and its finish and retry time,
-# and stays below abandonment, including during a deploy's overlap.
+# fail-closed answer arrives first. All the reads share one budget, `HOMEWORK_DECIDE_S` more, for the owner's context
+# and the decisions that come before them. The run then keeps the whole understanding call and its finish and retry
+# time, and stays below abandonment, including during a deploy's overlap.
 WEB_SEARCH_EXECUTE_TIMEOUT_S = 32
-HOMEWORK_BUDGET_S = WEB_SEARCH_EXECUTE_TIMEOUT_S + 3
+HOMEWORK_DECIDE_S = 3        # the owner's context and the decisions, before the reads start
+HOMEWORK_BUDGET_S = WEB_SEARCH_EXECUTE_TIMEOUT_S + HOMEWORK_DECIDE_S
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = HOMEWORK_BUDGET_S + UNDERSTAND_TIMEOUT_S + TURN_FINISH_S + UNDERSTAND_RETRY_MIN_S   # 110 s
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
 TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
-# Recover only when this process holds no run, and only once a run and its cleanup have ended, with 10 s to spare
-# for the clocks of a deploy's two tasks and the database's (`updated_at` is the database's time): 130 s. The web's
-# polling (`SETUP_WORK_GIVE_UP_MS` in web/src/setup/useSetupWork.ts) must outlast it.
-TURN_ABANDONED_S = TURN_RUN_TIMEOUT_S + TURN_ROLLBACK_TIMEOUT_S + 10
+# Recover only when this process holds no run, and only once a run and its cleanup have ended, with
+# `TURN_CLOCK_SLACK_S` to spare for the clocks of a deploy's two tasks and the database's (`updated_at` is the
+# database's time): 130 s. The web's polling (`SETUP_WORK_GIVE_UP_MS` in web/src/setup/useSetupWork.ts) must outlast it.
+TURN_CLOCK_SLACK_S = 10
+TURN_ABANDONED_S = TURN_RUN_TIMEOUT_S + TURN_ROLLBACK_TIMEOUT_S + TURN_CLOCK_SLACK_S
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)

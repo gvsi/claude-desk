@@ -2015,12 +2015,15 @@ def test_each_consent_read_deadline_outlasts_what_it_waits_for():
                             desk_setup.TURN_RUN_TIMEOUT_S)
     # A search's /execute waits past the kernel's own deadline, so the kernel's fail-closed answer arrives first.
     assert DEFAULT_TIMEOUT_S < WEB_SEARCH_TIMEOUT_S < execute
-    assert budget >= execute
+    # The margins setup.py documents, each pinned at its floor so neither can quietly shrink to nothing: three
+    # seconds for the owner's context and the decisions before a search's execute starts, and ten for clock skew.
+    assert budget - execute >= desk_setup.HOMEWORK_DECIDE_S >= 3
     # After the reads, the run keeps the whole understanding call, ten seconds to finish and five for a retry.
     assert run >= (budget + desk_setup.UNDERSTAND_TIMEOUT_S + desk_setup.TURN_FINISH_S
                    + desk_setup.UNDERSTAND_RETRY_MIN_S)
-    # A run and its cleanup end before another process may recover the row as abandoned.
-    assert run + desk_setup.TURN_ROLLBACK_TIMEOUT_S < desk_setup.TURN_ABANDONED_S
+    # A run and its cleanup end before another process may recover the row as abandoned, with room for the clocks.
+    assert (desk_setup.TURN_ABANDONED_S - (run + desk_setup.TURN_ROLLBACK_TIMEOUT_S)
+            >= desk_setup.TURN_CLOCK_SLACK_S >= 10)
     # The web polls a busy interview every 2 s and keeps going past abandonment for at least one more read, by when
     # the turn has landed, rolled back or been recovered: it never gives up on a turn that can still be running.
     hook = (Path(__file__).resolve().parents[3] / "web/src/setup/useSetupWork.ts").read_text()
