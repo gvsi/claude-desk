@@ -49,6 +49,16 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     "Within 20–30 miles of Oakland.",
     "20 to 30 miles",
     "Trabajamos por la mañana.",
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
 ])
 async def test_service_area_allows_area_and_weekly_availability(app, client, text):
     copy = await rivera(app, client)

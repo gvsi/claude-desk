@@ -2337,6 +2337,17 @@ def test_scan_public_text(text, rules):
     # Digits before "days a week", and a range of digits before a distance unit
     "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
     "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # ZIP codes, road numbers and literal round-the-clock availability.
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
     # "mañana" as the morning, after "por la", "en la" or "de la"
     "Trabajamos por la mañana.", "Abrimos de la mañana a la noche.", "En la mañana y en la tarde.",
     # A known limit: a fee written in words passes, since any cardinal number word does.
@@ -2355,8 +2366,19 @@ def test_public_service_area_allowance_stays_with_its_key(text):
     "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
     "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
     "Trip fee: 50.",
-    # Outside the distance allowance: round-the-clock hours, ZIP codes and years in business.
-    "Oakland and Berkeley, 24/7.", "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "24/7, $50 trip fee.",
+    "24/7, 10% off.",
+    "24/7, discounts.",
+    "24/7, guaranteed service.",
+    "24/7, free consultation.",
+    "24/7, your appointment is confirmed.",
+    "ZIP 9460.",
+    "ZIP 946012.",
+    "CA 9460.",
+    "Trip fee 94601.",
+    "Highway 101, trip fee 50.",
+    "24/7, fifty dollars.",
+    # An unmarked number of years in business remains outside the allowance.
     "Serving Oakland for 25 years.",
 ])
 def test_public_service_area_keeps_price_promise_and_language_refusals(text):

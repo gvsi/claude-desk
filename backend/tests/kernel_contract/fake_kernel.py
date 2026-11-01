@@ -959,17 +959,29 @@ SERVICE_AREA_DAY_WORDS = (
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
     rf"{SERVICE_AREA_BLANK}+semana|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches")
 
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+
 
 def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
-    number before a distance unit (or a range to one) or "days a week", or a year, any cardinal word, half or a hundred before a unit, "miles" as
+    number before a distance unit (or a range to one) or "days a week", a year, a marked ZIP code or road number, or literal "24/7"; any cardinal word, half or a hundred before a unit, "miles" as
     the unit, and weekdays, weekends and parts of the day."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit, after = text[start:end], text[end:]
     if rule == "digit":
         return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
-                or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None)
+                or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
+                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
+                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
     if rule in ("lex.en.number", "lex.es.number"):
         return (re.fullmatch(rf"miles|millas|{SERVICE_AREA_CARDINAL}", hit, re.IGNORECASE) is not None
                 or (re.fullmatch(SERVICE_AREA_HALF_OR_HUNDRED, hit, re.IGNORECASE) is not None

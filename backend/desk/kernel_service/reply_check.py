@@ -562,10 +562,18 @@ SERVICE_AREA_DAY_WORDS = re.compile(
     r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
 SERVICE_AREA_MORNING = re.compile(r"\b(?:por|en|de)\s+la\s+$", re.IGNORECASE)
 
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit (or a range to one) or "days a week", or a year; any cardinal number word ("three counties", "seven days a week"), half or a
+    distance unit (or a range to one) or "days a week", a year, a marked ZIP code or road number, or literal "24/7"; any cardinal number word ("three counties", "seven days a week"), half or a
     hundred right before a distance unit, or "miles" as the unit; a weekday, weekend or part of the day.
     Nothing else: no fraction, amount, time window or date, so "half off", "trip fee 1500" and "same-day"
     stay refused as under any other key. A fee written in words ("trip fee: fifty") passes: a known limit."""
@@ -573,7 +581,12 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
         return False
     hit = text[start:end]
     if rule == "digit":
-        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
+        return (SERVICE_AREA_YEAR.fullmatch(hit) is not None
+                or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
+                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
+                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
     if rule in ("lex.en.number", "lex.es.number"):
         return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
                 or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
