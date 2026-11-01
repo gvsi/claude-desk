@@ -74,6 +74,37 @@ async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receip
 
 
 @pytest.mark.kernel_plan("01c")
+async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_rows(kernel, ro_read):
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    stored = BusinessTool(tool='desk.existing', title='Customer enquiry', description='Take details.',
+                          config={'block': 'intake', 'questions': ['What do you need?']})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[stored]), path={'id': desk_id})
+
+    def rows():
+        return ro_read(schema, copy.copy_id, "SELECT * FROM {ro}.tools WHERE source = 'business'", ())
+
+    before = rows()
+    tools = [stored.model_copy(update={'tool': 'desk.safe'}),
+             stored.model_copy(update={'tool': 'desk.first', 'title': 'Tomorrow intake'}),
+             stored.model_copy(update={'tool': 'desk.second', 'title': 'Guaranteed service'})]
+    with pytest.raises(KernelFailed) as refused_call:
+        await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=tools), path={'id': desk_id})
+    assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
+    assert refused_call.value.detail == {'desk.first.title': ['public_promise'],
+                                         'desk.second.title': ['public_promise']}
+    assert rows() == before
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    events = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools']
+    assert len(events) == 2
+    assert events[-1].summary == {'tools': [], 'refused': 'public_promise'}
+
+
+@pytest.mark.kernel_plan("01c")
 async def test_business_tools_replace_and_expose_review_definition(kernel, ro_read):
     http, schema, _ = kernel
     copy = await new_copy(http)

@@ -4028,10 +4028,13 @@ class FakeKernelState:
         if "\x00" in text or any(document.canary in text for each in self.desks.values()
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
+        detail = {}
         for tool in batch.tools:
             if fields := (public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool))
                           or payment_title_refused_fields(tool)):
-                refuse("public_promise", detail=unindexed_detail({field: ["public_promise"] for field in fields}))
+                detail.update(unindexed_detail({field: ["public_promise"] for field in fields}))
+        if detail:
+            refuse("public_promise", detail=detail)
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
                     for tool in batch.tools]

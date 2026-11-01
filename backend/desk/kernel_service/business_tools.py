@@ -172,8 +172,18 @@ async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, requ
         raise _invalid(ctx, id, "business_tools_text")
     if labels.canary_fields(shown, await labels.copy_canaries(ctx)):
         raise _invalid(ctx, id, "business_tools_canary")
+    detail = {}
     for tool in parsed.tools:
-        await check_public_fields(ctx, id, tool)
+        try:
+            await check_public_fields(ctx, id, tool)
+        except KernelFailure as failure:
+            if failure.status != 422 or failure.detail is None:
+                raise
+            detail.update(failure.detail)
+    if detail:
+        failure = _invalid(ctx, id, "public_promise")
+        failure.detail = detail
+        raise failure
     rows = {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
         Tool.desk_id == id, Tool.source == "business").order_by(Tool.tool).with_for_update()))}
     changes = []
