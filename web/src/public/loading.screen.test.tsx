@@ -300,7 +300,7 @@ it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async 
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
       { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
-      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > button:nth-child(${i + 1})`, size: true })),
+      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > :nth-child(${i + 1})`, size: true })),
     ],
     open: async () => { await renderRoute(AGENTS, { viewport, language: 'es-MX', pollScale: 100 }); },
     release: read.release,
