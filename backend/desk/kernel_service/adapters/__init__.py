@@ -73,7 +73,7 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
                 or row.profile_sha256 != profile_sha256(row.profile)):
             return None
         # TODO PR2 typed booking, PR3 urgent, PR4 purpose payment: add their trusted execution hooks.
-        if expected.business.config.block != "intake":
+        if expected.business.config.block not in blocks.SUPPORTED_BLOCKS:
             return None
         adapter = blocks.BlockAdapter(expected)
         _check(adapter)
