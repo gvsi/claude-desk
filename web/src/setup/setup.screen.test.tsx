@@ -1224,6 +1224,21 @@ describe('setup', () => {
     expect(document.activeElement).toBe(document.body);
   });
 
+  it.each([1440, 390])('at %i px, the setup chat reads at 16/24, Claude and the owner alike, and the dock keeps its own type', async (width) => {
+    const { interview_id: id } = await startInterview();
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: SETUP_QUESTIONS[0]?.key, text: 'Leaks, drains and water heaters.' } });
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(log.getByText('Leaks, drains and water heaters.', { exact: true })).toBeVisible();
+    const bubble = log.element().querySelector('.cd-visitor-message__bubble');
+    const prose = log.element().querySelector('.cd-type-reply');
+    if (!bubble || !prose) throw new Error('the chat has the owner\'s words and Claude\'s');
+    for (const el of [bubble, prose]) expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['16px', '24px']);
+    const question = document.querySelector('.cd-setup-q3__question');
+    if (question) expect([getComputedStyle(question).fontSize, getComputedStyle(question).lineHeight]).toEqual(['17px', '25px']);
+    expectNoHorizontalScroll();
+  });
+
   it('answer_failure_keeps_the_answer', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
