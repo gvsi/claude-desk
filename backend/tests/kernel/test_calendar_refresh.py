@@ -3,8 +3,8 @@
 Setup gives a new Desk 60-minute slots from its hours for the 14 days after setup finishes, once.
 So a live Desk doesn't run out of open times, the kernel adds the days after its latest slot, up to
 14 days ahead, from its hours in its business's time zone (`desks.extend_calendars`), at its start
-and then daily. It only adds: a booked slot, one a request still names and the owner's own changes
-stay as they are. A Desk is made here as setup makes one: through `POST /desks` in a Rivera copy,
+and then daily. It only adds: a booked slot, one a request still names and the owner's changes
+inside the days it covers stay as they are. A Desk is made here as setup makes one: through `POST /desks` in a Rivera copy,
 with its hours, then given its calendar and Answering through the owner's routes. The clock stands
 at Friday 2026-10-30, 12:04 in Chicago, two days before the clocks there go back an hour.
 """

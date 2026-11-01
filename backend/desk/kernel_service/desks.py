@@ -27,8 +27,8 @@ the public page's open-now line from them too (`open_window_status`), on the loc
 Cedar's hours checks read.
 
 A setup-made Desk's calendar is kept open from its hours (`extend_calendar`): at the kernel's start
-and then daily, each live one gets the days after its latest slot, up to 14 days ahead, and nothing
-it already has is changed.
+and then daily, each live one gets the days after its latest slot, up to 14 days ahead. No slot it
+has is changed, but a tail the owner trimmed or a calendar they cleared is filled again.
 """
 
 import asyncio
@@ -720,13 +720,16 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     seed. Returns their IDs, in order; [] when it adds none, and then writes nothing.
 
     It only inserts: a booked slot, one a request still names, and every change the owner made
-    to the calendar stay exactly as they are. In the caller's transaction, bound to the Desk's
-    copy, it holds the Desk row `FOR UPDATE`, read afresh, as an owner's calendar write does, so
-    the two take turns (`repo.py`). Every write that changes or deletes a slot holds that row
-    first, so the Desk's slots are read without a lock, and a booking holding its slot `FOR SHARE`
-    neither waits for the refresh nor holds it up. The new slots go in under fresh keys, then the
-    ledger head is taken for the entry an owner's write leaves, `desk_data` `{part: "calendar",
-    refs}`, with `extended_from: "hours"` saying the kernel added them from the hours."""
+    inside the days the calendar covers stay exactly as they are. A tail the owner trimmed, or a
+    calendar they cleared, is filled again from the hours (wish #596 tracks keeping them).
+
+    In the caller's transaction, bound to the Desk's copy, it holds the Desk row `FOR UPDATE`, read
+    afresh, as an owner's calendar write does, so the two take turns (`repo.py`). Every write that
+    changes or deletes a slot holds that row first, so the Desk's slots are read without a lock,
+    and a booking holding its slot `FOR SHARE` neither waits for the refresh nor holds it up. The
+    new slots go in under fresh keys, then the ledger head is taken for the entry an owner's write
+    leaves, `desk_data` `{part: "calendar", refs}`, with `extended_from: "hours"` saying the kernel
+    added them from the hours."""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one_or_none()
     if (desk_row is None or desk_row.deleted_at is not None or not desk_row.answering or not desk_row.hours
