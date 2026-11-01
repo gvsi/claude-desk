@@ -12,6 +12,42 @@ async function scrollByKey(element: HTMLElement, key: '{ArrowDown}' | '{End}') {
   await finished;
 }
 
+it('keeps_retry_on_one_line_inside_the_failed_box_beside_2000_characters_at_390', async () => {
+  await page.viewport(390, 844);
+  await expect.poll(() => [window.innerWidth, window.innerHeight]).toEqual([390, 844]);
+  const failed = FailedLong.args?.failed;
+  const label = FailedLong.args?.label;
+  if (!failed || !label) throw new Error('the long failed story must supply its words and label');
+  const shortAnswer = failed.text.split(' ')[0];
+  if (!shortAnswer) throw new Error('the long failed story must supply a short answer for comparison');
+  const longAnswer = failed.text.replace(/\n/g, ' ').repeat(2).slice(0, 2000);
+  const screen = await render(
+    <div style={{ padding: 'var(--space-16)' }}>
+      <Composer variant="owner" label={label} placeholder={label} onSend={() => {}} failed={{ ...failed, text: shortAnswer }} />
+      <Composer variant="owner" label={label} placeholder={label} onSend={() => {}} failed={{ ...failed, text: longAnswer }} />
+    </div>,
+  );
+  await document.fonts.ready;
+  const [shortRetry, retry] = screen.getByRole('button', { name: 'Try again', exact: true }).elements();
+  if (!shortRetry || !retry) throw new Error('both failed composers must render a retry button');
+  const box = retry.closest<HTMLElement>('.cd-composer__box')!;
+  const kept = box.querySelector<HTMLElement>('.cd-composer__kept')!;
+  const buttonRect = retry.getBoundingClientRect();
+  const boxRect = box.getBoundingClientRect();
+  const labelRange = document.createRange();
+  labelRange.selectNodeContents(retry.querySelector('.cd-button__label')!);
+  expect(new Set([...labelRange.getClientRects()].map((rect) => Math.round(rect.top))).size).toBe(1);
+  expect(shortRetry.getBoundingClientRect().height).toBe(32);
+  expect(buttonRect.height).toBe(shortRetry.getBoundingClientRect().height);
+  expect(buttonRect.left).toBeGreaterThanOrEqual(kept.getBoundingClientRect().right);
+  expect(buttonRect.left).toBeGreaterThanOrEqual(boxRect.left);
+  expect(buttonRect.right).toBeLessThanOrEqual(boxRect.right);
+  expect(buttonRect.top).toBeGreaterThanOrEqual(boxRect.top);
+  expect(buttonRect.bottom).toBeLessThanOrEqual(boxRect.bottom);
+  expect(box.scrollWidth).toBe(box.clientWidth);
+  expect(kept.textContent).toBe(longAnswer);
+});
+
 it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async () => {
   await page.viewport(390, 844);
   await expect.poll(() => [window.innerWidth, window.innerHeight]).toEqual([390, 844]);
