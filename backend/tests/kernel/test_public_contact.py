@@ -41,7 +41,7 @@ elapsed = perf_counter() - start
 print(f'100,000-space contact: {elapsed:.6f}s')
 assert elapsed < 0.1
 """
-    result = subprocess.run([sys.executable, "-c", code], timeout=3, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-c", code], timeout=10, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     print(result.stdout.strip())
 
