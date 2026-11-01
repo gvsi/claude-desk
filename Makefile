@@ -295,8 +295,8 @@ evals-merge-ready:
 	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"
 
 # The soft-promise check measured on the real model. It spends money: every case in
-# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Haiku 5.5 call
-# on the Claude API each (estimated at $0.0005), for at most MAX_USD dollars, which it needs on the
+# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Sonnet 5.5 call
+# on the Claude API each (estimated at $0.0026), for at most MAX_USD dollars, which it needs on the
 # command line or in the environment (the tier 2 default doesn't count). The prompt is this tree's,
 # decisions.py's at PROMPT_REF or PROMPT_FILE's text; LABEL names the run. ANTHROPIC_API_KEY comes from
 # the environment. It writes evals/out/soft-promise/<label>-<time>.json and a row in the shared spend file.
@@ -308,7 +308,7 @@ evals-soft-promise:
 
 # Select candidate arms new and sonnet, or diagnostic steps_only; unchanged old evidence is reused.
 # SAMPLES accepts a common count or per-arm counts, e.g. new:5,steps_only:5,sonnet:2.
-# All measured arms share MAX_USD and the durable $3.20 cap in the ledger named by baseline SHA.
+# All measured arms share MAX_USD and the durable $3.20 cap in evals/out/soft-promise/experiment.json.
 .PHONY: evals-soft-promise-experiment
 CASES ?= evals/calibration/soft_promise.yaml
 ARMS ?= new,steps_only
