@@ -1149,8 +1149,11 @@ async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs:
                        business_tools_enabled=interview.business_tools_enabled)
 
 
-def _empty_payment_config(title: str) -> PurposePaymentProposalConfig:
-    return PurposePaymentProposalConfig(block="purpose_payment", purpose=title[:60], amount_cents=None)
+def _empty_payment_config(title: str) -> PurposePaymentProposalConfig | None:
+    purpose = " ".join(title.split())[:60]
+    if not purpose:
+        return None
+    return PurposePaymentProposalConfig(block="purpose_payment", purpose=purpose, amount_cents=None)
 
 
 def _check_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn, *,
@@ -1644,9 +1647,13 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
     if draft.job == "payment" and not interview.business_tools_enabled:
         logger.warning("setup dropped an unavailable job of kind %s", draft.job)
         return None
+    payment_config = _empty_payment_config(draft.title) if draft.job == "payment" else None
+    if draft.job == "payment" and payment_config is None:
+        logger.warning("setup dropped a payment job with an empty purpose")
+        return None
     fields = draft.model_dump(mode="json")
     if draft.job == "payment" and fields["config"] is None:
-        fields["config"] = _empty_payment_config(draft.title).model_dump(mode="json")
+        fields["config"] = payment_config.model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
     if not interview.business_tools_enabled:

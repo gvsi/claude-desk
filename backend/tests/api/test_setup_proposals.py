@@ -192,6 +192,39 @@ async def test_understanding_mints_hidden_proposals_with_code_owned_availability
     assert cards[-1].connector.label == "Stripe"
 
 
+def test_payment_purpose_collapses_title_whitespace():
+    from desk.api.prompts import JobDraft
+
+    state = plan_state([])
+    state.business_tools_enabled = True
+    draft = JobDraft.model_validate(job("payment", title="  Pay\t a\n retainer  ", config=None)
+                                    .model_dump(exclude={"can_do_today"}))
+    card = setup._planned_job(state, draft)
+    assert card.job.config.purpose == "Pay a retainer"
+    assert card.job.config.amount_cents is None
+
+
+@pytest.mark.parametrize("title", ["", " \t\r\n "])
+async def test_blank_payment_title_does_not_roll_back_consent(
+        app, browser, kernel_http, model, engine, caplog, title):
+    from tests.api.test_setup_questions import structured, understanding
+
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    payment = job("payment", title=title, config=None)
+    model.add(structured(setup.SetupUnderstanding(**understanding(jobs=[
+        draft.model_dump(exclude={"can_do_today"}) for draft in (payment, job())], connectors=[]))))
+    response = await consent(owner, state["interview_id"], False, model, cards=True)
+    assert response["consent"] is False and response["busy"] is False
+    saved = await stored(engine, state["interview_id"])
+    planned = [card for entry in saved["transcript"] for card in entry.get("planned", [])]
+    assert [card["job"]["job"] for card in planned] == ["schedule"]
+    assert not any(entry.get("pending") for entry in saved["transcript"])
+    dropped = [record for record in caplog.records if record.message == "setup dropped a payment job with an empty purpose"]
+    assert len(dropped) == 1 and dropped[0].args == ()
+
+
 @pytest.mark.parametrize("bad", [{"job": "teleport"}, {"config": {"block": "teleport"}},
                                   {"job": "payment"}, {"title": "x" * 61}])
 async def test_an_invalid_job_is_never_minted_by_the_understanding(monkeypatch, bad):
