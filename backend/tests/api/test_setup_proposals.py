@@ -1731,6 +1731,40 @@ async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_late
     assert all(card['job']['config'] is None for card in shown(reply) if card['job'])
 
 
+@pytest.mark.parametrize("action", ["read", "decision", "answer", "busy"])
+async def test_tools_off_renders_accepted_payments_as_declined(proposals, app, model, engine, action):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    await show_card(engine, interview_id, ids[1])
+    accepted = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1",
+                                        json={"accept": True, "amount_cents": 100})
+    payment = next(card for card in shown(accepted) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "accepted" and payment["job"]["config"]["amount_cents"] == 100
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    if action == "busy":
+        async with engine.begin() as conn:
+            interview = await setup._load(conn, owner.copy_id, interview_id)
+            interview.transcript.append(setup.Entry(role="owner", text="Not now", pending="pending-run"))
+            await setup._save(conn, interview)
+    before = await stored(engine, interview_id)
+    if action == "read":
+        response = await owner.browser.get(path + "?cards=1")
+    elif action == "decision":
+        response = await owner.browser.post(path + f"/proposals/{ids[2]}?cards=1", json={"accept": False})
+    else:
+        if action == "answer":
+            model.add(card_answer("decline", next=next_ask("what_you_do")))
+        response = await owner.browser.post(path + "/answer?cards=1", json={"card": ids[2], "text": "Not now"})
+    assert response.status_code == (202 if action == "busy" else 200), response.text
+    if action in {"read", "busy"}:
+        assert await stored(engine, interview_id) == before
+    payment = next(message["card"] for message in response.json()["messages"]
+                   if message["card"] and message["card"]["proposal_id"] == ids[1])
+    assert payment["state"] == "declined"
+    assert payment["job"]["config"] is None
+
+
 async def test_disabling_tools_declines_an_already_accepted_payment(proposals, app, model, engine):
     owner, state, ids = proposals
     interview_id = state["interview_id"]

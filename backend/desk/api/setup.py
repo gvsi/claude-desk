@@ -670,6 +670,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
         card = entry.card.model_copy(deep=True) if entry.card is not None else None
         if card is not None and card.job is not None and not business_tools_enabled:
             card.job.config = None
+            if card.job.job == "payment" and card.state == "accepted":
+                card.state = "declined"
         return card
 
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
