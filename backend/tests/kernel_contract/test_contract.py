@@ -2745,6 +2745,12 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     ("A 50-km radius.", []),
     ("Dentro de 1 kilómetro.", []),
     ("Within 25 miles, $50 trip fee.", ["currency", "digit"]),
+    ("Outside Oakland, half off.", ["lex.en.number"]),
+    ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
+    ("Within 25 miles. Trip fee 1500.", ["digit"]),
+    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
+    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Same-day service in Oakland.", ["lex.en.date"]),
 ])
 async def test_service_area_policy_contract(kernel, ro_read, text, rules):
     http, schema, _ = kernel

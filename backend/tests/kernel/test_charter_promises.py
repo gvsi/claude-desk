@@ -218,7 +218,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     public_before = (await client.get(f"/public/{copy.slug}")).json()["charter"]
     entries = len(await entries_of(app, copy))
     fields = {f"policy:{key}": rules for key in POLICY_KEYS}
-    area_rules = {"within two hours": [], "after 6 pm": ["digit"], "Monday to Friday": []}.get(text, rules)
+    area_rules = {"Monday to Friday": []}.get(text, rules)
     if area_rules:
         fields["policy:service_area"] = area_rules
     else:

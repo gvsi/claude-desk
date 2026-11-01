@@ -532,20 +532,51 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
 
 
-SERVICE_AREA_RULES = frozenset({"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"})
+# The service area's allowance (the owner's ruling: distances, number words, years and day words).
+# Each pattern reads the policy's own text from a hit's end, so a unit can't come from another card.
+_BLANK = r"[\s\-‐‑]"
+_DISTANCE_UNIT = r"(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b"
+_CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+             r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
+             r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
+             r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+"
+             r"|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
 # A distance unit straight after a number, singular or plural, with a hyphen or blanks between
 # ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
-SERVICE_AREA_DISTANCE = re.compile(
-    r"[\s\-‐‑]*(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b", re.IGNORECASE)
+SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
+SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
+SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
+# After a cardinal, the rest of a compound number ("twenty-five", "treinta y cinco"), then a distance
+# unit or "days a week" ("días a la semana").
+_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
+SERVICE_AREA_AFTER_CARDINAL = re.compile(
+    rf"(?:{_BLANK}+(?:y{_BLANK}+)?{_CARDINAL}\b){{0,2}}(?:{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK})",
+    re.IGNORECASE)
+SERVICE_AREA_UNIT_WORDS = re.compile(r"miles|millas", re.IGNORECASE)   # the Spanish lexicon's "miles" (thousands)
+# Weekdays, weekends and the parts of the day, but no date, time or time window.
+SERVICE_AREA_DAY_WORDS = re.compile(
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
+    rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{_BLANK}+de{_BLANK}+semana"
+    r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Area claims may name distances, years and weekly availability, but no promises."""
+    """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
+    distance unit or a year; a cardinal number word right before a distance unit or "days a week", or
+    "miles" as the unit; a weekday, weekend or part of the day. Nothing else: no fraction, amount, time
+    window or date, so "half off", "trip fee 1500" and "same-day" stay refused as under any other key."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
-    return rule in SERVICE_AREA_RULES or (rule == "digit" and (
-        re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
-        or SERVICE_AREA_DISTANCE.match(text, end) is not None))
+    hit = text[start:end]
+    if rule == "digit":
+        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
+    if rule in ("lex.en.number", "lex.es.number"):
+        return SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or (
+            SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
+            and SERVICE_AREA_AFTER_CARDINAL.match(text, end) is not None)
+    if rule in ("lex.en.date", "lex.es.date"):
+        return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+    return False
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
