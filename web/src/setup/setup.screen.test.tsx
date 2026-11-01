@@ -1963,6 +1963,20 @@ describe('setup', () => {
     expect(requests('setupConfirm')).toHaveLength(0);
   });
 
+  it('setup_preview_payment_links_note_no_chat', async () => {
+    // Setup's preview sits inside an owner screen, so a payment link it shows has no public chat to
+    // lead back to: the checkout's "Go back to the chat" stays plain words.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByText(DISCLOSURE)).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    await expect.element(box).toBeEnabled();
+    await box.fill('How do I pay the deposit?');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(screen.getByRole('link', { name: 'Open payment page' })).toBeVisible();
+    expect(localStorage.getItem('claude-desk.pay-chats')).toBeNull();
+  });
+
   it('setup_gives_the_new_business_its_own_name', async () => {
     const bakery = "Acme Bakery. I'm Lee, a baker in Fresno. Sourdough, pastries and cakes to order, Tuesday to Sunday.";
     const state = await interviewAtPreview(bakery);

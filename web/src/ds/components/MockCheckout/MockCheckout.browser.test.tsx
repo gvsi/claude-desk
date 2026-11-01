@@ -282,3 +282,41 @@ it('a_state_this_build_does_not_know_can_not_be_paid', () => {
   expect(line?.textContent).toBe('This payment is still being confirmed. The chat will show the result.');
   expect(line?.querySelector('.cd-status-dot--held')).not.toBeNull();
 });
+
+it('the_paid_line_links_back_only_to_a_public_chat', () => {
+  // Paid, with the visitor's chat known: the line's own words, with "Go back to the chat" a text
+  // link in the sentence to that chat, in the same tab.
+  const CHAT = '/d/rivera-plumbing-abc123';
+  const { container, update } = render({ state: 'paid', chatHref: CHAT });
+  const line = () => container.querySelector('.cd-checkout__state');
+  const links = () => [...container.querySelectorAll('a')];
+  expect(line()?.textContent).toBe('Paid. Go back to the chat to see it there.');
+  expect(links()).toHaveLength(1);
+  const [back] = links();
+  expect(back?.textContent).toBe('Go back to the chat');
+  expect(back?.getAttribute('href')).toBe(CHAT);
+  expect(back?.getAttribute('target')).toBeNull();
+  expect(back?.classList.contains('cd-text-link--running-text')).toBe(true);
+  expect(back?.closest('.cd-checkout__state')).toBe(line());
+  expect(resultRegion(container).textContent).toBe('Paid. Go back to the chat to see it there.');
+
+  // In Spanish, "Vuelve al chat" is the link.
+  update({ language: 'es' });
+  expect(line()?.textContent).toBe('Pagado. Vuelve al chat para verlo allí.');
+  expect(links().map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Vuelve al chat', CHAT]]);
+
+  // Every other state keeps its line with no link, whatever chat the page knows.
+  for (const state of ['issued', 'expired', 'cancelled', 'unknown'] as const) {
+    update({ state, chatHref: CHAT });
+    expect(links(), state).toHaveLength(0);
+  }
+  update({ state: 'cancelled', cancelReason: 'rules_changed', chatHref: CHAT });
+  expect(links()).toHaveLength(0);
+
+  // Anything but a public chat's own path is ignored: the paid line as it was, with no link.
+  for (const chatHref of ['', 'https://evil.example/d/rivera', '//evil.example', '/d/rivera?preview=desk-1', '/d/rivera#about', '/d/rivera/agents', '/d/Rivera', 'javascript:alert(1)', '/pay/k7Hq2vX9']) {
+    update({ state: 'paid', cancelReason: undefined, chatHref });
+    expect(links(), chatHref).toHaveLength(0);
+    expect(line()?.textContent, chatHref).toBe('Paid. Go back to the chat to see it there.');
+  }
+});
