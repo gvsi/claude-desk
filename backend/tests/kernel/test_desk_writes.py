@@ -217,7 +217,9 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     assert (business.name, business.owner_display_name, business.timezone, business.brand) == (
         "Rivera Plumbing and Drains", "Maria Rivera", "America/Denver", {"primary": "#22524D"})
     charter = await facts_of(app, copy, "charter")
-    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours"}   # the rest replaced
+    # the rest replaced, and the seed's starters kept, as the hours are
+    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours",
+                            *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert charter["charter:contact"].claims == [Claim(key="contact", kind="text", value="(510) 555-0199")]
     assert all(fact.readers == ["public"] and fact.source == "kernel" for fact in charter.values())
     prices = await rows_of(app, copy.copy_id, select(PriceRow).order_by(PriceRow.item_id))

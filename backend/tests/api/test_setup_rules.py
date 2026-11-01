@@ -55,6 +55,7 @@ from desk.api.prompts import (
     SetupAnswers,
     SituationDraft,
     SituationTool,
+    dollars,
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
@@ -230,7 +231,11 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     await consent(owner, state["interview_id"], False, model)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
-        reply = await answer(owner, model, state["interview_id"], f"About {key}.",
+        # The fixture is a completed owner interview: structured facts must be typed, not just model patches.
+        typed = [f"About {key}.", patch.get("public_contact") or ""]
+        typed += [f"{window.start} to {window.end}" for window in patch.get("hours") or []]
+        typed += [f"{item.title}: {dollars(item.unit_cents)}" for item in patch.get("price_items") or []]
+        reply = await answer(owner, model, state["interview_id"], " ".join(typed),
                              turn(**{name: value for name, value in patch.items() if value is not None}))
         assert reply.status_code == 200, reply.text
     state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
@@ -517,6 +522,28 @@ async def test_a_refused_contact_is_held_with_the_named_policy_and_the_rest_save
     assert REFUSED_CONTACT not in caplog.text and "$90" not in caplog.text
 
 
+@pytest.mark.parametrize("refusal", [
+    {"policy:pricing": ["currency", "digit"]}, {"contact": ["contact_format"]}, {"charter": ["policy_count_limit"]},
+], ids=["policy", "contact", "cap"])
+async def test_a_strict_charter_write_drops_nothing_and_raises_the_first_refusal(refusal, caplog):
+    """An owner's own edit is written strictly: the kernel's refusal reaches the caller and nothing is dropped."""
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    pricing="from $90", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    charters = charter_writes(kernel, [refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        with pytest.raises(KernelFailed) as refused:
+            await setup._put_charter(owner, "d1", parts.charter, drop_refused=False)
+
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", refusal)
+    assert charters == [[claim.model_dump(mode="json") for claim in parts.charter]]
+    assert not [record for record in caplog.records if record.name == "desk.api.setup"]
+
+
 async def put_parts(kernel: ScriptedKernel, parts) -> list[str]:
     """Writes setup's parts to Desk d1 through `kernel` as its owner; returns the held charter keys."""
     async with kernel.client() as http:
@@ -764,6 +791,46 @@ async def test_rules_are_drafted_as_cards_and_compiled_by_the_kernel(app, browse
     row = await stored(engine, state["interview_id"])
     assert (row["step"], row["draft_version"]) == ("rules", draft.version)
     assert [card["card_id"] for card in row["draft_cards"]] == ["card-1", "card-2", "card-3", "card-4", "card-5"]
+
+
+async def test_first_and_repeated_rules_hold_suggestions_until_selected_confirm(
+    app, browser, fake, kernel_http, model, engine,
+):
+    owner, state = await ready(app, browser, kernel_http, model)
+    # The stored state accepting suggestions leaves (the suggestions route's own tests cover how it gets there).
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
+                               " WHERE interview_id = :id"), {
+            "id": state["interview_id"], "patch": json.dumps({
+                "suggested_fields": ["public_contact", "hours", "price_items", "service_area"],
+            }),
+        })
+    before = await stored(engine, state["interview_id"])
+    # The first draft fails after the parts are written, so the second request writes them again.
+    model.add(cut_short(DraftedRules(cards=GOOD_CARDS)), drafted(*GOOD_CARDS))
+    for expected in (503, 200):
+        reply = await settled(owner, policy(state, "rules"))
+        assert reply.status_code == expected, reply.text
+        desk = fake.desks[state["desk_id"]]
+        assert desk.hours == [] and desk.prices == {} and desk.slots == {}
+        assert "charter:contact" not in desk.facts
+        assert "charter:policy:service_area" not in desk.facts
+        assert (await stored(engine, state["interview_id"]))["answers"] == before["answers"]
+    for route, field in (("hours", "hours"), ("prices", "price_items"), ("calendar", "calendar_slots")):
+        assert [call.body for call in fake.called(f"PUT /desks/{{id}}/{route}")] == [{field: []}] * 2
+    charter_calls = fake.called("PUT /desks/{id}/charter")
+    assert len(charter_calls) == 2
+    for charter_call in charter_calls:
+        assert not {"contact", "policy:service_area"} & {claim["key"] for claim in charter_call.body["charter"]}
+    path = f'/api/owner/setup/{state["interview_id"]}/public_lines'
+    shown = (await owner.browser.get(path)).json()
+    confirmed = await owner.browser.post(f"{path}/confirm", json={"keys": ["contact"], "revision": shown["revision"]})
+    assert confirmed.status_code == 200, confirmed.text
+    assert desk.facts["charter:contact"].claims[0].value == PATCHES["contact_and_after_hours"]["public_contact"]
+    assert desk.hours == [] and desk.prices == {} and desk.slots == {}
+    assert "charter:policy:service_area" not in desk.facts
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == [
+        "hours", "price_items", "service_area"]
 
 
 def sent_tools(model: ScriptedModel) -> list[dict]:
@@ -1274,7 +1341,7 @@ async def test_an_error_after_a_202_reaches_the_next_retry(app, browser, fake, k
     reply = await owner.browser.post(path)
     assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
     assert len(fake.called("POST /policy/draft")) == 1
-    reply = await owner.browser.post(path)
+    reply = await settled(owner, path)
     assert reply.status_code == 200, reply.text
     assert len(fake.called("POST /policy/draft")) == 2
 

@@ -2152,7 +2152,8 @@ describe("Today's unfinished setup", () => {
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.element(screen.getByText('Drafting your rules', { exact: true })).toBeVisible();
+    // The draft is being made: the rules draw as their shapes, and the hidden status says so.
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Drafting your rules$/ })).toBeInTheDocument();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const card = region(screen, 'Finish setting up Juniper Hair Studio');

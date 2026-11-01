@@ -1053,12 +1053,12 @@ export const Skeleton: Story = {
   beforeEach: loadWebFonts,
   parameters: {
     canvas: 'none',
-    canvasNote: 'P12-02, UXC-P1202-After (#artboard-d122e70134a0). The shapes follow the current shell; greeting and starter chips have not shipped.',
+    canvasNote: 'P12-02, UXC-P1202-After (#artboard-d122e70134a0). Every load draws the first view: the greeting, its meta line, the inline composer and three starter chips. A first visit to a Desk with starters lands in place; a resumed chat keeps its head, and its composer moves down.',
   },
   render: (args) => (
     <div>
       <div data-real-shell>
-        <PublicShell {...args} openStatus={OPEN_EN} children={null} aboutLinks={[
+        <PublicShell {...args} openStatus={OPEN_EN} firstView starters={{ words: desk.en.starters, onPick: fn() }} children={null} aboutLinks={[
           { label: 'What agents can do here', href: '/d/rivera/agents' },
           { label: 'Send an agent', href: '/d/rivera/agents#send' },
         ]} />
@@ -1072,23 +1072,30 @@ export const Skeleton: Story = {
     const real = canvasElement.querySelector<HTMLElement>('[data-real-shell]')!;
     const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-shell]')!;
     await expect(shapes.querySelector('button, a[href], input, textarea, [tabindex]')).toBeNull();
+    const size = ['top', 'left', 'width', 'height'] as const;
+    const line = ['top', 'left', 'height'] as const;
+    // The greeting wraps to two lines on a phone, drawn as two shapes: the first marks its place.
+    const place = ['top', 'left'] as const;
     const pairs = [
-      ['brand-header', '.cd-public-brand', true],
-      ['chat-title', '.cd-public-shell__chat-title > h2', false],
-      ['disclosure', '.cd-public-shell__disclosure', false],
-      ['chat-head', '.cd-public-shell__chat-head', true],
-      ['ask-owner', '.cd-public-shell__chat-head > button', true],
-      ['conversation', '.cd-public-shell__conversation', true],
-      ['composer', '.cd-composer__box', true],
-      ['concept-footer', '.cd-concept-footer', true],
-      ['about-title', '.cd-public-shell__about > h2', false],
-      ['about-column', '.cd-public-shell__about', true],
+      ['brand-header', '.cd-public-brand', size],
+      ['chat-title', '.cd-public-shell__chat-title > h2', line],
+      ['disclosure', '.cd-public-shell__disclosure', line],
+      ['chat-head', '.cd-public-shell__chat-head', size],
+      ['ask-owner', '.cd-public-shell__chat-head > button', size],
+      ['conversation', '.cd-public-shell__conversation', size],
+      ['greeting', '.cd-public-shell__greeting', place],
+      ['invitation', '.cd-public-shell__invitation', line],
+      ['composer', '.cd-composer__box', size],
+      ['starters', '.cd-public-shell__starters', size],
+      ['concept-footer', '.cd-concept-footer', size],
+      ['about-title', '.cd-public-shell__about > h2', line],
+      ['about-column', '.cd-public-shell__about', size],
     ] as const;
-    for (const [anchor, selector, size] of pairs) {
+    for (const [anchor, selector, edges] of pairs) {
       const a = real.querySelector(selector)!.getBoundingClientRect();
       const b = shapes.querySelector(`[data-skeleton-anchor="${anchor}"]`)!.getBoundingClientRect();
       const offset = real.getBoundingClientRect().top - shapes.getBoundingClientRect().top;
-      for (const edge of size ? ['top', 'left', 'width', 'height'] as const : ['top', 'left', 'height'] as const) {
+      for (const edge of edges) {
         await expect(Math.abs(a[edge] - b[edge] - (edge === 'top' ? offset : 0)), `${anchor} ${edge}: real ${a[edge]}, shape ${b[edge]}, offset ${offset}`).toBeLessThanOrEqual(2);
       }
     }
@@ -1106,5 +1113,49 @@ export const SkeletonShort: Story = {
   parameters: {
     ...Skeleton.parameters,
     viewport: { options: { 'skeleton-short': { name: 'Short phone', styles: { width: '390px', height: '480px' }, type: 'mobile' } } },
+  },
+};
+
+/** A visitor has not asked anything yet: invitation, composer and the Desk's own starters. */
+export const FirstViewEnglish: Story = {
+  args: {
+    firstView: true,
+    openStatus: OPEN_EN,
+    starters: { words: desk.en.starters, onPick: fn() },
+    children: <Transcript label="Conversation with Rivera Plumbing">{null}</Transcript>,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect(within(canvas.getByRole('group', { name: 'Suggestions' })).getAllByRole('button')).toHaveLength(3);
+  },
+};
+
+export const FirstViewSpanish: Story = {
+  args: {
+    ...FirstViewEnglish.args,
+    language: 'es',
+    about: desk.es.charter,
+    openStatus: { ...OPEN_EN, text: 'Abierto ahora, hasta las 18:00' },
+    composer: composer.es,
+    starters: { words: desk.es.starters, onPick: fn() },
+    children: <Transcript label="Conversación con Rivera Plumbing">{null}</Transcript>,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: '¿En qué te puede ayudar Rivera Plumbing?' })).toBeVisible();
+    await expect(canvas.getByText('Prueba una de estas o pregunta con tus palabras.')).toBeVisible();
+    await expect(within(canvas.getByRole('group', { name: 'Sugerencias' })).getAllByRole('button')).toHaveLength(3);
+  },
+};
+
+export const FirstViewWithoutStarters: Story = {
+  args: { ...FirstViewEnglish.args, starters: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
+    await expect(canvas.queryByText('Try one of these, or ask in your own words.')).not.toBeInTheDocument();
+    await expect(canvas.queryByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
   },
 };

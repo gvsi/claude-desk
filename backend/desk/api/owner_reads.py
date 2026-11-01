@@ -57,7 +57,8 @@ from desk.api.schemas import (
     WeekDay,
 )
 from desk.api.setup import INTERVIEWS
-from desk.api.store import MESSAGES, triaged
+from desk.api.sse import RUN_EVENTS
+from desk.api.store import MESSAGES, WITH_EVENTS, triaged
 from desk.contracts import Decision, DecisionState
 
 
@@ -91,6 +92,8 @@ REPLY_WHY = {
     "stale_fact": "it cited something out of date",
     "canary": "it quoted a private document",
     "unsupported_language": "it wasn't in English or Spanish",
+    "check_unavailable": "the checkpoint wasn't available",
+    "uncertain_language": "it didn't read clearly as English or Spanish",
 }
 
 
@@ -428,8 +431,8 @@ class Activity:
     callbacks: list[Timed]                     # native.request_callback executed, at its ledger entry
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
-    replies: list[Timed]                       # Claude's delivered replies, a handoff clause left out
-    handoffs: list[Timed]                      # Claude's delivered replies carrying a handoff clause
+    replies: list[Timed]                       # Claude's delivered events whose handoff flag is false
+    handoffs: list[Timed]                      # Claude's delivered events whose handoff flag is true
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -532,8 +535,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
                 and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
-        select(MESSAGES.c.n, MESSAGES.c.session_id, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.blocks,
+        select(MESSAGES.c.n, MESSAGES.c.session_id, MESSAGES.c.kind, MESSAGES.c.author,
+               RUN_EVENTS.c.payload["handoff"].as_boolean().label("handoff"),
                MESSAGES.c.created_at, MESSAGES.c.replay_id)
+        .select_from(WITH_EVENTS)
         .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.created_at >= start,
                MESSAGES.c.kind.in_((*VISITOR_TEXT, "delivered", "owner_say", "whisper")))
         .order_by(MESSAGES.c.n))
@@ -548,7 +553,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         elif row.author == "owner":
             stepped.append(at)                         # a say, a whisper, or a say delivered
         elif row.kind == "delivered" and row.author == "claude":
-            if any(block.template == "handoff" for block in row.blocks or []):
+            if row.handoff:
                 handoffs.append(at)
             else:
                 replies.append(at)
@@ -583,7 +588,7 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
 @dataclass(frozen=True)
 class Counted:
     """What the briefing from `start` to `end` counts: the refused requests, bookings and leads, the conversations'
-    text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
+    text rows, and each conversation Claude answered alone (a delivered event with no handoff flag, and no
     booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session.
     Stopped drafts do not make a conversation busy."""
 

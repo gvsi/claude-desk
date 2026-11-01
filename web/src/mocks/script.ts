@@ -36,7 +36,7 @@ export type Language = 'en' | 'es';
 /** How far apart a turn's events arrive. */
 export const EVENT_GAP_MS = 150;
 
-const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola'] as const;
+const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola', 'tarjetas'] as const;
 
 /** A turn is in Spanish when the visitor's text has one of the markers, else in English. */
 export function turnLanguage(text: string): Language {
@@ -463,13 +463,19 @@ export interface TurnContext {
   readonly text: string;
   /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
   readonly person: { personId: string; name: string } | null;
+  /**
+   * Whom the Desk's handoff card names (`handoffBlock`): its owner, by their display name, or the
+   * business when its owner gave no name (`MockWorld.handoffNameOf`).
+   */
+  readonly handoffName: string;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
   /**
-   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
-   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   * A checked reply's shown blocks and ledger entry; `blocked` when Claude's draft failed the
+   * check, and `paused` when the check stopped it because the chat is paused. Shown blocks may
+   * keep checked cards after a prose failure, with or without a drafted handoff.
    */
   reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
@@ -507,12 +513,14 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'cards-only' | 'cards-kept-handoff' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** A demo command: one of `words` picks the rule only as the whole message, never inside a question. */
+  command?: true;
   /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
   tools: readonly ToolName[];
   steps: readonly Step[];
@@ -546,16 +554,55 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118'
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
-/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
-const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+/**
+ * The kernel's handoff card (its `handoff` template), in `language`, naming `name`: whom the Desk
+ * hands the visitor to (`TurnContext.handoffName`), with one stop after a name that ends in one
+ * ("Chen & Co."). For Maria Rivera it is the fixtures' own card.
+ */
+export function handoffBlock(language: Language, name: string): CardBlock {
+  const stop = afterName(name, '.');
+  return language === 'es'
+    ? cardBlock('handoff', { fact_id: null, title: `Déjame consultarlo con ${name}${stop}`, lines: [`${name} te responderá aquí.`] })
+    : cardBlock('handoff', { fact_id: null, title: `Let me check with ${name}${stop}`, lines: [`${name} will reply here.`] });
+}
+
+/** The turn's handoff card: the Desk's own, in the turn's language. */
+const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.handoffName);
+
+/** Claude hands the visitor to the Desk's owner: the kernel's handoff card, as asking for them gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([handoff(ctx)])];
 
 /**
  * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
  * the kernel's handoff, which its check stops as paused.
  */
-export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([handoff(ctx)], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
+  {
+    // A final prose-only failure: the checked card stays, and none of the draft's prose is shown.
+    name: 'cards-only',
+    words: ['cards-only', 'solo-tarjetas'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true }),
+    ],
+  },
+  {
+    // The same failure with Claude's drafted handoff kept after the checked card.
+    name: 'cards-kept-handoff',
+    words: ['cards-kept-handoff', 'tarjetas-con-traspaso'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true }),
+    ],
+  },
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
@@ -615,7 +662,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
   {
     name: 'book',
-    words: ['book', 'tuesday', 'reservar'],
+    words: ['book', 'tuesday', 'reservar', 'martes'],
     tools: ['native.find_slots'],
     steps: [
       writing,
@@ -632,6 +679,12 @@ export const SCRIPT: readonly ScriptRule[] = [
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
     ],
+  },
+  {
+    name: 'area',
+    words: ['alameda'],
+    tools: [],
+    steps: [writing, (ctx) => ctx.reply([rivera.blocks.policy[ctx.language]])],
   },
   {
     name: 'callback',
@@ -709,7 +762,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
-  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+  (ctx) => ctx.reply([handoff(ctx)], { blocked: true }),
 ];
 
 /**
@@ -735,7 +788,7 @@ function ruleNamed(name: RuleName): ScriptRule {
  */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   if (rule.name !== 'discount') return rule;
   const asked = askedDiscountBp(text);
@@ -794,7 +847,7 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved
   if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (decision.state === 'refused_at_execution') return [resolved];
-  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([handoff(ctx)])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
     return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];

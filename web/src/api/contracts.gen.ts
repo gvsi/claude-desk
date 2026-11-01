@@ -402,6 +402,8 @@ export interface Violation {
     | "stale_fact"
     | "canary"
     | "unsupported_language"
+    | "uncertain_language"
+    | "check_unavailable"
     | "session_paused";
   span: string;
   fact_ids?: string[];
@@ -1003,6 +1005,7 @@ export interface PublicDesk {
   charter: RenderedBlock[];
   agent_card: RenderedBlock[];
   open_status?: OpenStatus | null;
+  starters?: string[];
 }
 export interface ReviewThresholds {
   min_within_charter_bp: number;

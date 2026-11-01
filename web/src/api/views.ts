@@ -492,9 +492,64 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
+export type Choice = { text: string; recommended: boolean };
+
+/** One proposal per Claude card message; stable id `p-` + 12 hex for the interview. */
+export type ProposalCard = {
+  proposal_id: string;
+  kind: 'job' | 'connector';
+  state: 'proposed' | 'accepted' | 'declined' | 'changed';
+  superseded_by: string | null;
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
+};
+
+/** The closed catalog of jobs setup can propose. */
+export type JobKind = 'answer' | 'intake' | 'schedule' | 'price' | 'documents' | 'status' | 'payment' | 'urgent';
+
+/** Title and who ≤ 60, why ≤ 200, how ≤ 300; model text is untrusted. */
+export type JobProposal = {
+  job: JobKind;
+  title: string;
+  why: string;
+  how: string;
+  who?: string | null;
+  can_do_today: boolean;
+  autonomy: 'auto' | 'ask';
+  config: BlockConfig | null;
+};
+
+/**
+ * Intake: 1..5 questions, each ≤ 120. Booking: appointment type ≤ 60, minutes 15..60 (one slot).
+ * Payment: purpose ≤ 60, amount_cents null until the owner enters integer cents 0..1_000_000.
+ * Urgent: urgent_when ≤ 300.
+ */
+export type BlockConfig =
+  | { block: 'intake'; questions: string[] }
+  | { block: 'typed_booking'; appointment_type: string; minutes: number }
+  | { block: 'purpose_payment'; purpose: string; amount_cents: number | null }
+  | { block: 'urgent'; urgent_when: string };
+
+/** Setup's closed connector catalog. */
+export type ConnectorKey = 'google_calendar' | 'gmail' | 'google_drive' | 'quickbooks' | 'stripe' | 'square' | 'calendly';
+
+/** Why ≤ 200; catalog apps connect in simulation. False remains an unavailable-app fallback. */
+export type ConnectorProposal = {
+  app: ConnectorKey;
+  label: string;
+  why: string;
+  connectable: boolean;
+  /** True only once the connection succeeded; older responses omit it (false). */
+  connected?: boolean;
+};
+
+/** Card messages have role Claude, empty text and no choices; ordinary messages have card null. */
 export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
+  choices: Choice[];
+  card: ProposalCard | null;
 }
 
 export interface SetupState {
@@ -512,11 +567,63 @@ export interface SetupState {
   busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
+  /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
+  pending_card?: string | null;
 }
 
 export interface SetupTools {
   tools: ToolRow[];
   connectable: 'mock_payments'[];
+}
+
+/** Line keys understood by setup's public-lines review, shared without importing UI code. */
+export const SETUP_PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+
+/** The public charter lines the owner reviews before the safety check. */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: 'owner' | 'suggested';
+  editable: boolean;
+  /** Stored owner words held from publication; absent on older answers means false. */
+  held?: boolean;
+}
+
+export type PublicHoursWindow = HoursWindow;
+
+export interface SetupPublicHours {
+  source: 'owner' | 'suggested';
+  windows: HoursWindow[];
+}
+
+export type PublicPriceItem = SetupPublicPriceItem;
+
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+
+export interface SetupPublicPrices {
+  source: 'owner' | 'suggested';
+  items: SetupPublicPriceItem[];
+}
+
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+  revision: string;
+}
+
+export interface SetupPublicLinesConfirmIn {
+  keys: string[];
+  revision: string;
+}
+
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
 }
 
 /** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
@@ -729,10 +836,16 @@ export interface StartSetupBody {
  * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
-export interface SetupAnswerBody {
-  question: QuestionKey;
-  text: string;
-}
+export type SetupAnswerBody = { text: string } & (
+  | { question: QuestionKey; card?: never }
+  | { question: null; card: string }
+);
+
+/** Changes always accept: title 1..60, job autonomy, payment-only integer cents 0..1_000_000. */
+export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number; autonomy?: 'auto' | 'ask' };
+
+/** Sent as an empty JSON object. */
+export type SetupSuggestionsBody = Record<string, never>;
 
 export interface ConsentBody {
   allow: boolean;
