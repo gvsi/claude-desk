@@ -588,12 +588,12 @@ describe('rule draft review', () => {
     const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(breadcrumb.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
     await expect.element(breadcrumb.getByText('Ask me first', { exact: true })).toHaveAttribute('aria-current', 'page');
-    // Every rule of Rivera's own and the shared rule go to the default ask, and the starter's cards
-    // it keeps make no row.
+    // Every rule of Rivera's own (its urgent job's among them) and the shared rule go to the default
+    // ask, and the starter's cards it keeps make no row.
     const changes = screen.getByRole('region', { name: 'Changes' });
     await expect.element(changes).toBeVisible();
     const rows = rowTexts(screen);
-    expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length + 1);
+    expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length + 2);
     for (const text of rows) expect(text).toMatch(/^Changed/);
     for (const text of rows) expect(text).toContain('Not covered by a rule you set, so I ask you.');
     // The shared rule's row says so under its title, after its connector, and it's the only one.

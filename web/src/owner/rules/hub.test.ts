@@ -539,12 +539,13 @@ describe('the rows a confirmed change lands on', () => {
   });
 
   it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
-    // "Ask me first" drops each of Rivera's own rules: every tool one of them governed changes, and
-    // the tools only the starter's cards govern (open times, leads, callbacks, identity checks) don't.
+    // "Ask me first" drops each of Rivera's own rules: every tool one of them governed changes, the
+    // urgent callback among them, and the tools only the starter's cards govern (open times, leads,
+    // callbacks, identity checks) don't.
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
     const changed = rowsChangedBy(draftFromDiff(stored, desk().policy, 'ask_first'), view().tools);
     expect([...changed.tools].sort()).toEqual(
-      ['native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
+      ['desk.emergency-callback', 'native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
     );
     expect(changed.moneyLimit).toBe(false);
   });

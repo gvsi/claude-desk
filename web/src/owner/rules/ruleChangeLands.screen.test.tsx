@@ -281,6 +281,8 @@ describe('a confirmed rule change in Ask Claude', () => {
   });
 
   it('a_row_above_what_shows_scrolls_as_near_the_middle_as_rules_goes', async () => {
+    // A Desk with no jobs above its connectors, so the Quote row sits in Rules' first screen.
+    desk().tools = desk().tools.filter((row) => row.source !== 'business');
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
     // Rules scrolled to its end, the Quote row far above what shows.
@@ -440,8 +442,11 @@ describe('a preset or a new payment limit', () => {
 
   it.each(['Rivera Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
     // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
-    // A short window, so Payments can be wholly out of view above Stripe.
+    // A short window, so Payments can be wholly out of view above Stripe. Acme's Desk has no jobs:
+    // Rules' loading state draws none, so Back on a Desk that has them would restore its place on
+    // a page that then grows above it.
     renameBusiness(business);
+    if (business === 'Acme Accounting') desk().tools = desk().tools.filter((row) => row.source !== 'business');
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
     const root = screen.container;
     const stripe = screen.getByRole('region', { name: 'Stripe' });
