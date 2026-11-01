@@ -1,0 +1,33 @@
+import axe from 'axe-core';
+import { expect, it } from 'vitest';
+import { page, userEvent } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
+import { Composer } from './Composer.tsx';
+import { FailedLong } from './Composer.stories.tsx';
+
+it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async () => {
+  await page.viewport(390, 844);
+  const failed = FailedLong.args?.failed;
+  const label = FailedLong.args?.label;
+  if (!failed || !label) throw new Error('the long failed story must supply its words and label');
+  const screen = await render(<Composer variant="owner" label={label} placeholder={label} onSend={() => {}} failed={failed} />);
+  const region = screen.getByRole('region', { name: label });
+  const kept = region.element() as HTMLElement;
+  expect(kept.clientHeight).toBe(6 * Number.parseFloat(getComputedStyle(kept).lineHeight));
+  await userEvent.keyboard('{Tab}');
+  await expect.element(region).toHaveFocus();
+  expect(getComputedStyle(kept).outlineColor).toBe('rgb(126, 174, 218)');
+  expect(getComputedStyle(kept).outlineWidth).toBe('2px');
+  expect(getComputedStyle(kept).outlineOffset).toBe('2px');
+  const before = kept.scrollTop;
+  await userEvent.keyboard('{ArrowDown}');
+  await expect.poll(() => kept.scrollTop).toBeGreaterThan(before);
+  await userEvent.keyboard('{End}');
+  await expect.poll(() => kept.scrollTop + kept.clientHeight).toBeGreaterThanOrEqual(kept.scrollHeight - 1);
+  await userEvent.keyboard('{Tab}');
+  const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+  await expect.element(retry).toHaveFocus();
+  expect(retry.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+  const result = await axe.run(screen.container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } });
+  expect(result.violations).toEqual([]);
+});

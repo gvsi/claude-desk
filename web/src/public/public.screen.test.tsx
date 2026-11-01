@@ -731,9 +731,12 @@ describe('public chat page', () => {
     await say(screen, 'How much is drain clearing?');
   });
 
-  it('send_failure_keeps_the_message', async () => {
-    const { screen } = await renderRoute(PAGE);
+  it.each(['desktop', 'phone'] as const)('send_failure_keeps_the_message_and_short_composer_unchanged_on_%s', async (viewport) => {
+    const { screen } = await renderRoute(PAGE, { viewport });
     await ready(screen);
+    const composer = screen.container.querySelector<HTMLElement>('.cd-composer__box')!;
+    const height = composer.getBoundingClientRect().height;
+    expect(height).toBe(52);
     // The send fails on the server's side without being kept: the chat checks, then says so.
     mockStore.inject({ route: 'sendMessage', status: 500 });
     await type(screen, 'How much is drain clearing?');
@@ -741,6 +744,8 @@ describe('public chat page', () => {
     await expect.element(failed.getByText("That didn't send. Your message is still here.", { exact: true })).toBeVisible();
     await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     expect(requests('sendMessage')).toHaveLength(1);
+    expect(composer.getBoundingClientRect().height).toBe(height);
+    expect(screen.container.querySelector('.cd-composer__kept')).toBeNull();
     expect(requests('visitorSession')).toHaveLength(2);
 
     const before = chatEvents().length;

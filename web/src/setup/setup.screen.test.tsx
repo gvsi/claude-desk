@@ -1103,6 +1103,7 @@ describe('setup', () => {
     retained.scrollTop = retained.scrollHeight;
     expect(retained.scrollTop).toBeGreaterThan(0);
     expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
     await retry.click();
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]!.text}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
