@@ -32,3 +32,16 @@ def test_typesafe_unset_placeholder_is_off(monkeypatch, placeholder):
 def test_typesafe_missing_key_is_off(monkeypatch):
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     assert KernelSettings.from_env().typesafe_api_key == ""
+
+
+@pytest.mark.parametrize(("value", "on"), [(None, False), ("", False), ("0", False), ("true", False), ("yes", False),
+                                           (" 1", False), ("1", True)])
+def test_sample_week_is_on_only_for_exactly_one(monkeypatch, value, on):
+    """Each new copy opens on a sample week only where the kernel's environment says `SAMPLE_WEEK=1`, exactly: the
+    hosted kernel's container sets it, and tests and evals see empty copies unless one opts in."""
+    if value is None:
+        monkeypatch.delenv("SAMPLE_WEEK", raising=False)
+    else:
+        monkeypatch.setenv("SAMPLE_WEEK", value)
+    assert KernelSettings.from_env().sample_week is on
+    assert KernelSettings(database_url="unused").sample_week is False
