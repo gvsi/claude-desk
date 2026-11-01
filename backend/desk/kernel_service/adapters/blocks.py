@@ -1,7 +1,7 @@
 """Trusted profiles for owner-configured blocks. Text is data; code fixes every capability."""
 
 import hashlib
-from typing import Annotated
+from typing import Annotated, Literal
 
 import desk_kernel
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +12,14 @@ from desk.kernel_service.adapters.base import AdapterRefusal, AdapterResult, Exe
 from desk.kernel_service.adapters.book import BookArgs
 from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, CaptureLeadArgs
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
+
+Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
+CARD_FIELDS: dict[Block, tuple[str, ...]] = {
+    "intake": ("title",),
+    "typed_booking": ("title", "appointment_type"),
+    "purpose_payment": ("title", "purpose"),
+    "urgent": ("title",),
+}
 
 
 class IntakeArgs(BaseModel):

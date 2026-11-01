@@ -47,20 +47,13 @@ def config_texts(value):
 
 def public_fields(tool: BusinessTool) -> dict[str, str]:
     """One tool's visitor-facing fields in render order; never its structured amount."""
-    values = {f"{tool.tool}.title": tool.title}
-    config = tool.config
-    if config.block == "typed_booking":
-        values[f"{tool.tool}.appointment_type"] = config.appointment_type
-    elif config.block == "purpose_payment":
-        values[f"{tool.tool}.purpose"] = config.purpose
-    return values
+    return {f"{tool.tool}.{field}": getattr(tool if field == "title" else tool.config, field)
+            for field in blocks.CARD_FIELDS[tool.config.block]}
 
 
 def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
-    allowed = {f"{tool.tool}.title": FREE_WORDS}
-    if tool.config.block == "typed_booking":
-        allowed[f"{tool.tool}.appointment_type"] = FREE_WORDS
-    return allowed
+    return {f"{tool.tool}.{field}": FREE_WORDS for field in blocks.CARD_FIELDS[tool.config.block]
+            if field in {"title", "appointment_type"}}
 
 
 def public_promise_fields(values: Mapping[str, str], *,

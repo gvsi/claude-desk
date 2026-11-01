@@ -410,6 +410,40 @@ async def test_card_text_has_one_combined_scan_per_tool_in_render_order(app, cli
                       (['desk.retainer.title', 'desk.retainer.purpose'], {'desk.retainer.title'})]
 
 
+async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the_scan(app, client, monkeypatch):
+    from desk.kernel_service import business_tools
+    from desk.kernel_service.adapters import blocks
+
+    assert blocks.CARD_FIELDS == {'intake': ('title',), 'typed_booking': ('title', 'appointment_type'),
+                                  'purpose_payment': ('title', 'purpose'), 'urgent': ('title',)}
+    copy = await rivera(app, client)
+    checks, original = [], business_tools.refuse_public_promises
+    async def record(ctx, part, values, desk_id=None, *, allow_words={}):
+        checks.append((list(values.items()), set(allow_words)))
+        return await original(ctx, part, values, desk_id, allow_words=allow_words)
+    monkeypatch.setattr(business_tools, 'refuse_public_promises', record)
+    tools = [intake(title='Free intro call', config={'block': 'intake', 'questions': ['Pay $50?']}),
+             intake(tool='desk.consult', title='Consult', config={
+                 'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}),
+             intake(tool='desk.retainer', title='Retainer', config={
+                 'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}),
+             intake(tool='desk.urgent', title='Urgent support', config={
+                 'block': 'urgent', 'urgent_when': 'We will call you today for free.'})]
+    assert (await put(client, copy, tools)).status_code == 200
+    assert checks == [([('desk.new-enquiry.title', 'Free intro call')], {'desk.new-enquiry.title'}),
+                      ([('desk.consult.title', 'Consult'), ('desk.consult.appointment_type', 'Free consult')],
+                       {'desk.consult.title', 'desk.consult.appointment_type'}),
+                      ([('desk.retainer.title', 'Retainer'), ('desk.retainer.purpose', 'Initial retainer')],
+                       {'desk.retainer.title'}),
+                      ([('desk.urgent.title', 'Urgent support')], {'desk.urgent.title'})]
+    before = {name: row.definition_sha256 for name, row in (await business_rows(app, copy)).items()}
+    for purpose in ('Free retainer', 'Pay $50'):
+        response = await put(client, copy, [intake(tool='desk.retainer', config={
+            'block': 'purpose_payment', 'purpose': purpose, 'amount_cents': 5000})])
+        assert response.status_code == 422, response.text
+        assert {name: row.definition_sha256 for name, row in (await business_rows(app, copy)).items()} == before
+
+
 async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(app, client):
     from .test_approvals import public_key
     from .test_decide import verify_signature
