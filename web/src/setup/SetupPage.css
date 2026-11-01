@@ -149,6 +149,90 @@
   }
 }
 
+/* A step's part that waits on a read (StepSkeletons): its parts keep the step's 20 px rhythm
+   inside the region, as its shapes do in the layer, so the part lands where its shapes were. */
+.cd-setup-step__region > .cd-skeleton-screen__body,
+.cd-setup-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+/* The opening (SetupOpening) stays around the step once the interview is read, so its shapes hand
+   off to the step's. In the conversation's frame, where only the transcript scrolls, it passes the
+   column's height on to the conversation, so the dock keeps its place at the window's foot; and the
+   shapes fading over the conversation keep the place they had in the column, which is now the
+   transcript column's (SetupConversation.css), as this frame's main has no padding of its own. */
+.cd-setup--chat .cd-setup-opening,
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  box-sizing: border-box;
+  padding: var(--space-40) max(var(--space-40), calc((100% - 720px) / 2)) 0;
+}
+
+@media (max-width: 639px) {
+  .cd-setup--chat .cd-setup-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+    padding: var(--space-24) var(--space-16) 0;
+  }
+}
+
+/* Known words' lines (MeasuredLines): a box as wide as the words' own, in their type, which holds a
+   pill per line they take there. */
+.cd-setup-skeleton__measured {
+  display: block;
+  min-width: 0;
+}
+
+/* Lines the words take at one width only: a phone's wrap onto more of them. */
+.cd-skeleton-line.cd-setup-skeleton__phone-line {
+  display: none;
+}
+
+@media (max-width: 639.98px) {
+  .cd-skeleton-line.cd-setup-skeleton__phone-line {
+    display: flex;
+  }
+
+  .cd-skeleton-line.cd-setup-skeleton__wide-line {
+    display: none;
+  }
+}
+
+/* A shape set on a line of words' middle, as a name and its badge are: the line is as deep as the
+   tallest of them, as it is under the words. */
+.cd-skeleton.cd-setup-skeleton__inline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.cd-setup-skeleton__badge {
+  margin-left: var(--space-4);
+}
+
+/* The always-on rules' lock, on the middle of its rule's first line, and the rule's lines beside it. */
+.cd-setup-skeleton__lock {
+  display: flex;
+  align-items: center;
+}
+
+.cd-setup-skeleton__fill {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* "Not what we planned" as a line where the words go, 6 px under who is asking, without the held
+   bar beside it: a skeleton draws no status. */
+.cd-setup-skeleton__flag {
+  margin-top: var(--space-6);
+}
+
 .cd-setup-step__actions {
   display: flex;
   flex-wrap: wrap;
