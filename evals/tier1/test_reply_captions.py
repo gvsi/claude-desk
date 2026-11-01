@@ -108,7 +108,7 @@ def test_the_terse_payment_caption_still_reads_as_unsupported():
         {"id": "quote-amount", "requires": ["01a"],
          "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["en"] + " $89",
          "clauses": [{"template": "quote", "fact": "own-quote"}],
-         "expect": {"ok": False, "violations": ["number_in_prose"], "blocks": ["handoff"]}},
+         "expect": {"ok": False, "violations": ["number_in_prose"], "blocks": ["quote"]}},
     ]
 ])
 async def test_captions_through_full_reply_check(k, fake, records, row):
