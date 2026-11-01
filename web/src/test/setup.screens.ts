@@ -13,7 +13,7 @@
 import '../ds/tokens.css';
 import '../ds/base.css';
 
-import { afterEach, beforeAll, beforeEach, expect } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect } from 'vitest';
 import { cleanup } from 'vitest-browser-react';
 
 import { setPollScale, setRetryScale } from '../app/poll.ts';
@@ -22,6 +22,7 @@ import { stampRequests, startTest, worker } from '../mocks/browser.ts';
 import { mockStore } from '../mocks/store.ts';
 import { CONNECTOR_PAGES_BUILT, setConnectorPagesBuilt } from '../owner/connectors/pages.ts';
 import { resetBrowserLanguage } from './renderRoute.tsx';
+import { mockDrain } from './mockDrain.ts';
 
 let started: Promise<unknown> | null = null;
 
@@ -46,3 +47,7 @@ afterEach(async () => {
   resetBrowserLanguage();
   expect(mockStore.unhandled, 'requests to /api/ paths the mock API does not serve').toEqual([]);
 });
+
+// Keep this page's reply channels alive until MSW has answered even requests aborted at unmount.
+// A hanging handler fails its own file in five seconds, before it can kill the shared worker.
+afterAll(() => mockDrain.waitForIdle());
