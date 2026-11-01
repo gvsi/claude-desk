@@ -2756,6 +2756,11 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     ("Within half a mile of Lake Merritt.", []),
     ("Within a hundred miles of Oakland.", []),
     ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    ("Oakland and Berkeley, 7 days a week.", []),
+    ("Trabajamos 7 días a la semana.", []),
+    ("We cover 20-30 miles around Oakland.", []),
+    ("Within 20–30 miles of Oakland.", []),
+    ("Trip fee 20 to 30.", ["digit"]),
     # A known limit: a fee written in words passes, since any cardinal number word does.
     ("Cargo de viaje: cincuenta.", []),
     ("Same-day service in Oakland.", ["lex.en.date"]),

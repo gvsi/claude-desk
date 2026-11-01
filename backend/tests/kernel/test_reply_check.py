@@ -2334,6 +2334,9 @@ def test_scan_public_text(text, rules):
     "Atendemos tres condados: Alameda, Contra Costa y Marin.", "Dos sucursales: Oakland y Berkeley.",
     "Serving the East Bay for over twenty years.", "Within half a mile of Lake Merritt.",
     "Within a hundred miles of Oakland.", "Within one hundred miles of Oakland.", "Dentro de cien kilómetros.",
+    # Digits before "days a week", and a range of digits before a distance unit
+    "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
+    "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
     # A known limit: a fee written in words passes, since any cardinal number word does.
     "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
     "Seven days to finish any job in Oakland.",
@@ -2369,6 +2372,8 @@ def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     ("Within 25 miles, 1000 off.", ["digit"]),
     ("Oakland: 1500 minimum.", ["digit"]),
     ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    ("Trip fee 20 to 30.", ["digit"]),
+    ("Seven days a week, 2 to 3 hours each.", ["digit"]),
     # Response times and dates
     ("Service in Oakland within two hours.", ["lex.en.date"]),
     ("Same-day service in Oakland.", ["lex.en.date"]),

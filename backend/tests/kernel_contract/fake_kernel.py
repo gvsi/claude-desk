@@ -948,6 +948,10 @@ SERVICE_AREA_CARDINAL = (
     r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
     r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
     r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
+SERVICE_AREA_AFTER_DIGITS = (
+    rf"(?:(?:{SERVICE_AREA_BLANK}*[-–—]{SERVICE_AREA_BLANK}*|{SERVICE_AREA_BLANK}+(?:to|a|hasta){SERVICE_AREA_BLANK}+)"
+    rf"[0-9]+(?:[.,][0-9]+)*)?{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+"
+    rf"a{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b")
 SERVICE_AREA_HALF_OR_HUNDRED = rf"half|(?:one{SERVICE_AREA_BLANK}+)?hundred|cien"
 SERVICE_AREA_BEFORE_UNIT = rf"{SERVICE_AREA_BLANK}+(?:an?{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_UNIT}"
 SERVICE_AREA_DAY_WORDS = (
@@ -958,14 +962,14 @@ SERVICE_AREA_DAY_WORDS = (
 
 def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
-    number before a distance unit or a year, any cardinal word, half or a hundred before a unit, "miles" as
+    number before a distance unit (or a range to one) or "days a week", or a year, any cardinal word, half or a hundred before a unit, "miles" as
     the unit, and weekdays, weekends and parts of the day."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit, after = text[start:end], text[end:]
     if rule == "digit":
         return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
-                or re.match(rf"{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}", after, re.IGNORECASE) is not None)
+                or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None)
     if rule in ("lex.en.number", "lex.es.number"):
         return (re.fullmatch(rf"miles|millas|{SERVICE_AREA_CARDINAL}", hit, re.IGNORECASE) is not None
                 or (re.fullmatch(SERVICE_AREA_HALF_OR_HUNDRED, hit, re.IGNORECASE) is not None

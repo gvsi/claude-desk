@@ -542,9 +542,13 @@ _CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
              r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
              r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+"
              r"|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
-# A distance unit straight after a number, singular or plural, with a hyphen or blanks between
-# ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
-SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
+_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
+# After a number: a distance unit, singular or plural, with a hyphen or blanks between ("25 miles",
+# "a 30-mile radius", "1 kilómetro", "50-km"), maybe after a range to a second number ("20-30 miles",
+# "20 to 30 miles", "20 a 30 km", "20 hasta 30 km"); or "days a week" ("7 días a la semana").
+SERVICE_AREA_AFTER_DIGITS = re.compile(
+    rf"(?:(?:{_BLANK}*[-–—]{_BLANK}*|{_BLANK}+(?:to|a|hasta){_BLANK}+)[0-9]+(?:[.,][0-9]+)*)?"
+    rf"{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK}", re.IGNORECASE)
 SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
 SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
 # Half or a hundred is a distance only right before its unit ("half a mile", "a hundred miles").
@@ -560,7 +564,7 @@ SERVICE_AREA_DAY_WORDS = re.compile(
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit or a year; any cardinal number word ("three counties", "seven days a week"), half or a
+    distance unit (or a range to one) or "days a week", or a year; any cardinal number word ("three counties", "seven days a week"), half or a
     hundred right before a distance unit, or "miles" as the unit; a weekday, weekend or part of the day.
     Nothing else: no fraction, amount, time window or date, so "half off", "trip fee 1500" and "same-day"
     stay refused as under any other key. A fee written in words ("trip fee: fifty") passes: a known limit."""
@@ -568,7 +572,7 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
         return False
     hit = text[start:end]
     if rule == "digit":
-        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
+        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
     if rule in ("lex.en.number", "lex.es.number"):
         return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
                 or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
