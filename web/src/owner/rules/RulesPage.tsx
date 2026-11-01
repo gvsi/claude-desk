@@ -26,7 +26,7 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
-import { deskPath, useNeedsYou } from '../useDesks.ts';
+import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { BusinessJobs } from './BusinessJobs.tsx';
@@ -42,8 +42,8 @@ import './RulesPage.css';
 export const RULES_TITLE = 'Rules';
 
 /**
- * What the owner can ask Claude for on Rules, in her words (the presets board's), then, while a
- * request is held, why the latest one was (`holdQuestion`).
+ * Rivera's examples of what the owner can ask Claude for on Rules, in her words (the presets board's).
+ * While a request is held, any Desk can also ask why the latest one was (`holdQuestion`).
  */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
@@ -83,6 +83,7 @@ export function RulesPage() {
   const { desk } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
+  const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
   const { ask } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
@@ -95,7 +96,7 @@ export function RulesPage() {
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
-  const chips = question === null ? RULES_CHIPS : [...RULES_CHIPS, question];
+  const chips = question === null ? fixedChips : [...fixedChips, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
@@ -241,7 +242,7 @@ export function RulesPage() {
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div className="cd-rules__ask">
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
-        <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />
+        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
       {active === undefined ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {body}
