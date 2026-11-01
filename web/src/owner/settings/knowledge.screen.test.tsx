@@ -12,6 +12,7 @@ import type { KnowledgeItem } from '../../api/contracts.ts';
 import type { KnowledgeBody, KnowledgeRow } from '../../api/views.ts';
 import { SPEC } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
+import { settled } from '../../ds/test/settled.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
@@ -684,9 +685,12 @@ describe('knowledge', () => {
     expect(Math.round(content.getBoundingClientRect().width)).toBe(720);
     const gap = (above: Element, below: Element) => Math.round(below.getBoundingClientRect().top - above.getBoundingClientRect().bottom);
     expect([gap(lead, known), gap(known, add), gap(add, added)]).toEqual([20, 20, 20]);
-    // (The pointer, left on "Add a note" by the add, moves off it first, so it isn't hovered.)
+    // Move the pointer off "Add a note", then let its hover-exit transition finish before
+    // measuring the resting fill: leaving hover starts the color change, rather than ending it.
     await userEvent.hover(lead);
-    expectComputed(main(screen).getByRole('button', { name: 'Add a note' }).element(), SPEC.primary);
+    const addNoteButton = main(screen).getByRole('button', { name: 'Add a note' }).element();
+    await settled(addNoteButton);
+    expectComputed(addNoteButton, SPEC.primary);
 
     // The frame with Settings current, every card in the card look, and Tab through Knowledge's
     // SubNav row, the note, its two adds, then the switch: the list's rows hold no stop.
