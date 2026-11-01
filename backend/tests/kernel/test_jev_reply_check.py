@@ -158,5 +158,5 @@ async def test_jev_reads_the_same_shown_prose_and_cards_as_sonnet(app, client, r
     verdict = await checked(client, visitor, "Ｈere is your quote.\u200b", [clause("quote", quote.fact_id)])
     assert verdict.ok
     sonnet = reviewer.soft_inputs[-1]
-    assert fake.inputs == [("Here is your quote.", [verdict.blocks[1].text], sonnet.next_steps)]
+    assert fake.inputs == [("Here is your quote.", [f"Quote card: {verdict.blocks[1].text}"], sonnet.next_steps)]
     assert fake.inputs[0] == (sonnet.prose, sonnet.cards, sonnet.next_steps)
