@@ -20,16 +20,18 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
+from desk.api.rules import preset_cards
 from desk.contracts import LedgerEvent, PolicyVersion, RuleCard, ToolProfile
 from desk.db.models import LedgerEntry, Person, Tool
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
-from desk.kernel_service.seed import RIVERA_CARDS
+from desk.kernel_service.seed import RIVERA_CARDS, SATURDAY_HOURS, WEEKDAY_HOURS
+from desk.presets import PRESETS
 
 from .helpers import (TEST_CAP, CopyRows, compile_at, draft_and_confirm, draft_refusals, kernel_ctx, make_copy_rows,
                       rows_of)
-from .test_adapters import visitor_of
+from .test_adapters import rivera, visitor_of
 from .test_compiler import NATIVE, card, req
 from .test_decide import decided
 from .test_execute import executed
@@ -134,6 +136,22 @@ async def test_draft_is_proved_with_every_obligation(desk_prove, app, client):
                                                 {"version": 2, "status": "proved", "method": "symcc"}]
     # the live proof answers the same cards from now on
     assert app.state.kernel.policies.cache.get(hashes_of(row)) == proof
+
+
+@pytest.mark.solver
+async def test_recommended_rules_in_a_desks_own_hours_prove(desk_prove, app, client):
+    """"Recommended rules" as the API drafts it for Rivera's Desk (`desk.api.rules.preset_cards`): its weekday
+    booking card in Rivera's 08:00 to 18:00 weekday hours, not the shipped 09:00 to 17:00, misses the shipped proof,
+    so the kernel compiles and proves it like any owner draft, every obligation holding, and it activates."""
+    copy = await rivera(app, client)
+    cards = preset_cards("auto", [WEEKDAY_HOURS, SATURDAY_HOURS])
+    [booking] = [c for c in cards if c.applies_to == "native.book"]
+    assert cards != PRESETS["auto"] and (booking.card_id, booking.hours) == ("preset-book-weekday", WEEKDAY_HOURS)
+    confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, cards)
+    proof = confirmed.proof
+    assert proof is not None and proof.ok and proof.method == "symcc" and not proof.timed_out, proof
+    assert [(c.name, c.ok) for c in proof.checks] == [(name, True) for name in activation.PROOF_CHECKS]
+    assert confirmed.status == "active" and booking in confirmed.cards
 
 
 def use_prover(monkeypatch: pytest.MonkeyPatch, stub: str, *, sleep: float = 0) -> None:

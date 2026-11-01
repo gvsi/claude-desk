@@ -17,7 +17,7 @@ import html
 import json
 import re
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import time, timedelta
 
 import httpx
 import pytest
@@ -40,7 +40,7 @@ from desk.api.prompts import (
     RuleChat,
 )
 from desk.api.ratelimit import LIMITS, Limit
-from desk.api.rules import card_diff, chat_view, rule_card
+from desk.api.rules import card_diff, chat_view, preset_cards, preset_of, rule_card
 from desk.api.schemas import (
     CardDiff,
     CoveringCard,
@@ -66,6 +66,7 @@ from desk.kernel_api import (
     AnswerRequest,
     CreateSessionRequest,
     DecideRequest,
+    DeskHoursRequest,
     DocumentCreated,
     ExecuteRequest,
     PolicyConfirmRequest,
@@ -806,6 +807,124 @@ async def test_preset_drafts_the_shared_preset_cards(app, browser, fake, kernel_
         each for each in [*rivera, person, never] if each not in PRESETS["ask_first"]]
     reply = await owner.browser.post(rules_path(owner, "preset"), json={"preset": "custom"})
     assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
+
+
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
+EIGHT_TO_SIX = HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
+NINE_TO_FIVE = HoursWindow(days=WEEKDAYS, start=time(9), end=time(17))
+SATURDAY = HoursWindow(days=["sat"], start=time(9), end=time(13))
+PRESET_BOOKING_REASON = "Weekday bookings in working hours, checked by the reviewer."
+
+
+def booking_cards(cards: list[RuleCard]) -> list[RuleCard]:
+    return [each for each in cards if each.applies_to == "native.book"]
+
+
+def with_bookings(*bookings: RuleCard) -> list[RuleCard]:
+    """"Recommended rules" with `bookings` in place of its weekday booking card, every other card as it is."""
+    (shipped,) = booking_cards(PRESETS["auto"])
+    at = PRESETS["auto"].index(shipped)
+    return [*PRESETS["auto"][:at], *bookings, *PRESETS["auto"][at + 1:]]
+
+
+def test_recommended_rules_book_weekdays_in_the_desks_own_hours():
+    # An 8 to 6 weekday Desk's "Recommended rules" book weekdays 8 to 6: one booking card, the preset's own in all
+    # but its hours (the reason names none), in its place; every other card is the preset's.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    cards = preset_cards("auto", [EIGHT_TO_SIX])
+    assert cards == with_bookings(shipped.model_copy(update={"hours": EIGHT_TO_SIX}))
+    (booking,) = booking_cards(cards)
+    assert (booking.card_id, booking.applies_to, booking.mode, booking.who, booking.hours, booking.review,
+            booking.reason) == ("preset-book-weekday", "native.book", "auto", "anyone", EIGHT_TO_SIX, True,
+                                PRESET_BOOKING_REASON)
+    # Saturday hours drop out ("weekday bookings"), so Saturday bookings ask first.
+    assert preset_cards("auto", [EIGHT_TO_SIX, SATURDAY]) == cards
+    # A window over the whole week keeps its weekdays; windows with the same hours merge, their days in week order.
+    week = HoursWindow(days=["sun", "mon", "tue", "wed", "thu", "fri", "sat"], start=time(8), end=time(18))
+    assert preset_cards("auto", [week]) == cards
+    assert preset_cards("auto", [HoursWindow(days=["thu", "fri"], start=time(8), end=time(18)),
+                                 HoursWindow(days=["wed", "tue", "mon"], start=time(8), end=time(18))]) == cards
+    # A window that ends at midnight (00:00) keeps that end.
+    all_day = HoursWindow(days=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start=time(0), end=time(0))
+    (midnight,) = booking_cards(preset_cards("auto", [all_day]))
+    assert midnight.hours == HoursWindow(days=WEEKDAYS, start=time(0), end=time(0))
+
+
+def test_recommended_rules_take_a_card_per_weekday_window():
+    # Split weekday hours make a booking card per window, numbered by their first day, then their hours, however the
+    # Desk keeps them, each the preset's card in all but its ID and hours.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    mon_to_thu = HoursWindow(days=["mon", "tue", "wed", "thu"], start=time(8), end=time(18))
+    friday = HoursWindow(days=["fri"], start=time(8), end=time(16))
+    cards = preset_cards("auto", [friday, SATURDAY, mon_to_thu])
+    assert cards == with_bookings(shipped.model_copy(update={"card_id": "preset-book-weekday-1", "hours": mon_to_thu}),
+                                  shipped.model_copy(update={"card_id": "preset-book-weekday-2", "hours": friday}))
+    assert preset_cards("auto", [mon_to_thu, friday]) == cards
+    # Two windows on one day (a lunch break) are two cards, the morning's first.
+    morning = HoursWindow(days=WEEKDAYS, start=time(8), end=time(12))
+    afternoon = HoursWindow(days=WEEKDAYS, start=time(13), end=time(18))
+    assert [(each.card_id, each.hours) for each in booking_cards(preset_cards("auto", [afternoon, morning]))] == [
+        ("preset-book-weekday-1", morning), ("preset-book-weekday-2", afternoon)]
+
+
+def test_recommended_rules_fall_back_to_the_shipped_cards():
+    # No hours, no weekday hours, or weekday hours of exactly 9 to 5: the shipped cards byte for byte, so the draft
+    # hits the proofs shipped for them.
+    shipped = [each.model_dump_json() for each in PRESETS["auto"]]
+    for hours in ([], [SATURDAY], [NINE_TO_FIVE], [NINE_TO_FIVE, SATURDAY],
+                  [HoursWindow(days=["mon", "tue"], start=time(9), end=time(17)),
+                   HoursWindow(days=["wed", "thu", "fri", "sat"], start=time(9), end=time(17))]):
+        assert [each.model_dump_json() for each in preset_cards("auto", hours)] == shipped, hours
+    # Fewer weekdays at 9 to 5 aren't the shipped card's hours.
+    (fewer,) = booking_cards(preset_cards("auto", [HoursWindow(days=["mon", "tue", "wed", "thu"], start=time(9),
+                                                                end=time(17))]))
+    assert (fewer.card_id, fewer.hours.days) == ("preset-book-weekday", ["mon", "tue", "wed", "thu"])
+    # "Ask me first" books nothing: its cards whatever the hours.
+    assert preset_cards("ask_first", [EIGHT_TO_SIX]) == PRESETS["ask_first"]
+
+
+def test_preset_of_reads_the_desks_own_recommended_rules():
+    hours = [EIGHT_TO_SIX, SATURDAY]
+    cards = preset_cards("auto", hours)
+    assert preset_of([*reversed(cards), default("native.payment_link")], hours) == "auto"
+    assert preset_of(PRESETS["ask_first"], hours) == "ask_first"
+    # The shipped 9 to 5 cards aren't an 8 to 6 Desk's "Recommended rules", nor its own those of another Desk.
+    assert preset_of(PRESETS["auto"], hours) is None
+    assert preset_of(cards, []) is None
+    assert preset_of(PRESETS["auto"], []) == "auto"
+
+
+async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, browser, fake, kernel_http):
+    # Rivera's Desk keeps 8 to 6 on weekdays and 9 to 1 on Saturdays: its "Recommended rules" book weekdays 8 to 6,
+    # and Saturday bookings ask first.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    assert fake.desks[owner.desk_id].hours == [EIGHT_TO_SIX, SATURDAY]
+
+    async def preset() -> str | None:
+        return RulesView.model_validate((await owner.browser.get(rules_url(owner))).json()).preset
+
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    (posted,) = fake.called("POST /policy/draft")
+    sent = PolicyDraftRequest.model_validate(posted.body).cards
+    assert sent == draft.cards == with_bookings(booking_cards(PRESETS["auto"])[0].model_copy(
+        update={"hours": EIGHT_TO_SIX}))
+    (booking,) = booking_cards(sent)
+    assert (booking.card_id, booking.hours, booking.review, booking.reason) == (
+        "preset-book-weekday", EIGHT_TO_SIX, True, PRESET_BOOKING_REASON)
+    # Rivera's own 8 to 6 weekday rule goes to the preset's, and her Saturday rule goes, to ask first.
+    assert {each.card_id for each in draft.diff.removed} >= {"rv-book-wk", "rv-book-sat"}
+    assert booking in draft.diff.added
+    assert await preset() is None
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert await preset() == "auto"
+
+    # Hours of 9 to 5 on weekdays draft the shipped cards as they are; the 8 to 6 cards aren't this Desk's preset now.
+    await kernel_http.owner(owner.token).call("PUT /desks/{id}/hours", DeskHoursRequest(hours=[NINE_TO_FIVE]),
+                                              path={"id": owner.desk_id})
+    assert await preset() is None
+    again = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    assert PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body).cards == PRESETS["auto"]
+    assert again.diff == CardDiff(added=[], removed=[], changed=[(booking, booking_cards(PRESETS["auto"])[0])])
 
 
 async def approved_link(kernel_http, owner: Owner, items: list[dict], n: int) -> None:
