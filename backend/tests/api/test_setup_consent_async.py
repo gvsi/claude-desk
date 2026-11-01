@@ -267,8 +267,8 @@ async def test_after_timeout_or_shutdown_preserves_the_landed_state(
     monkeypatch.setattr(setup, "consent", custom)
     monkeypatch.setattr(setup, "_rollback_turn", track_rollback)
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
-    # Only the after callback should time out here; let the real database commit finish first.
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 2)
+    # Only the post-commit callback should time out; staging and commits use the database.
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 25)
     monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 0.4, raising=False)
     reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
     assert reply.status_code == (202 if slow else 200), reply.text
@@ -610,27 +610,43 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
 
     monkeypatch.setattr(setup, "_after_consent", waiting)
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2 if end == "deadline" else 100)
-    reply = await owner.browser.post(path + "/consent", json={"allow": True})
-    assert reply.status_code == (202 if slow else 503)
-    await asyncio.wait_for(entered.wait(), 5)
-    if slow:
-        task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
-        if end == "shutdown":
-            await app.state.runtime.turn_runs.close()
-            assert task.cancelled()
-            assert "CancelledError" in caplog.text
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", None if end == "deadline" else 100)
+    if end == "deadline":
+        # Keep the real timeout, but arm it only after database staging reaches the stalled step.
+        timeout = asyncio.timeout
+        deadline = timeout(None)
+        monkeypatch.setattr(setup.asyncio, "timeout", lambda delay: deadline if delay is None else timeout(delay))
+    request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": True}))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        if slow:
+            reply = await asyncio.wait_for(asyncio.shield(request), 5)
+        if end == "deadline":
+            deadline.reschedule(asyncio.get_running_loop().time())
+        if not slow:
+            reply = await asyncio.wait_for(asyncio.shield(request), 5)
+        assert reply.status_code == (202 if slow else 503)
+        if slow:
+            task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
+            if end == "shutdown":
+                await app.state.runtime.turn_runs.close()
+                assert task.cancelled()
+                assert "CancelledError" in caplog.text
+            else:
+                with pytest.raises(ApiProblem) as failed:
+                    await asyncio.wait_for(asyncio.shield(task), 5)
+                assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+                assert "TimeoutError" in caplog.text
         else:
-            with pytest.raises(ApiProblem) as failed:
-                await asyncio.wait_for(asyncio.shield(task), 5)
-            assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+            assert reply.json() == {"error": "model_unavailable"}
             assert "TimeoutError" in caplog.text
-    else:
-        assert reply.json() == {"error": "model_unavailable"}
-        assert "TimeoutError" in caplog.text
-    assert (await owner.browser.get(path)).json() == state
-    assert state["interview_id"] not in setup._RUNNING
-    assert not app.state.runtime.turn_runs.holds(state["interview_id"])
+        assert (await owner.browser.get(path)).json() == state
+        assert state["interview_id"] not in setup._RUNNING
+        assert not app.state.runtime.turn_runs.holds(state["interview_id"])
+    finally:
+        release.set()
+        await app.state.runtime.turn_runs.close()
+        await asyncio.gather(request, return_exceptions=True)
 
 
 async def test_a_wait_that_expires_returns_the_busy_snapshot_even_if_the_run_lands_just_after(
