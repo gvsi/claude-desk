@@ -927,8 +927,18 @@ describe('rules page', () => {
     expect(limit().getBoundingClientRect().top, "Payments' limit where the owner left it").toBe(shows);
   });
 
-  it('rules_page_matches_its_board', async () => {
+  it.each(['at once', 'after its shapes show'] as const)('rules_page_matches_its_board_drawn_%s', async (when) => {
+    // Rules waits for its suggestions: read slowly, its shapes show first and fade as the page draws,
+    // here for as long as a busy browser can keep them (the fade's one-second fallback).
+    if (when === 'after its shapes show') {
+      mockStore.inject({ route: 'suggestions', status: 200, body: desk().suggestions, delayMs: 500 });
+      const slowFade = document.createElement('style');
+      slowFade.textContent = ".cd-skeleton-screen__layer[data-state='leaving'] { animation-duration: 10s !important; }";
+      document.head.append(slowFade);
+      onTestFinished(() => slowFade.remove());
+    }
     const { screen } = await renderRoute(`${DESK}/rules`);
+    if (when === 'after its shapes show') await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;
