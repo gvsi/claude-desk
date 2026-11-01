@@ -91,12 +91,34 @@ def test_owner_supports_structured_facts(field, value, owner_text, supported):
     ("Waltz", "Waltzes"),
     ("Match", "Matches"),
     ("Brush", "Brushes"),
+    ("Class", "Classes"),
+    ("Course", "Courses"),
+    ("Case", "Cases"),
+    ("Size", "Sizes"),
+    ("House", "Houses"),
+    ("License", "Licenses"),
+    ("Glass", "Glasses"),
 ])
 def test_owner_supports_price_title_regular_plurals_both_ways(singular, plural):
     assert setup.owner_supports("price_items", [setup.PriceAnswer(title=plural, unit_cents=17500)],
                                 f"A {singular.lower()} is $175 now.", stated=True)
     assert setup.owner_supports("price_items", [setup.PriceAnswer(title=singular, unit_cents=17500)],
                                 f"{plural} are $175 now.", stated=True)
+
+
+@pytest.mark.parametrize("singular,plural", [
+    ("Repair", "Repairs"),
+    ("Class", "Classes"),
+    ("Yoga class", "Yoga classes"),
+    ("Course", "Courses"),
+    ("Case", "Cases"),
+    ("Size", "Sizes"),
+    ("House", "Houses"),
+    ("License", "Licenses"),
+    ("Glass", "Glasses"),
+])
+def test_price_title_singular_and_plural_share_one_key(singular, plural):
+    assert setup._title(singular) == setup._title(plural)
 
 
 @pytest.mark.parametrize("title,owner_text,supported", [
@@ -775,6 +797,7 @@ async def test_off_topic_plural_price_title_accepts_singular_owner_correction(pr
 @pytest.mark.parametrize("question", ["quote_limit", "contact_and_after_hours"])
 @pytest.mark.parametrize("stored_title,stored_cents,text,patch_title,cents", [
     ("Callout fee", 15000, "Callouts are $175 now", "Callout fee", 17500),
+    ("Yoga classes", 2000, "A yoga class is $25 now", "Yoga class", 2500),
 ])
 async def test_price_correction_replaces_the_stored_price(
     proposals, model, engine, question, stored_title, stored_cents, text, patch_title, cents,

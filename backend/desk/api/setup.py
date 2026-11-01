@@ -1563,12 +1563,16 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
 
 
 def _singular(word: str) -> str:
-    """A word of four or more letters without a regular plural ending: "es" after s, x, z, ch or sh, else "s"."""
-    if len(word) < 4:
+    """A word of four or more letters in one form for its singular and regular plural, so "class" and "classes" or
+    "case" and "cases" match: one ending in "ss" as it is, else without a plural "es" after s, x, z, ch or sh, a
+    plural "s", or a final "e" after s, z or ch."""
+    if len(word) < 4 or word.endswith("ss"):
         return word
     if re.search(r"(?:s|x|z|ch|sh)es$", word):
         return word[:-2]
-    return word[:-1] if word.endswith("s") else word
+    if word.endswith("s"):
+        return word[:-1]
+    return word[:-1] if re.search(r"(?:s|z|ch)e$", word) else word
 
 
 def _title(title: str) -> str:
