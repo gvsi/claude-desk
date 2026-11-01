@@ -385,3 +385,18 @@ async def test_reconcile_does_not_issue_while_configuration_is_locked(app, clien
         assert not await quotes_of(app, copy) and not await links_of(app, copy)
     assert (await read(client, visitor.headers, decision)).state == 'executed'
     assert len(await quotes_of(app, copy)) == len(await links_of(app, copy)) == 1
+
+
+@pytest.mark.parametrize('config', [None, {'block': 'intake', 'questions': ['What?']},
+                                    {'block': 'urgent', 'urgent_when': 'No heating'}])
+def test_adapter_refuses_a_profile_of_another_block(config):
+    from desk.contracts import BusinessToolDef
+    from desk.kernel_service import adapters
+    from desk.kernel_service.adapters import blocks
+
+    own = BusinessToolDef.model_validate({key: value for key, value in payment().items() if key != 'tool'})
+    assert blocks.PurposePaymentAdapter(blocks.profile(TOOL, own)).profile.status == 'enabled'
+    other = (adapters.ADAPTERS['native.payment_link'].profile if config is None else blocks.profile(
+        TOOL, BusinessToolDef(title=TITLE, description='Take details.', config=config)))
+    with pytest.raises(ValueError, match='unsupported_block'):
+        blocks.PurposePaymentAdapter(other)
