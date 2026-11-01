@@ -2687,13 +2687,13 @@ def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> Publi
 
 
 def _public_lines(interview: Interview) -> SetupPublicLines:
-    """The board's projection of the stored answers. A line the kernel held at the latest charter write keeps its
-    stored words and source, marked `held` (never the contact); the revision covers that mark too."""
+    """The board's projection of the stored answers. A line the kernel held at the latest charter write, the
+    contact included, keeps its stored words and source, marked `held`; the revision covers that mark too."""
     answers, held = interview.answers, set(interview.held_policy_keys)
     public = SetupPublicLines(revision="", lines=[
         SetupPublicLine(key=key, text=value.strip(),
                         source="suggested" if field in answers.suggested_fields else "owner",
-                        editable=field != "how_we_help", held=key in held and key != "contact")
+                        editable=field != "how_we_help", held=key in held)
         for field, key in PUBLIC_LINE_KEYS.items() if (value := getattr(answers, field)) and value.strip()
     ], hours=SetupPublicHours(source="suggested" if "hours" in answers.suggested_fields else "owner",
                              windows=answers.hours) if answers.hours else None,

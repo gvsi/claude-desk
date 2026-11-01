@@ -1037,8 +1037,9 @@ async def test_held_lines_are_marked_and_part_of_the_revision(lines_setup, engin
     before = await stored(engine, state["interview_id"])
     held = (await owner.browser.get(path)).json()
     assert held["revision"] != shown["revision"]
-    # The stored words and their source stay as they were; the contact is never marked held.
-    assert held["lines"] == [{**line, "held": line["key"] == "policy:after_hours"} for line in shown["lines"]]
+    # The stored words and their source stay as they were; a held contact is marked like a held policy line.
+    assert held["lines"] == [{**line, "held": line["key"] in ("policy:after_hours", "contact")}
+                             for line in shown["lines"]]
     assert await stored(engine, state["interview_id"]) == before
 
 
@@ -1063,7 +1064,23 @@ async def test_every_write_leaves_held_lines_out_of_the_charter(lines_setup, eng
     assert "charter:policy:after_hours" not in charter(fake, state["desk_id"])
     assert "charter:contact" not in charter(fake, state["desk_id"])
     assert await held_keys(owner, state) == ["policy:after_hours", "contact"]
-    assert [line["key"] for line in reply.json()["lines"] if line["held"]] == ["policy:after_hours"]
+    assert [line["key"] for line in reply.json()["lines"] if line["held"]] == ["contact", "policy:after_hours"]
+
+
+async def test_rewording_a_held_contact_publishes_it_and_clears_its_hold(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await hold_keys(engine, owner, state, ["contact", "policy:urgent"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.put(path, json={"key": "contact", "text": "help@plumbing.example"})
+    assert reply.status_code == 200, reply.text
+    (sent,) = [body["charter"] for part, body in calls if part == "charter"]
+    claims = {claim["key"]: claim["value"] for claim in sent}
+    assert claims["contact"] == "help@plumbing.example"
+    assert "policy:urgent" not in claims
+    assert charter(fake, state["desk_id"])["charter:contact"]["claims"][0]["value"] == "help@plumbing.example"
+    assert await held_keys(owner, state) == ["policy:urgent"]
+    assert {line["key"]: line["held"] for line in reply.json()["lines"]
+            if line["key"] in ("contact", "policy:urgent")} == {"contact": False, "policy:urgent": True}
 
 
 async def test_rewording_a_held_line_publishes_it_and_clears_its_hold(lines_setup, engine, fake, monkeypatch):

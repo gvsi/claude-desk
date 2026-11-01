@@ -858,9 +858,9 @@ export interface SetupPublicHours {
   windows: HoursWindow[];
 }
 /**
- * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a policy line the
- * kernel's public-text checks held back (the setup state's `held_policy_keys`, never the contact): its stored words
- * stay off the charter until the owner rewords it.
+ * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+ * public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+ * off the charter until the owner rewords it.
  */
 export interface SetupPublicLine {
   key: string;

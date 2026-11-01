@@ -13136,7 +13136,7 @@
           "held"
         ],
         "title": "SetupPublicLine",
-        "description": "A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a policy line the\nkernel's public-text checks held back (the setup state's `held_policy_keys`, never the contact): its stored words\nstay off the charter until the owner rewords it."
+        "description": "A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's\npublic-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay\noff the charter until the owner rewords it."
       },
       "SetupPublicLineError": {
         "properties": {
