@@ -75,6 +75,7 @@
    both lines. The name is the link, and its overlay covers the row, with the row's focus ring. */
 .cd-connector-section__tool {
   position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   grid-template-areas:
@@ -94,9 +95,17 @@
     'description summary outcome';
 }
 
+/* The tool's name, then "Updated" 8 px after it once a confirmed change landed on the row. */
+.cd-connector-section__tool-head {
+  display: flex;
+  grid-area: name;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
 /* The tool's name, a link to its page or, without one, plain text in the same type. */
 .cd-connector-section__tool-name {
-  grid-area: name;
   min-width: 0;
   color: var(--text-primary);
   font-weight: 520;
@@ -110,7 +119,8 @@
   content: '';
 }
 
-.cd-connector-section__tool:last-child > .cd-connector-section__tool-link::after {
+.cd-connector-section__tool:last-child .cd-connector-section__tool-link::after,
+.cd-connector-section__tool:last-child > .cd-landed-glow {
   border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
 }
 

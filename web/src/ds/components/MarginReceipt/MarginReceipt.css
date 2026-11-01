@@ -87,6 +87,24 @@
   }
 }
 
+/* A line that lands on its own, outside a conversation's rows (RulesReceipt under Claude's message
+   in Ask Claude): it rises space-4 as it fades in, on motion-base, its dot growing from half size
+   with it, as the boards draw a receipt landing. */
+.cd-margin-line--lands {
+  animation: cd-margin-line-land var(--motion-base) var(--motion-ease-emphasis) backwards;
+}
+
+.cd-margin-line--lands .cd-margin-line__dot > * {
+  animation: cd-margin-line-dot var(--motion-base) var(--motion-ease-emphasis) backwards;
+}
+
+@keyframes cd-margin-line-land {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
 /* A line already on screen before its row arrived (it moved under the reply with it) is already
    read: it shows at once, its dot whole, while the lines new with the reply land. */
 .cd-transcript-row--live > .cd-transcript-row__margin > .cd-margin-line--shown,
@@ -100,7 +118,9 @@
     transition: none;
   }
 
-  .cd-transcript-row--live > .cd-transcript-row__margin .cd-margin-line__dot > * {
+  .cd-transcript-row--live > .cd-transcript-row__margin .cd-margin-line__dot > *,
+  .cd-margin-line--lands,
+  .cd-margin-line--lands .cd-margin-line__dot > * {
     animation: none;
   }
 

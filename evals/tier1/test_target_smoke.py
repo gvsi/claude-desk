@@ -14,7 +14,8 @@ from evals.tier1.targets import SYMCC_REQUIRED, KernelTarget, TargetError
 pytestmark = pytest.mark.requires("01a")
 
 REVIEW_PASS = Json({"within_charter_bp": 10000, "manipulation_bp": 0, "recommendation": "allow"})
-SEED_PRICES = {"deposit": 2000, "drain": 18000, "heater": 15000, "leak": 25000}   # "Rivera seed"
+SEED_PRICES = {"deposit": 2000, "drain": 18000, "heater": 15000, "leak": 25000,   # "Rivera seed"
+               "pipe": 10000, "short-notice": 5000}
 SEED_CONTACTS = {"Dana": "dana@example.com", "Bob": "bob@example.com"}
 
 

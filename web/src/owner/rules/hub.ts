@@ -9,6 +9,7 @@ import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from 
 import type { AnyToolName, NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
+  ruleDiff,
   ruleWordsLine,
   rulesForTool,
   type ConnectorView,
@@ -20,6 +21,7 @@ import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorOn, isCatalogTool, toolDisplayName, toolNoun, toolState, type BusinessTools, type ConnectorKey } from '../connectors/catalog.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { coveredTools } from './changeRows.ts';
+import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
@@ -230,6 +232,28 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
       },
     ];
   });
+}
+
+/** The rows on Rules a confirmed change changed: its tools' rows, and the payment limit's line. */
+export interface ChangedRows {
+  /** The tools whose rules the change changed, or which it turned on, in the order of `tools`. */
+  tools: AnyToolName[];
+  /** It changed the payment limit, whose line leads Payments and Stripe. */
+  moneyLimit: boolean;
+}
+
+/**
+ * The rows on Rules that a confirmed `draft` changed, read from the draft's own cards, never from
+ * the words on the page: each of the Desk's `tools` whose governing rules (`rulesForTool`, as the
+ * hub reads them) differ between the draft's two sides, each tool it turns on, and the payment
+ * limit when the draft changes it.
+ */
+export function rowsChangedBy(draft: RuleDraft, tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): ChangedRows {
+  const turnedOn = new Set<AnyToolName>(draft.turnedOn.map((row) => row.tool));
+  const changed = [...tools, ...draft.turnedOn].filter(
+    (row) => turnedOn.has(row.tool) || ruleDiff(rulesForTool(row, draft.before), rulesForTool(row, draft.after)).length > 0,
+  );
+  return { tools: [...new Set(changed.map((row) => row.tool))], moneyLimit: draft.moneyCap !== null };
 }
 
 /** The payment limit's field, when it holds anything but whole dollars. */

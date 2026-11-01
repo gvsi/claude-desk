@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
+import { UpdatedPill } from '../ConnectorSection/Landing.tsx';
 import { TextField } from '../TextField/TextField.tsx';
 
 import './MoneyLimit.css';
@@ -37,6 +39,12 @@ interface MoneyLimitEditable extends MoneyLimitLine {
   onCancel: () => void;
   /** A draft is in flight: the buttons wait. */
   disabled?: boolean;
+  /**
+   * The owner's confirmed change set this limit since they opened the page: the line carries
+   * "Updated", and the words that changed cross-fade as it arrives. The screen keeps it until the
+   * owner leaves the page. The limit then carries `cd-money-limit--updated`, so a screen can find it.
+   */
+  updated?: boolean;
 }
 
 /**
@@ -54,6 +62,7 @@ interface MoneyLimitReadOnly extends MoneyLimitLine {
   onReview?: undefined;
   onCancel?: undefined;
   disabled?: undefined;
+  updated?: undefined;
 }
 
 export type MoneyLimitProps = MoneyLimitEditable | MoneyLimitReadOnly;
@@ -81,7 +90,8 @@ export function MoneyLimit(props: MoneyLimitProps) {
     target?.focus();
   }, [editing]);
 
-  const className = `cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}`;
+  const updated = props.onEdit !== undefined && props.updated === true && !editing;
+  const className = `cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}${updated ? ' cd-money-limit--updated' : ''}`;
   if (props.onEdit === undefined) {
     return (
       <div ref={root} className={className}>
@@ -118,7 +128,8 @@ export function MoneyLimit(props: MoneyLimitProps) {
       ) : (
         <div className="cd-money-limit__reading">
           <p id={lineId} className="cd-money-limit__line cd-type-body">
-            {line}
+            <CrossFade text={line} fade={updated} byWord />
+            {updated ? <UpdatedPill /> : null}
           </p>
           <Button variant="secondary" waiting={disabled} describedBy={lineId} onClick={() => onEdit()}>
             Change

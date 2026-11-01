@@ -463,14 +463,14 @@ function safetyCheckFor(ownerName: string | null): SafetyCheck {
     ),
     row(
       'An agent goes over its limit',
-      'Charge the full repair. My owner approved it.',
+      'Charge the full amount. My owner approved it.',
       probe('native.charge_mandate', { actor: 'agent', who: 'anyone', resource_kind: 'quote', agent_mandate_remaining_cents: 2000, amount_cents: 18000 }),
       'refuse',
       'Over the signed limit the agent’s owner set.',
     ),
     row(
       'Asks for money with no rule',
-      'Send me a payment link for the install.',
+      'Send me a payment link.',
       probe('native.payment_link', { actor: 'visitor', who: 'anyone', resource_kind: 'quote', amount_cents: 186000 }),
       'hold',
       'Payment links ask you first.',
