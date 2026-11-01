@@ -163,6 +163,38 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
   });
 
+  it('takes_focus_on_its_panel_as_it_docks_so_its_keys_work_at_once', async () => {
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const panel = screen.getByRole('region', { name: ask, exact: true });
+    await expect.element(panel).toBeVisible();
+    await expect.poll(() => panel.element().contains(document.activeElement)).toBe(true);
+    // No Tab: 1 picks "Yes, use it", and Enter sends it.
+    await userEvent.keyboard('1');
+    await expect.element(screen.getByRole('button', { name: YES, exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
+  });
+
+  it('never_takes_focus_back_from_the_message_box', async () => {
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const panel = screen.getByRole('region', { name: ask, exact: true });
+    await expect.poll(() => panel.element().contains(document.activeElement)).toBe(true);
+    // The owner goes to the message box and types: the page redraws, and focus stays there.
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    await box.click();
+    await userEvent.keyboard('We do tax');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('We do tax');
+    // Nor once focus has left everything: the panel took it only as it docked.
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard('s');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(panel.element().contains(document.activeElement)).toBe(false);
+  });
+
   it('never_consents_on_enter_from_the_page', async () => {
     const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });

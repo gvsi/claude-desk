@@ -131,6 +131,16 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (wasBusy.current && !busy && asking) setConsentError(stillCheckingLine());
     wasBusy.current = busy;
   }, [busy, asking]);
+  // The memory question takes focus on its panel once, as it first docks, so its number keys work
+  // at once; never from the message box, nor from anywhere else the owner has gone.
+  const consentDocked = useRef(false);
+  useEffect(() => {
+    if (consentPanel === null || consentDocked.current) return;
+    consentDocked.current = true;
+    const focus = document.activeElement;
+    if (composer.current?.contains(focus) || (focus !== document.body && !step.current?.contains(focus))) return;
+    step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)?.focus({ preventScroll: true });
+  }, [consentPanel]);
   const waitingForFirstQuestion = useRef(asking || consentBusy);
 
   useEffect(() => {
