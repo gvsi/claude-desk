@@ -1252,9 +1252,10 @@ def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
     receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
-    # why an approved release of private data went nowhere, for the owner alone: the visitor mustn't read why
+    # why an action was refused at execution, for the owner alone (`owner_plain`): the visitor mustn't read why
     # their session ended, so these aren't status lines and `render.status` can't render them
-    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
+    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed",
+               "refused_rules_changed", "refused_desk_deleted", "refused_fallback"}
     # refused_at_execution's line when a connected tool can't be reached, and refused's when an agent's charge is
     # over what its signed mandate has left
     variants = {"tool_unavailable", "refused_over_mandate"}
@@ -1279,6 +1280,7 @@ def test_status_lines_are_digit_free():
 
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
+                                 "refused_rules_changed", "refused_desk_deleted", "refused_fallback",
                                  "owner_say_blocked", "owner_said", "verify_started"])
 async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
     """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a

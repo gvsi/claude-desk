@@ -166,6 +166,9 @@ from desk.api.prompts import (
     SETUP_PAYMENT_UNAVAILABLE_LINE,
     SITUATIONS_HEAD,
     SITUATIONS_SYSTEM,
+    SITUATION_CALLER_TOOL_REQUIRED,
+    SITUATION_PRICE_REQUIRED,
+    SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
     BusinessType,
     Choice,
@@ -228,6 +231,7 @@ from desk.api.versions import (
     version_from_row,
 )
 from desk.contracts import (
+    AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
     MONEY_TOOLS,
     BusinessSeed,
@@ -333,10 +337,10 @@ def reduce_name(text: str | None) -> str:
     return kept[:OWNER_NAME_MAX].strip()
 
 
-def owner_name(given: str | None, described: str | None, business_name: str) -> str:
-    """The name customers see for the owner: the one the owner gave, else the one their description gave, else the
-    business name, each reduced to the kernel's pattern; "Owner" when all reduce to nothing."""
-    for candidate in (given, described, business_name):
+def owner_name(given: str | None, described: str | None) -> str:
+    """The name customers see: the one the owner gave, else the one their description gave, reduced to the kernel's
+    pattern; "Owner" when neither gives a name. A business name is never a person's name."""
+    for candidate in (given, described):
         reduced = reduce_name(candidate)
         if reduced:
             return reduced
@@ -790,7 +794,7 @@ async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelCl
     described = await structured(model, recorder(engine, owner), SETUP_START_SYSTEM,
                                  [_user(wrap(OWNER_DESCRIPTION_TAG, body.description))], SetupStart, START_MAX_TOKENS)
     business_name = " ".join(described.business_name.split())
-    name = owner_name(body.owner_display_name, described.owner_display_name, business_name)
+    name = owner_name(body.owner_display_name, described.owner_display_name)
     seed = DeskSeed(name=DESK_NAME, charter=[], hours=[], price_items=[], calendar_slots=[], people=[], documents=[],
                     notifications=default_notifications(described.business_type))
     return described, CreateDeskRequest(
@@ -808,7 +812,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         interview_id=interview_id, copy_id=owner.copy_id, desk_id=created.desk_id,
         business_type=described.business_type, step="questions", consent=None,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
-                             owner_display_name=desk.business.owner_display_name),
+                             owner_display_name=(reduce_name(body.owner_display_name)
+                                                 or reduce_name(described.owner_display_name) or None)),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
@@ -2218,14 +2223,26 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     cards = [card for card in drafted_cards if not card.is_default]
     prices = await _prices(owner, desk_id)
     timezone = (await _business(owner, desk_id))["timezone"]
+    enabled = {row["tool"] for row in await owner.ro.rows("tools", desk_id=desk_id, status="enabled")}
+    tools = {who: sorted(given & enabled) for who, given in SITUATION_TOOLS_BY_WHO.items()}
     rules_text = json.dumps([card.model_dump(mode="json", exclude={"card_id", "person_id", "agent_key_id",
                                                                    "is_default"}) for card in cards])
     message = _user("\n\n".join([SITUATIONS_HEAD.format(business_type=interview.business_type),
                                  wrap(RULES_TAG, rules_text), wrap(PRICES_TAG, json.dumps(prices)),
+                                 wrap(TOOLS_TAG, json.dumps(tools)),
                                  wrap(ANSWERS_TAG, interview.answers.model_dump_json(exclude_defaults=True))]))
+
+    def usable(drafted: DraftedSituations) -> str | None:
+        if any((draft.tool == "native.quote" or draft.tool in MONEY_TOOLS) and draft.item_id not in prices
+               for draft in drafted.situations):
+            return SITUATION_PRICE_REQUIRED
+        if any(draft.expected != "refuse" and draft.tool not in tools[draft.who] for draft in drafted.situations):
+            return SITUATION_CALLER_TOOL_REQUIRED
+        return None
+
     drafted = await ask_model(model, recorder(engine, owner, SITUATIONS_ROUTE), SITUATIONS_SYSTEM, [message],
                               DraftedSituations, max_tokens=SITUATIONS_MAX_TOKENS, route=SITUATIONS_ROUTE,
-                              effort="medium")
+                              effort="medium", check=usable)
     if drafted is None:
         raise ApiProblem(503, "model_unavailable")
     built = [situation(number, draft, prices, interview.answers.hours, timezone, now)
@@ -2251,15 +2268,23 @@ def situation_matches(planned: PlannedOutcome, result: ProbeResult, cards: dict[
 
 def safety_probes(answers: SetupAnswers, prices: dict[str, int]) -> list[tuple[SafetyProbe, Probe]]:
     """Each safety probe with the `Probe` built for it from the Desk's prices and the answered limits; a row whose
-    stand-in price the Desk lacks is left out."""
+    legal stand-in price the Desk lacks is left out."""
     largest = _largest(prices)
     built = []
     for number, spec in enumerate(SAFETY_PROBES, 1):
         item_id, amount = (largest if largest is not None else (None, None))
         if spec.stand_in == "over_mandate" and amount is not None:
             amount = max(amount, (spec.mandate_cents or 0) + 1)
-        elif spec.stand_in == "over_money_limit" and answers.payment_link_auto_max_cents is not None:
-            amount = min(answers.payment_link_auto_max_cents, answers.auto_money_cap_cents) + 1
+        elif spec.stand_in == "over_money_limit":
+            # Just past the lowest limit a link meets (the link limit when answered, else the cap), so a rule that
+            # allows more than it shows as allowed: the next round $10, or a cent past it at the platform's ceiling.
+            limit = min(answers.auto_money_cap_cents, answers.payment_link_auto_max_cents
+                        if answers.payment_link_auto_max_cents is not None else answers.auto_money_cap_cents)
+            amount = (limit // 1_000 + 1) * 1_000
+            if amount > AUTO_MONEY_HARD_CAP_CENTS:
+                amount = limit + 1
+            if amount > AUTO_MONEY_HARD_CAP_CENTS:
+                continue
         if spec.stand_in is not None and amount is None:
             continue
         probe = Probe(actor=spec.actor, who=spec.who, agent_mandate_remaining_cents=spec.mandate_cents,
@@ -2278,11 +2303,20 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS, drafted=True)
-    built = safety_probes(interview.answers, await _prices(owner, desk_id))
+    listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
+    prices = {row["item_id"]: row["unit_cents"] for row in listed}
+    titles = {row["item_id"]: row["title"] for row in listed}
+    largest = _largest(prices)
+    title = titles[largest[0]] if largest is not None else ""
+    name = interview.answers.owner_display_name
+    built = safety_probes(interview.answers, prices)
     started = monotonic()
     results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
     seconds = round(monotonic() - started, 1)
-    rows = [SafetyRow(label=spec.label, tries=spec.tries, result=result,
+    rows = [SafetyRow(label=spec.label,
+                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. ",
+                                              charge_item=title, payment_item=f" for {title}" if title else ""),
+                      result=result,
                       blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
             for (spec, _), result in zip(built, results, strict=True)]
     await _update(engine, owner, interview_id,

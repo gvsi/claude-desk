@@ -151,8 +151,8 @@ async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: Approv
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
         "state": "refused_at_execution", "reason": reason, "check": check})
-    return ApprovalResult(decision=await decide.decision_contract(ctx, row, inbox=inbox), execution=None,
-                          card_diff=None)
+    return ApprovalResult(decision=await decide.decision_contract(ctx, row, inbox=inbox, for_owner=True),
+                          execution=None, card_diff=None)
 
 
 async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: ApprovalAnswer) -> ApprovalResult:
@@ -208,7 +208,8 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
     if answer in DENIALS:
         await decide.set_state(ctx, row, "denied", kind="approval", summary={
             "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "denied"})
-        return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=card_diff)
+        return ApprovalResult(decision=await decide.decision_contract(ctx, row, for_owner=True), execution=None,
+                              card_diff=card_diff)
     if execute.releases_private_data(row.tool) and (ended := await execute.session_ended(ctx, row)) is not None:
         # private data goes only to a session that still stands for its person; T2 asks again under its lock
         return await _refused_at_execution(ctx, row, answer, ended, reason="session_ended")
@@ -230,8 +231,8 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         DecisionRow.decision_id == row.decision_id).execution_options(populate_existing=True)))).one()
     if final.state == "refused_at_execution":
         approved = None                   # T2 refused it after all: nothing ran, so it isn't shown as approved
-    return ApprovalResult(decision=await decide.decision_contract(ctx, final), execution=execution, card_diff=card_diff,
-                          approved=approved)
+    return ApprovalResult(decision=await decide.decision_contract(ctx, final, for_owner=True), execution=execution,
+                          card_diff=card_diff, approved=approved)
 
 
 async def cancel(ctx: KernelCtx, session_row: SessionRow, decision_id: str) -> Decision:

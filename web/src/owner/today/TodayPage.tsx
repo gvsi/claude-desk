@@ -11,7 +11,7 @@ import { publicLink } from '../customerLink.ts';
 import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { firstName, heldOldestFirst, isLive, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
@@ -86,7 +86,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
   // and for a Desk listed without it (an API from before it).
-  const setup = desk.setup ?? null;
+  const setup = isLive(desk) ? null : desk.setup;
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 

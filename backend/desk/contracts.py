@@ -241,6 +241,9 @@ class Decision(BaseModel):
     card_ids: list[str]
     review: Review | None = None
     reason_plain: str                     # owner-facing kernel template from the action and deciding cards; the call's free text quoted, labelled "Claude's note"
+    owner_plain: str | None = None        # owner-facing kernel template: why an approved or allowed action didn't run (`refused_at_execution`); None otherwise.
+                                          # Owner-authenticated reads only (GET /decisions/{id}, the approval answer); None on every answer to a session or
+                                          # agent. Fixed templates in the owner's language, never free text; like reason_plain, the signature doesn't cover it
     visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits
     answers: list[ApprovalAnswer] = []    # held only; allow_person only where "Decision lifecycle" allows it
     expires_at: AwareDatetime             # allow: 60 s; hold: 24 h; evaluated lazily by the kernel
@@ -401,7 +404,7 @@ class ApprovalResult(BaseModel):
     execution: ExecResult | None          # allow_once / allow_person execute inside the answer call
     card_diff: list[RuleCard] | None      # allow_person / deny_always: cards the owner proves (/policy/draft) and confirms
     approved: Decision | None = None     # signed approved state: "{owner} approved this" for an answer that runs
-                                         # None for a denial or an approval refused before execution
+                                         # None for a denial, or an approval the rules recheck refuses (refused_at_execution)
 
 # Replies: typed clauses plus guarded prose
 ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
