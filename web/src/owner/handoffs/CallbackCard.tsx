@@ -19,7 +19,7 @@ export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
  * A visitor who wants the owner, a way into the chat, and a way to close it. A call-back request
  * says their name, contact and reason as they typed them, and the callback they were promised; a
  * conversation the handoff card handed over says the Desk's reason and the visitor's last words,
- * and promises no call back. Either says Claude's note on a stopped reply in the chat when the API
+ * and promises no call back. Either says Claude's note on what the Desk stopped in the chat when the API
  * sends one, unless the chat has a request held (`showSummary`).
  */
 interface CallbackCardProps {
@@ -104,8 +104,8 @@ export function CallbackCard({ item, showJoin = true, onDone, showSummary = true
             From the visitor: “<span data-copy="user">{item.from_the_visitor}</span>”
           </p>
         ) : null}
-        {/* Claude's own summary of the chat, for the owner alone: plain text, never quoted or marked as the visitor's. */}
-        {summary !== null ? <p className="cd-callback__context cd-type-meta">{`Claude's note on a stopped reply: ${summary}`}</p> : null}
+        {/* Claude's note on the chat's newest stopped attempt, for the owner alone and left out while the chat has a request held: plain text, never quoted or marked as the visitor's. */}
+        {summary !== null ? <p className="cd-callback__context cd-type-meta">{`Claude's note on what the Desk stopped: ${summary}`}</p> : null}
         {/* A call back is promised only on a call-back request: one the API names so, or sends with no kind yet. */}
         {handoff.kind === undefined || handoff.kind === 'callback' ? (
           <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>

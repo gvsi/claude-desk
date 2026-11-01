@@ -34,6 +34,8 @@ const DANA = rivera.people.dana.name;
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
 const REFUND_REASON = rivera.heldRefund.reason_plain;
 
+/** The handoff card's AI-written line, before its note (owner decision, 2026-11-01). */
+const NOTE = "Claude's note on what the Desk stopped";
 /** The seeded chats: Dana's live one, and the visitor whose 15% discount is held. */
 const DANA_LIVE = 'ses-dana-web';
 const SEEDED_HOLD = 'ses-visitor-web';
@@ -361,11 +363,11 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(SEEDED_HOLD));
     const held = heldCard(screen, SEEDED_REASON);
     await expect.element(held).toBeVisible();
-    expect(screen.container.textContent).not.toContain("Claude's note");
+    expect(screen.container.textContent).not.toContain(NOTE);
     await held.getByRole('button', { name: 'Deny this time' }).click();
 
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
-    const line = card.getByText(`Claude's note on a stopped reply: ${triage.summary}`, { exact: true });
+    const line = card.getByText(`${NOTE}: ${triage.summary}`, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     expect(line.element().previousElementSibling?.textContent).toMatch(/^From the visitor: “.+”$/);
     expect(line.element().closest('[data-copy="user"]')).toBeNull();
@@ -381,18 +383,23 @@ describe('Conversations', () => {
     if ('network' in read || read.status !== 200) throw new Error('the mock reads Needs you');
     const items = read.body as NeedsYouItem[];
     expect(items.some((item) => item.handoff != null)).toBe(true);
+    const summary = 'Asked for a discount; the Desk stopped a draft.';
     mockStore.inject({
       route: 'needsYou', status: 200, times: 10_000,
       body: items.map((item) => (item.handoff == null ? item : {
-        ...item, claude_summary: 'Asked for a discount; the Desk stopped a draft.', handoff: { ...item.handoff, session_id: SEEDED_HOLD },
+        ...item, claude_summary: summary, handoff: { ...item.handoff, session_id: SEEDED_HOLD },
       })),
     });
 
     const { screen } = await renderRoute(conversation(SEEDED_HOLD));
-    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeVisible();
-    expect(card.element().textContent).not.toContain("Claude's note");
+    expect(card.element().textContent).not.toContain(NOTE);
+    // Answered here, the request no longer waits on Maria, so the note shows, though this read still lists it.
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+    await expect.element(card.getByText(`${NOTE}: ${summary}`, { exact: true })).toBeVisible();
   });
 
   it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {

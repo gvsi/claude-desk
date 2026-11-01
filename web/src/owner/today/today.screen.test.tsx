@@ -63,6 +63,8 @@ const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 /** The owner line for the kernel's `conflict` (the design system's error copy). */
 const CHANGED = 'This changed while you were looking. Reload to see where it stands.';
 
+/** The handoff card's AI-written line, before its note (owner decision, 2026-11-01). */
+const NOTE = "Claude's note on what the Desk stopped";
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
@@ -1988,7 +1990,7 @@ describe('Today', () => {
 
     const { screen } = await renderRoute(TODAY);
     const wants = screen.getByRole('article', { name: 'Wants you' });
-    const line = wants.getByText(`Claude's note on a stopped reply: ${summary}`, { exact: true });
+    const line = wants.getByText(`${NOTE}: ${summary}`, { exact: true });
     await expect.element(line).toBeVisible();
     const said = wants.getByText('Can I talk to Maria?', { exact: true }).element().parentElement;
     if (!said) throw new Error("the visitor's words sit in their line");
@@ -2022,8 +2024,12 @@ describe('Today', () => {
     const { screen } = await renderRoute(TODAY);
     const wants = screen.getByRole('article', { name: 'Wants you' });
     await expect.element(wants).toBeVisible();
-    await expect.element(heldCard(screen, rivera.decisions.held.reason_plain)).toBeVisible();
-    expect(wants.element().textContent).not.toContain("Claude's note");
+    const held = heldCard(screen, rivera.decisions.held.reason_plain);
+    await expect.element(held).toBeVisible();
+    expect(wants.element().textContent).not.toContain(NOTE);
+    // Answered here, the request no longer waits on Maria, so the note shows, though this read still lists it.
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+    await expect.element(wants.getByText(`${NOTE}: ${summary}`, { exact: true })).toBeVisible();
   });
 
   it('callback_shows_claudes_summary_under_its_reason', async () => {
@@ -2037,7 +2043,7 @@ describe('Today', () => {
 
     const { screen } = await renderRoute(TODAY);
     const wants = screen.getByRole('article', { name: 'Wants you' });
-    const line = wants.getByText(`Claude's note on a stopped reply: ${summary}`, { exact: true });
+    const line = wants.getByText(`${NOTE}: ${summary}`, { exact: true });
     await expect.element(line).toBeVisible();
     expect(line.element().previousElementSibling?.textContent).toBe(CALLBACK_REASON);
     expect(line.element().nextElementSibling?.textContent).toBe("You'll call back on Monday, between 8:00 am and 9:00 am.");
@@ -2053,7 +2059,7 @@ describe('Today', () => {
       const { screen } = await renderRoute(TODAY);
       const wants = screen.getByRole('article', { name: 'Wants you' });
       await expect.element(wants.getByText('Can I talk to Maria?', { exact: true })).toBeVisible();
-      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain("Claude's note");
+      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain(NOTE);
     }
   });
 
@@ -2066,7 +2072,7 @@ describe('Today', () => {
     const card = heldCard(screen, SEEDED_REASON);
     await expect.element(card).toBeVisible();
     expect(card.element().textContent).toContain('From the visitor: “');
-    expect(card.element().textContent).not.toContain("Claude's note");
+    expect(card.element().textContent).not.toContain(NOTE);
     expect(card.element().textContent).not.toContain('allow it');
   });
 
