@@ -10,6 +10,7 @@
 import type {
   Decision,
   DeskUpdated,
+  DeskBusinessRequest,
   DemoAgentIssued,
   DemoInboxEntry,
   KnowledgeItem,
@@ -100,6 +101,7 @@ export const ROUTES = {
   me: { method: 'GET', path: '/api/owner/me', owner: true },
   desks: { method: 'GET', path: '/api/owner/desks', owner: true },
   setAnswering: { method: 'PUT', path: '/api/owner/desks/{desk_id}/answering', owner: true },
+  setBusiness: { method: 'PUT', path: '/api/owner/desks/{desk_id}/business', owner: true },
   deleteDesk: { method: 'DELETE', path: '/api/owner/desks/{desk_id}', owner: true },
   openPreview: { method: 'POST', path: '/api/owner/desks/{desk_id}/preview_session', owner: true },
 
@@ -196,6 +198,7 @@ interface RouteShapes {
   me: { body: undefined; response: CopyOut };
   desks: { body: undefined; response: BusinessOut[] };
   setAnswering: { body: AnsweringBody; response: DeskUpdated };
+  setBusiness: { body: DeskBusinessRequest; response: DeskUpdated };
   deleteDesk: { body: undefined; response: undefined };
   openPreview: { body: undefined; response: VisitorSession };
 

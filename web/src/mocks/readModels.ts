@@ -3,6 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
+import { effectiveBrand } from './brand.ts';
 import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
@@ -72,6 +73,7 @@ export function businessOut(world: MockWorld): BusinessOut {
     name: BUSINESS.name,
     owner_display_name: BUSINESS.owner_display_name,
     timezone: BUSINESS.timezone,
+    brand: effectiveBrand(world.desks[0]?.brand),
     desks: deskSummaries(world),
   };
 }
@@ -696,7 +698,7 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
   return {
     ...rivera.publicDesk[language],
     desk_name: desk.summary.name,
-    brand: { ...BUSINESS.brand },
+    brand: effectiveBrand(desk.brand),
     agent_card: AGENT_CARD_BLOCKS[language].map((block) => ({ ...block })),
     open_status: desk.openStatus?.[language] ?? null,
   };

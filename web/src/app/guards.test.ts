@@ -62,6 +62,27 @@ const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 const VISION_ARTICLE_STYLES = 'about/vision/VisionArticle.css';
 const PAPER_STYLES = 'about/paper.css';
 const PALETTE_ROOTS: Record<string, string> = { [VISION_ARTICLE_STYLES]: 'vision-article', [PAPER_STYLES]: 'cd-about-paper' };
+// The owner's fixed header palette mirrors the kernel's table (signed 2026-11-01).
+// Only that table may contain raw colors, including its Clay accent; screens still use tokens.
+const HEADER_PALETTE_FILE = 'public/palette.ts';
+
+function withoutHeaderPalette(source: Source): Source {
+  if (source.file !== HEADER_PALETTE_FILE) return source;
+  const tree = ts.createSourceFile(source.file, source.text, ts.ScriptTarget.Latest, true);
+  const ranges: [number, number][] = [];
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'BRAND_PALETTE' && node.initializer) {
+      let value = node.initializer;
+      while (ts.isAsExpression(value) || ts.isSatisfiesExpression(value)) value = value.expression;
+      if (ts.isObjectLiteralExpression(value)) ranges.push([value.getStart(tree), value.end]);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  let text = source.text;
+  for (const [start, end] of ranges.reverse()) text = text.slice(0, start) + ' '.repeat(end - start) + text.slice(end);
+  return { ...source, text };
+}
 // A CSS comment; a palette's root rule, its class alone as the selector (read with comments blanked); and a
 // custom property's name, which is a declaration's whole name.
 const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/g;
@@ -122,7 +143,7 @@ function withoutThePalette(text: string, root: string): string {
 function rawColors(scanned: Source[] = sources): string[] {
   return hits(
     RAW_COLOR,
-    scanned.map((source) => {
+    scanned.map(withoutHeaderPalette).map((source) => {
       const root = PALETTE_ROOTS[source.file];
       return root === undefined ? source : { ...source, text: withoutThePalette(source.text, root) };
     }),
@@ -781,6 +802,15 @@ describe('app source guards', () => {
     expect(hits(RAW_MS, timed)).toHaveLength(1);
     expect(hits(RAW_CSS_SECONDS, timed)).toHaveLength(1);
 
+    const headerPalette = {
+      file: HEADER_PALETTE_FILE,
+      text: "export const BRAND_PALETTE = { clay: { primary: '#773624', accent: '#D97757' } } as const satisfies Record<BrandPalette, object>; const other = '#123456';",
+    };
+    expect(rawColors([headerPalette])).toEqual([`${HEADER_PALETTE_FILE}: #123456`]);
+    expect(hits(MARK_PARTS, [withoutHeaderPalette(headerPalette)])).toEqual([]);
+    expect(hits(MARK_PARTS, [withoutHeaderPalette({ ...headerPalette, text: `${headerPalette.text} const stray = '#D97757';` })])).toEqual([`${HEADER_PALETTE_FILE}: #D97757`]);
+    expect(rawColors([{ ...headerPalette, file: 'owner/settings/HeaderColourCard.tsx' }])).toHaveLength(3);
+
     expect(rawColors()).toEqual([]);
     expect(hits(RAW_MS)).toEqual([]);
     expect(hits(RAW_CSS_SECONDS, sources.filter((s) => s.file.endsWith('.css')))).toEqual([]);
@@ -1294,7 +1324,7 @@ describe('app source guards', () => {
     expect(hits(CLAY_PARTS, sample('--clayton: 1; --mark-clay: 1'))).toEqual([]);
 
     // Every text file under src/, the design system's stories, boards and docs included.
-    const everything = everyTextFile();
+    const everything = everyTextFile().map(withoutHeaderPalette);
     const files = everything.map((s) => s.file);
     for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
       expect(files, file).toContain(file);

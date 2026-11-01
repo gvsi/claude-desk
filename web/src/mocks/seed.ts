@@ -10,12 +10,13 @@
 import type { HoursWindow, KnowledgeItem, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
 import type { JobProposal, PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { paletteBrand } from '../public/palette.ts';
 import { seedAgentChat } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { DeskRecord, MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
-export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document';
+export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document' | 'rivera_no_brand';
 
 export interface CopyIds {
   copyId: string;
@@ -58,7 +59,7 @@ export const BUSINESS = {
   name: rivera.business.name,
   owner_display_name: rivera.business.ownerName,
   timezone: 'America/Los_Angeles',
-  brand: { ...rivera.business.brand },
+  brand: paletteBrand('teal'),
 } as const;
 
 /** Mon–Fri 08:00–18:00 and Sat 09:00–13:00. */
@@ -421,6 +422,8 @@ export function seedWorld(world: MockWorld): void {
   for (const [i, item] of knowledge.entries()) {
     world.knowledge.set(`${ids.deskId}:${item.item_id}`, { deskId: ids.deskId, item, createdAt: opened - (knowledge.length - i), forced: false });
   }
+  if (seed === 'rivera_no_brand') main.brand = {};
+
   if (seed === 'rivera_two_desks') {
     world.addDesk({
       desk_id: ids.emergenciesDeskId,

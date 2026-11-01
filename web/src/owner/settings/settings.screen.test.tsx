@@ -436,7 +436,7 @@ describe('Settings', () => {
 describe('Settings against its boards', () => {
   it('settings_match_their_boards', async () => {
     // General as N-Run2-Settings-General draws it, at 1440 px: the page fills the main area and
-    // centers its column, and Tab goes through SubNav, then Answering, then Delete this Desk.
+    // centers its column, and Tab goes through SubNav, then the selected header colour, Answering and Delete this Desk.
     const { screen } = await renderRoute(GENERAL);
     const business = main(screen).getByRole('region', { name: 'Your business' });
     await expect.element(business).toBeVisible();
@@ -445,12 +445,14 @@ describe('Settings against its boards', () => {
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
       fill: true,
-      tabStops: [...links(screen), answering.element() as HTMLElement, remove.element() as HTMLElement],
+      tabStops: [...links(screen), main(screen).getByRole('radio', { name: 'Teal', exact: true }).element() as HTMLElement, answering.element() as HTMLElement, remove.element() as HTMLElement],
     });
+    // Tabbing to Delete scrolls the now-longer General page. Measure its opening position.
+    main(screen).element().scrollTop = 0;
     let content = await expectSettingsColumns(screen, 'General');
 
     // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
-    // own card 20 px under them, the card's look with its switch row 20 px in from its top and
+    // own card below Header colour, the card's look with its switch row 20 px in from its top and
     // bottom (the row pads its own sides, so its words line up with the details'); Delete this
     // Desk's heading 28 px under that, its neutral button at the column's right.
     const card = one(business.element(), '.cd-card');
@@ -461,11 +463,14 @@ describe('Settings against its boards', () => {
     const switchRow = answering.element();
     expect(round(top(switchRow) - top(answeringCard))).toBe(21);
     expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
-    expect(round(top(answeringCard) - bottom(card))).toBe(20);
+    const colourCard = main(screen).getByRole('region', { name: 'Header colour', exact: true }).element();
+    expect(round(top(colourCard) - bottom(card))).toBe(20);
+    expect(round(top(answeringCard) - bottom(colourCard))).toBe(20);
     const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
     expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
     expectComputed(remove.element(), SPEC.secondaryMain);
     expect(round(remove.element().getBoundingClientRect().right)).toBe(round(content.getBoundingClientRect().right));
+    main(screen).element().scrollTop = main(screen).element().scrollHeight;
     await expectFooterAtFoot(screen.container);
 
     // Its dialog is the general one (owner decision, 2026-10-30): no refused dot, Delete Desk the
@@ -533,7 +538,9 @@ describe('Settings against its boards', () => {
     const detailCard = one(details, '.cd-card');
     expect([round(detailCard.getBoundingClientRect().left), round(detailCard.getBoundingClientRect().width)]).toEqual([16, 358]);
     const switchCard = main(phone.screen).getByRole('region', { name: 'Claude acts for you' }).element();
-    expect(round(top(switchCard) - bottom(detailCard))).toBe(16);
+    const phoneColour = main(phone.screen).getByRole('region', { name: 'Header colour', exact: true }).element();
+    expect(round(top(phoneColour) - bottom(detailCard))).toBe(16);
+    expect(round(top(switchCard) - bottom(phoneColour))).toBe(16);
     const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
     const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
     const line = deleting.getByText(DELETE_LINE, { exact: true }).element();

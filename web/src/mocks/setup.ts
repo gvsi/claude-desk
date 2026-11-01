@@ -9,6 +9,7 @@
  * interview and its step. The interviews are kept per copy beside its world, so a start over leaves
  * none behind.
  */
+import { effectiveBrand } from './brand.ts';
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
@@ -1664,7 +1665,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     business_name: interview.business,
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
-    brand: { ...BUSINESS.brand },
+    brand: effectiveBrand(desk.brand),
     charter: publicState ? [
       ...publicState.lines.filter(({ text, source, held }) => source === 'owner' && !held && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text })),
       ...(publicState.hours?.source === 'owner' && publicState.hours.windows.length ? [cardBlock('hours', {
@@ -1711,6 +1712,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
         name: interview.business,
         owner_display_name: ownerOf(interview),
         timezone: interview.timezone,
+        brand: effectiveBrand(desk.brand),
         desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
     ];
