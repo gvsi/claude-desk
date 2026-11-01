@@ -114,8 +114,7 @@ async def test_a_burst_pipe_at_three_in_the_morning_alerts_maria_at_once(app, cl
     assert result.state == "succeeded"
     [handoff] = await rows_of(app, copy.copy_id, select(Handoff))
     assert (handoff.kind, handoff.status, handoff.action_id) == ("callback", "open", decision.action.action_id)
-    assert (handoff.window_start, handoff.window_end) == (datetime(2026, 10, 26, 8, tzinfo=TZ),
-                                                          datetime(2026, 10, 26, 9, tzinfo=TZ))
+    assert (handoff.window_start, handoff.window_end) == (None, None)    # urgent: no Monday slot promised
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(
         DemoInboxEntry.preview == "Urgent callback requested"))
     assert (alert.to, alert.kind, alert.created_at) == ("owner", "alert", frozen_clock.now())
