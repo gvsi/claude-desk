@@ -1108,12 +1108,25 @@ describe("the real situations, in the business's own words", () => {
     expect(read(rows[DOCUMENT]), 'Juniper').toEqual(['hold', 'hold', 'Documents ask you first.', ['card-4'], true]);
   });
 
-  it('only_the_saturday_booking_is_not_what_the_suggestions_planned', async () => {
-    // The planted surprise stays the one row flagged, and follows the draft as the others do.
+  it('nothing_is_flagged_when_the_suggestions_left_bookings_asking', async () => {
+    // The Saturday booking is planned to ask first, as the answers' Saturday rule says. Where the
+    // bookings rule books it on its own, that isn't what was planned (`expectOwnBookings`); where
+    // the suggestions left bookings asking first too, it is, and no row is flagged.
     for (const description of SUGGESTED) {
       const { rows } = await triedOnSuggestions(description);
-      expect(flagged(rows), description).toEqual([SATURDAY]);
-      expect(read(rows[SATURDAY]).slice(1), description).toEqual(['hold', 'Bookings ask you first.', ['card-2'], false]);
+      expect(flagged(rows), description).toEqual([]);
+      expect(read(rows[SATURDAY]), description).toEqual(['hold', 'hold', 'Bookings ask you first.', ['card-2'], true]);
+    }
+  });
+
+  it('the_suggestions_draft_names_each_rule_once', async () => {
+    // The Saturday rule already asks first, so it keeps its own reason when the suggestions leave
+    // bookings asking first too, and the Rules step lists every reason once.
+    for (const description of SUGGESTED) {
+      const { draft } = await triedOnSuggestions(description);
+      expect(cardOf(draft, 'card-3'), description).toMatchObject({ applies_to: 'native.book', mode: 'ask', reason: 'Saturday bookings ask you first.' });
+      const reasons = draft.cards.map((card) => card.reason);
+      expect(reasons.filter((reason, at) => reasons.indexOf(reason) !== at), description).toEqual([]);
     }
   });
 

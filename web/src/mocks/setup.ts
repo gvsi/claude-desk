@@ -568,8 +568,9 @@ function decidedBy(cards: readonly RuleCard[], cardId: string, p: Probe, onItsOw
 /**
  * The six situations the check runs on the draft (`cards`), told in the business's words
  * (`words`). Each one a rule decides follows that rule as the draft has it (`decidedBy`), so a rule
- * the answers left asking first asks here too, and is what they planned. One is planted as not
- * what the answers planned: the Saturday booking, planned for what the bookings rule doesn't do.
+ * the answers left asking first asks here too, and is what they planned. The Saturday booking is
+ * planned to ask first, so it isn't what the answers planned where the bookings rule books it on
+ * its own.
  */
 function situationsFor(cards: readonly RuleCard[], words: SituationWords): SituationResult[] {
   const rows: [Situation, ProbeResult][] = [];
@@ -604,11 +605,10 @@ function situationsFor(cards: readonly RuleCard[], words: SituationWords): Situa
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
   // Open on Saturdays, a business's Saturday visitor isn't after hours.
   const saturdayWho = words.bookingDays.includes('sat') ? 'public' : 'after_hours';
-  // The planted surprise, which the bookings rule decides as the draft has it: planned to ask first,
-  // as the answers' Saturday rule (card-3) says, unless that rule asks first too; then planned to be
-  // booked, so it stays the one row not what was planned.
+  // Planned to ask first, as the answers' Saturday rule (card-3) says, whatever the bookings rule
+  // does: decided by that rule as the draft has it, it isn't what was planned where it books on its own.
   const onSaturday = decidedBy(cards, 'card-2', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
-  rows.push([{ title: words.saturday, who: saturdayWho, probe: saturday, expected: onSaturday.outcome === 'hold' ? 'allow' : 'hold' }, onSaturday]);
+  rows.push([{ title: words.saturday, who: saturdayWho, probe: saturday, expected: 'hold' }, onSaturday]);
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add(words.someoneElses, 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
   return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));
@@ -1035,8 +1035,9 @@ function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDr
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
   const cards = setupCards(interview.capCents, interview.words).map((rule): RuleCard => {
-    if (!interview.consultant && !interview.usedSuggestions) return rule;
-    // An unanswered or skipped limit never inherits the scripted run's automatic permission.
+    // An unanswered or skipped limit never inherits the scripted run's automatic permission. A rule
+    // that already asks first (Saturday bookings) keeps its own reason, so each is listed once.
+    if ((!interview.consultant && !interview.usedSuggestions) || rule.mode === 'ask') return rule;
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
     if (rule.applies_to === 'native.release_document' && interview.answers.documents_and_payments !== CPA_COPY.documentChoices[1]) return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
     if (rule.applies_to === 'native.book' && !interview.proposals.some(({ state, job }) => state === 'accepted' && job?.job === 'schedule' && job.autonomy === 'auto')) return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
