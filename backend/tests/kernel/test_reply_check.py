@@ -110,6 +110,21 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
 
+async def test_a_plumbing_emergency_gets_both_amounts_on_quote_cards(app, client):
+    """"Pipe repairs start from $100, and there's a short-notice fee of $50": Claude's words name the
+    starting price and the fee, and each amount is on a quote card built from the seed's price list."""
+    copy, visitor = await visitor_of(app, client)
+    repair = await own_quote(client, visitor, ("pipe", 1), call_id="call-pipe")
+    fee = await own_quote(client, visitor, ("short-notice", 1), call_id="call-fee")
+    verdict = await checked(client, visitor, "Pipe repairs have a starting price, and there's a short-notice fee.",
+                            [clause("quote", repair.fact_id), clause("quote", fee.fact_id)])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    _, *cards = verdict.blocks
+    assert [(card.template, card.fact_id, card.title, card.lines[0]) for card in cards] == [
+        ("quote", repair.fact_id, "$100.00", "Pipe repair (starting price)"),
+        ("quote", fee.fact_id, "$50.00", "Short-notice fee")]
+
+
 def kinds_of(verdict: ReplyVerdict) -> set[str]:
     return {violation.kind for violation in verdict.violations}
 
