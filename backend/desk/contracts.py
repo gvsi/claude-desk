@@ -109,7 +109,7 @@ class CalendarSlot(BaseModel):
     minutes: int
 
 class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's Demo inbox
-    now: list[str]                        # event kinds that alert at once ("approval", "emergency", "breaker")
+    now: list[str]                        # event kinds that alert at once ("approval", "callback", "breaker")
     briefing: list[str]
 
 class BusinessSeed(BaseModel):
