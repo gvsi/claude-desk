@@ -49,7 +49,7 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
         assert (await call).desk_id == desk_id
     else:
         assert await refused(call) == (422, 'invalid')
-    rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+    rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE tool = 'desk.consult'", ())
     assert bool(rows) is accepted
 
 
@@ -131,7 +131,7 @@ async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receip
             BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
     assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
     assert refused_call.value.detail == {f'{tool.tool}.{field}': [rule] for field in fields}
-    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ()) == []
+    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE tool = %s", (tool.tool,)) == []
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     blocked = await decide(http.session(visitor.session_token), visitor.state.session_id, visitor.state.generation,
                            'refused-intake', tool.tool, {'name': 'Dana', 'answers': ['Consult']})
@@ -171,7 +171,7 @@ async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_row
     assert rows() == before
     ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
     events = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools']
-    assert len(events) == 2
+    assert [event.summary.get('refused') for event in events[-2:]] == [None, 'public_promise']
     assert events[-1].summary == {'tools': [], 'refused': 'public_promise'}
 
 
@@ -255,7 +255,7 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
     assert await refused(http.session(visitor.session_token).call(
         "PUT /desks/{id}/business_tools", valid, path={"id": desk_id})) == (401, "auth")
     rows = ro_read(schema, copy.copy_id, "SELECT tool, status, business FROM {ro}.tools"
-                                       " WHERE desk_id = %s AND source = 'business'", (desk_id,))
+                                       " WHERE desk_id = %s AND source = 'business' AND status <> 'disabled'", (desk_id,))
     assert len(rows) == 1 and rows[0]["status"] == "needs_review"
     assert rows[0]["business"]["title"] == tool.title
 

@@ -380,9 +380,18 @@ RIVERA_CARDS = [
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
           "Agents can pay up to $20 from their spending limit.", max_amount_cents=2_000),
+    _card("rv-urgent", "desk.emergency-callback", "auto", "anyone", "Urgent call-backs go to Maria at once."),
     *(RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                reason="Anything your rules don't cover waits for you.")
       for tool in ("native.release_document", "payments.list_charges", "payments.create_refund")),
+]
+
+# The seed's urgent business tool (the kernel's `seed.RIVERA_BUSINESS_TOOLS`): every copy has it enabled, turned on
+# by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
+RIVERA_BUSINESS_TOOLS = [
+    {"tool": "desk.emergency-callback", "title": "Emergency callback",
+     "description": "Asks Maria to call back urgently about an emergency.",
+     "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
 
@@ -1856,7 +1865,8 @@ class FakeKernelState:
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
-        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS,
+                                 business_tools=RIVERA_BUSINESS_TOOLS)
         desk.rivera_seed = True
         for lang, questions in RIVERA_STARTERS.items():
             for n, question in enumerate(questions, start=1):
@@ -1871,11 +1881,15 @@ class FakeKernelState:
         return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
-                     cards: list[RuleCard]) -> Desk:
+                     cards: list[RuleCard], business_tools: list[dict] | None = None) -> Desk:
         """The one `DeskSeed` path (`POST /copies` and `POST /desks`): the business (or an existing one of the copy),
         the Desk, its people, documents (each body ending with a fresh canary, its fact naming only the title), prices,
-        slots, notification prefs, `tools` rows, the active policy version of `cards`, the charter facts, the
+        slots, notification prefs, `tools` rows (each of `business_tools` enabled at its definition, as the seed's rules
+        version turns the Rivera seed's on), the active policy version of `cards`, the charter facts, the
         `charter:hours` fact and a `desk_data` entry."""
+        from desk.contracts import BusinessTool, BusinessToolDef
+        from desk.kernel_service.adapters.blocks import profile as block_profile
+
         if business.existing_business_id is not None:
             existing = next((desk for desk in self.desks.values() if desk.copy_id == copy_id
                              and desk.business_id == business.existing_business_id), None)
@@ -1914,6 +1928,10 @@ class FakeKernelState:
         self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
         for tool in tools:
             self._put_tool(desk, tool_profile(tool))
+        for configured in map(BusinessTool.model_validate, business_tools or ()):
+            definition = BusinessToolDef.model_validate(configured.model_dump(exclude={"tool"}))
+            self._put_tool(desk, block_profile(configured.tool, definition).model_copy(
+                update={"status": "enabled", "review_reason": None}))
         desk.cards = list(cards)
         self._put_policy(desk)
         for claim in seed.charter:

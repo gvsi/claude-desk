@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from desk.kernel_service import decisions, ledger, render
-from desk.next_steps import NEXT_STEPS
+from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS
 from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYSTEM, AnthropicDecisions, CallUsage,
                                            SoftPromiseInput, SoftPromiseVerdict)
 
@@ -28,9 +28,11 @@ from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoff
 from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, reply_entries
 
-VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
+# A stranger's steps on a fresh Rivera copy, in tool-name order: the seed's urgent tool,
+# `desk.emergency-callback` (the urgent block's step), then the native tools'.
+VISITOR_NEXT_STEPS = [BUSINESS_BLOCK_STEPS["urgent"], *(NEXT_STEPS[tool] for tool in (
     "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-    "native.quote", "native.request_callback", "native.start_verification")]
+    "native.quote", "native.request_callback", "native.start_verification"))]
 
 SONNET = "claude-sonnet-5-5"
 PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
