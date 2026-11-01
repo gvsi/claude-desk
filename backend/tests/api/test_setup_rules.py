@@ -537,7 +537,7 @@ async def test_a_strict_charter_write_drops_nothing_and_raises_the_first_refusal
         owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
                          kernel=http.owner("owner-token"), ro=None)
         with pytest.raises(KernelFailed) as refused:
-            await desk_setup._put_charter(owner, "d1", parts.charter, drop_refused=False)
+            await setup._put_charter(owner, "d1", parts.charter, drop_refused=False)
 
     assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", refusal)
     assert charters == [[claim.model_dump(mode="json") for claim in parts.charter]]

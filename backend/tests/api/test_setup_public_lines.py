@@ -500,7 +500,8 @@ async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(li
     blank = await owner.browser.put(path, json={"key": "contact", "text": " \n\t "})
     assert blank.status_code == 422, blank.text
     assert calls == []
-    text = "a" * 200
+    text = "https://plumbing.example/" + "a" * 175   # a valid public contact at the 200-character limit
+    assert len(text) == 200
     reply = await owner.browser.put(path, json={"key": "contact", "text": f"  {text}  "})
     assert reply.status_code == 200, reply.text
     assert reply.json()["lines"][1] == {"key": "contact", "text": text, "source": "owner", "editable": True,
