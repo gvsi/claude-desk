@@ -276,7 +276,7 @@ async def test_reply_check_gets_10_s_without_changing_other_routes(monkeypatch):
     from desk.contracts import ReplyDraft
     from desk.kernel_api import CheckReplyRequest
 
-    assert kernel_client.REPLY_CHECK_TIMEOUT_S == 10.0
+    assert kernel_client.REPLY_CHECK_TIMEOUT_S == 12.0
     kernel = ScriptedKernel()
     # An unusable answer still records the request's transport timeout.
     kernel.fail(httpx.Response(503))
@@ -286,7 +286,7 @@ async def test_reply_check_gets_10_s_without_changing_other_routes(monkeypatch):
                             ("GET /whoami", None)]:
             with pytest.raises(KernelUnavailable):
                 await http.session("session-token-1").call(route, body)
-    assert [request.extensions["timeout"]["read"] for request in kernel.requests] == [10.0, 6.0]
+    assert [request.extensions["timeout"]["read"] for request in kernel.requests] == [12.0, 6.0]
 
     # Exercise the outer deadline over an in-process transport too, without a ten-second sleep.
     monkeypatch.setattr(kernel_client, "REPLY_CHECK_TIMEOUT_S", 0.02)

@@ -74,7 +74,7 @@ SOFT_PROMISE_REPLIES: dict[str, Reply] = {
     "flag": Json({**SOFT_PROMISE_PASS, "promises_beyond_cards": True}),
     "denies_ai": Json({**SOFT_PROMISE_PASS, "denies_being_ai": True}),   # the reply claims to be a person
     "error": HttpError(500),
-    "timeout": Sleep(7, Json(SOFT_PROMISE_PASS)),   # past the check's 6 s timeout
+    "timeout": Sleep(9, Json(SOFT_PROMISE_PASS)),   # past the check's 8 s timeout
     "unparsable": Text("maybe"),
 }
 # The soft-promise violation's rule_id for each flag (Plan 01a step 5): a denial of being an AI is

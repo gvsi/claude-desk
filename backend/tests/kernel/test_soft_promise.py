@@ -381,7 +381,7 @@ async def test_soft_promise_request_shape():
     assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     assert (usage.model, usage.status, usage.input_tokens, usage.output_tokens) == (SONNET, "ok", 900, 12)
     [request] = client.requests
-    assert request["timeout"] == 6.0                                           # one try, inside the 6 s budget
+    assert request["timeout"] == 8.0                                           # one try, inside the 8 s budget
     assert request["model"] == SONNET
     assert request["max_tokens"] == 1024
     assert request["system"] == SOFT_PROMISE_SYSTEM

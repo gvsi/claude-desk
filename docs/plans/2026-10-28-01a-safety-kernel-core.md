@@ -897,3 +897,5 @@ templates, whatever the reply's language; an open handoff's card is "Handed to a
 the live texts, Sonnet flagged that reply in 5 of 5 samples unlabelled and passed it in 5 of 5
 labelled. The prompt's wording, the cards the visitor sees and the calibration cases are unchanged;
 a test requires a label for every registered template.
+
+Owner decision, 2026-11-01: the soft check's one try is 8 s and the API's `/check_reply` timeout 12 s, after live checks timed out at 6 s in a burst; still one try, no retry or fallback, and a timeout still blocks the reply (`check_unavailable`).

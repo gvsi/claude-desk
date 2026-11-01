@@ -17,7 +17,7 @@
 #   final          false for the first draft of a reply; default true
 #   soft_promise   the soft-promise check's one reply (claude-sonnet-5-5; no recheck, no fallback):
 #                  pass, the default; flag (promises_beyond_cards true); denies_ai (denies_being_ai
-#                  true); error (HTTP 500); timeout (7 s, past the check's 6 s); unparsable (the text
+#                  true); error (HTTP 500); timeout (9 s, past the check's 8 s); unparsable (the text
 #                  "maybe"); refusal. A flag is soft_promise; no verdict is check_unavailable.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows

@@ -117,7 +117,7 @@ NO_API_KEY = "no-key"
 _KEY = re.compile(r"[!-~]+")
 
 SOFT_PROMISE_MODEL = "claude-sonnet-5-5"
-SOFT_PROMISE_TIMEOUT_S = 6.0
+SOFT_PROMISE_TIMEOUT_S = 8.0
 SOFT_PROMISE_MAX_TOKENS = 1024
 # The owner's decision of 2026-10-30: the check flags promises the cards don't back and prose that
 # denies being an AI, not prose restating what a card beside it shows, which the card carries.
