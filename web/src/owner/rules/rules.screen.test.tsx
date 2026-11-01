@@ -980,14 +980,18 @@ describe('rules page', () => {
     expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
 
     // Back from All rules: the question comes in with the page, above the place, at once or once
-    // Needs you, held, comes after the shapes have shown.
+    // Needs you, held, comes after the shapes have shown. Rules reads Needs you as it opens, and a
+    // read already out when it opens is the one it waits for; tests poll often, so one may be. So
+    // every read is held from while Rules is still open: once one is held, none sent before it is
+    // still out (a query has one read out at a time), and the read Rules waits for on Back is held.
+    const reads = when === 'after' ? holdNeedsYou() : null;
+    if (reads !== null) await expect.poll(reads.held, { timeout: 2_000 }).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
-    const reads = when === 'after' ? holdNeedsYou() : null;
     await router.navigate(-1);
     if (reads !== null) {
-      await expect.poll(reads.held).toBeGreaterThan(0);
-      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
       reads.release();
     }
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
@@ -997,17 +1001,26 @@ describe('rules page', () => {
   });
 
   it.each(['at once', 'after its shapes show'] as const)('rules_page_matches_its_board_drawn_%s', async (when) => {
-    // Rules waits for its suggestions: read slowly, its shapes show first and fade as the page draws,
+    // Rules waits for its suggestions: held until its shapes have shown, they fade as the page draws,
     // here for as long as a busy browser can keep them (the fade's one-second fallback).
+    let releaseSuggestions = () => {};
     if (when === 'after its shapes show') {
-      mockStore.inject({ route: 'suggestions', status: 200, body: desk().suggestions, delayMs: 500 });
+      const until = new Promise<void>((resolve) => {
+        releaseSuggestions = resolve;
+      });
+      onTestFinished(() => releaseSuggestions());
+      mockStore.inject({ route: 'suggestions', status: 200, body: desk().suggestions, until });
       const slowFade = document.createElement('style');
       slowFade.textContent = ".cd-skeleton-screen__layer[data-state='leaving'] { animation-duration: 10s !important; }";
       document.head.append(slowFade);
       onTestFinished(() => slowFade.remove());
     }
     const { screen } = await renderRoute(`${DESK}/rules`);
-    if (when === 'after its shapes show') await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+    if (when === 'after its shapes show') {
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
+      releaseSuggestions();
+    }
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;
