@@ -403,7 +403,9 @@ async def test_fact_support_uses_only_owner_transcript(proposals, model, engine,
     assert record["answers"]["suggested_fields"] == ([] if supported else ["public_contact"])
 
 
-async def test_suggested_facts_stay_unpublished_from_setup_to_live(app, browser, kernel_http, model, engine, fake):
+async def test_suggested_facts_stay_unpublished_from_setup_to_live(
+        app, browser, kernel_http, model, engine, fake, monkeypatch):
+    from unittest.mock import AsyncMock
     from tests.api.test_setup_questions import understanding, unparsed
     from tests.api.test_setup_rules import settled, unparseable
 
@@ -434,13 +436,21 @@ async def test_suggested_facts_stay_unpublished_from_setup_to_live(app, browser,
         assert "attacker@example.test" not in public.text
 
     path = f"/api/owner/policy/setup/{interview_id}"
+    rules_work = AsyncMock(wraps=setup.rules)
+    monkeypatch.setattr(setup, "rules", rules_work)
     model.add(unparseable(), unparseable())
     first = await settled(owner, path + "/rules")
     assert first.status_code == 200, first.text
+    assert rules_work.await_count == 1 and len(fake.called("POST /policy/draft")) == 1
+    drafting = len([request for request in model.requests if request.route == "card_draft"])
+    assert drafting == 2
     await assert_unpublished()
     # A fresh request resumes the stored draft, without drafting or confirming any fact.
+    app.state.runtime.proving.forget(state["desk_id"])
     again = await settled(owner, path + "/rules")
     assert again.status_code == 200 and again.json() == first.json()
+    assert rules_work.await_count == 2 and len(fake.called("POST /policy/draft")) == 2
+    assert len([request for request in model.requests if request.route == "card_draft"]) == drafting
     await assert_unpublished()
     for step, expected in (("safety_check", "safety_check"), ("confirm", "preview"), ("go_live", "live")):
         response = await settled(owner, path + "/" + step)
