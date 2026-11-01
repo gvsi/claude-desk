@@ -4,6 +4,7 @@ import { expect, it, onTestFinished } from 'vitest';
 
 import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
+import { CHANGED_REFRESHED } from '../ds/index.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdPublicLineOnSeed, storedPublicState, storePublicLines } from '../mocks/publicLineStore.ts';
@@ -554,7 +555,7 @@ it.each([undefined, '', null, 7])('holds a public-lines response without a usabl
 });
 
 
-it('redraws public lines after a stale confirmation and waits for a second Looks right', async () => {
+it.each(['stale revision', 'removed key'] as const)('redraws public lines after a %s confirmation and waits for a second Looks right', async (change) => {
   const { screen, state } = await openLines();
   const params = { id: state.interview_id };
   const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
@@ -562,10 +563,12 @@ it('redraws public lines after a stale confirmation and waits for a second Looks
   const saved = await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:about', text: updatedText } });
   if ('network' in saved) throw new Error('save failed');
   expect(saved.status).toBe(200);
-  const latest = saved.body as SetupPublicLines;
+  if (change === 'removed key') storePublicLines(mockStore.world, state.interview_id, (saved.body as SetupPublicLines).lines.filter((line) => line.key !== 'contact'));
+  const latest = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.conflict);
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(CHANGED_REFRESHED.en);
   await expect.element(screen.getByText(updatedText, { exact: true })).toBeVisible();
+  if (change === 'removed key') expect(screen.getByText('(408) 555-0199, linda@chenandco.com', { exact: true }).elements()).toHaveLength(0);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLines')).toHaveLength(2);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
   expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: before.lines.map((line) => line.key), revision: before.revision });

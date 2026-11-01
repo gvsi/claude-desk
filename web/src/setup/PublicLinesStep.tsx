@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '../api/views.ts';
-import { Button, Card, cardChrome, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
+import { Button, Card, cardChrome, CHANGED_REFRESHED, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 import { publicLineLimit } from './publicLineLimit.ts';
 
@@ -141,9 +141,16 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
       onNext('safety_check');
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
+      if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'invalid'))) {
         const current = await reread();
-        if (current === null || current.step === 'rules' || current.step === 'situations') await lines.refetch();
+        const stillHere = current?.step === 'rules' || current?.step === 'situations';
+        if (current === null || stillHere) {
+          const refreshed = await lines.refetch();
+          if (stillHere && refreshed.isSuccess) {
+            setError(CHANGED_REFRESHED.en);
+            return;
+          }
+        }
       }
       const line = err instanceof ApiError && err.status === 422 && err.code === 'line_refused'
         ? shown.find((line) => line.key === err.lineKey && canEdit(line)) : undefined;
