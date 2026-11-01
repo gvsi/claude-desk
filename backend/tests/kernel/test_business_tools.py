@@ -1062,19 +1062,21 @@ def test_free_words_stand_in_titles_and_appointment_types_and_never_on_a_payment
     assert {block: blocks.free_name_fields(block) for block in blocks.CARD_FIELDS} == {
         'intake': ('title',), 'typed_booking': ('title', 'appointment_type'), 'purpose_payment': (),
         'urgent': ('title',)}
-    for config in ({'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30},
-                   {'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000}):
+    free = reply_check.FREE_WORDS
+    for config, allowed in [
+            ({'block': 'intake', 'questions': ['What?']}, {'desk.consult.0-title': free}),
+            ({'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30},
+             {'desk.consult.0-title': free, 'desk.consult.1-appointment_type': free}),
+            ({'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000}, {})]:
         tool = BusinessTool.model_validate(intake(tool='desk.consult', config=config))
-        assert business_tools.free_allow_words(tool) == {
-            f'desk.consult.{index}-{field}': reply_check.FREE_WORDS
-            for index, field in enumerate(blocks.CARD_FIELDS[config['block']])
-            if field in blocks.free_name_fields(config['block'])}
+        assert business_tools.free_allow_words(tool) == allowed
 
 
 async def named_desk(app, client, tools, states):
     """Rivera with business `tools` written, each row then put in its state of `states` (by tool):
-    `enabled`, `needs_review` (as written), `disabled`, or `stale` (enabled, its profile pin broken);
-    a visitor of it."""
+    `enabled`, `needs_review` (as written), `disabled`, `stale` (enabled, its profile pin broken), or
+    `drifted` (enabled, its stored definition changed outside the write and its profile pin recomputed
+    to match, so only `adapters.resolve`'s check of the definition can tell); a visitor of it."""
     copy = await rivera(app, client)
     assert (await put(client, copy, tools)).status_code == 200
     async with kernel_ctx(app) as ctx:
@@ -1086,6 +1088,10 @@ async def named_desk(app, client, tools, states):
                 row.status, row.review_reason = ('disabled' if state == 'disabled' else 'enabled'), None
             if state == 'stale':
                 row.profile_sha256 = '0' * 64
+            if state == 'drifted':
+                business = row.profile.business.model_copy(update={'description': 'Changed outside the write.'})
+                row.profile = row.profile.model_copy(update={'business': business})
+                row.profile_sha256 = adapters.profile_sha256(row.profile)
     return copy, await open_visitor(client, copy)
 
 
@@ -1106,7 +1112,7 @@ async def test_a_free_word_outside_the_repeated_title_is_still_a_promise_word(ap
     assert not verdict.ok
 
 
-@pytest.mark.parametrize('state', ['needs_review', 'disabled', 'stale'])
+@pytest.mark.parametrize('state', ['needs_review', 'disabled', 'stale', 'drifted'])
 async def test_a_business_tool_waiting_for_review_disabled_or_stale_backs_no_free_word(app, client, state):
     """Beside an enabled tool whose title the reply repeats, a second tool's title backs its own
     free word only once that tool is enabled and resolves."""
@@ -1120,8 +1126,10 @@ async def test_a_business_tool_waiting_for_review_disabled_or_stale_backs_no_fre
 
 async def test_business_free_names_are_enabled_resolving_titles_and_types_never_a_payments(app, client):
     """Desk-wide, in tool order: every enabled tool that resolves lends its title and appointment
-    type, and nothing else does (a payment's title, a block with no adapter yet, a tool waiting for
-    review, a disabled one, or one whose profile no longer matches its pin)."""
+    type, and nothing else does (a block with no adapter yet, a tool waiting for review, a disabled
+    one, one whose profile no longer matches its pin, or one whose definition drifted from its pinned
+    profile). The payment is left out here because its block has no adapter yet; the rule that a
+    payment's title never lends a free word is pinned by `blocks.free_name_fields`'s own test above."""
     from desk.kernel_service import context
 
     tools = [intake(title=INTRO_CALL),
@@ -1133,10 +1141,12 @@ async def test_business_free_names_are_enabled_resolving_titles_and_types_never_
                  'block': 'urgent', 'urgent_when': 'A burst pipe'}),
              intake(tool='desk.waiting', title='Free trial lesson'),
              intake(tool='desk.old', title='Free old lesson'),
-             intake(tool='desk.stale', title='Free stale lesson')]
+             intake(tool='desk.stale', title='Free stale lesson'),
+             intake(tool='desk.drifted', title='Free drifted lesson')]
     copy, _ = await named_desk(app, client, tools, {
         'desk.new-enquiry': 'enabled', 'desk.consult': 'enabled', 'desk.retainer': 'enabled',
-        'desk.urgent': 'enabled', 'desk.waiting': 'needs_review', 'desk.old': 'disabled', 'desk.stale': 'stale'})
+        'desk.urgent': 'enabled', 'desk.waiting': 'needs_review', 'desk.old': 'disabled', 'desk.stale': 'stale',
+        'desk.drifted': 'drifted'})
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL]
