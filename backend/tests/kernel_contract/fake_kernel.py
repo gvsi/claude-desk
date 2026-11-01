@@ -2115,12 +2115,12 @@ class FakeKernelState:
     # Decisions -----------------------------------------------------------------------------------
 
     @staticmethod
-    def _intake_profile(desk: Desk, tool: str) -> ToolProfile | None:
+    def _business_profile(desk: Desk, tool: str) -> ToolProfile | None:
         from desk.kernel_service.adapters import blocks, profile_sha256
 
         profile = desk.tools.get(tool)
         if (profile is None or profile.source != 'business' or profile.business is None
-                or profile.business.config.block != 'intake'):
+                or profile.business.config.block not in blocks.SUPPORTED_BLOCKS):
             return None
         expected = blocks.profile(tool, profile.business)
         if (profile.definition_sha256 != expected.definition_sha256
@@ -2141,10 +2141,15 @@ class FakeKernelState:
                           and (tool not in MANDATE_TOOLS or session.mandate_id is not None))
             if session.mandate_id is not None and (desk.answering or session.preview):
                 given += ("native.charge_mandate",)
-        if 'native.capture_lead' in given:
-            given += tuple(tool for tool, profile in desk.tools.items()
-                           if profile.status == 'enabled' and self._intake_profile(desk, tool) is not None)
+        given += self._business_tools_given(desk, given)
         return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
+
+    def _business_tools_given(self, desk: Desk, base_tools) -> tuple[str, ...]:
+        from desk.kernel_service.adapters import blocks
+
+        return tuple(tool for tool, profile in desk.tools.items()
+                     if profile.status == 'enabled' and self._business_profile(desk, tool) is not None
+                     and blocks.BLOCK_BASE[profile.business.config.block] in base_tools)
 
     def context(self, request: Request, body: Any) -> SessionContext:
         """The session's tools now, every tool its kind could be given, and the facts its labels let it read;
@@ -2154,7 +2159,7 @@ class FakeKernelState:
         declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         if session.kind in ('visitor', 'agent'):
             declared += tuple(tool for tool, profile in desk.tools.items()
-                              if profile.status == 'enabled' and self._intake_profile(desk, tool) is not None)
+                              if profile.status == 'enabled' and self._business_profile(desk, tool) is not None)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
         return SessionContext(
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
@@ -2188,7 +2193,7 @@ class FakeKernelState:
             return self._refresh(record)
         if session.mode == "paused":
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="paused")
-        if call.tool not in TOOL_NAMES and self._intake_profile(desk, call.tool) is None:
+        if call.tool not in TOOL_NAMES and self._business_profile(desk, call.tool) is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="unknown_tool")
         if call.tool not in self.tools_given(session, desk):
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="not_given")
@@ -2271,7 +2276,7 @@ class FakeKernelState:
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):
             return "refuse", [f"never-{tool}"], None
-        if self._intake_profile(desk, tool) is not None:
+        if self._business_profile(desk, tool) is not None:
             covering = [card for card in desk.cards if (
                 card.applies_to == tool or card.applies_to.removeprefix('effect:') in action.effects) and (
                 card.who == 'anyone' or card.who == 'verified' and session.verified
@@ -2542,7 +2547,7 @@ class FakeKernelState:
         desk, action = self.desks[record.desk_id], record.decision.action
         if action.tool.startswith('desk.'):
             from desk.kernel_service.adapters import profile_sha256
-            profile = self._intake_profile(desk, action.tool)
+            profile = self._business_profile(desk, action.tool)
             if (profile is None or profile.status != 'enabled'
                     or profile_sha256(profile) != action.profile_sha256):
                 approved = record.decision.state == 'approved'
@@ -2634,7 +2639,7 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
-        elif tool == "native.capture_lead" or self._intake_profile(desk, tool) is not None:
+        elif tool == "native.capture_lead" or self._business_profile(desk, tool) is not None:
             lead_id = new_id("lead")
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
@@ -3348,9 +3353,7 @@ class FakeKernelState:
             mandate = probe.agent_mandate_remaining_cents is not None
             given = tuple(tool for tool in given if tool != "payments.create_refund"
                           and (tool not in MANDATE_TOOLS or mandate)) + (("native.charge_mandate",) if mandate else ())
-        if 'native.capture_lead' in given:
-            given += tuple(tool for tool, profile in desk.tools.items()
-                           if profile.status == 'enabled' and self._intake_profile(desk, tool) is not None)
+        given += self._business_tools_given(desk, given)
         return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
 
     @staticmethod
@@ -3521,7 +3524,7 @@ class FakeKernelState:
                 raise Refusal(404, 'not_found')
             if profile.definition_sha256 != pin.definition_sha256:
                 raise Refusal(409, 'conflict')
-            if profile.source == 'business' and self._intake_profile(desk, pin.tool) is None:
+            if profile.source == 'business' and self._business_profile(desk, pin.tool) is None:
                 raise Refusal(404, 'not_found')
         if not body.enable:
             if any(pin.tool in ALWAYS_ON_TOOLS for pin in body.tools):

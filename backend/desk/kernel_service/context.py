@@ -80,6 +80,8 @@ def _profile(row: Tool) -> ToolProfile:
 async def session_context(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
                           desk_row: Desk) -> SessionContext:
     """The tools, facts and knowledge of `desk_row` given to the authenticated session."""
+    from desk.kernel_service.adapters import blocks
+
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
@@ -87,6 +89,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     declared = decide.declared_tools(principal.kind)
     valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
                       and profile.status == "enabled"
+                      and profile.business is not None and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                       and await adapters.resolve(ctx, desk_id, tool) is not None}
     given = {tool for tool, profile in profiles.items() if tool in given
              and (profile.source != "business" or tool in valid_business)}

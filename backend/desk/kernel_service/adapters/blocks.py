@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 import desk_kernel
 from pydantic import BaseModel, ConfigDict, Field
 
-from desk.contracts import BusinessToolDef, Claim, Fact, Label, ToolProfile
+from desk.contracts import BusinessToolDef, Claim, Fact, Label, ToolName, ToolProfile
 from desk.kernel_service import labels
 from desk.kernel_service.adapters.base import AdapterRefusal, AdapterResult, ExecCtx, Normalized, NormalizeCtx, quoted
 from desk.kernel_service.adapters.book import BookArgs
@@ -14,6 +14,7 @@ from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, C
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
 
 Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
+SUPPORTED_BLOCKS: frozenset[Block] = frozenset({"intake"})
 CARD_FIELDS: dict[Block, tuple[str, ...]] = {
     "intake": ("title",),
     "typed_booking": ("title", "appointment_type"),
@@ -40,8 +41,8 @@ BLOCK_SENTENCES = {
     "purpose_payment": "Creates a payment link for the configured purpose and kernel-owned amount.",
     "urgent": "Saves an urgent callback request and alerts the owner.",
 }
-BLOCK_BASES = {"intake": "native.capture_lead", "typed_booking": "native.book",
-               "purpose_payment": "native.payment_link", "urgent": "native.request_callback"}
+BLOCK_BASE: dict[Block, ToolName] = {"intake": "native.capture_lead", "typed_booking": "native.book",
+                                   "purpose_payment": "native.payment_link", "urgent": "native.request_callback"}
 BLOCK_ARGS = {"intake": IntakeArgs, "typed_booking": BookArgs,
               "purpose_payment": PurposePaymentArgs, "urgent": RequestCallbackArgs}
 
@@ -70,7 +71,7 @@ class BlockAdapter:
     releases_private_data = False
 
     def __init__(self, stored: ToolProfile):
-        if stored.business is None or stored.business.config.block != "intake":
+        if stored.business is None or stored.business.config.block not in SUPPORTED_BLOCKS:
             raise ValueError("unsupported_block")
         self.profile = profile(stored.tool, stored.business).model_copy(update={"status": "enabled", "review_reason": None})
 

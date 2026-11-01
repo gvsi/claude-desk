@@ -604,6 +604,78 @@ async def test_removed_tool_is_disabled_and_answering_off_keeps_intake(app, clie
     assert all(row.status == 'disabled' for row in (await business_rows(app, copy)).values())
 
 
+async def test_supported_blocks_gate_resolution_and_context_even_for_enabled_rows(app, client, monkeypatch):
+    from desk.kernel_service.adapters import blocks
+
+    assert blocks.SUPPORTED_BLOCKS == frozenset({'intake'})
+    copy = await rivera(app, client)
+    urgent = intake(tool='desk.urgent', title='Urgent support', description='Urgent-only marker.',
+                    config={'block': 'urgent', 'urgent_when': 'Urgent trigger marker.'})
+    assert (await put(client, copy, [intake(), urgent])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+                Tool.desk_id == copy.desk_id, Tool.source == 'business'))):
+            row.status, row.review_reason = 'enabled', None
+        assert await adapters.resolve(ctx, copy.desk_id, 'desk.urgent') is None
+        assert await adapters.resolve(ctx, copy.desk_id, 'desk.new-enquiry') is not None
+    visitor = await open_visitor(client, copy)
+    seen = await context_of(client, visitor.session_id, visitor.headers)
+    assert 'desk.new-enquiry' in {profile.tool for profile in seen.tools}
+    assert 'desk.urgent' not in {profile.tool for profile in (*seen.tools, *seen.tools_declared)}
+    assert 'Urgent-only marker' not in seen.model_dump_json()
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset())
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        assert await adapters.resolve(ctx, copy.desk_id, 'desk.new-enquiry') is None
+    seen = await context_of(client, visitor.session_id, visitor.headers)
+    assert not {profile.tool for profile in (*seen.tools, *seen.tools_declared)} & {'desk.new-enquiry', 'desk.urgent'}
+
+
+@pytest.mark.parametrize('kind,mandate,answering,preview,expected', [
+    ('visitor', False, True, False, {'intake', 'typed_booking', 'purpose_payment', 'urgent'}),
+    ('agent', False, True, False, {'intake', 'typed_booking', 'urgent'}),
+    ('agent', True, True, False, {'intake', 'typed_booking', 'purpose_payment', 'urgent'}),
+    ('visitor', False, False, False, {'intake', 'urgent'}),
+    ('agent', True, False, False, {'intake', 'urgent'}),
+    ('visitor', False, False, True, {'intake', 'typed_booking', 'purpose_payment', 'urgent'}),
+    ('owner', False, True, False, set()),
+])
+def test_business_tool_standings_follow_shared_block_bases(monkeypatch, kind, mandate, answering, preview, expected):
+    from types import SimpleNamespace
+    from desk.contracts import BusinessToolDef, Principal
+    from desk.kernel_service import decide
+    from desk.kernel_service.adapters import blocks
+    from tests.kernel_contract.fake_kernel import FakeKernelState
+
+    definitions = {'intake': {'questions': ['What?']},
+                   'typed_booking': {'appointment_type': 'Consult', 'minutes': 30},
+                   'purpose_payment': {'purpose': 'Retainer', 'amount_cents': 5000},
+                   'urgent': {'urgent_when': 'No heating'}}
+    # Exercise the common giving rules for future adapters without enabling them in production.
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset(definitions))
+    profiles = {f'desk.{block.replace("_", "-")}': blocks.profile(
+        f'desk.{block.replace("_", "-")}', BusinessToolDef(
+            title='Service', description='Take details.', config={'block': block, **config}))
+        .model_copy(update={'status': 'enabled'}) for block, config in definitions.items()}
+    profiles.update({tool: adapters.ADAPTERS[tool].profile.model_copy(update={'status': 'enabled'})
+                     for tool in blocks.BLOCK_BASE.values()})
+    enabled = {tool: SimpleNamespace(profile=profile, status='enabled') for tool, profile in profiles.items()}
+    principal = Principal(kind=kind, session_id='session', copy_id='copy', desk_id='desk',
+                          mandate_id='mandate' if mandate else None)
+    session = SimpleNamespace(kind=kind, mandate_id=principal.mandate_id, preview=preview, verified=False)
+    desk = SimpleNamespace(answering=answering, tools=profiles)
+    wanted = {f'desk.{block.replace("_", "-")}' for block in expected}
+    actual = decide.tools_given(principal, session, desk, enabled)
+    fake = object.__new__(FakeKernelState)
+    fake_given = fake.tools_given(session, desk)
+    assert {tool for tool in actual if tool.startswith('desk.')} == wanted
+    assert {tool for tool in fake_given if tool.startswith('desk.')} == wanted
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset())
+    assert not any(tool.startswith('desk.') for tool in decide.tools_given(principal, session, desk, enabled))
+    assert not any(tool.startswith('desk.') for tool in fake.tools_given(session, desk))
+
+
 async def test_signed_agent_session_cannot_replace_business_tools(app, client, frozen_clock):
     from .test_agent_auth import a2a_body, mint, post_open
     from desk.kernel_service.clock import signed_time

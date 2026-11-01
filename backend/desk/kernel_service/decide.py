@@ -212,12 +212,12 @@ def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, e
             given &= ANSWERING_OFF_TOOLS
     native = given & set(enabled) & set(adapters.ADAPTERS)
     if hasattr(enabled, "items"):
-        from desk.kernel_service.adapters.blocks import BLOCK_BASES
+        from desk.kernel_service.adapters import blocks
         for tool, row in enabled.items():
             profile = row.profile
-            if (profile is not None and profile.source == "business" and profile.business is not None
-                    and profile.business.config.block == "intake"
-                    and BLOCK_BASES[profile.business.config.block] in given):
+            if (row.status == "enabled" and profile is not None and profile.source == "business" and profile.business is not None
+                    and profile.business.config.block in blocks.SUPPORTED_BLOCKS
+                    and blocks.BLOCK_BASE[profile.business.config.block] in given):
                 native.add(tool)
     return native
 
