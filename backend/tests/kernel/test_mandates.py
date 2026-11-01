@@ -769,6 +769,24 @@ async def test_demo_agent_pays_the_rivera_deposit(app, client, frozen_clock):
             "card", "charge_confirmed", fact.fact_id, "Service call deposit, $20.00", [], None)
 
 
+async def test_an_agent_may_name_its_quote_by_its_fact_id(app, client, frozen_clock):
+    """An agent's context shows its quote by its fact ID (`quote:<id>`), as a visitor's does, and the
+    tool takes "the quote_id in your context": the whole fact ID charges exactly the quote the bare ID
+    would, within the mandate, and no other prefix is read as the quote's."""
+    setup = await rivera_agent(app, client, frozen_clock)
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    other = await asked(client, signed, CHARGE, f"charge:{quote_id}", call_id="call-other")
+    assert (other.outcome, other.action) == ("refuse", None)
+    decision = await asked(client, signed, CHARGE, f"quote:{quote_id}")
+    assert (decision.outcome, decision.card_ids, decision.action.resource.id, decision.action.amount_cents) == (
+        "allow", ["rv-mandate"], quote_id, 2_000), decision.reason_plain
+    assert (await executed(client, signed, decision)).state == "succeeded"
+    assert await quote_status(app, setup.desk.copy_id, quote_id) == "paid"
+    assert agent_charges(setup.desk.copy_id) == [
+        (decision.action.action_id, 2_000, f"agent:{setup.agent.key_id}", "succeeded")]
+
+
 # ---- A quote is paid once -------------------------------------------------------------------------------
 
 async def quote_status(app: FastAPI, copy_id: str, quote_id: str) -> str:

@@ -2629,7 +2629,8 @@ class FakeKernelState:
                 raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
-            document = desk.documents.get(args["document_id"])
+            # named bare or by its fact ID, as Claude's context shows it (`adapters.base.fact_ref`)
+            document = desk.documents.get(args["document_id"].removeprefix("document:"))
             if document is None:
                 raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
@@ -2640,8 +2641,9 @@ class FakeKernelState:
         elif tool == "payments.list_charges":
             resource = ResourceRef(kind="charge", id=f"person:{session.person_id}", owner_person_id=session.person_id)
         elif tool in ("native.payment_link", "native.charge_mandate"):
-            quote = self.quotes.get(args["quote_id"])
-            fact = desk.facts.get(f"quote:{args['quote_id']}")
+            quote_id = args["quote_id"].removeprefix("quote:")     # bare or by its fact ID, as for documents
+            quote = self.quotes.get(quote_id)
+            fact = desk.facts.get(f"quote:{quote_id}")
             # this conversation's own quote, unpaid: a quote is paid once (Plan 01c)
             if (quote is None or quote["desk_id"] != desk.desk_id or quote["session_id"] != session.session_id
                     or quote["status"] != "available" or fact is None or not self._current(fact)

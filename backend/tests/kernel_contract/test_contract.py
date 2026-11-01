@@ -1959,6 +1959,40 @@ async def test_document_link_is_single_use(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01b")
+async def test_a_document_named_by_its_fact_id_is_released_as_by_its_id(kernel, ro_read):
+    """Claude's context shows a document by its fact ID (`document:<id>`), and that whole ID names the same document
+    as the bare one: the record owner's call is allowed, resolved to the document's own ID, and executes to a link card
+    for it. Another kind's prefix names no document, so that call is refused before any action exists."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(created.session_token), created.state.session_id
+    started = await verify_start(view, session_id, DANA)
+    await verify_check(view, session_id, code_in(await session_inbox(view, session_id), started.inbox[0].entry_id))
+    ((person_id,),) = [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.sessions WHERE session_id = %s", (session_id,))]
+    (document,) = ro_read(ro_schema, copy.copy_id, "SELECT document_id, title FROM {ro}.documents"
+                                                   " WHERE desk_id = %s AND record_owner_person_id = %s",
+                          (copy.desk_ids[0], person_id))
+
+    allowed = await decide(view, session_id, 0, "call-1", "native.release_document",
+                           {"document_id": f"document:{document['document_id']}"})
+    assert allowed.state == "allowed"
+    assert (allowed.action.resource.kind, allowed.action.resource.id, allowed.action.resource.owner_person_id) == (
+        "document", document["document_id"], person_id)
+    executed = await execute(view, allowed, 0)
+    (fact,) = executed.facts
+    verdict = await cite(view, session_id, 0, "Here is your invoice.", "document_link", fact.fact_id)
+    assert verdict.ok
+    (card,) = [block for block in verdict.blocks if block.template == "document_link"]
+    assert card.title == document["title"]
+
+    refused = await decide(view, session_id, 0, "call-2", "native.release_document",
+                           {"document_id": f"quote:{document['document_id']}"})
+    assert (refused.outcome, refused.state, refused.action) == ("refuse", "refused", None)
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
     """A refusal by the always-on baseline names the baseline's forbid, `B.<@id>`, with no card behind it: a session
     verified as Dana asks for a document on someone else's record, and `B.private_data_record_owner` refuses it, alike
