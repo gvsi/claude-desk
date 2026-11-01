@@ -303,7 +303,7 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     interview_id = state["interview_id"]
     await show_card(engine, interview_id, question=True)
     fields = dict(public_contact="attacker@example.test", service_area="Everywhere",
-                  price_items=[{"title": "Repair", "unit_cents": 100}])
+                  price_items=[{"title": "Repair", "unit_cents": 100}], urgent="24/7 emergency call-outs.")
     reply = await answer(owner, model, interview_id, "We repair plumbing.",
                          turn(summary="We repair plumbing.", **fields))
     assert reply.status_code == 200, reply.text
@@ -314,6 +314,7 @@ async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, mod
     assert said["owner_fields"] == ["summary"]
     trusted = setup.owner_rule_answers(answers)
     assert trusted.public_contact is None and trusted.service_area is None and trusted.price_items == []
+    assert trusted.urgent is None
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
     model.add(unparseable(), unparseable())
@@ -728,6 +729,52 @@ def test_off_topic_hours_removals_never_add_days_or_change_times(days, start, en
     assert ("hours" in backed) is supported
 
 
+@pytest.mark.parametrize("windows,said,held,supported", [
+    # Only windows the owner's stored hours lack need a stated time, as only new or changed prices need one.
+    ([("sat", "10:00", "14:00")], "Call 415-555-0118. We're also open Saturdays 10am to 2pm now.", False, True),
+    ([("sat", "10:00", "14:00")], "Call 415-555-0118. We're also open Saturdays now.", False, False),
+    ([("sat", "10:00", "14:00")], "We're a 10-person team with 2 vans, call 415-555-0118.", False, False),
+    # Held hours stay held until every window is stated in that answer.
+    ([("sat", "10:00", "14:00")], "Call 415-555-0118. We're also open Saturdays 10am to 2pm now.", True, False),
+])
+def test_off_topic_hours_additions_need_only_the_new_windows_stated(windows, said, held, supported):
+    weekdays = HoursAnswer(days=["mon", "tue", "wed", "thu", "fri"], start="10:00", end="18:00")
+    before = SetupAnswers(summary="Plumbing", hours=[weekdays.window()], suggested_fields=["hours"] if held else [])
+    patch = setup.SetupPatch(hours=[weekdays, *(HoursAnswer(days=[day], start=start, end=end)
+                                                for day, start, end in windows)])
+    backed = setup._backed_off_topic(patch, "contact_and_after_hours", said, before)
+    assert ("hours" in backed) is supported
+
+
+@pytest.mark.parametrize("said,added", [("Call 415-555-0118. We're also open Saturdays 10am to 2pm now.", True),
+                                        ("Call 415-555-0118. We're also open Saturdays now.", False)])
+async def test_owner_hours_addition_on_the_contact_question_is_the_owners(proposals, model, engine, said, added):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    weekdays = {"days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "18:00"}
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "10am to 6pm weekdays.", turn(hours=[weekdays]),
+                         question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    saturday = {"days": ["sat"], "start": "10:00", "end": "14:00"}
+    reply = await answer(owner, model, interview_id, said, turn(public_contact="415-555-0118", hours=[weekdays, saturday]),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    expected = [weekdays, saturday] if added else [weekdays]
+    assert answers.hours == [HoursAnswer(**window).window() for window in expected]
+    assert "hours" not in answers.suggested_fields
+    said_entry = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert ("hours" in said_entry["owner_fields"]) is added
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.hours == answers.hours
+    assert any(date.fromisoformat(slot.slot_id[2:10]).weekday() == 5 for slot in parts.calendar) is added
+
+
 async def test_owner_price_clear_on_another_question_is_the_owners(proposals, model, engine):
     from tests.api.test_setup_questions import answer, turn
 
@@ -1034,37 +1081,68 @@ async def test_fact_turn_owns_only_supported_fields(proposals, model, engine, to
             assert record["answers"][name] == []
 
 
-def test_a_fact_is_on_topic_on_every_question_that_asks_for_it():
-    from desk.api.prompts import FIELD_TURNS, LIMIT_TURN_FACTS, QUESTION_KEYS
+# Each fact's home question, where the owner's answer gives it: the quote question records pricing and the price list
+# as well (LIMIT_TURN_FACTS). The test fixes them; which other turns have a field follows FIELD_TURNS.
+HOMES = {"summary": "what_you_do", "service_area": "hours_and_area", "pricing": "what_you_do", "intake": "what_you_do",
+         "urgent": "contact_and_after_hours", "after_hours": "contact_and_after_hours", "hours": "hours_and_area",
+         "public_contact": "contact_and_after_hours", "price_items": "quote_limit"}
+POLICY_FIELDS = ("pricing", "intake", "urgent", "after_hours")
 
-    # A structured fact (a value code checks against the owner's words) is on topic only on its home question,
-    # whichever other turns have its field. A free-text field the turns are scoped for (FIELD_TURNS) is on topic on
-    # each of them, any other on its own question, and a fact the quote question records on that question too.
-    homes = {"hours": {"hours_and_area"}, "price_items": {"quote_limit"}, "public_contact": {"contact_and_after_hours"}}
-    expected = {name: homes.get(name) or set(FIELD_TURNS.get(name, {setup.FACT_TOPICS.get(name)})) - {None}
-                for name in setup.SetupPatch.model_fields}
+
+def _fact_turns():
+    from desk.api.prompts import LIMIT_QUESTIONS, QUESTION_KEYS
+
+    return [key for key in QUESTION_KEYS if key not in LIMIT_QUESTIONS.values()]
+
+
+def test_each_fact_is_on_topic_only_on_its_home_question():
+    from desk.api.prompts import FIELD_TURNS, LIMIT_TURN_FACTS, QUESTION_KEYS, SETUP_TURNS
+
+    expected = {name: {home} for name, home in HOMES.items()}
     for name, key in LIMIT_TURN_FACTS.items():
-        expected[name] = expected[name] | {key}
+        expected[name].add(key)
     assert {name: {key for key in QUESTION_KEYS if setup._on_topic(name, key)}
-            for name in setup.SetupPatch.model_fields} == expected
-    assert {name for name, keys in expected.items() if keys} == {
-        "summary", "service_area", "public_contact", "price_items", "pricing", "intake", "urgent", "after_hours", "hours"}
-    # The fixed cases: owner pricing on the quote question, urgent on what_you_do, and hours at home on the hours
-    # question only, though the contact turn has an hours field too.
-    assert setup._on_topic("pricing", "quote_limit") and setup._on_topic("urgent", "what_you_do")
-    assert not setup._on_topic("pricing", "hours_and_area")
-    assert "contact_and_after_hours" in FIELD_TURNS["hours"] and not setup._on_topic("hours", "contact_and_after_hours")
+            for name in setup.SetupPatch.model_fields if any(setup._on_topic(name, key) for key in QUESTION_KEYS)
+            } == expected
+    for name, home in HOMES.items():
+        assert name in SETUP_TURNS[home].model_fields, (name, home)   # its home question's turn can record it
+    # Every other turn that has the field (FIELD_TURNS) holds it, the fixed cases being urgent on what_you_do and
+    # hours on the contact question.
+    for name in set(FIELD_TURNS) & set(HOMES):
+        for key in FIELD_TURNS[name] - expected[name]:
+            assert not setup._on_topic(name, key), (name, key)
+    assert not setup._on_topic("urgent", "what_you_do") and not setup._on_topic("hours", "contact_and_after_hours")
+    assert setup._on_topic("pricing", "quote_limit") and not setup._on_topic("pricing", "hours_and_area")
 
 
-def _policy_turns():
-    from desk.api.prompts import FIELD_TURNS, QUESTION_KEYS
+def _home_policy_turns():
+    from desk.api.prompts import LIMIT_TURN_FACTS
 
-    return [(field, key) for field in ("pricing", "intake", "urgent", "after_hours")
-            for key in QUESTION_KEYS if key in FIELD_TURNS[field]]
+    return [(field, key) for field in POLICY_FIELDS for key in sorted({HOMES[field], LIMIT_TURN_FACTS.get(field)} - {None})]
 
 
-@pytest.mark.parametrize("field,topic", _policy_turns())
-async def test_policy_text_is_the_owners_on_every_question_that_asks_for_it(proposals, model, engine, field, topic):
+def _held_policy_turns():
+    from desk.api.prompts import FIELD_TURNS, LIMIT_TURN_FACTS
+
+    return [(field, key) for field in POLICY_FIELDS for key in _fact_turns()
+            if key in FIELD_TURNS[field] and key not in (HOMES[field], LIMIT_TURN_FACTS.get(field))]
+
+
+def _fieldless_policy_turns():
+    from desk.api.prompts import FIELD_TURNS
+
+    return [(field, key) for field in POLICY_FIELDS for key in _fact_turns() if key not in FIELD_TURNS[field]]
+
+
+def test_policy_turn_cases_cover_the_fixed_ones():
+    assert ("urgent", "contact_and_after_hours") in _home_policy_turns()
+    assert {("pricing", "what_you_do"), ("pricing", "quote_limit")} <= set(_home_policy_turns())
+    assert {("urgent", "what_you_do"), ("after_hours", "hours_and_area")} <= set(_held_policy_turns())
+    assert ("pricing", "hours_and_area") in _fieldless_policy_turns()
+
+
+@pytest.mark.parametrize("field,topic", _home_policy_turns())
+async def test_policy_text_is_the_owners_on_its_home_question(proposals, model, engine, field, topic):
     from desk.api.prompts import SETUP_POLICY_CLAIMS
     from tests.api.test_setup_questions import answer, turn
 
@@ -1084,10 +1162,77 @@ async def test_policy_text_is_the_owners_on_every_question_that_asks_for_it(prop
     assert SETUP_POLICY_CLAIMS[field] in {claim.key for claim in parts.charter}
 
 
-@pytest.mark.parametrize("field", ["pricing", "intake", "urgent"])
+@pytest.mark.parametrize("field,topic", _held_policy_turns())
+@pytest.mark.parametrize("owner_set", [False, True])
+async def test_policy_text_on_another_question_that_asks_for_it_stays_held(
+        proposals, model, engine, caplog, field, topic, owner_set):
+    from desk.api.prompts import SETUP_POLICY_CLAIMS
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    mine = "Call us and we will tell you what happens next."
+    if owner_set:
+        async with engine.begin() as conn:
+            interview = await setup._load(conn, owner.copy_id, interview_id)
+            setattr(interview.answers, field, mine)
+            await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, topic)
+    website = "24/7 emergency call-outs."
+    caplog.clear()
+    reply = await answer(owner, model, interview_id, "We fix plumbing for homeowners.", turn(**{field: website}),
+                         question=topic)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert field not in said.get("owner_fields", [])
+    assert getattr(answers, field) == (mine if owner_set else website)
+    assert (field in answers.suggested_fields) is not owner_set
+    claims = {claim.key: claim.value for claim in setup.seed_parts(
+        answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2)).charter}
+    assert claims.get(SETUP_POLICY_CLAIMS[field]) == (mine if owner_set else None)
+    if owner_set:
+        assert f"setup dropped off-topic field {field}" in caplog.text
+
+
+@pytest.mark.parametrize("field,topic", _held_policy_turns())
+async def test_held_policy_text_stays_off_the_kernel_until_the_owner_confirms_it(
+        proposals, model, engine, fake, field, topic):
+    from tests.api.test_setup_questions import answer, turn
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    website = "24/7 emergency call-outs."
+    # The model emits it, then emits it again unchanged: both times the owner's answer says nothing of it.
+    for said in ("We fix plumbing for homeowners.", "Mostly older houses."):
+        await ask_topic(owner, engine, interview_id, topic)
+        reply = await answer(owner, model, interview_id, said, turn(**{field: website}), question=topic)
+        assert reply.status_code == 200, reply.text
+        record = await stored(engine, interview_id)
+        assert field in record["answers"]["suggested_fields"]   # listed for the owner to confirm
+        assert field not in [entry for entry in record["transcript"] if entry["role"] == "owner"][-1].get(
+            "owner_fields", [])
+    assert setup.owner_rule_answers(SetupAnswers.model_validate(record["answers"])).model_dump()[field] is None
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    model.add(unparseable(), unparseable())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    assert fake.called("PUT /desks/{id}/charter")
+    writes = [call.body for call in fake.calls if not call.route.startswith("GET ")]
+    assert "emergency call-outs" not in json.dumps(writes)
+    public = await owner.browser.get(f"/api/public/{state['slug']}")
+    assert public.status_code == 200, public.text
+    assert "emergency call-outs" not in public.text
+    assert field in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+
+
+@pytest.mark.parametrize("field,topic", _fieldless_policy_turns())
 @pytest.mark.parametrize("held", [True, False])
-async def test_policy_text_in_a_patch_on_hours_and_area_stays_suggested(
-        proposals, model, engine, monkeypatch, caplog, field, held):
+async def test_policy_text_on_a_question_without_its_field_stays_suggested(
+        proposals, model, engine, monkeypatch, caplog, field, topic, held):
     from desk.api.prompts import SETUP_POLICY_CLAIMS, SETUP_TURNS, SetupPatch
     from tests.api.test_setup_questions import answer, turn
 
@@ -1100,13 +1245,12 @@ async def test_policy_text_in_a_patch_on_hours_and_area_stays_suggested(
             setattr(interview.answers, field, website)
             interview.answers.suggested_fields = [field]
             await setup._save(conn, interview)
-    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    await ask_topic(owner, engine, interview_id, topic)
     text = "We work around Oakland. Each job is priced after a look at it."
-    # The hours question has no field for it (FIELD_TURNS); a patch that carries it anyway is dropped.
-    monkeypatch.setattr(SETUP_TURNS["hours_and_area"], "patch",
-                        lambda self: SetupPatch(service_area="Oakland", **{field: text}))
+    # This question's turn has no field for it (FIELD_TURNS); a patch that carries it anyway is dropped.
+    monkeypatch.setattr(SETUP_TURNS[topic], "patch", lambda self: SetupPatch(service_area="Oakland", **{field: text}))
     caplog.clear()
-    reply = await answer(owner, model, interview_id, text, turn(service_area="Oakland"), question="hours_and_area")
+    reply = await answer(owner, model, interview_id, text, turn(service_area="Oakland"), question=topic)
     assert reply.status_code == 200, reply.text
     record = await stored(engine, interview_id)
     answers = SetupAnswers.model_validate(record["answers"])
@@ -1114,9 +1258,34 @@ async def test_policy_text_in_a_patch_on_hours_and_area_stays_suggested(
     assert getattr(answers, field) == (website if held else None)
     assert (field in answers.suggested_fields) is held
     assert field not in said.get("owner_fields", [])
-    assert f"hours_and_area carried {field}; it was dropped" in caplog.text
+    assert f"{topic} carried {field}; it was dropped" in caplog.text
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert SETUP_POLICY_CLAIMS[field] not in {claim.key for claim in parts.charter}
+
+
+@pytest.mark.parametrize("said,owned", [("We cover Oakland and Berkeley.", True), ("Weekdays 9am to 5pm.", False)])
+async def test_a_held_service_area_the_owner_repeats_on_its_own_question_is_theirs(proposals, model, engine, said, owned):
+    from desk.api.prompts import SETUP_POLICY_CLAIMS
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    area = "Oakland and Berkeley"
+    reply = await answer(owner, model, interview_id, "We fix plumbing.", turn(summary="We fix plumbing.", service_area=area))
+    assert reply.status_code == 200, reply.text
+    assert "service_area" in (await stored(engine, interview_id))["answers"]["suggested_fields"]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, said, turn(service_area=area), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.service_area == area
+    assert ("service_area" in [entry for entry in record["transcript"] if entry["role"] == "owner"][-1].get(
+        "owner_fields", [])) is owned
+    assert ("service_area" in answers.suggested_fields) is not owned
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert (SETUP_POLICY_CLAIMS["service_area"] in {claim.key for claim in parts.charter}) is owned
 
 
 @pytest.mark.parametrize("described,text,owned", [

@@ -1942,7 +1942,9 @@ def test_a_scoped_field_is_recorded_only_on_the_questions_that_ask_for_it(name, 
         return
     window = HoursAnswer(days=["mon"], start="08:00", end="17:00")
     stored, changed = ([], [window]) if name == "hours" else ("Stored before.", "Changed.")
-    answers = SetupAnswers(summary="Tax advice.", **{name: stored})
+    # Stored as a held suggestion, which any turn that has the field may replace: an owner's own value is replaced
+    # only on its home question (setup.FACT_HOMES).
+    answers = SetupAnswers(summary="Tax advice.", **{name: stored}, suggested_fields=[name])
     for key in QUESTION_KEYS:
         merged = desk_setup.merged(answers, SetupPatch(**{name: changed}), key)
         if key in turns:

@@ -1699,31 +1699,24 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                for window in cast(list[HoursAnswer], value))
 
 
-# Each free-text fact a turn can set that `FIELD_TURNS` doesn't scope, with the one question that asks for it. A fact
-# is on topic there (`_on_topic`): a turn's value is the owner's, and on any other question it is a suggestion, held
-# from the Desk until the owner confirms it. Names are handled on their own (`merged`, `_rename`).
-FACT_TOPICS: dict[str, QuestionKey] = {"summary": "what_you_do", "service_area": "hours_and_area"}
-# Each structured fact, a value code checks against the owner's words (`owner_supports`), with its home question: on
-# topic only there, whichever other turns have its field. On any other question it follows the off-topic rules: backed
-# only by a stated value in that answer or a removal, never replacing or refilling the owner's, else held. Those turns
-# read the website and memory, where a bare count could otherwise back hours.
+# Each fact a turn can set, with its home question, the one that asks the owner for it: there a turn's value is the
+# owner's (`_on_topic`), and the quote question's for a fact it records (`LIMIT_TURN_FACTS`). Other turns may have the
+# field too (`FIELD_TURNS`) and read the website and memory, so there it follows the off-topic rules: free text is
+# held until the owner confirms it, and a structured value counts only when that answer states it or only removes
+# some of the owner's own (`_backed_off_topic`). Neither replaces nor refills the owner's own value. Names are handled
+# on their own (`merged`, `_rename`).
 FACT_HOMES: dict[str, QuestionKey] = {
-    "hours": "hours_and_area", "price_items": "quote_limit", "public_contact": "contact_and_after_hours",
+    "summary": "what_you_do", "pricing": "what_you_do", "intake": "what_you_do",
+    "service_area": "hours_and_area", "hours": "hours_and_area",
+    "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
+    "urgent": "contact_and_after_hours", "price_items": "quote_limit",
 }
 
 
 def _on_topic(name: str, key: QuestionKey) -> bool:
-    """Whether fact `name` is on topic on the turn answering `key`: a structured fact only on its home question
-    (`FACT_HOMES`), a free-text one on every question that asks for it, the ones `FIELD_TURNS` lists for it (read at
-    each call) or else its one question in `FACT_TOPICS`, and either on the quote question when that question
-    records it (`LIMIT_TURN_FACTS`)."""
-    topics = (FACT_HOMES[name],) if name in FACT_HOMES else FIELD_TURNS.get(name, (FACT_TOPICS.get(name),))
-    return key in topics or LIMIT_TURN_FACTS.get(name) == key
-
-
-def _is_fact(name: str) -> bool:
-    """Whether code tracks who gave `name`: a fact some question asks for. Names, limits and a website named aren't."""
-    return name in SetupPatch.model_fields and any(_on_topic(name, key) for key in QUESTION_KEYS)
+    """Whether fact `name` is on topic on the turn answering `key`: on its home question (`FACT_HOMES`), and on the
+    quote question for a fact that question records (`LIMIT_TURN_FACTS`)."""
+    return FACT_HOMES.get(name) == key or LIMIT_TURN_FACTS.get(name) == key
 
 
 def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
@@ -1750,12 +1743,19 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: Se
     """The facts this turn gave off their topic (`_on_topic`) that the owner's own words this turn (`said`) back: a
     list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports`
     finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained
-    suggested item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
+    suggested item does; likewise only hours windows the owner's stored hours lack need it. Such a turn reads the
+    website and memory, so prices and times need explicit syntax. Free text is never backed off its topic."""
     backed = set()
     for name in _fact_patch_fields(patch, key):
-        if not _is_fact(name) or _on_topic(name, key):
+        if name not in FACT_HOMES or _on_topic(name, key):
             continue
         value = getattr(patch, name)
+        if name == "hours" and value and before is not None and name not in before.suggested_fields:
+            # Only windows the owner's stored hours lack need stating, as only new or changed prices do.
+            stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
+            added = [answer for answer in value if any((day, window.start, window.end) not in stored
+                                                       for window in [answer.window()] for day in window.days)]
+            value = added or value
         if name == "price_items" and value and before is not None:
             if name in before.suggested_fields:
                 # A held list stays held until every retained item is backed, not just this turn's correction.
@@ -1776,17 +1776,20 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: Se
 def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswers,
                         after: SetupAnswers, owner_text: str, *, backed: Collection[str] = frozenset()) -> list[str]:
     """Keep explicit clears, topic-matched prose, owner-supported structured facts and the off-topic facts this
-    turn's own words back (`backed`) as owner answers."""
+    turn's own words back (`backed`) as owner answers. Prose held before and re-emitted unchanged stays held unless
+    the owner's own words contain it."""
     fields = []
+    folded = " ".join(owner_text.split()).casefold()
     for name in _fact_patch_fields(patch, key):
         value = getattr(patch, name)
-        if not _is_fact(name) or name in backed or (value == [] and getattr(after, name) == []):
+        if name not in FACT_HOMES or name in backed or (value == [] and getattr(after, name) == []):
             fields.append(name)
             continue
         if not _on_topic(name, key):
             continue
         if (name not in {"public_contact", "price_items", "hours"}
-                and name in before.suggested_fields and getattr(before, name) == getattr(after, name)):
+                and name in before.suggested_fields and getattr(before, name) == getattr(after, name)
+                and " ".join(str(value).split()).casefold() not in folded):
             continue
         # A partial quote patch cannot take ownership of held items it never named.
         if name == "price_items" and name in before.suggested_fields:
@@ -1834,7 +1837,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
             value = reduce_name(value) or None
         elif name == "business_name":
             value = " ".join(value.split()) or None
-        if (_is_fact(name) and not _on_topic(name, key) and name not in backed
+        if (name in FACT_HOMES and not _on_topic(name, key) and name not in backed
                 and (name in owner_fields or (getattr(answers, name) and name not in answers.suggested_fields))):
             if value != getattr(answers, name):
                 logger.warning("setup dropped off-topic field %s", name)
@@ -2219,7 +2222,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
         said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
         for name in _fact_patch_fields(patch, key):
-            if not _is_fact(name):
+            if name not in FACT_HOMES:
                 continue
             if name in said.owner_fields:
                 updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
