@@ -4,7 +4,7 @@
  * rules read only, and the Desk's public link with its QR card and ready-made words.
  */
 import QRCode from 'qrcode';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
@@ -50,6 +50,7 @@ function held(): { until: Promise<void>; release: () => void } {
   const until = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   return { until, release };
 }
 

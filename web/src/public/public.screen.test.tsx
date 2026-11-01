@@ -1597,6 +1597,7 @@ describe('public chat page', () => {
     chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
     const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
     mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    onTestFinished(() => slowRead.release());
     const reads = requests('visitorSession').length;
     const texts = watchTexts();
     // The page's timers are fake from here, so the chat calls itself caught up only when the test
@@ -1674,6 +1675,7 @@ describe('public chat page', () => {
     // The read of the session the page sends to confirm her is slow too.
     const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
     mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    onTestFinished(() => slowRead.release());
     const texts = watchTexts();
     useTimers();
     await router.navigate(PAGE);
@@ -1714,6 +1716,7 @@ describe('public chat page', () => {
     let release = () => {};
     mockStore.inject({ route: 'visitorSession', status: 200, body: earlier });
     mockStore.inject({ route: 'visitorSession', status: 200, body: later, until: new Promise<void>((resolve) => (release = resolve)) });
+    onTestFinished(() => release());
     const replay = holdStreamEvents();
     const reads = requests('visitorSession').length;
     const texts = watchTexts();
@@ -2466,6 +2469,7 @@ describe('public chat page', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     let held = false;
     worker.use(
       http.get(`/api/public/desks/${RIVERA.slug}/session`, async () => {
@@ -3082,6 +3086,7 @@ async function staleOwnerReopen(drop: boolean): Promise<void> {
   const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
   let release = () => {};
   mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  onTestFinished(() => release());
   const native = window.EventSource;
   let source: EventSource | undefined;
   window.EventSource = class extends native {
@@ -3105,6 +3110,7 @@ async function staleOwnerReopen(drop: boolean): Promise<void> {
     source?.dispatchEvent(new Event('error'));
     await until(() => expect(screen.container.textContent).toContain('Reconnecting to the chat'));
     mockStore.inject({ route: 'visitorSession', status: 200, body: { ...older, state: chat.state }, until: new Promise<void>((resolve) => (releaseCurrent = resolve)) });
+    onTestFinished(() => releaseCurrent());
   } else {
     mockStore.emit(RIVERA.slug, { type: 'owner_left' });
     await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
@@ -3140,6 +3146,7 @@ async function newerVerificationBeforeReopen(fallback: boolean): Promise<void> {
   const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
   let release = () => {};
   mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  onTestFinished(() => release());
   const reads = requests('visitorSession').length;
   const texts = watchTexts();
   useTimers();

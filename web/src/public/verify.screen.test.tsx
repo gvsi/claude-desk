@@ -155,6 +155,7 @@ describe('verification', () => {
     const held = () => {
       let release = () => {};
       const until = new Promise<void>((resolve) => (release = resolve));
+      onTestFinished(() => release());
       return { until, release };
     };
 
