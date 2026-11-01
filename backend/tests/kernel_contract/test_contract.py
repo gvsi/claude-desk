@@ -473,6 +473,7 @@ async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, r
     assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
         held.decision_id, "approved", "Maria Rivera approved this")
     assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.owner_plain is None
     assert result.approved.ledger_seq < result.decision.ledger_seq
     assert result.decision.state == "executed" and result.execution.state == "succeeded"
 
@@ -568,7 +569,7 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
 
     result = await answer(owner, held.decision_id, "allow_once")
     assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
-    assert result.execution is None and result.card_diff is None
+    assert result.execution is None and result.card_diff is None and result.approved is None
     assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
     owner_line = "Your rules changed before this ran, so it wasn't done."
     assert result.decision.owner_plain == owner_line
