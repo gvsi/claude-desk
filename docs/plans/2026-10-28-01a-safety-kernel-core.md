@@ -863,6 +863,10 @@ The paid calibration covered 220 cases: Sonnet let 6 promise cases slip against 
 and blocked 4 honest replies against 12. Measured latency was p50 1.1 s, p95 2.8 s, maximum 5.2 s,
 at $0.0017 per check. Errors, refusals, timeouts and unparsable answers still block as `soft.unavailable`.
 The API gives `/check_reply` 10 s, with the 6 s default unchanged for other non-proving routes.
+Reconciled with the recoverable reply failures (master plan, "Reply check and visitor-visible
+text"): this one try replaced their earlier unchanged-input recheck. No verdict is
+`check_unavailable` / `soft.unavailable`, shown at once and ending a visiting agent's turn, and
+the reply ledger keeps its `{model, status, first_status, tries, ...}` summary with `tries` 1.
 Haiku's first wording missed 40 promise cases and its revised wording missed 36: a missed case
 is one expected `flag` with any `pass` among its samples; timeouts block and do not count as misses.
 The five arm outcomes and trimmed experiment ledger are committed under
