@@ -845,8 +845,9 @@ export class MockWorld {
   reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean; paused?: boolean } = {}): EvMessage {
     const paused = opts.paused ?? false;
     const blocked = paused || (opts.blocked ?? false);
+    const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
-    if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
+    if (this.replaying === 0 && handoff) this.openCardHandoff(session);
     const checked = this.appendLedger(this.deskOf(session), {
       kind: 'reply',
       origin: 'kernel',
@@ -860,9 +861,9 @@ export class MockWorld {
       generation: session.state.generation,
       author: 'claude',
       language,
-      handoff: blocked,
+      handoff,
       blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
-      visitor_plain: VISITOR_PLAIN[language][blocked ? 'reply_handed_off' : 'reply_checked'],
+      visitor_plain: VISITOR_PLAIN[language][handoff ? 'reply_handed_off' : 'reply_checked'],
       ledger_seq: checked.seq,
       signature: sign(messageId),
     };
