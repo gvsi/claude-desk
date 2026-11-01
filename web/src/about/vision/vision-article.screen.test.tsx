@@ -3,8 +3,9 @@
  * this prototype with four phone screens drawn inline. Expected words are written out here, never read from the
  * page's code.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 
+import { FONT_SHEET_URL, loadWebFonts } from '../../ds/test/fonts.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -406,6 +407,38 @@ describe('The Vision article', () => {
       // A paper card on the page, its corners 14 px.
       expect(getComputedStyle(card).backgroundColor, viewport).toBe('rgb(251, 250, 247)');
       expect(getComputedStyle(card).borderTopLeftRadius, viewport).toBe('14px');
+    }
+  });
+
+  it('the_phone_switch_keeps_the_three_pages_on_one_row', async () => {
+    // Under the phone bar, the set's three pages sit on one row at 390 and 375 px: "Vision" never drops to a line
+    // of its own and pushes the page down, and nothing runs past the window's width. The laptop switch keeps its
+    // 12 px either side of each name. Measured in the interface's web font, as the page ships, which the other tests
+    // here don't load; the sheet goes again after, so they keep measuring as before.
+    onTestFinished(() => {
+      const want = new URL(FONT_SHEET_URL).href;
+      for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
+    });
+    await loadWebFonts();
+    for (const size of [{ width: 390, height: 844 }, { width: 375, height: 667 }]) {
+      const where = `at ${size.width}`;
+      const { screen } = await renderRoute(PATH, { viewport: size });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: where }).toBeVisible();
+      const documents = screen.getByRole('navigation', { name: 'About this prototype' }).element() as HTMLElement;
+      const links = [...documents.querySelectorAll<HTMLElement>('a')];
+      expect(links.map((link) => flat(link)), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
+      const tops = links.map((link) => link.getBoundingClientRect().top);
+      expect(new Set(tops).size, `${where}: tops ${tops.join(', ')}`).toBe(1);
+      // One row: the switch is as tall as its space above and one 30 px link.
+      expect(documents.getBoundingClientRect().height - parseFloat(getComputedStyle(documents).paddingTop), where).toBe(30);
+      expect(Math.max(...links.map((link) => link.getBoundingClientRect().right)), where).toBeLessThanOrEqual(size.width - 16);
+      expectNoHorizontalScroll();
+    }
+    const { screen } = await renderRoute(PATH, { viewport: 'desktop' });
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    for (const link of screen.getByRole('navigation', { name: 'About this prototype' }).element().querySelectorAll('a')) {
+      const style = getComputedStyle(link);
+      expect([style.paddingLeft, style.paddingRight], flat(link)).toEqual(['12px', '12px']);
     }
   });
 
