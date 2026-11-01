@@ -40,7 +40,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   both phases share `HOMEWORK_BUDGET_S`. On no it skips every
   read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
-  opening's understanding call. A website the owner names later after no is kept as text.
+  opening's understanding call. A website the owner names later after no is kept as text. The owner's display
+  stream gets each read's start, then each read's label in the same order, then the opening's text; none of it is
+  state.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -66,8 +68,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
-fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
-connections. Any turn while busy returns that state without running or counting on the limits.
+fails in time, or 202 with the stored busy state. Consent doesn't wait: it answers 202 with the busy state once it is
+stored. Cancelling the request leaves the task working on its own connections. Any turn while busy returns that state without running or counting on the limits.
 The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
 seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
 `TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
@@ -135,9 +137,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
+from desk.api.owner_streaming import current as current_display, failure as display_failure
+from desk.api.turn_runs import TurnRuns
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
 from desk.api.link_notices import tell_cancelled_links
 from desk.api.metrics import record_model_call
@@ -797,13 +800,18 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
+    # An owner display shows the reply (or Rules' answer) of only the run's first call; its retry resets it.
+    display = current_display.get()
+    field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
+    shows = display is not None and field is not None and display.take()
     for attempt in (1, 2):
         bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
         if bound <= 0 or (attempt == 2 and bound < retry_min_s):
             return None
+        on_text = display.begin(field) if shows else None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
-                               timeout_s=bound)
+                               timeout_s=bound, on_text=on_text)
         started = monotonic()
         try:
             async with asyncio.timeout(bound):
@@ -969,19 +977,54 @@ def _web_search_entry(result: ExecResult | None, *, query: str) -> Entry:
 
 
 async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
-    """Decide all reads before executing together; both phases share one budget and keep display order."""
+    """Decide all reads before executing together; both phases share one budget and keep display order.
+
+    The owner's display, when one is open, gets a `reading` for each read once the reads start (memory, the website,
+    then each search given on this Desk, in saved order), then each read's `label` in that same order, as soon as it
+    and every read before it are in. A label is the text its saved entry holds; a failed search whose label the
+    transcript keeps only once repeats that text. None of it is state."""
+    display = current_display.get()
     desk_id = interview.desk_id
     reads: list[tuple[str, dict, Callable[[ExecResult | None], Entry], float | None]] = [
         ("native.read_memory", {"query": MEMORY_QUERY}, _memory_entry, None)]
+    shown_as: list[tuple[str, str | None]] = [("memory", None)]           # each read as the display names it
     site = website_url(interview.transcript[0].website)
     if site is not None:
         url, host = site
         reads.append(("native.fetch_website", {"url": url}, partial(_website_entry, url=url, host=host), None))
+        shown_as.append(("website", host))
+    queries = (interview.transcript[0].search_queries or [])[:3]
     reads.extend(("native.web_search", {"query": query}, partial(_web_search_entry, query=query),
                   WEB_SEARCH_EXECUTE_TIMEOUT_S)
-                 for query in (interview.transcript[0].search_queries or [])[:3])
+                 for query in queries)
+    shown_as.extend(("web_search", None) for _ in queries)
     tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
     not_given: set[int] = set()
+    shown: list[int] | None = None                     # the reads the display shows, once they have started
+    labelled = 0
+
+    def outcome(index: int) -> ExecResult | None:
+        return tasks[index].result() if index in tasks and not tasks[index].cancelled() else None
+
+    def show_reading() -> None:
+        nonlocal shown
+        if shown is not None:
+            return
+        shown = [index for index, (tool, _, _, _) in enumerate(reads)
+                 if not (tool == "native.web_search" and index in not_given)]
+        if display is not None:
+            for index in shown:
+                display.reading(*shown_as[index])
+
+    def show_labels() -> None:
+        nonlocal labelled
+        while display is not None and shown is not None and labelled < len(shown):
+            index = shown[labelled]
+            if index in tasks and not tasks[index].done():
+                return
+            display.label(shown_as[index][0], reads[index][2](outcome(index)).text)
+            labelled += 1
+
     try:
         async with asyncio.timeout(HOMEWORK_BUDGET_S):
             context = await owner.kernel.call("GET /context/{session_id}?desk_id=",
@@ -999,6 +1042,11 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             # Finish every decision first so a long search cannot block a later decision's short timeout.
             for index, tool, decision, timeout_s in allowed:
                 tasks[index] = asyncio.create_task(execute_setup_tool(owner, tool, decision, timeout_s=timeout_s))
+            show_reading()
+            show_labels()
+            for task in tasks.values():                # in saved order: each label once it and those before are in
+                await asyncio.wait({task})
+                show_labels()
             if tasks:
                 await asyncio.gather(*tasks.values())
     except TimeoutError:
@@ -1010,6 +1058,8 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
+    show_reading()                                     # reads cut short before they started still show, then fail
+    show_labels()
     entries = []
     search_failed = False
     for index, (tool, _, entry, _) in enumerate(reads):
@@ -1570,7 +1620,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                    runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                    check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
                    turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
-                   keep_staged: bool = True,
+                   keep_staged: bool = True, wait: bool = True,
                    after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
                    render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
     """Store staged entries, run a detached owner turn, and return its landed or busy state.
@@ -1578,12 +1628,14 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
-    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state (`wait=False`
+    answers the busy state as soon as it is stored).
     `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
     acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
     is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
-    rolling back the turn.
+    rolling back the turn. The owner's display gets `done` once a committed turn has also run `after`, closed its
+    connections and released the guard; an error is sent after the rollback.
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
@@ -1599,7 +1651,9 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     async def run() -> SetupState:
         nonlocal pending
         interview.turn_deadline = asyncio.get_running_loop().time() + TURN_RUN_TIMEOUT_S
-        run_id = secrets.token_hex(8)
+        display = current_display.get()
+        assert display is not None and display.run is not None
+        run_id = display.run
         busy = None
         committed = False
         try:
@@ -1648,12 +1702,18 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
                     logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
-            if isinstance(failed, TimeoutError):
-                raise ApiProblem(503, "model_unavailable") from None
+            answered = ApiProblem(503, "model_unavailable") if isinstance(failed, TimeoutError) else failed
+            display.finish("error", {"run": run_id, "error": display_failure(answered)["error"]})
+            if answered is not failed:
+                raise answered from None
             raise
         finally:
             guard.close()
             busy_stored.set()                 # a failed busy commit wakes the request to receive its error
+            if committed:
+                # Only now is the turn's work done and the interview free: a refetch reads the final state, and
+                # the next answer is taken.
+                display.finish("done", {"run": run_id})
 
     try:
         await admit()
@@ -1671,6 +1731,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
+    if not wait:
+        return pending
     done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
@@ -1680,7 +1742,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    """Run consent and its reads through the shared turn runner, answering the busy state once it is stored; no
+    reads run after no."""
     def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
@@ -1697,7 +1760,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn,
+                          check=check, stage=stage, turn=turn, wait=False,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
@@ -2175,6 +2238,27 @@ def _asks(text: str) -> bool:
     return _ENDS_A_QUESTION.search(text) is not None
 
 
+def _code_next(interview: Interview, answering: QuestionKey | None = None) -> QuestionKey | None:
+    """The topic code asks next by default (`_next_ask` without the model's proposal), taking `answering` as covered."""
+    return next((key for key in QUESTION_KEYS
+                 if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
+
+
+def _hold_unless_kept(interview: Interview, answering: QuestionKey | None = None) -> None:
+    """Show none of this turn's first reply on the owner's display when it could be hidden before it is saved: it
+    reads untrusted text, and the topic code asks next by default is a limit question (`_TurnReplies.before`)."""
+    display = current_display.get()
+    if display is not None and answering not in LIMIT_CHOICES and _code_next(interview, answering) in LIMIT_CHOICES:
+        display.hold()
+
+
+def _unshow(text: str) -> None:
+    """Take a reply that won't be saved as it is off the owner's display, if it is the one showing."""
+    display = current_display.get()
+    if display is not None:
+        display.withdraw(text)
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -2188,6 +2272,7 @@ class _TurnReplies:
         if question in LIMIT_CHOICES:
             for reply, reads_untrusted in self.entries:
                 if reads_untrusted:
+                    _unshow(reply.text)        # text already streamed clears at once (a reset), before anything else
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
 
@@ -2347,6 +2432,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     payload = card.job.model_dump(mode="json") if card.job else card.connector.model_dump(mode="json")
     decision = json.dumps({"proposal_id": proposal_id,
                            "decision": "waiting" if text is not None else card.state, **payload}, ensure_ascii=False)
+    _hold_unless_kept(interview)
     following = await _next_step(owner, engine, model, interview, decision, text=text)
     if text is not None and following is None:
         raise ApiProblem(503, "model_unavailable")
@@ -2375,7 +2461,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
         if following.decision == "none":
             return
         if not _decide_typed(interview, proposal_id, following.decision == "accept"):
-            interview.transcript.pop()
+            _unshow(interview.transcript.pop().text)
             interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
@@ -2419,6 +2505,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         key = question
         desk_id = interview.desk_id
         said, = staged
+        _hold_unless_kept(interview, key)
         turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                                 [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
@@ -2540,6 +2627,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
+        _unshow(closing.reply)                # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)

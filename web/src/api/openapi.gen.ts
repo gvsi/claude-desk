@@ -1216,6 +1216,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
+  "GET /api/owner/setup/{id}/events": { 200: null },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },

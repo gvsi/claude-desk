@@ -131,6 +131,8 @@ export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
  * forever. Each entry must be served and called by no route.
  */
 export const NEVER_CALLED = [
+  // Called by the owner chats' streaming web, which adds them.
+  'GET /api/owner/setup/{id}/events',
   // Served for other callers: the document link a visitor opens, and a visiting agent's turn.
   'GET /api/d/{token}',
   'POST /api/a2a/{slug}',
