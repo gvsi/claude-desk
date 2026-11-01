@@ -258,9 +258,11 @@ class AgentRunStarted(BaseModel):
 
 class AgentTasks(BaseModel):
     """Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
-    the business type setup stored for it (`other` without one). A key, never words: the page holds every word."""
+    the business type setup stored for it (`other` without one). Tasks are listed in page order; the payment tasks
+    need an enabled agent payment tool. Keys, never words: the page holds every word."""
 
     task_set: DemoTaskSet
+    tasks: list[DemoTask]
 
 
 class AgentTurn(BaseModel):

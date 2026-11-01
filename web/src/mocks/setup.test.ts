@@ -1283,6 +1283,28 @@ describe("the real situations, in the business's own words", () => {
 });
 
 describe("the built-in agent's task words on a Desk setup made", () => {
+  it('agent_tasks_follow_the_desks_enabled_payment_tools', async () => {
+    const all = ['book_visit', 'quote_and_deposit', 'push_the_limit'];
+    const chen = await startState();
+    const desk = mockStore.world.desk(chen.desk_id)!;
+    seedBusinessTools(desk);
+    const read = async (slug: string) => {
+      await mockStore.dispatch('openSession', { params: { slug } });
+      return mockStore.dispatch('agentTasks', { params: { slug } });
+    };
+    expect(await read(RIVERA.slug)).toEqual({ status: 200, body: { task_set: 'rivera', tasks: all } });
+    expect(desk.tools.filter((row) => row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate')
+      .map((row) => row.status)).toEqual(['needs_review', 'needs_review']);
+    expect(await read(chen.slug)).toEqual({ status: 200, body: { task_set: 'office', tasks: ['book_visit'] } });
+    for (const tool of ['native.payment_link', 'native.charge_mandate']) {
+      const row = desk.tools.find((row) => row.tool === tool)!;
+      row.status = 'enabled';
+      expect(await read(chen.slug)).toEqual({ status: 200, body: { task_set: 'office', tasks: all } });
+      row.status = 'disabled';
+      expect(await read(chen.slug)).toEqual({ status: 200, body: { task_set: 'office', tasks: ['book_visit'] } });
+    }
+  });
+
   it('each_starter_gets_its_business_type_and_the_seed_none', async () => {
     // As setup's start reads a type in the description: the salon is "other", the plumber a trade,
     // the rentals a landlord and the CPA firm an office, in either language. The seeded Desk, which

@@ -259,13 +259,13 @@ describe('agents page', () => {
   });
 
   it('a_desk_setup_made_offers_its_own_tasks', async () => {
-    // A dentist's Desk, which setup made as an office: its chips ask for a consult and say "up front",
+    // A dentist's Desk, which setup made as an office without enabled payment tools: only its consult,
     // in English and Spanish, never Turner's visit or service call deposit; the run's first request
     // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
     // starter is an office too, but the mock's setup runs it as its consultant interview, which this
     // helper doesn't answer; the mock's unit test types every starter.)
     const slug = await liveSetupDesk("I'm Dana Park. Park Dental is a family dentist in Fremont, and new patients start with a checkup.");
-    const office = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const office = ['Book the earliest consult'];
     const { screen } = await renderRoute(`/d/${slug}/agents`);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByRole('button', { name: office[0] })).toBeVisible();
@@ -273,6 +273,8 @@ describe('agents page', () => {
     expect(names().filter((name) => office.includes(name ?? ''))).toEqual(office);
     expect(names()).not.toContain('Book the earliest visit');
     expect(names()).not.toContain('Get a quote and pay the service call deposit');
+    expect(names()).not.toContain('Pay up front, within its limit');
+    expect(names()).not.toContain('Try to pay more than its limit');
     expect(requests('agentTasks')).toHaveLength(1);
     expect(calls().indexOf('openSession')).toBeLessThan(calls().indexOf('agentTasks'));
 
@@ -286,7 +288,31 @@ describe('agents page', () => {
     const es = await renderRoute(`/d/${slug}/agents`, { language: 'es-MX' });
     const enviar = es.screen.getByRole('region', { name: 'Enviar un agente' });
     await expect.element(enviar.getByRole('button', { name: 'Reservar la primera consulta libre' })).toBeVisible();
-    await expect.element(enviar.getByRole('button', { name: 'Pagar por adelantado, dentro de su límite' })).toBeVisible();
+    expect(enviar.getByRole('button').elements().map((el) => el.textContent)).not.toContain('Pagar por adelantado, dentro de su límite');
+  });
+
+  it('offers_the_listed_tasks_in_page_order_and_all_three_for_older_or_unreadable_reads', async () => {
+    const all = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const bodies = [
+      { task_set: 'office', tasks: ['book_visit'] },
+      { task_set: 'office', tasks: ['push_the_limit', 'book_visit', 'quote_and_deposit'] },
+      { task_set: 'office' },
+      { task_set: 'office', tasks: null },
+      { task_set: 'office', tasks: ['book_visit', 'unknown'] },
+      { task_set: 'office', tasks: 'book_visit' },
+      { task_set: 'office', tasks: [] },
+    ];
+    for (const [index, body] of bodies.entries()) {
+      mockStore.inject({ route: 'agentTasks', status: 200, body });
+      const { screen } = await renderRoute(PAGE);
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      await expect.element(panel.getByRole('button', { name: all[0] })).toBeVisible();
+      expect(panel.getByRole('button').elements().map((el) => el.textContent).filter((name) => all.includes(name ?? '')))
+        .toEqual(index === 0 ? all.slice(0, 1) : all);
+    }
+    const { screen } = await renderRoute(PAGE);
+    await expect.element(screen.getByRole('button', { name: TASKS[0] })).toBeVisible();
+    expect(chipsIn(screen)).toEqual(TASKS);
   });
 
   it('the_tasks_wait_in_shapes_and_a_failed_read_offers_plain_words', async () => {
@@ -303,6 +329,8 @@ describe('agents page', () => {
     // in plain words for any business, and the agent still goes out on the one picked.
     const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const failures = [
+      { route: 'agentTasks', status: 200, body: null },
+      { route: 'agentTasks', status: 200, body: { task_set: 'unknown', tasks: ['book_visit'] } },
       { route: 'agentTasks', status: 503 },
       { route: 'agentTasks', status: 'network' },
       { route: 'openSession', status: 429 },
