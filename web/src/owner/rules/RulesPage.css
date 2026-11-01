@@ -92,3 +92,34 @@
     margin-left: auto;
   }
 }
+
+/* The read-dependent parts keep the page's own gaps in every phase. */
+.cd-rules__region > .cd-skeleton-screen__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+.cd-rules-skeleton__control {
+  flex: none;
+  min-width: 0;
+}
+.cd-rules-skeleton__rule {
+  flex: 1;
+  min-width: 0;
+}
+.cd-rules__header .cd-preset-menu > .cd-rules-skeleton__control {
+  flex: 1;
+}
+@media (max-width: 639.98px) {
+  .cd-rules__region > .cd-skeleton-screen__body {
+    gap: var(--space-16);
+  }
+  .cd-rules__header .cd-preset-menu .cd-skeleton {
+    /* Skeleton measures this control's width inline; the phone preset must fill its row instead. */
+    width: 100% !important;
+  }
+}
+
+.cd-rules-skeleton__suffix {
+  display: inline-block;
+}

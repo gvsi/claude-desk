@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { LedgerPage } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
-import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusLabel } from '../../ds/index.ts';
+import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, SkeletonScreen, StatusLabel } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -30,6 +30,8 @@ import {
 import { attemptsQuery, ledgerQuery } from './queries.ts';
 import { RecordList } from './RecordList.tsx';
 
+import { SafetySkeleton } from './SafetySkeleton.tsx';
+
 import './Safety.css';
 
 const TITLE = 'Safety';
@@ -46,10 +48,9 @@ export function useLedger(deskId: string) {
   return useQuery({ ...ledgerQuery(deskId), refetchInterval: pollMs('safety') });
 }
 
-/** Whether the checkpoint signs with the development key; false until it says so. */
-function useDevKey(): boolean {
-  const health = useQuery({ queryKey: ['health'], queryFn: () => request('health') });
-  return health.data?.kernel?.dev_signing_key ?? false;
+/** The health read also shapes the check line's development-key paragraph. */
+function useHealth() {
+  return useQuery({ queryKey: ['health'], queryFn: () => request('health') });
 }
 
 /** The Desk's stopped attempts, newest first as the API lists them, polled. */
@@ -103,8 +104,8 @@ function anyFailed(...failures: (ReadFailure | null)[]): ReadFailure | null {
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
   const safety = useAttempts(deskId);
-  const todayFailure = useReadFailure(today);
-  const attemptsFailure = useReadFailure(safety);
+  const todayFailure = useReadFailure(today, { pausedRoute: 'today' });
+  const attemptsFailure = useReadFailure(safety, { pausedRoute: 'safety' });
   const failure = anyFailed(todayFailure, attemptsFailure);
   const week = today.data?.this_week;
   const attempts = safety.data;
@@ -202,7 +203,7 @@ interface AttemptsViewProps {
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
-  const failure = useReadFailure(safety);
+  const failure = useReadFailure(safety, { pausedRoute: 'safety' });
   const [filter, setFilter] = useState(ALL);
   // The row the owner last picked. The attempt open on arrival, or after a filter, leaves the
   // focus where it is; a picked one takes it once its address has opened it.
@@ -285,8 +286,19 @@ export function SafetyPage() {
   const [params, setParams] = useSearchParams();
   const view: SafetyView = params.get('view') === 'entries' ? 'entries' : 'attempts';
   const ledger = useLedger(deskId);
-  const ledgerFailure = useReadFailure(ledger);
-  const devKey = useDevKey();
+  const ledgerFailure = useReadFailure(ledger, { pausedRoute: 'ledger' });
+  const health = useHealth();
+  const healthFailure = useReadFailure(health, { pausedRoute: 'health' });
+  const devKey = health.data?.kernel?.dev_signing_key ?? false;
+  // Keep every first-view read mounted in either view. Switching back reuses the attempts.
+  const attempts = useAttempts(deskId);
+  const today = useToday(deskId);
+  const settled = [ledger, health, attempts, today].every((read) => read.isFetched || read.isPaused);
+  // Once either view has shown the real region, keep its control mounted. This also retains
+  // paused-read errors across reconnect while reads with no data start for the first time.
+  const [hasShownRegion, setHasShownRegion] = useState(settled || view === 'entries');
+  if ((settled || view === 'entries') && !hasShownRegion) setHasShownRegion(true);
+  const ready = settled || hasShownRegion;
 
   const changeView = (next: SafetyView) => {
     setParams(
@@ -303,29 +315,32 @@ export function SafetyPage() {
   return (
     <div className="cd-safety" onClick={followInAppLinks(navigate)}>
       <PageHeader title={TITLE} actions={<HeldForYou deskId={deskId} />} />
-      <Headline deskId={deskId} slug={desk.slug} />
-      <div className="cd-safety__bar">
-        {/* A failed read of the record says so first, beside the check it last made, which the
-            record's entries below also come from. */}
-        <div className="cd-safety__chain">
-          <ReadFailed failure={ledgerFailure} />
-          {ledger.data ? (
-            <ChainStatus chainOk={ledger.data.chain_ok} firstBadSeq={ledger.data.first_bad_seq} entries={ledger.data.entries.length} devKey={devKey} />
-          ) : ledgerFailure === null ? (
-            <p className="cd-safety__loading cd-type-meta" role="status">
-              Checking the record
-            </p>
-          ) : null}
+      <SkeletonScreen loading={view === 'attempts' && !ready} status="Reading what was stopped" skeleton={<SafetySkeleton withHeader={false} />} className="cd-safety__region">
+        <Headline deskId={deskId} slug={desk.slug} />
+        <div className="cd-safety__bar">
+          {/* A failed read of the record says so first, beside the check it last made, which the
+              record's entries below also come from. */}
+          <div className="cd-safety__chain">
+            <ReadFailed failure={ledgerFailure} />
+            <ReadFailed failure={healthFailure} />
+            {ledger.data ? (
+              <ChainStatus chainOk={ledger.data.chain_ok} firstBadSeq={ledger.data.first_bad_seq} entries={ledger.data.entries.length} devKey={devKey} />
+            ) : ledgerFailure === null ? (
+              <p className="cd-safety__loading cd-type-meta" role="status">
+                Checking the record
+              </p>
+            ) : null}
+          </div>
+          <SegmentedControl label="What to show" options={VIEWS} value={view} onChange={changeView} />
         </div>
-        <SegmentedControl label="What to show" options={VIEWS} value={view} onChange={changeView} />
-      </div>
-      {view === 'entries' ? (
-        ledger.data ? (
-          <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} />
-        ) : null
-      ) : (
-        <AttemptsView deskId={deskId} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
-      )}
+        {view === 'entries' ? (
+          ledger.data ? (
+            <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} />
+          ) : null
+        ) : (
+          <AttemptsView deskId={deskId} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
+        )}
+      </SkeletonScreen>
     </div>
   );
 }

@@ -9,6 +9,10 @@
    list and an open conversation each take the page, the conversation with "All conversations"
    above it, and the footer follows whichever shows.
 
+   While they load (P12-01), the list under its title and the open conversation each hold their
+   place in a skeleton region, drawn from these same classes, so what lands sits where its shapes
+   were.
+
    Each scroll region is positioned, as the main area is, so anything absolutely placed in it, such
    as a receipt's screen-reader label, scrolls with it instead of stretching the main area. */
 
@@ -42,15 +46,59 @@
 
 .cd-conversations__title,
 .cd-conversations__caption,
-.cd-conversations__day,
-.cd-conversations__list > .cd-conversations__quiet {
+.cd-conversations__day {
   margin: 0;
   padding: 0 var(--space-8);
 }
 
-/* Under the title, as Today sets "Includes recorded history" under its heading. */
-.cd-conversations__caption {
+/* Everything the list's read draws, in one region under the title that fills the rest of the
+   column: the recorded-history caption 4 px under the title, as Today sets "Includes recorded
+   history" under its heading, then a failed read's notice and the days, 16 px apart, the first of
+   them 16 px under the title when there is no caption. The region starts at the caption's place,
+   so a skeleton's caption never reaches above it while its layer fades over the list. */
+.cd-conversations__region,
+.cd-conversations__region > .cd-skeleton-screen__body,
+.cd-conversations__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-conversations__region {
   margin-top: calc(var(--space-4) - var(--space-16));
+}
+
+.cd-conversations__under {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-conversations__under > :first-child:not(.cd-conversations__caption) {
+  margin-top: calc(var(--space-16) - var(--space-4));
+}
+
+/* The list's shapes fill the column, whatever its height, and what it can't show is cut off: they
+   add no height of their own, so the column never scrolls while it loads, and none of them shrinks
+   to fit. */
+.cd-conversations-skeleton__list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  contain: size;
+}
+
+.cd-conversations-skeleton__list > * {
+  flex-shrink: 0;
+}
+
+/* The caption's line box is the page's, around its caption-sized link. */
+.cd-conversations-skeleton__caption {
+  display: flex;
+  align-items: center;
+  height: 1lh;
 }
 
 .cd-conversations__group {
@@ -92,12 +140,26 @@
   max-width: var(--size-reading);
 }
 
-/* The open conversation fills the column's height, never less than its head, the transcript's least
-   height and its controls, and the column's width, so the transcript can scroll from the column's
-   edge; what it holds keeps to the reading column. */
-.cd-conversations__open > .cd-conversation {
-  flex: 1 0 auto;
+/* The open conversation's region fills the column's height, never less than its head, the
+   transcript's least height and its controls, and the column's width, so the transcript can scroll
+   from the column's edge; what it holds keeps to the reading column: the conversation's own parts,
+   or the page that says it isn't here or couldn't be read. */
+.cd-conversations__open > .cd-conversation-pane {
   max-width: none;
+}
+
+.cd-conversation-pane,
+.cd-conversation-pane > .cd-skeleton-screen__body,
+.cd-conversation-pane > .cd-skeleton-screen__body > .cd-skeleton-screen__layer,
+.cd-conversation-pane .cd-conversation {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-conversation-pane > .cd-skeleton-screen__body > :not(.cd-conversation, .cd-skeleton-screen__layer) {
+  max-width: var(--size-reading);
 }
 
 .cd-conversations__quiet {
@@ -124,7 +186,8 @@
     grid-column: 2;
   }
 
-  .cd-conversations__back {
+  .cd-conversations__back,
+  .cd-conversations__open-title {
     display: none;
   }
 }
@@ -207,13 +270,11 @@
 }
 
 .cd-conversation__name,
-.cd-conversation__latest,
-.cd-conversation__loading {
+.cd-conversation__latest {
   margin: 0;
 }
 
 .cd-conversation__latest,
-.cd-conversation__loading,
 .cd-conversation__quiet {
   color: var(--text-secondary);
 }
@@ -264,4 +325,44 @@
 
 .cd-conversation__name:focus:not(:focus-visible) {
   outline: none;
+}
+
+/* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
+   scrolls. The owner's controls keep their room with nothing drawn in it: Take over's button and
+   the whisper box at their heights. */
+.cd-conversation-skeleton .cd-conversation__scroll {
+  overflow: hidden;
+}
+
+/* The held request's rule, beside its icon, as wide as the row leaves it. */
+.cd-conversation-skeleton__rule {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A line's room in its type's line box, with nothing drawn in it. */
+.cd-conversation-skeleton__room-line {
+  height: 1lh;
+}
+
+.cd-conversation-skeleton__button {
+  height: var(--size-control-main);
+}
+
+.cd-conversation-skeleton__composer {
+  height: calc(var(--size-control) + 2 * var(--space-10));
+}
+
+/* The visitor's bubble at the right, no wider than a bubble can be (85 % of the row). */
+.cd-conversation-skeleton__bubble {
+  display: flex;
+  justify-content: flex-end;
+  width: 85%;
+}
+
+/* In a narrow card, Allow and Deny share the line. Their heights are measured in the real CSS. */
+@container cd-approval-answers (max-width: 437.98px) {
+  .cd-approval-card__row > .cd-conversation-skeleton__answer {
+    flex: 1 1 0;
+  }
 }
