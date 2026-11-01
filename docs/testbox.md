@@ -13,7 +13,7 @@ tools/testbox/run make evals-tier1
 A lane's first call takes about 4.5 minutes, to sync the worktree and build the lane's environment
 and kernel; later calls add seconds of overhead.
 
-The remote machine is available for tests and kernel builds; it is not the default runner yet. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
+Test runs and kernel builds go through this machine by default (AGENTS.md, "Tests"); run them locally only when it's unreachable. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
 QA also stay on the laptop. CI continues using its own runners.
 
 The always-on, on-demand test machine is a c8g.24xlarge (96 arm64 vCPUs, 192 GB RAM) in
