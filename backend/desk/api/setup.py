@@ -1412,6 +1412,38 @@ def _normalize_choices(choices: list[Choice]) -> list[Choice]:
     return normalized
 
 
+# Identical to the shared helper arriving with the setup cards change; the duplicate goes when that lands.
+def owner_supports(field: Literal["public_contact", "price_items", "hours"],
+                   value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str) -> bool:
+    """Whether the owner's typed text contains every structured value, independent of model or read text."""
+    if not value:
+        return True
+    folded = owner_text.casefold()
+    if field == "public_contact":
+        contact = cast(str, value)
+        digits = re.sub(r"\D", "", contact)
+        return contact.casefold() in folded or bool(
+            len(digits) >= 7 and re.fullmatch(r"[+\d\s().-]+", contact)
+            and digits in re.sub(r"\D", "", owner_text))
+    if field == "price_items":
+        amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "")) * 100)
+                   for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)",
+                                            owner_text)}
+        return all(item.unit_cents in amounts for item in cast(list[PriceAnswer], value))
+
+    def has_time(clock: str) -> bool:
+        hour, minute = map(int, clock.split(":"))
+        period = "am" if hour < 12 else "pm"
+        minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
+        clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}{minutes})"
+        matching_period = rf"{period[0]}\.?m\.?"
+        no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
+        return re.search(rf"(?<![\w:]){clock_forms}(?:\s*{matching_period}|{no_period})"
+                         rf"(?![\w:]|\.\d)", folded) is not None
+
+    return all(has_time(window.start) and has_time(window.end) for window in cast(list[HoursAnswer], value))
+
+
 def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> SuggestedFacts:
     """Search may inform the plan, but suggested facts need evidence from the owner's sources.
 
@@ -1419,34 +1451,12 @@ def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> Suggeste
     until it has its own provenance check, including when the model supplies a subclass with extra fields.
     """
     folded = text.casefold()
-    words = set(re.findall(r"[^\W\d_]+", folded))
-    amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "").strip()) * 100)
-               for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)", text)}
-
-    def has_time(clock: str) -> bool:
-        hour, minute = map(int, clock.split(":"))
-        period = "am" if hour < 12 else "pm"
-        # Whole-hour values also commonly appear without minutes or a meridiem, e.g. "7 to 9".
-        minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
-        clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}{minutes})"
-        matching_period = rf"{period[0]}\.?m\.?"
-        # An unqualified time must not match the prefix of a contradictory meridiem.
-        no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
-        return re.search(rf"(?<![\w:]){clock_forms}(?:\s*{matching_period}|{no_period})"
-                         rf"(?![\w:]|\.\d)", folded) is not None
-
-    area_words = [word for word in re.findall(r"[^\W\d_]+", suggested.service_area.casefold()) if len(word) >= 4]
-    contact = suggested.public_contact
-    digits = re.sub(r"\D", "", contact)
     kept = {
-        "service_area": suggested.service_area if (suggested.service_area.casefold() in folded or
-                         (area_words and all(word in words for word in area_words))) else "",
-        "hours": suggested.hours if all(has_time(window.start) and has_time(window.end)
-                                         for window in suggested.hours) else [],
-        "public_contact": contact if (contact.casefold() in folded or
-                          (len(digits) >= 7 and re.fullmatch(r"[+\d\s().-]+", contact) and
-                           digits in re.sub(r"\D", "", text))) else "",
-        "price_items": [item for item in suggested.price_items if item.unit_cents in amounts],
+        "service_area": suggested.service_area if suggested.service_area.casefold() in folded else "",
+        "hours": suggested.hours if owner_supports("hours", suggested.hours, text) else [],
+        "public_contact": suggested.public_contact if owner_supports(
+            "public_contact", suggested.public_contact, text) else "",
+        "price_items": [item for item in suggested.price_items if owner_supports("price_items", [item], text)],
         "after_hours": "",
     }
     filtered = SuggestedFacts.model_construct(**kept)
