@@ -523,6 +523,20 @@ async def test_another_owners_interview_is_not_found(lines_setup, app, browser, 
 
 
 @pytest.mark.parametrize("method", ["get", "put", "confirm"])
+async def test_another_owners_busy_interview_is_not_found(lines_setup, app, browser, kernel_http, engine, fake, method):
+    _, state, path = lines_setup
+    other = await new_owner(app, browser, kernel_http)
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    with setup._turn(state["interview_id"]):
+        reply = await request_lines(other.browser, path, method)
+    assert reply.status_code == 404, reply.text
+    assert reply.json() == {"error": "not_found"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+
+
+@pytest.mark.parametrize("method", ["get", "put", "confirm"])
 async def test_public_lines_share_the_interview_guard(lines_setup, engine, fake, method):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])

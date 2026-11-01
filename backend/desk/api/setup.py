@@ -2691,6 +2691,7 @@ async def _public_lines_interview(owner: OwnerCtx, engine: AsyncEngine, intervie
 
 
 async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)  # ownership before exposing the process's turn guard
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         return _public_lines(interview.answers)
@@ -2721,6 +2722,7 @@ async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: dateti
 
 async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
                           now: datetime) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
@@ -2786,6 +2788,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
 async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
                                 now: datetime) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
