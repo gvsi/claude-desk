@@ -343,6 +343,51 @@ def _named_reach(text: str, names: Iterable[str]) -> list[int]:
     return reach
 
 
+def _real_spelling(text: str) -> tuple[str, list[int]]:
+    """`text` read across case, width and accents, with each dash and apostrophe read as the
+    lexicons read them (`_plain`) and each run of whitespace as one space, but no lookalike letter
+    read as another (as `_allowed_public_hit` reads a word); and the index in `text` each character
+    came from."""
+    chars: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        if char.isspace():
+            if not chars or chars[-1] != " ":
+                chars.append(" ")
+                origin.append(index)
+            continue
+        for part in unicodedata.normalize("NFKD", "’" if char == "'" else _plain(char)):
+            if unicodedata.category(part) not in ("Mn", "Me"):
+                folded = part.casefold()
+                chars.append(folded)
+                origin += [index] * len(folded)
+    return "".join(chars), origin
+
+
+def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
+    """`_named_reach` for the names of a Desk's enabled business tools, each found in `text` as
+    `_real_spelling` reads both; None when no name is there. A name made only of free words is
+    never looked for: it would be every free word (the owner's decision of 2026-10-31)."""
+    keys = [key for key, _ in (_real_spelling(shown(name).strip()) for name in names)
+            if not all(word in FREE_WORDS for word in re.findall(r"\w+", key))]
+    if not keys:
+        return None
+    folded, origin = _real_spelling(text)
+    reach = [0] * (len(text) + 1)
+    for name in keys:
+        start = folded.find(name)
+        while start != -1:
+            if start == 0 or not folded[start - 1].isalnum():   # a repeat starts at a word's start
+                low, high = origin[start], origin[start + len(name) - 1] + 1
+                reach[low] = max(reach[low], high)
+            start = folded.find(name, start + 1)
+    if not any(reach):
+        return None
+    for i in range(1, len(reach)):
+        reach[i] = max(reach[i], reach[i - 1])
+    return reach
+
+
 def _span(text: str) -> str:
     return text[:SPAN_CHARS]
 
@@ -460,7 +505,8 @@ def canary_violation(document_ids: Sequence[str]) -> Violation:
 
 
 def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
-               booking_card: bool = False, callback_card: bool = False) -> list[Violation]:
+               booking_card: bool = False, callback_card: bool = False,
+               approved_free_names: Iterable[str] = ()) -> list[Violation]:
     """Every number, currency sign, lexicon word and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
     one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
@@ -473,7 +519,11 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     clause checks passed, which says the same: the owner's decision of 2026-10-30). Call claims
     instead pass with `callback_card`, a `callback_confirmed` card those checks passed. Neither
     card exempts the other category. Overlapping claims are reduced only within their own
-    category before either exemption. A word mixing
+    category before either exemption. A free word (`FREE_WORDS`, spelled as it is, across case,
+    width and accents, but no lookalike letters) passes as a promise word only inside a repeat of one
+    of `approved_free_names` (the titles and appointment types of the Desk's enabled business tools,
+    the owner's decision of 2026-10-31), read the same way, and when its expression needs no text
+    past that repeat ("free to all"); a name of free words alone backs none. A word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
     inside one of `names` (the Desk's own names) as it is written there; the canaries of
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
@@ -484,12 +534,14 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
     space and as "’". The canary comes first, then the rest in the order they appear."""
     return [violation for _, _, _, violation in _prose_hits(text, canaries, names, booking_card=booking_card,
-                                                            callback_card=callback_card)]
+                                                            callback_card=callback_card,
+                                                            approved_free_names=approved_free_names)]
 
 
 def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
                 booking_card: bool = False, callback_card: bool = False,
-                right_context: RightContext | None = None) -> list[tuple[int, int, str, Violation]]:
+                right_context: RightContext | None = None,
+                approved_free_names: Iterable[str] = ()) -> list[tuple[int, int, str, Violation]]:
     """The prose scan with full match offsets in `shown(text)`, before display spans are truncated."""
     text, found = _blank_canaries(shown(text), canaries)
     hits: list[tuple[int, int, str, Violation]] = [(-1, -1, "canary", canary_violation(found))] if found else []
@@ -516,6 +568,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                                                                 rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
+    free_reach = _free_name_reach(text, approved_free_names)
     hits += [hit for hit in _booking_claims(text, readings, right_context)
              if not (booking_card and hit[2].endswith(".booking")
                      or callback_card and hit[2].endswith(".callback"))]
@@ -530,6 +583,11 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                 if match.end() == match.start():
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
+                if (free_reach is not None and free_reach[start] >= end
+                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS)
+                        and ("(?=" not in pattern.pattern or _Lookahead(
+                            reading, origin, pattern, match.start(), match.end()).holds_at(free_reach[start]))):
+                    continue
                 # Expressions with the same consumed span can require different right
                 # context. Preserve every dependency before deduplicating display hits.
                 if right_context is not None and "(?=" in pattern.pattern:
