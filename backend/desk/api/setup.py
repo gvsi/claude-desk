@@ -187,6 +187,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_PLAN_NOT_CONNECTED,
+    SETUP_PLAN_NO_AMOUNT,
     SETUP_PLAN_TAG,
     SETUP_RETRY,
     SETUP_START_SYSTEM,
@@ -1587,11 +1588,6 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
     interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
                                      question_text(answer.next_topic, interview.business_type),
                                      question=answer.next_topic, choices=_normalize_choices(answer.choices)))
-
-
-# A payment job settled as declined because it never got an amount (`settle_plan`), not by the owner's own no: Claude
-# must not say they turned it down.
-SETUP_PLAN_NO_AMOUNT = "left out: no amount was entered on its card"
 
 
 def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:

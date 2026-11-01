@@ -697,6 +697,9 @@ haven't seen yet."""
 # The `<setup_plan>` status (`_setup_plan` in setup.py) of an accepted app whose Stripe connection didn't go through.
 # Defined here, ahead of the setup prompts and their tags below, because `_HOW_YOU_WORK` quotes it.
 SETUP_PLAN_NOT_CONNECTED = "accepted, not connected"
+# The `<setup_plan>` status of a payment job that "Use your suggestions" settled as declined because it had no amount
+# (`settle_plan`), not by the owner's own no, so Claude doesn't say they turned it down.
+SETUP_PLAN_NO_AMOUNT = "left out: no amount was entered on its card"
 
 _HOW_YOU_WORK = f"""\
 How you work
