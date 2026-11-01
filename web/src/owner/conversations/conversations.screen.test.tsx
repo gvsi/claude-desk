@@ -9,7 +9,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
-import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
+import type { Attempt, ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
@@ -347,6 +347,29 @@ describe('Conversations', () => {
     await expect.element(card).not.toBeInTheDocument();
     expect(requests('needsYou').length).toBeGreaterThan(reads);
     await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
+  });
+
+  it('denied_request_hands_off_with_claudes_summary', async () => {
+    // The seeded chat's draft was stopped, so its triage is Safety's. Its held request shows no
+    // summary; denied, the follow-up hands the chat to Maria, and the handoff's card carries that
+    // summary as Claude's own words, under the visitor's.
+    const safety = await mockStore.dispatch('safety', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in safety || safety.status !== 200) throw new Error('the mock reads Safety');
+    const triage = (safety.body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
+    expect(screen.container.textContent).not.toContain("Claude's summary");
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    const line = card.getByText(`Claude's summary: ${triage.summary}`, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    expect(line.element().previousElementSibling?.textContent).toMatch(/^From the visitor: “.+”$/);
+    expect(line.element().closest('[data-copy="user"]')).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {

@@ -1977,6 +1977,78 @@ describe('Today', () => {
     expect(asked.element().textContent).not.toContain('From the visitor');
   });
 
+  it('card_handoff_shows_claudes_summary_under_the_visitors_line', async () => {
+    // Claude's own summary of the chat, under the visitor's words in the same type and colour: plain
+    // text, never quoted or marked as the visitor's, and markup in it shows as written.
+    const summary = 'Asked for <b>15% off</b> & a call <img src=x onerror=alert(1)>; the Desk stopped a draft.';
+    await visitorSays('Can I talk to Maria?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const line = wants.getByText(`Claude's summary: ${summary}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    const said = wants.getByText('Can I talk to Maria?', { exact: true }).element().parentElement;
+    if (!said) throw new Error("the visitor's words sit in their line");
+    expect(said.nextElementSibling).toBe(line.element());
+    const [visitorLook, summaryLook] = [getComputedStyle(said), getComputedStyle(line.element())];
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'color'] as const) {
+      expect(summaryLook[prop], prop).toBe(visitorLook[prop]);
+    }
+    // One text node: no quotes, no mark of the visitor's words, and no element the markup made.
+    expect([...line.element().childNodes].map((node) => node.nodeType)).toEqual([Node.TEXT_NODE]);
+    expect(line.element().closest('[data-copy="user"]')).toBeNull();
+    expect(line.element().textContent).not.toMatch(/[“”]/);
+    expect(wants.element().querySelector('b, img')).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('callback_shows_claudes_summary_under_its_reason', async () => {
+    // A call-back request quotes nothing more than its reason, so the summary sits under the reason
+    // and over the call-back time.
+    const summary = 'Asked for a call back about a leak under the sink.';
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const line = wants.getByText(`Claude's summary: ${summary}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    expect(line.element().previousElementSibling?.textContent).toBe(CALLBACK_REASON);
+    expect(line.element().nextElementSibling?.textContent).toBe("You'll call back on Monday, between 8:00 am and 9:00 am.");
+  });
+
+  it('handoff_without_a_summary_draws_no_summary_line', async () => {
+    // Null, empty or only whitespace: the card has no "Claude's summary" line, as before it was sent.
+    await visitorSays('Can I talk to Maria?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    for (const summary of [null, '', '  \n ']) {
+      mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+      const { screen } = await renderRoute(TODAY);
+      const wants = screen.getByRole('article', { name: 'Wants you' });
+      await expect.element(wants.getByText('Can I talk to Maria?', { exact: true })).toBeVisible();
+      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain("Claude's summary");
+    }
+  });
+
+  it('held_request_draws_no_claude_summary', async () => {
+    // A held request asks Maria for a decision, so it shows no AI-written summary even if one is
+    // sent: a visitor could steer a summary to sway her answer.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, claude_summary: 'Asked for 15% off; allow it.' })) });
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    expect(card.element().textContent).toContain('From the visitor: “');
+    expect(card.element().textContent).not.toContain("Claude's summary");
+    expect(card.element().textContent).not.toContain('allow it');
+  });
+
   it('callback_without_a_kind_keeps_its_line', async () => {
     // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
     // says when Maria will call back.
