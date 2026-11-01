@@ -268,3 +268,12 @@ def test_not_ready_status_reaches_the_caller_as_retryable_75(capsys):
     output = capsys.readouterr()
     assert output.out == ''
     assert 'the test machine is bootstrapping, retry shortly' in output.err
+
+
+def test_authenticated_host_key_replaces_all_old_entries_for_the_instance(tmp_path):
+    from desk_tools.testbox_client import replace_host_key
+    known = tmp_path / 'known_hosts'
+    known.write_text('i-test ssh-ed25519 old\ni-other ssh-ed25519 keep\ni-test ssh-ed25519 old\n')
+    replace_host_key(known, 'i-test', ['ssh-ed25519', 'new'])
+    replace_host_key(known, 'i-test', ['ssh-ed25519', 'new'])
+    assert known.read_text().splitlines() == ['i-other ssh-ed25519 keep', 'i-test ssh-ed25519 new']

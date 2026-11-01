@@ -187,6 +187,14 @@ with (base / 'lock').open('w') as lock:
 """.replace('BASE', repr(base)).replace('STATE', repr(lane_state_script(base))).replace('COMMAND', repr(command)).replace('CANCEL', repr(cancel))
 
 
+def replace_host_key(known_hosts: Path, instance: str, host_key: list[str]):
+    if known_hosts.exists():
+        subprocess.run(["ssh-keygen", "-R", instance, "-f", str(known_hosts)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with known_hosts.open("a") as known:
+        known.write(f"{instance} {host_key[0]} {host_key[1]}\n")
+
+
 def read_remote_state(holder):
     line = holder.stdout.readline()
     if line:
@@ -314,8 +322,7 @@ def run(args, root, lane, cache):
             host_key = result["StandardOutputContent"].strip().split()
             if host_key[:1] != ["ssh-ed25519"] or len(host_key) < 2:
                 raise RuntimeError("SSM did not return the SSH host key")
-            with (cache / "known_hosts").open("a") as known:
-                known.write(f"{instance} {host_key[0]} {host_key[1]}\n")
+            replace_host_key(cache / "known_hosts", instance, host_key)
         # A separate session prevents one caller's process-group cleanup killing other lanes.
         if check.returncode:
             subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
