@@ -34,7 +34,7 @@ The workflow has nine required checks, in this order. `backend tests` and `tier 
 
 ## Pull request path scoping
 
-The additional `changed paths` check runs first for scoped suites. `secret scan` and `repo checks` start alongside it with no dependency and always run. The nine required check names stay unchanged. Pushes to `main` and manual runs run every suite; only `pull_request` events can skip suites.
+On pull requests, the additional `changed paths` check runs first for scoped suites. `secret scan` and `repo checks` start alongside it with no dependency and always run. The nine required check names stay unchanged. Pushes to `main` and manual runs skip `changes` before it takes a runner, avoiding its serial start-up time. Its outputs are then empty, so `!cancelled() && '' != 'false'` runs every scoped job and the required shard checks demand four successes. Only `pull_request` events can skip suites.
 
 The classifier ([`tools/desk_tools/changed_paths.py`](../tools/desk_tools/changed_paths.py)) checks out the PR's merge commit with `fetch-depth: 2`. Before reading `git diff --name-only HEAD^1 HEAD`, it verifies that HEAD has exactly two parents and its second parent matches the event's `PR_HEAD_SHA`; otherwise it runs every suite. The first parent is the base branch. Git rename detection is disabled for the diff so both the old and new paths count. It applies these rules:
 

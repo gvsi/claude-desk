@@ -148,10 +148,11 @@ def test_secret_scan_and_repo_checks_start_without_classification():
         assert "needs" not in job and "if" not in job
 
 
-def test_changed_paths_job_checks_out_the_merge_base_and_writes_both_outputs():
+def test_changed_paths_job_only_classifies_pull_requests_and_writes_both_outputs():
     job = load(WORKFLOW)["jobs"]["changes"]
     assert job["name"] == "changed paths"
-    assert "needs" not in job and "if" not in job
+    assert "needs" not in job
+    assert job["if"] == "github.event_name == 'pull_request'"
     checkout, classify = job["steps"]
     assert is_checkout(checkout)
     assert checkout["with"] == {"persist-credentials": False, "fetch-depth": 2}
