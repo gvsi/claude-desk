@@ -2337,6 +2337,17 @@ def test_scan_public_text(text, rules):
     # Digits before "days a week", and a range of digits before a distance unit
     "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
     "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # Years need an immediately preceding year marker.
+    "Serving the East Bay desde 1998.",
+    "In 1998.",
+    "From 1998.",
+    "Est. 1998.",
+    "Established 1998.",
+    "Founded 1998.",
+    "Desde 1998.",
+    "En 1998.",
+    "Since 1900.",
+    "Since 2099.",
     # ZIP codes, road numbers and literal round-the-clock availability.
     "Oakland and Berkeley, 24/7.",
     "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
@@ -2392,6 +2403,15 @@ def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
     ("Fuera de Oakland, cobramos la mitad.", ["lex.es.number"]),
     # Amounts with no currency word
+    ("Trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 2000.", ["digit"]),
+    ("Cargo de viaje: 2000.", ["digit"]),
+    ("Oakland 1998.", ["digit"]),
+    ("For 1998 years.", ["digit"]),
+    ("Since 1899.", ["digit"]),
+    ("Since 2100.", ["digit"]),
+    ("Begin 1998.", ["digit"]),
+    ("Since 1998, trip fee 2000.", ["digit"]),
     ("Within 25 miles. Trip fee 1500.", ["digit"]),
     ("Within 25 miles, 1000 off.", ["digit"]),
     ("Oakland: 1500 minimum.", ["digit"]),

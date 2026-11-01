@@ -549,6 +549,7 @@ _DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la
 SERVICE_AREA_AFTER_DIGITS = re.compile(
     rf"(?:(?:{_BLANK}*[-–—]{_BLANK}*|{_BLANK}+(?:to|a|hasta){_BLANK}+)[0-9]+(?:[.,][0-9]+)*)?"
     rf"{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK}", re.IGNORECASE)
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
 SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
 SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
 # Half or a hundred is a distance only right before its unit ("half a mile", "a hundred miles").
@@ -572,16 +573,19 @@ SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit (or a range to one) or "days a week", a year, a marked ZIP code or road number, or literal "24/7"; any cardinal number word ("three counties", "seven days a week"), half or a
-    hundred right before a distance unit, or "miles" as the unit; a weekday, weekend or part of the day.
-    Nothing else: no fraction, amount, time window or date, so "half off", "trip fee 1500" and "same-day"
-    stay refused as under any other key. A fee written in words ("trip fee: fifty") passes: a known limit."""
+    """Allow only the service area's numeric, geographic and day-part shapes, within its own text.
+
+    Digits need a distance unit (possibly after a range), "days a week", an explicit year marker,
+    a ZIP or road prefix, or literal "24/7". Cardinal words pass anywhere; half or a hundred needs
+    a distance unit. Weekdays, weekends and day parts pass, with singular mañana needing morning
+    context. A fee written in words ("trip fee: fifty") passes: a known limit. Other amounts,
+    fractions, dates and time windows retain their ordinary refusals."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit = text[start:end]
     if rule == "digit":
-        return (SERVICE_AREA_YEAR.fullmatch(hit) is not None
+        return ((SERVICE_AREA_YEAR.fullmatch(hit) is not None
+                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
                 or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
                 or (re.fullmatch(r"[0-9]{5}", hit) is not None
                     and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)

@@ -952,6 +952,7 @@ SERVICE_AREA_AFTER_DIGITS = (
     rf"(?:(?:{SERVICE_AREA_BLANK}*[-–—]{SERVICE_AREA_BLANK}*|{SERVICE_AREA_BLANK}+(?:to|a|hasta){SERVICE_AREA_BLANK}+)"
     rf"[0-9]+(?:[.,][0-9]+)*)?{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+"
     rf"a{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b")
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
 SERVICE_AREA_HALF_OR_HUNDRED = rf"half|(?:one{SERVICE_AREA_BLANK}+)?hundred|cien"
 SERVICE_AREA_BEFORE_UNIT = rf"{SERVICE_AREA_BLANK}+(?:an?{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_UNIT}"
 SERVICE_AREA_DAY_WORDS = (
@@ -976,7 +977,8 @@ def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, r
         return False
     hit, after = text[start:end], text[end:]
     if rule == "digit":
-        return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+        return ((re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
                 or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None
                 or (re.fullmatch(r"[0-9]{5}", hit) is not None
                     and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
