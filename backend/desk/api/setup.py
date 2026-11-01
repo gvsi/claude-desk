@@ -308,6 +308,8 @@ WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
+PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
+                "now or later in Rules.")
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -1484,7 +1486,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         fitting = _names_card(source, asked)
         if fitting and source.question.strip():
             interview.transcript.append(Entry(role="claude", text=source.question.strip()))
-        interview.transcript.append(Entry(role="claude", text="", card=asked.model_copy(deep=True)))
+        _show_card(interview, asked)
     else:
         # An added job becomes eligible only on a later planning call, never on the turn that minted it.
         if interview.shows_cards and interview.unshown:
@@ -1495,6 +1497,14 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True)
             return
         await close_setup(owner, engine, model, interview)
+
+
+def _show_card(interview: Interview, card: ProposalCard) -> None:
+    interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
+    payment = bool((card.job and card.job.job == "payment") or
+                   (card.connector and card.connector.app == "stripe"))
+    if payment and not any(entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript):
+        interview.transcript.append(Entry(role="claude", text=PAYMENT_LINE))
 
 
 def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
@@ -1554,7 +1564,7 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
             reply.planned = [replacement]
             if following.question.strip():
                 interview.transcript.append(Entry(role="claude", text=following.question.strip()))
-            interview.transcript.append(Entry(role="claude", text="", card=replacement.model_copy(deep=True)))
+            _show_card(interview, replacement)
             return
         if following.decision == "none" or not _decide_typed(interview, proposal_id,
                                                             following.decision == "accept"):

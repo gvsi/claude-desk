@@ -684,9 +684,9 @@ async def test_one_planned_connector_is_an_ask_with_no_topic_choices(app, browse
     assert response.status_code == 200, response.text
     state = (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json()
     assert state["question"] is None and state["pending_card"] is not None
-    assert state["messages"][-1]["card"]["connector"]["app"] == "stripe"
+    assert state["messages"][-2]["card"]["connector"]["app"] == "stripe"
     assert state["messages"][-1]["choices"] == []
-    assert state["messages"][-2]["text"] == (line.strip() or "Got it.")
+    assert state["messages"][-3]["text"] == (line.strip() or "Got it.")
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -3027,7 +3027,7 @@ async def test_a_revision_uses_code_capabilities_and_never_model_payment_amounts
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
         json={"card": proposal_id, "text": "Change the job."})
     assert response.status_code == 200, response.text
-    card = response.json()["messages"][-1]["card"]
+    card = next(message["card"] for message in reversed(response.json()["messages"]) if message["card"])
     assert card["job"]["can_do_today"] == CAPABILITIES[job]
     assert card["job"]["config"] == ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}
                                      if job == "payment" else None)
@@ -3304,7 +3304,7 @@ async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, 
                             turn(next={"kind": "connector", "connector": "stripe"}, question="Use Stripe?"))
     assert response.status_code == 200, response.text
     row = await stored(engine, interview_id)
-    card = row["transcript"][-1].get("card")
+    card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
         "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True}
     assert response.json()["pending_card"] == card["proposal_id"]
@@ -3612,3 +3612,71 @@ async def test_every_catalog_app_is_connectable(monkeypatch, app_key, where):
         await desk_setup._advance(None, None, None, interview, source, reply)
         card = interview.latest_ask.card
     assert card.connector.app == app_key and card.connector.connectable is True
+
+
+async def show_runtime_card(interview, *, stripe=False, revised=False, monkeypatch=None):
+    from desk.api.prompts import ConnectorProposal, JobDraft, ProposalCard, SetupCardAnswer, SetupNextStep
+    interview.transcript[0].cards = True
+    interview.business_tools_enabled = True
+    if stripe:
+        card = ProposalCard(proposal_id=desk_setup.new_proposal_id(), kind="connector", state="proposed",
+                            job=None, connector=ConnectorProposal(app="stripe", label="Stripe", why="Links", connectable=True))
+    else:
+        card = desk_setup._planned_job(interview, JobDraft(**{
+            **understanding()["jobs"][0], "job": "payment",
+            "config": {"block": "purpose_payment", "purpose": "Deposit"}}))
+    if revised:
+        old = desk_setup._planned_job(interview, JobDraft(**understanding()["jobs"][0]))
+        interview.transcript.append(desk_setup.Entry(role="claude", text="", card=old))
+        following = SetupCardAnswer(reply="Deposit it is.", decision="change", revised=[card.job.model_dump(exclude={"can_do_today"})],
+                                    next=next_ask("done"), question="Deposit?", choices=[],
+                                    skip=[], drop=[], add_jobs=[], plan="")
+
+        async def next_step(*args, **kwargs):
+            return following
+
+        monkeypatch.setattr(desk_setup, "_next_step", next_step)
+        await desk_setup.card_turn(None, None, None, interview, old.proposal_id, text="Take deposits instead.")
+        return interview.latest_ask.card
+    source = SetupNextStep(reply="", next={"kind": card.kind, card.kind: card.proposal_id},
+                           question="Set this up?", choices=[], skip=[], drop=[], add_jobs=[], plan="")
+    entry = desk_setup.Entry(role="claude", text="", planned=[card])
+    interview.transcript.append(entry)
+    await desk_setup._advance(None, None, None, interview, source, entry)
+    return card
+
+
+async def test_the_payment_line_follows_the_first_payment_card_once():
+    interview = runtime_interview()
+    await show_runtime_card(interview)
+    line = "I'll ask you before any payment. You can set an amount I handle on my own, now or later in Rules."
+    assert interview.transcript[-1].text == line
+    assert interview.transcript[-2].card.job.job == "payment"
+    # A reload preserves the once-only marker without a stored flag.
+    interview.transcript = [desk_setup.Entry.model_validate(entry.model_dump()) for entry in interview.transcript]
+    await show_runtime_card(interview, stripe=True)
+    await show_runtime_card(interview)
+    assert sum(entry.role == "claude" and entry.text == line for entry in interview.transcript) == 1
+
+
+async def test_the_payment_line_follows_a_stripe_card():
+    interview = runtime_interview()
+    # An owner's identical text cannot impersonate the Claude transcript marker.
+    interview.transcript.append(desk_setup.Entry(role="owner", text=desk_setup.PAYMENT_LINE))
+    await show_runtime_card(interview, stripe=True)
+    assert interview.transcript[-2].card.connector.app == "stripe"
+    assert interview.transcript[-1] == desk_setup.Entry(role="claude", text=desk_setup.PAYMENT_LINE)
+    await show_runtime_card(interview)
+    assert sum(entry.role == "claude" and entry.text == desk_setup.PAYMENT_LINE for entry in interview.transcript) == 1
+
+
+@pytest.mark.parametrize("kind", ["payment", "stripe", "revision"])
+async def test_the_payment_line_leaves_the_card_pending(monkeypatch, kind):
+    interview = runtime_interview()
+    card = await show_runtime_card(interview, stripe=kind == "stripe", revised=kind == "revision", monkeypatch=monkeypatch)
+    assert interview.pending_card == card.proposal_id and interview.question is None
+    line = interview.transcript[-1]
+    assert line.text == desk_setup.PAYMENT_LINE
+    assert line.role == "claude" and line.card is None and line.question is None and not line.choices
+    state = desk_setup.setup_state(interview, "test", cards=True)
+    assert state.pending_card == card.proposal_id and state.messages[-1].text == desk_setup.PAYMENT_LINE
