@@ -558,7 +558,7 @@ async def test_reviewed_typed_booking_books_its_slot_and_keeps_its_note_owner_on
     assert 'note' in next(profile for profile in seen.tools if profile.tool == 'native.book').input_schema['properties']
     assert note['fact_id'] not in {visible.fact_id for visible in seen.facts}
     for index, extra in enumerate(({'appointment_type': 'Other'}, {'type': 'Other'}, {'minutes': 15},
-                                    {'config': {'block': 'intake'}}, {'block': 'intake'})):
+                                    {'config': {'block': 'intake'}}, {'block': 'intake'}, {'note': 'x' * 201})):
         blocked = await decide(session, visitor.state.session_id, visitor.state.generation,
                                f'bad-consult-{index}', tool.tool, {**args, **extra})
         assert blocked.outcome == 'refuse' and blocked.action is None

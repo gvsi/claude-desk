@@ -8,7 +8,7 @@ from sqlalchemy import select
 from desk.contracts import RuleCard
 from desk.db.models import ActorSession, Booking, DemoInboxEntry, Desk, Document, Fact
 from desk.kernel_service import adapters
-from desk.kernel_service.adapters.base import ExecCtx, claudes_note
+from desk.kernel_service.adapters.base import QUOTED_CHARS, ExecCtx, claudes_note
 from desk.kernel_service.sessions import principal_for
 
 from .helpers import kernel_ctx, rows_of
@@ -24,7 +24,7 @@ async def test_note_is_owner_only_and_reconcile_returns_only_the_booking(app, cl
     copy, visitor = await configured(app, client, cards=[RuleCard(
         card_id='book-auto', applies_to=tool, mode='auto', who='anyone', reason='Book times.')])
     prefix = 'Use the “side”\nentrance. '
-    note = prefix + 'x' * (500 - len(prefix))
+    note = prefix + 'x' * (QUOTED_CHARS - len(prefix))
     decision = await decided(client, visitor, tool, {'slot_id': SLOT, 'note': note})
     assert decision.outcome == 'allow', decision
     result = await executed(client, visitor, decision)
@@ -50,7 +50,7 @@ async def test_note_is_owner_only_and_reconcile_returns_only_the_booking(app, cl
         assert 'Use the' not in verdict.model_dump_json()
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))
     assert alert.body.endswith('. ' + claudes_note((note,)))
-    assert note not in alert.body    # the existing owner alert helper quotes at most 200 characters
+    assert note not in alert.body    # the helper puts whitespace and curly quotes safely on one line
     assert result.inbox == []
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
@@ -105,10 +105,25 @@ async def test_note_is_untrusted_reviewer_data_and_never_cedar_context(app, clie
 
 
 @pytest.mark.parametrize('tool', ['native.book', TOOL])
-async def test_a_501_character_booking_note_is_refused_at_step_one(app, client, tool):
+async def test_a_201_character_booking_note_is_refused_at_step_one(app, client, tool):
     copy, visitor = await configured(app, client, cards=[RuleCard(
         card_id='book-auto', applies_to=tool, mode='auto', who='anyone', reason='Book times.')])
-    decision = await decided(client, visitor, tool, {'slot_id': SLOT, 'note': 'x' * 501})
+    decision = await decided(client, visitor, tool, {'slot_id': SLOT, 'note': 'x' * (QUOTED_CHARS + 1)})
     assert (decision.outcome, decision.action) == ('refuse', None)
     assert "The request wasn't in a form the tool takes" in decision.reason_plain
     assert not await rows_of(app, copy.copy_id, select(Booking))
+
+
+@pytest.mark.parametrize('tool', ['native.book', TOOL])
+@pytest.mark.parametrize('note', ['', ' \n\t '])
+async def test_a_blank_booking_note_is_absent_from_owner_storage_and_text(app, client, tool, note):
+    copy, visitor = await configured(app, client, cards=[RuleCard(
+        card_id='book-auto', applies_to=tool, mode='auto', who='anyone', reason='Book times.')])
+    decision = await decided(client, visitor, tool, {'slot_id': SLOT, 'note': note})
+    assert decision.outcome == 'allow'
+    result = await executed(client, visitor, decision)
+    assert result.state == 'succeeded'
+    assert not await rows_of(app, copy.copy_id, select(Fact).where(Fact.fact_id.like('booking_note:%')))
+    [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))
+    assert "Claude's note" not in alert.body
+    assert "Claude's note" not in (await read(client, visitor.headers, decision)).reason_plain

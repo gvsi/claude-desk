@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -24,7 +24,7 @@ from desk.db.models import Booking, CalendarSlot, Person
 from desk.db.models import Fact as FactRow
 from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import register
-from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
+from desk.kernel_service.adapters.base import (QUOTED_CHARS, AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
                                                NormalizeCtx, business_timezone, claudes_note, quoted)
 from desk.kernel_service.repo import KernelCtx, new_id
 
@@ -36,6 +36,13 @@ class BookArgs(BaseModel):
 
     slot_id: str = Field(pattern=SLOT_ID_PATTERN)
     note: str | None = Field(None, max_length=500)
+
+    @field_validator('note')
+    @classmethod
+    def short_owner_note(cls, note: str | None) -> str | None:
+        if note is not None and len(note) > QUOTED_CHARS:
+            raise ValueError('booking note is too long')
+        return note if note and note.strip() else None
 
 
 PROFILE = ToolProfile(

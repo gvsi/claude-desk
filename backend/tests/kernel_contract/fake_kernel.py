@@ -2612,8 +2612,13 @@ class FakeKernelState:
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
             from desk.kernel_service.labels import find_canaries
-            if args.get('note') and find_canaries(args['note'], {document.document_id: document.canary
+            try:
+                note = BookArgs.model_validate(args).note
+            except ValidationError:
+                raise AdapterCheckRefused('invalid_args') from None
+            if note and find_canaries(note, {document.document_id: document.canary
                     for each in self.desks.values() if each.copy_id == desk.copy_id for document in each.documents.values()}):
                 raise AdapterCheckRefused('note_canary')
             slot = desk.slots.get(args["slot_id"])
@@ -2837,7 +2842,7 @@ class FakeKernelState:
         if cards:
             reason += " " + cards[0]
         note = call.args.get("note") if action is not None else None
-        if isinstance(note, str) and note:
+        if isinstance(note, str) and note.strip():
             reason += f" Claude's note: “{note[:200]}”"
         return reason
 
@@ -3049,6 +3054,9 @@ class FakeKernelState:
                                   Claim(key="expires", kind="datetime", value=expires_at.isoformat())]))
             view = {"fact_id": facts[0].fact_id, "quote_id": quote_id, "items": items, "status": "available"}
         elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
+
+            note = BookArgs.model_validate(args).note
             slot = desk.slots[action.resource.id]
             if slot.slot_id in desk.booked:
                 return [], None, []
@@ -3066,10 +3074,10 @@ class FakeKernelState:
                 config = profile.business.config
                 facts[0].claims.extend([Claim(key='appointment_type', kind='text', value=config.appointment_type),
                                         Claim(key='appointment_minutes', kind='text', value=str(config.minutes))])
-            if args.get('note'):
+            if note:
                 self._put_fact(desk, Fact(fact_id=f'booking_note:{booking_id}', kind='knowledge', status='committed',
                     source='kernel', label=Label(readers=['owner']), claims=[
-                        Claim(key='booking', kind='ref', value=booking_id), Claim(key='note', kind='text', value=args['note'])]))
+                        Claim(key='booking', kind='ref', value=booking_id), Claim(key='note', kind='text', value=note)]))
             view = {"fact_id": facts[0].fact_id, "booking_id": booking_id, "status": "confirmed"}
         elif tool == "native.find_slots":
             open_slots = sorted((slot for slot in desk.slots.values()
