@@ -47,12 +47,20 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
+ * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+ * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ */
+export interface AgentTasks {
+  task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+}
+/**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
  * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
  *
  * An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
  * 2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
- * (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+ * (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+ * templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
  * replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
  * Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
  * blocks and statuses.
@@ -1240,6 +1248,7 @@ export const API_OPERATIONS = {
   "POST /api/public/desks/{slug}/verify/check": { 200: "VerifyChecked" },
   "GET /api/public/desks/{slug}/demo_inbox": { 200: "DemoInboxEntry[]" },
   "POST /api/public/desks/{slug}/agents/key": { 200: "DemoAgentIssued" },
+  "GET /api/public/desks/{slug}/agent_tasks": { 200: "AgentTasks" },
   "POST /api/public/desks/{slug}/send_agent": { 202: "AgentRunStarted" },
   "GET /api/public/desks/{slug}/send_agent/{run_id}": { 200: "DemoAgentRun" },
   "GET /api/d/{token}": { 200: null },

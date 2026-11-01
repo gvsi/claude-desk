@@ -14,6 +14,7 @@ import type {
   BusinessOut,
   Choice,
   ConnectorProposal,
+  DemoTaskSet,
   DeskSetup,
   DeskSummary,
   JobProposal,
@@ -47,6 +48,9 @@ import { storedPublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
+
+/** Setup's business types (the API's `BusinessType`), each also a set of the agent's task words. */
+type BusinessType = Exclude<DemoTaskSet, 'rivera'>;
 
 /** Plan 02's limits on the business's description and on an answer. */
 const DESCRIPTION_MAX = 1500;
@@ -107,6 +111,8 @@ interface Interview {
   business: string;
   ownerName: string | null;
   about: string | null;
+  /** The business type setup read in the description (`businessTypeOf`). */
+  businessType: BusinessType;
   timezone: string;
   /** Include "search fails" in the description to preview the API's single search failure label. */
   searchFails: boolean;
@@ -309,6 +315,22 @@ function aboutOf(description: string): string | null {
   const named = naming(sentences)?.at;
   const line = sentences.filter((sentence, at) => at !== named && !INTRODUCTION.test(words(sentence))).join(' ').slice(0, 200).trim();
   return line === '' ? null : line;
+}
+
+/**
+ * The business type setup's start would read in the description (the API's `SetupStart.business_type`,
+ * which a model chooses there): work at the customer's place, appointments at an office, renting
+ * homes, or anything else. The mock reads it from a few words, in English and Spanish.
+ */
+const OFFICE = /\b(?:CPA|accountants?|accounting|bookkeeping|tax(?:es)?|dentists?|dental|lawyers?|law firm|clinic|contables?|contabilidad|impuestos|dentista)\b/i;
+const LANDLORD = /\b(?:apartments?|rentals?|tenants?|landlord|units?|departamentos?|inquilinos?|alquiler(?:es)?)\b/i;
+const TRADE = /\b(?:plumb(?:er|ing)|electricians?|cleaning|cleaners?|leaks?|drains?|water heaters?|handyman|roofing|plomer[oa]s?|fugas?|drenajes?)\b/i;
+
+function businessTypeOf(description: string): BusinessType {
+  if (OFFICE.test(description)) return 'office';
+  if (LANDLORD.test(description)) return 'landlord';
+  if (TRADE.test(description)) return 'trade';
+  return 'other';
 }
 
 /** A slug for the business, unique in the copy. */
@@ -1304,6 +1326,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     business,
     ownerName,
     about: aboutOf(text),
+    businessType: businessTypeOf(text),
     timezone,
     searchFails: /search fails/i.test(text),
     capCents: 0,
@@ -1619,6 +1642,14 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
 /** The unreviewed About for the owner's draft, kept even when the public scan refuses it. */
 export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
   return interviewForDesk(world, desk.summary.desk_id)?.about ?? null;
+}
+
+/**
+ * Which words the built-in agent's tasks take on the Desk (`GET …/agent_tasks`): its setup business
+ * type for a Desk setup made, else null (the copy's own Desk, Rivera's, whose set is `rivera`).
+ */
+export function setupTaskSet(world: MockWorld, deskId: string): BusinessType | null {
+  return interviewForDesk(world, deskId)?.businessType ?? null;
 }
 
 /**
