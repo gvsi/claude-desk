@@ -112,6 +112,9 @@ const resultRows = (prefix: string, rows: number): Part[] => Array.from({ length
  */
 const ONE_LINE_PX = 20;
 
+/** The line heights the estimated words are set in: caption, meta, and body or control. */
+const LINE_HEIGHTS_PX = [17, 18, 20] as const;
+
 /**
  * Each step's load. The tools' words are the app's own, so their shapes take the lines those words
  * take in this browser's fonts, and every row is compared whole. The rules, situations and tricks
@@ -185,18 +188,23 @@ function onPage(selector: string): Element | undefined {
   return [...document.querySelectorAll(selector)].find((element) => !element.closest('.cd-skeleton-screen__layer'));
 }
 
-/** Where a part was drawn, in viewport px, and whether it was the page's element or its shape. */
+/** Where a part was drawn and how big, in viewport px, and whether it was the page's element or its shape. */
 interface Place {
   top: number;
   left: number;
+  width: number;
+  height: number;
   real: boolean;
 }
+
+/** The box's edges a place is told apart by: a part that moves or changes size takes a new place. */
+const PLACE_EDGES = ['top', 'left', 'width', 'height'] as const;
 
 /**
  * Every place each part is drawn at, read at every change and every frame from now until `stop`:
  * its shape while the shapes show, then the page's element from the moment it is drawn (while the
- * shapes fade over it) on. A place within 2 px of the one before is the same place. The shape's last
- * box is kept, to compare the page's element with.
+ * shapes fade over it) on. A place within 2 px of the one before, on every edge and in both
+ * dimensions, is the same place. The shape's last box is kept, to compare the page's element with.
  */
 function watchPlaces(parts: readonly Part[]) {
   const seen = parts.map(() => ({ shape: undefined as DOMRect | undefined, places: [] as Place[] }));
@@ -214,8 +222,8 @@ function watchPlaces(parts: readonly Part[]) {
       }
       const last = record.places.at(-1);
       const real = element !== undefined;
-      const moved = !last || last.real !== real || Math.abs(box.top - last.top) > SKELETON_TOLERANCE_PX || Math.abs(box.left - last.left) > SKELETON_TOLERANCE_PX;
-      if (moved) record.places.push({ top: box.top, left: box.left, real });
+      const changed = !last || last.real !== real || PLACE_EDGES.some((edge) => Math.abs(box[edge] - last[edge]) > SKELETON_TOLERANCE_PX);
+      if (changed) record.places.push({ top: box.top, left: box.left, width: box.width, height: box.height, real });
     });
   };
   const observer = new MutationObserver(look);
@@ -267,7 +275,7 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
   }
   for (const part of moved) {
     const places = records.get(part.name)!.places;
-    const label = `${part.name}: ${JSON.stringify(places.map(({ top, real }) => `${real ? 'page' : 'shape'} ${Math.round(top)}`))}`;
+    const label = `${part.name}: ${JSON.stringify(places.map(({ top, height, real }) => `${real ? 'page' : 'shape'} ${Math.round(top)}+${Math.round(height)}`))}`;
     expect(places.filter(({ real }) => !real), `${label}: one place while the shapes show`).toHaveLength(1);
     expect(places.filter(({ real }) => real), `${label}: lands in one place and stays there`).toHaveLength(1);
     expect(places.at(-1)?.real, `${label}: the page's element comes after its shape`).toBe(true);
@@ -278,10 +286,16 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
     const explained = above.reduce((sum, other) => sum + taller.get(other.name)!, 0);
     expect(Math.abs(landed.top - shape.top - explained), `${label}: moves ${landed.top - shape.top} px; the estimated parts above it differ by ${explained} px`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expect(Math.abs(landed.left - shape.left), `${label}: lands at its shape's left`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    // A row's width comes from its column and the button's from its known label, never from the data.
+    expect(Math.abs(landed.width - shape.width), `${label}: lands as wide as its shape`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     if (part.name === MAIN_BUTTON_PART.name) {
-      // Its label is known: it lands as wide and as tall as its shape.
-      expect(Math.abs(landed.width - shape.width), `${label}: width`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
-      expect(Math.abs(landed.height - shape.height), `${label}: height`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      expect(Math.abs(landed.height - shape.height), `${label}: lands as tall as its shape`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    } else {
+      // The row's own words come with the read: its height may differ from its shape's only by its
+      // own words wrapping, the difference that moves the parts under it: none, or one whole line.
+      const difference = landed.height - shape.height;
+      const wholeLine = [0, ...LINE_HEIGHTS_PX].some((line) => Math.abs(Math.abs(difference) - line) <= SKELETON_TOLERANCE_PX);
+      expect(wholeLine, `${label}: lands ${difference} px off its shape's height, which is not one whole line`).toBe(true);
     }
   }
 }
