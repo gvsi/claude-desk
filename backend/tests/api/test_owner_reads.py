@@ -70,6 +70,15 @@ def test_reply_reason_distinguishes_checker_outage_from_unclear_language():
     assert owner_reads.reply_reason([("uncertain_language", "language_uncertain")]) == (
         "A reply was stopped before it was shown, because it didn't read clearly as English or Spanish.")
 
+@pytest.mark.parametrize(("rule_id", "why"), [
+    ("markdown.link", "it linked to a site the business's contact details don't name"),
+    ("markdown.image", "it included an image"),
+])
+def test_reply_reason_names_a_markdown_cause(rule_id, why):
+    assert owner_reads.reply_reason([("promise_word", rule_id)]) == (
+        f"A reply was stopped before it was shown, because {why}.")
+
+
 OWNER = "x-owner-session"
 
 
