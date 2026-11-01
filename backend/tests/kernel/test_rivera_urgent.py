@@ -17,7 +17,7 @@ from desk.kernel_service import activation, business_tools, mcp_pins, reply_chec
 from desk.kernel_service.adapters import blocks
 from desk.kernel_service.repo import storable
 
-from .helpers import ledger_rows, rows_of
+from .helpers import kernel_ctx, ledger_rows, rows_of
 from .test_adapters import visitor_of
 from .test_context import context_of
 from .test_decide import decided
@@ -100,8 +100,14 @@ async def test_a_fresh_copy_has_the_emergency_callback_enabled_and_offered_to_a_
 async def test_a_burst_pipe_at_three_in_the_morning_alerts_maria_at_once(app, client, frozen_clock):
     frozen_clock.travel(datetime(2026, 10, 25, 3, 0, tzinfo=TZ))     # a Sunday, 03:00 in Oakland
     copy, visitor = await visitor_of(app, client)
+    # Maria hears of call-backs in her briefing, not at once: the urgent alert mustn't lean on her settings
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [settings] = await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))
+        settings.now = [kind for kind in settings.now if kind != "callback"]
+        settings.briefing = [*(kind for kind in settings.briefing if kind != "callback"), "callback"]
     [prefs] = await rows_of(app, copy.copy_id, select(NotificationPref))
-    assert "callback" not in prefs.now                       # the seed's settings, unchanged by the test
+    assert "callback" not in prefs.now and "callback" in prefs.briefing
     decision = await decided(client, visitor, TOOL, BURST)
     assert (decision.outcome, decision.card_ids) == ("allow", ["rv-urgent"]), decision.reason_plain
     result = await executed(client, visitor, decision)
