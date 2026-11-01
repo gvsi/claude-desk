@@ -60,6 +60,50 @@ async def said(conn, caller: Caller, words: str) -> None:
     await conn.commit()
 
 
+@pytest.mark.parametrize("already_verified", [False, True])
+async def test_invoice_request_finishes_with_its_document_card(api_conn, caller, fake, already_verified):
+    """Scripted orchestration: the verification wake refreshes tools and the pending invoice can finish."""
+    await said(api_conn, caller, "Please send my invoice. My email is dana@example.com.")
+    if not already_verified:
+        initial = ScriptedModel([
+            response(tool_use("native__start_verification", {"contact": "dana@example.com"})),
+            response(reply("Please use the form to continue.", {"template": "verify_prompt"})),
+        ])
+        assert await run_turn(api_conn, caller, initial) == "done"
+    fake.verify(caller.session_id, "dana")
+    document = next(document for document in fake.desks[caller.desk_id].documents.values()
+                    if document.record_owner_person_id == fake.sessions[caller.session_id].person_id)
+    if not already_verified:
+        await append_note_once(api_conn, caller.ids, NOTES["verified"], wake=True)
+        await api_conn.commit()
+
+    def show_document(request):
+        result = next(result["content"] for result in tool_results(request)
+                      if result["tool_use_id"] == "toolu_document")
+        assert result["outcome"] == "done"
+        return response(reply("Here is the document.", {"template": "document_link",
+                                                       "fact_id": result["fact_ids"][0]}))
+
+    model = ScriptedModel([
+        response(tool_use("native__release_document", {"document_id": document.document_id}, id="toolu_document")),
+        show_document,
+    ])
+    assert await run_turn(api_conn, caller, model) == "done"
+    first = json.dumps(model.requests[0].messages)
+    assert document.document_id in first
+    if not already_verified:
+        assert NOTES["verified"] in first
+        assert change("tool_addition", "native__release_document") in model.requests[0].messages[-1]["content"]
+    messages = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert not messages[-1].handoff
+    (card,) = [block for block in messages[-1].blocks if block.kind == "card"]
+    assert card.template == "document_link" and card.href
+    tools_run = [record.decision.action.tool for record in fake.decisions.values()
+                 if record.decision.session_id == caller.session_id and record.result is not None]
+    assert tools_run.count("native.release_document") == 1
+    assert tools_run.count("native.start_verification") == (0 if already_verified else 1)
+
+
 def reply(prose: str, *clauses: dict, id: str | None = None) -> dict:
     return tool_use("send_reply", {"prose": prose, "clauses": list(clauses)}, id=id)
 
@@ -162,7 +206,7 @@ async def test_the_desks_catalog_reaches_claude_in_the_desk_context(api_conn, ca
     assert (catalog["fact_id"], catalog["kind"], catalog["label"]["readers"]) == ("catalog", "charter", ["public"])
     assert [(claim["key"], claim["value"]) for claim in catalog["claims"]] == [
         ("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
-        ("leak", "Leak repair")]
+        ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"), ("short-notice", "Short-notice fee")]
     assert {claim["kind"] for claim in catalog["claims"]} == {"text"}            # no price, amount or unit
 
 
@@ -512,6 +556,44 @@ def quote_fact(request) -> str:
     return done["content"]["result"]["fact_id"]
 
 
+async def test_quote_finishes_with_a_payment_link_card_once(api_conn, caller, fake):
+    await said(api_conn, caller, "Please quote a drain clearing and give me the link to pay.")
+    result_ids = []
+
+    def create_payment_link(request):
+        (result,) = tool_results(request)
+        assert result["tool_use_id"] == "toolu_quote" and result["content"]["outcome"] == "done"
+        quote = result["content"]["result"]
+        assert quote["fact_id"] in result["content"]["fact_ids"]
+        return response(tool_use("native__payment_link", {"quote_id": quote["quote_id"]}, id="toolu_payment"))
+
+    def show_payment_link(request):
+        (result,) = tool_results(request)
+        assert result["tool_use_id"] == "toolu_payment" and result["content"]["outcome"] == "done"
+        (fact_id,) = result["content"]["fact_ids"]
+        result_ids.append(fact_id)
+        return response(reply("Here is the link to pay.", {"template": "payment_link", "fact_id": fact_id}))
+
+    model = ScriptedModel([
+        response(tool_use("native__quote", DRAIN, id="toolu_quote")),
+        create_payment_link,
+        show_payment_link,
+    ])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert len(model.requests) == 3
+    (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    (card,) = [block for block in message.blocks if block.kind == "card"]
+    assert not message.handoff and card.template == "payment_link" and card.href
+    assert [card.fact_id] == result_ids
+    decisions = [record.decision for record in fake.decisions.values()
+                 if record.decision.session_id == caller.session_id]
+    assert [decision.action.tool for decision in decisions] == ["native.quote", "native.payment_link"]
+    executions = [entry.event.ref_id for entry in fake.desks[caller.desk_id].ledger
+                  if entry.event.kind == "execute" and entry.event.session_id == caller.session_id]
+    assert executions == [decision.decision_id for decision in decisions]
+    assert len(fake.called("POST /execute")) == 2
+
+
 async def test_parallel_calls_with_mixed_outcomes_share_one_tool_result_message(api_conn, caller, visitor, fake):
     all_in = asyncio.Event()
     arrived = []
@@ -767,6 +849,47 @@ async def test_optional_callback_offer_records_work_only_when_accepted(api_conn,
     assert len(checks) == 3 and checks[-1].body["draft"]["clauses"] == []
     assert all(clause["template"] != "handoff" for check in checks for clause in check.body["draft"]["clauses"])
     assert len(fake.handoffs) == int(accepted)
+
+
+async def test_an_emergency_offer_makes_no_call_and_the_yes_makes_one(api_conn, caller, fake):
+    """A burst pipe with the visitor's name and number already given (#519): the turn whose scripted model gives a
+    safety step and offers a call back runs no tool, so nothing in the API calls back or alerts on its own, and the
+    model read the ask-first rule for urgent requests. The visitor's yes then gets one call back, with the details
+    they gave. Scripted choices prove orchestration, not that a live model chooses these words or tools."""
+    await said(api_conn, caller, "My pipes have burst.")
+    first = ScriptedModel([response(reply("That's awful, I'm sorry. If you can, turn off the main water valve. "
+                                          "Which town are you in?"))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    await said(api_conn, caller, "It's under the kitchen sink, water is spraying everywhere. I'm Dana Park, "
+                                 "1420 Grove St in Berkeley, 510-555-0177.")
+    offer = ScriptedModel([response(reply("If you can, close the valve under the sink. "
+                                          + prompts.STATUS_LINES["offer_callback"]["en"]))])
+    assert await run_turn(api_conn, caller, offer) == "done"
+    assert fake.called("/decide") == [] and fake.handoffs == {}
+    system = offer.requests[0].system[0]["text"]
+    assert ('Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a callback?" / es: '
+            '"¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests.') in system
+    assert "Only on their yes, ask for what's missing of their name, a phone number or email and the reason" in system
+
+    await said(api_conn, caller, "Yes please")
+    args = {"name": "Dana Park", "contact": "510-555-0177",
+            "reason": "Burst pipe under the kitchen sink, water spraying, at 1420 Grove St in Berkeley"}
+
+    def confirm(request):
+        (result,) = tool_results(request)
+        assert result["content"]["outcome"] == "done" and not result["is_error"]
+        return response(reply("Your callback request is in, and the card shows when to expect the call.", {
+            "template": "callback_confirmed", "fact_id": result["content"]["result"]["fact_id"]}))
+
+    choice = ScriptedModel([response(tool_use("native__request_callback", args)), confirm])
+    assert await run_turn(api_conn, caller, choice) == "done"
+    (decision,) = fake.called("/decide")
+    assert decision.body["call"]["tool"] == "native.request_callback" and decision.body["call"]["args"] == args
+    assert len(fake.called("/execute")) == len(fake.handoffs) == 1
+    (work,) = fake.handoffs.values()
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"][-1]
+    (card,) = [block for block in shown.blocks if block.template == "callback_confirmed"]
+    assert card.fact_id == "handoff:" + work["handoff_id"]
 
 
 @pytest.mark.parametrize("callback", [False, True], ids=["reply-without-handoff", "all-set-with-callback"])

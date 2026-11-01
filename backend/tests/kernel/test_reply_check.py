@@ -127,6 +127,21 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
 
+async def test_a_plumbing_emergency_gets_both_amounts_on_quote_cards(app, client):
+    """"Pipe repairs start from $100, and there's a short-notice fee of $50": Claude's words name the
+    starting price and the fee, and each amount is on a quote card built from the seed's price list."""
+    copy, visitor = await visitor_of(app, client)
+    repair = await own_quote(client, visitor, ("pipe", 1), call_id="call-pipe")
+    fee = await own_quote(client, visitor, ("short-notice", 1), call_id="call-fee")
+    verdict = await checked(client, visitor, "Pipe repairs have a starting price, and there's a short-notice fee.",
+                            [clause("quote", repair.fact_id), clause("quote", fee.fact_id)])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    _, *cards = verdict.blocks
+    assert [(card.template, card.fact_id, card.title, card.lines[0]) for card in cards] == [
+        ("quote", repair.fact_id, "$100.00", "Pipe repair (starting price)"),
+        ("quote", fee.fact_id, "$50.00", "Short-notice fee")]
+
+
 def kinds_of(verdict: ReplyVerdict) -> set[str]:
     return {violation.kind for violation in verdict.violations}
 
@@ -497,9 +512,9 @@ async def test_only_the_desks_own_names_may_mix_scripts(app, client):
 def test_a_long_draft_is_scanned_in_one_pass(prose, names):
     """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter,
     and each mixed-script word is looked up once among the Desk's names, not once per mention."""
-    started = time.perf_counter()
+    started = time.process_time()      # CPU time: the scan is pure computation, and wall time varies with load
     reply_check.scan_prose(prose, names=names)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
 
 
 def test_the_lookalike_table_is_what_its_script_makes():
@@ -1024,7 +1039,9 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
-    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose,
+                                                     cards=[f"Booking confirmed card: {card.text}"],
+                                                     next_steps=VISITOR_NEXT_STEPS)]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -1835,9 +1852,9 @@ def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
     """Thousands of booking claims, conditioned or not and each holding a shorter one, are read in
     one pass: a condition is looked for just before each claim, and claims inside others drop out
     in one sweep."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("si ya está confirmada " * 4_000 + "tu cita está confirmada " * 4_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert {(v.rule_id, v.span) for v in found} == {("lex.es.booking", "tu cita está confirmada")}
     assert len(found) == 4_000
 
@@ -1874,7 +1891,8 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
-    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA], next_steps=VISITOR_NEXT_STEPS)]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[f"Policy card: {SERVICE_AREA}"],
+                                                     next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -1937,7 +1955,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
+                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)
@@ -2080,10 +2098,10 @@ def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
     before the owner's decision of 2026-10-30 removed it, are read in one pass by the lexicons'
     readings and hold no violation, so a lexicon line with dots ("a.m.", "p.ej.") can't backtrack
     on them unnoticed."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
                                    + "a.b/" * 10_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert found == []
 
 

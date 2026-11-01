@@ -1019,7 +1019,7 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
         *(row["title"] for row in ro_read(ro_schema, copy.copy_id, "SELECT title FROM {ro}.price_items")),
         *(row["title"] for row in ro_read(ro_schema, copy.copy_id, "SELECT title FROM {ro}.documents")),
     ]
-    assert len(private) == 10 and not [value for value in private if value in shown]
+    assert len(private) == 12 and not [value for value in private if value in shown]
     assert await refused(http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug + "-gone"})) == (
         404, "not_found")
 
@@ -1182,7 +1182,7 @@ async def test_context_starts_with_the_desks_catalog(kernel, ro_read):
         "catalog", "charter", "available", ["public"])
     assert [(claim.key, claim.kind, claim.value) for claim in catalog.claims] == [
         (row["item_id"], "text", row["title"]) for row in items]
-    assert len(items) == 4 and [fact.fact_id for fact in facts].count("catalog") == 1
+    assert len(items) == 6 and [fact.fact_id for fact in facts].count("catalog") == 1
 
 
 @pytest.mark.kernel_plan("01a")
@@ -3474,7 +3474,8 @@ async def test_copy_starts_with_public_website_and_price_list_knowledge(kernel, 
     expected = [
         KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                       text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                           "water heater flush and leak repair. Each price is given in a quote from this list.",
+                           "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                           "Each price is given in a quote from this list.",
                       label=Label(readers=["public"])),
         KnowledgeItem(item_id="kn-website", source="website",
                       title="Your website, rivera-plumbing.example, read during setup",

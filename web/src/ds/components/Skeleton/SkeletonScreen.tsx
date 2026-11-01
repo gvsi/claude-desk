@@ -97,12 +97,19 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
     const shapes = layer.current;
     if (!box || !shapes) return;
     const placeAll = () => placeBands([...shapes.querySelectorAll<HTMLElement>('.cd-skeleton')]);
-    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(placeAll) : null;
+    let frame: number | undefined;
+    const refresh = () => {
+      placeAll();
+      // A responsive render can move shapes after resize callbacks without resizing this region.
+      if (frame === undefined) frame = requestAnimationFrame(() => { frame = undefined; placeAll(); });
+    };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(refresh) : null;
     observer?.observe(box);
-    window.addEventListener('resize', placeAll);
+    window.addEventListener('resize', refresh);
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', placeAll);
+      window.removeEventListener('resize', refresh);
+      if (frame !== undefined) cancelAnimationFrame(frame);
     };
   }, [hasLayer]);
 

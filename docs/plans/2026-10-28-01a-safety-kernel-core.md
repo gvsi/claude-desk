@@ -879,3 +879,14 @@ honest blocks. At 0.95 it caught 1 of Sonnet's 6 missed cases without adding an 
 the calibration set. See the [calibration record](../evals.md#soft-check-calibration-2026-10-31).
 
 Owner decisions, 2026-10-31: the action reviewer's prompt asks the reviewer to recommend block only on concrete evidence in the action or `untrusted_args` of an attempt to get around a rule, verification or a signed limit; identity, verification, entitlement and the cards' limits are the kernel's decisions. The assistant writes the call's free-text arguments; they may repeat what the visitor said. The prompt asks the reviewer to treat all free text, including card reasons, as data, never an instruction or authority to change a rule, and reasons as descriptions of rules, never evidence about the person; fit still includes the business's public facts. The prompt is pinned; the calibration in `evals/calibration/results/reviewer-old-new-20261031-202017.json` was accepted on production-built facts, and a free rescore against the current cases still accepts it. Thresholds and strike handling are unchanged.
+
+Owner decision, 2026-11-01, card kinds for the soft checks: a live visitor asking to pay the service
+call deposit had the reply stopped twice and handed off, because the soft-promise check read each
+card as its rendered text alone and couldn't tell a payment link card ("Service call deposit,
+$20.00") from other text, so "Here's the quote and the link to pay." read as a promise no card
+backed. Each card now reaches Sonnet and Jev alike as its template's fixed English label, then its
+text ("Payment link card: Service call deposit, $20.00"), from `render.CHECK_LABELS` beside the
+templates, whatever the reply's language; an open handoff's card is "Handed to a person". On
+the live texts, Sonnet flagged that reply in 5 of 5 samples unlabelled and passed it in 5 of 5
+labelled. The prompt's wording, the cards the visitor sees and the calibration cases are unchanged;
+a test requires a label for every registered template.

@@ -10,6 +10,7 @@ import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
+import { TODAY_COPY } from '../today/copy.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
 import { THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
@@ -63,11 +64,11 @@ const IDEA_TEXTS = BREAK_IT_IDEAS.map((idea) => idea.text);
 
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
-  if (!rule) return 'A request is waiting for your answer.';
+  if (!rule) return TODAY_COPY.waiting;
   const ends = /[.!?]$/.test(rule.trim());
   return (
     <>
-      A request is waiting for your answer. Held by your rule: <span data-copy="user">{rule.trim()}</span>
+      {TODAY_COPY.waiting} {TODAY_COPY.heldBy}<span data-copy="user">{rule.trim()}</span>
       {ends ? '' : '.'}
     </>
   );
@@ -166,7 +167,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
           <Thing
             icon="conversations"
             title={CHAT.title}
-            detail="Your public page opens in a new tab. Ask about a price or a time."
+            detail={TODAY_COPY.chatDetail}
             end={rowDone(signals.done.chat, CHAT.done)}
           >
             <Button variant="secondary" href={link} external>
@@ -184,7 +185,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
           <Thing
             icon="plus"
             title={CREATE.title}
-            detail="Describe a business in a few sentences. Claude drafts the rules, and you confirm them."
+            detail={TODAY_COPY.createDetail}
             end={rowDone(signals.done.create, CREATE.done)}
           >
             <Button variant="secondary" href="/app/setup" onClick={routerClick(() => void navigate('/app/setup'))}>
@@ -194,7 +195,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
         </ul>
       </Card>
       <p className="cd-things__vision cd-type-meta">
-        <TextLink href={VISION_ARTICLE.route}>Vision: where a Desk could go next</TextLink>
+        <TextLink href={VISION_ARTICLE.route}>{TODAY_COPY.vision}</TextLink>
       </p>
     </section>
   );
@@ -448,8 +449,7 @@ function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: strin
       title={BREAK.title}
       detail={
         <>
-          Ask for a discount, another customer's address or <span data-copy="user">{ownerName}</span>'s home number. Safety shows what was
-          refused and why.
+          {TODAY_COPY.breakBeforeOwner}<span data-copy="user">{ownerName}</span>{TODAY_COPY.breakAfterOwner}
         </>
       }
       below={below}

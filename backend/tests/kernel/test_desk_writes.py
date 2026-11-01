@@ -198,7 +198,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
                                     {"item_id": "drain", "title": "Drain clearing", "unit_cents": 19_000},
                                     {"item_id": "leak", "title": "Leak repair", "unit_cents": 25_000},
                                     {"item_id": "camera", "title": "Camera inspection", "unit_cents": 30_000}]},
-         ["camera", "drain", "heater"]),
+         ["camera", "drain", "heater", "pipe", "short-notice"]),
         ("calendar", {"calendar_slots": [slot_body(slot) for slot in slots[1:]] + [new_slot]},
          sorted([slots[0].slot_id, new_slot["slot_id"]])),
         ("people", {"upsert": [{"ref": "eve", "display_name": "Eve Santos", "contact": "+1 (510) 555-0123"}]},

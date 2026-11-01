@@ -2029,7 +2029,10 @@ const demoAgentIssued = {
 
 // ---------------------------------------------------------------------------------------------
 
+const bookingReasonPlain = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
+
 export const rivera = {
+  bookingReasonPlain,
   business,
   people,
   blocks,
