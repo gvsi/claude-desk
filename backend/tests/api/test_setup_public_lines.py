@@ -10,7 +10,7 @@ from sqlalchemy import text as sql
 
 from desk.api import setup
 from desk.api.deps import ApiProblem
-from desk.api.kernel_client import CredentialView, KernelHttp, KernelUnavailable
+from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
 from desk.api.prompts import SetupAnswers
 from desk.kernel_api import DeskCharterRequest
 from tests.api.test_setup_questions import app, begin, model, new_owner, stored
@@ -300,6 +300,46 @@ async def test_how_we_help_is_not_editable(lines_setup, engine, fake):
     assert reply.json() == {"error": "not_editable", "key": "policy:how_we_help"}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
+
+
+async def test_refusal_prefers_the_edited_line(lines_setup, engine, fake, monkeypatch, caplog):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    refuse_charter(monkeypatch, {"policy:about": ["digit"], "policy:after_hours": ["lex.en.promise"]})
+    reply = await owner.browser.put(path, json={"key": "policy:after_hours", "text": "Private after hours marker."})
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": "policy:after_hours", "reason": ["lex.en.promise"]}
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert caplog.messages.count("setup public charter refused (key=policy:after_hours)") == 1
+    assert "Private after hours marker" not in caplog.text
+
+
+@pytest.mark.parametrize("detail", [None, ["policy:pricing"], {"policy:pricing": "digit"},
+                                  {"policy:pricing": ["digit", 7]}],
+                         ids=["missing", "non-dict", "non-list", "non-string"])
+async def test_refusal_without_detail_is_plain_line_refused(lines_setup, engine, fake, monkeypatch, caplog, detail):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    original = CredentialView.call
+
+    async def refuse(self, route, body=None, **kwargs):
+        if route == "PUT /desks/{id}/charter":
+            failure = KernelFailed(422, "invalid")
+            # Exercise the optional-detail contract used by the incoming kernel client change (#353).
+            failure.detail = detail
+            raise failure
+        return await original(self, route, body, **kwargs)
+
+    monkeypatch.setattr(CredentialView, "call", refuse)
+    reply = await request_lines(owner.browser, path, "put")
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert caplog.messages.count("setup public charter refused (key=None)") == 1
 
 
 async def test_failed_save_restores_charter_from_current_stored_answers(lines_setup, engine, fake,

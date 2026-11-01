@@ -2649,13 +2649,27 @@ class PublicLineProblem(Exception):
         self.answer = SetupPublicLineError(error=error, key=key, reason=reason)
 
 
-def _line_refused(failure: KernelFailed) -> PublicLineProblem:
+def _public_refusal_detail(failure: KernelFailed) -> dict[str, list[str]]:
+    detail = failure.detail or {}
+    if not isinstance(detail, dict) or any(
+        not isinstance(key, str) or not isinstance(reasons, list)
+        or any(not isinstance(code, str) for code in reasons)
+        for key, reasons in detail.items()
+    ):
+        return {}
+    return detail
+
+
+def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> PublicLineProblem:
     # Only known claim keys and machine reason codes leave this boundary; never claim text.
-    if "charter" not in failure.detail:
-        for field in PUBLIC_LINE_FIELDS:
-            key = SETUP_POLICY_CLAIMS[field]
-            if key in failure.detail:
-                reasons = [code for code in failure.detail[key] if re.fullmatch(r"[a-z][a-z0-9_.]{0,79}", code)]
+    detail = _public_refusal_detail(failure)
+    if "charter" not in detail:
+        keys = [SETUP_POLICY_CLAIMS[field] for field in PUBLIC_LINE_FIELDS]
+        if edited_key in keys:
+            keys = [edited_key, *[key for key in keys if key != edited_key]]
+        for key in keys:
+            if key in detail:
+                reasons = [code for code in detail[key] if re.fullmatch(r"[a-z][a-z0-9_.]{0,79}", code)]
                 return PublicLineProblem("line_refused", key=key, reason=reasons)
     return PublicLineProblem("line_refused")
 
@@ -2682,7 +2696,8 @@ async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
         return _public_lines(interview.answers)
 
 
-async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: datetime) -> None:
+async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: datetime, *,
+                              edited_key: str | None = None) -> None:
     timezone = (await _business(owner, interview.desk_id))["timezone"]
     parts = seed_parts(interview.answers, timezone, business_type=interview.business_type,
                        today=now.astimezone(ZoneInfo(timezone)).date())
@@ -2695,9 +2710,9 @@ async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: dateti
         except KernelFailed as failure:
             if failure.status != 422:
                 raise
-            refused = _line_refused(failure)
+            refused = _line_refused(failure, edited_key)
             logger.warning("setup public charter refused (key=%s)", refused.answer.key)
-            if attempt == 0 and set(failure.detail or {}) == {"policy:how_we_help"}:
+            if attempt == 0 and set(_public_refusal_detail(failure)) == {"policy:how_we_help"}:
                 # This claim is code-owned; editable lines must always be corrected by the owner.
                 charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
                 continue
@@ -2731,7 +2746,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
         try:
             async with asyncio.timeout(PUBLIC_CHARTER_REPAIR_TIMEOUT_S):
                 stored = await _read(engine, owner, interview.interview_id)
-                await _put_public_charter(owner, stored, now)
+                await _put_public_charter(owner, stored, now, edited_key=key)
         except Exception as restore_failed:
             logger.error("setup public charter restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
@@ -2739,7 +2754,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
     async def settle() -> SetupPublicLines:
         try:
-            await _put_public_charter(owner, interview, now)
+            await _put_public_charter(owner, interview, now, edited_key=key)
         except KernelUnavailable:
             await repair()
             raise
