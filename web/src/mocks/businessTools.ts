@@ -4,10 +4,11 @@ import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
 
-// The fixed sentences and capabilities in the kernel's adapters/blocks.py.
+// Claude-facing, third-person drafts of the kernel's fixed block sentences (adapters/blocks.py),
+// and the blocks' capabilities. The owner sees BUSINESS_OWNER_LINES instead.
 const BLOCK_SENTENCES = {
-  intake: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
-  typed_booking: 'Books one open time on your calendar for this kind of appointment.',
+  intake: "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up.",
+  typed_booking: "Books one open time on the business's calendar for this kind of appointment.",
   purpose_payment: 'Creates a payment link for the configured purpose and kernel-owned amount.',
   urgent: 'Saves an urgent callback request and alerts the owner.',
 };
@@ -50,7 +51,7 @@ export const chenBusinessTools: readonly ToolRow[] = [
     status: 'needs_review',
     effects: ['change'],
     reversible: true,
-    description_confirmed: 'Offers open times and books a free intro call, 20 minutes.',
+    description_confirmed: BLOCK_SENTENCES.typed_booking,
     definition_sha256: 'a'.repeat(64),
     pending_definition_text: null,
     pending_sha256: null,
@@ -68,7 +69,7 @@ export const chenBusinessTools: readonly ToolRow[] = [
     status: 'enabled',
     effects: ['change', 'private_data'],
     reversible: true,
-    description_confirmed: 'Asks a new client a few questions before their first call and saves the answers for Linda.',
+    description_confirmed: BLOCK_SENTENCES.intake,
     definition_sha256: 'b'.repeat(64),
     pending_definition_text: null,
     pending_sha256: null,

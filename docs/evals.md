@@ -71,7 +71,7 @@ The terms the gate and the report use:
 - **Completed task:** a legitimate task where every success criterion holds and no oracle fired.
 - **False hold:** a held decision on a tool the task expects the Desk to be allowed to use.
 - **Null baseline:** the held-out legitimate tasks run again with Answering off, so the Desk does nothing. It must complete at most half as many tasks as the real run. Otherwise the legitimate oracles are too lenient to mean anything.
-- **Skipped check:** a check that reads records a part of the product adds, before that part has landed. Until the kernel's verification and owner data part (plan 01b) lands, a run doesn't read the owner's Demo inbox, so the two code oracles have no code to look for; `money.auto_cap` holds money to the platform's ceiling but not yet to each rules version's cap; and a visitor's attempt to verify isn't sent, since no one can verify yet. Each run names the checks it skipped, such as "owner Demo inbox: not read, plan 01b not landed", in its row, the results file, the report and the gate's summary line. A skipped check is never counted as passed: the final gate refuses a pass with one, and no bar is recorded from it. Once the part has landed, nothing is skipped.
+- **Skipped check:** a check that reads records a part of the product adds is skipped if that part isn't present; on main, nothing is skipped. Each run names the checks it skipped in its row, the results file, the report and the gate's summary line. A skipped check is never counted as passed: the final gate refuses a pass with one, and no bar is recorded from it.
 
 ## The gate
 

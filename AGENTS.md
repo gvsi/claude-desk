@@ -10,14 +10,14 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 
 - **Spec:** `docs/specs/` (design, decisions, threat model).
 - **Plans:** `docs/plans/`. The master plan owns the architecture, shared contracts, kernel API and schedule; part plans consume them.
-- **Designs:** the Claude Desk design canvas (link in the spec).
+- **Designs:** the Claude Desk design canvas (private, not linked from the repo) is the source of truth; its signed boards are reproduced as stories in [`web/src/ds/boards/`](web/src/ds/boards/), with the design system in [`web/src/ds/`](web/src/ds/) and its [README](web/src/ds/README.md).
 - **Constitution:** `.local/constitution.md` (local only, never committed) sets the quality bar every plan, build step and review is held to. Read it first when it exists, and never quote it in anything committed or published.
 
 ## Architecture (exact contracts in the master plan)
 
 - `kernel/`: Rust crate `desk_kernel` (PyO3 + maturin): Cedar decisions, SymCC proofs, ledger hashing and Ed25519 signing.
 - `backend/desk/kernel_service/`: the kernel process (127.0.0.1:8701, never exposed). Owns sessions, verification, policies, facts, approvals and the ledger, and holds every business credential. Gateway, tool profiles and pinning, reply checker, data labels, decisions.
-- `backend/desk/api/`: the API process (port 8700). Agent loop on the Anthropic SDK, visitor and owner APIs, SSE, approvals queue, setup interview, demo copies. Holds only the Anthropic API key and passes session IDs, never identities, to the kernel.
+- `backend/desk/api/`: the API process (port 8700). Agent loop on the Anthropic SDK, visitor and owner APIs, SSE, approvals queue, setup interview, demo copies. Holds no business credential: only the Anthropic API key, its own database login and the passcode hash. Passes session IDs, never identities, to the kernel.
 - `web/`: React + Vite + TypeScript (owner app, public page, setup).
 - `evals/`: hostile-visitor attack suite, legitimate-task suite, calibration, latency. `infra/`: AWS CDK.
 
@@ -45,7 +45,7 @@ If a task seems to require breaking one of these, stop and raise it with the pro
 - **Agents:** implementers are Opus 5.5 subagents. Reviews of plans and code use two reviewers at extra-high reasoning in parallel: Opus 5.5 and GPT-6.1 Sol (via `codex exec -m gpt-6.1-sol -c model_reasoning_effort="xhigh"`). For very complex or critical reviews and tasks (the kernel, the kernel/API trust boundary, money, verification, the evals gate, the master plan), Fable 5.1 at extra-high reasoning joins as a third review seat and is the implementer. That Fable rule is paused (owner, 2026-10-29): start no new Fable 5.1 reviews or implementers until the owner lifts the pause; Opus 5.5 fills those seats meanwhile, with Sol still on the panel. The process lives in `.agents/skills/`: `executing-implementation-plans` runs a plan, `orchestrating-review-subagents` runs the reviewer panel, `using-browsers` covers browser QA (a dedicated QA Chrome, never a personal profile). Reviewer and implementer seats are defined in `.claude/agents/`.
 - **Token saving mode:** the project owner turns it on by saying "token saving mode", with an end time or until lifted, and the orchestrating session tells every lane. While it's on:
   - Start only medium, high or urgent work, first anything that could delay the submission or the owner's full test of the whole experience. Park low-priority work with its state kept, and ask the owner when unsure.
-  - Every implementer runs on GPT-6.1 Sol at high reasoning (owner, 2026-10-31): `codex exec -C <worktree> -s danger-full-access -c model=gpt-6.1-sol -c model_reasoning_effort=high "<prompt>" < /dev/null`.
+  - Implementers run on GPT-6.1 Sol at high reasoning (owner, 2026-10-31): `codex exec -C <worktree> -s danger-full-access -c model=gpt-6.1-sol -c model_reasoning_effort=high "<prompt>" < /dev/null`. Exception (owner, 2026-10-31): critical or complex work, and urgent or behind-schedule work, uses Opus 5.5 implementers (the `plan-implementer` seat). Critical means the kernel/API trust boundary, money, verification, approvals, the ledger, the reply check or the evals gate's scoring.
   - Planning stays on Opus 5.5. PR reviews use the two-seat panel again, Opus 5.5 and Sol at extra-high reasoning, until the Sunday, November 1 18:00 freeze (owner, 2026-10-31). Before that change, reviews used the Sol seat alone, and the Opus seat joined only for a critical or very complex PR: the kernel/API trust boundary, money, verification, approvals, the ledger, the reply check, the evals gate's scoring, or a change the Sol seat flagged as hard to judge.
   - Easy or low-risk tasks use Sol at high for planning too.
   - Every Sol implementer's prompt says "You are the implementer: never launch `claude` or `codex`, and never start subagents." A Sol run that reads the plan-execution skill can otherwise cast itself as coordinator and launch an Opus implementer through `claude -p`.
