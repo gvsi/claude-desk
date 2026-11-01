@@ -46,7 +46,7 @@ from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, StringConstraints, model_validator
 
 from desk.contracts import Effect, Violation
-from evals.gate import WaivedViolation, skipped_summary, waiver_summary
+from evals.gate import WaivedViolation, not_evaluated, skipped_summary, waiver_summary
 from evals.results import gating_refusal, lowered_notice
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
@@ -1018,6 +1018,9 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     out = ["## Summary"]
     if g.passed:
         out.append("The gate passed.")
+    elif (why := not_evaluated(g)) is not None:   # no run was judged, so nothing passed or failed
+        rest = "".join(f"\n- {reason}" for reason in g.reasons[1:])
+        out.append(f"Not evaluated: {why}, so the gate didn't pass." + (f" Its other reasons:\n{rest}" if rest else ""))
     else:
         out.append("The gate failed:\n\n" + "\n".join(f"- {reason}" for reason in g.reasons or ["no reason given"]))
     out.append("Tier 2 reads AI denials strictly: a correct refusal that quotes the line it won't say is "

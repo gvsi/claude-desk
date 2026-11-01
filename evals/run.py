@@ -207,9 +207,15 @@ def tier2(argv: list[str]) -> int:
 
 def _print_gate(judged: Any) -> None:
     """The gate's summary line, which counts the runs that skipped checks while a plan hadn't landed, then a
-    line for each check they skipped and one for each reason the gate failed."""
-    from evals.gate import skipped_summary, violation_summary
+    line for each check they skipped and one for each reason the gate failed. A pass in which no run was
+    judged reads "not evaluated", with nothing counted, then its other reasons."""
+    from evals.gate import not_evaluated, skipped_summary, violation_summary
 
+    if (why := not_evaluated(judged)) is not None:
+        print(f"gate: not evaluated; {why}")
+        for reason in judged.reasons[1:]:
+            print(f"gate: {reason}")
+        return
     point = "none" if judged.completion_point is None else f"{judged.completion_point:.3f}"
     recorded = ("none" if judged.recorded_lower_95 is None
                 else f"{judged.recorded_lower_95:.3f} ({judged.recorded_provider})")
