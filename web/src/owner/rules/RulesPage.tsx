@@ -157,7 +157,10 @@ export function RulesPage() {
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const hidesChips = useSyncExternalStore(subscribeChipsHidden, chipsHidden, () => false);
-  const waitingForNeedsYou = !hidesChips && fixedChips.length === 0 && !needsYou.isFetchedAfterMount && !needsYou.isPaused;
+  // Rivera's fixed suggestions let the first draw skip waiting for Needs you only once the rules are
+  // read: all of them show meanwhile, but the rules may leave none, like another business's page.
+  const keepsFixedChips = fixedChips.length > 0 && (rules.data !== undefined || rules.isError);
+  const waitingForNeedsYou = !hidesChips && !keepsFixedChips && !needsYou.isFetchedAfterMount && !needsYou.isPaused;
   // Suggested cards move the connectors at every width, so they join the same opening wait.
   const waitingForSuggestions = suggestions.data === undefined && !suggestions.isError && !suggestions.isPaused;
   const [openingWaitEnded, setOpeningWaitEnded] = useState(false);
@@ -240,16 +243,22 @@ export function RulesPage() {
     ask(words);
   };
   useEffect(() => {
-    if (asking) return;
+    if (asking) return undefined;
     const chip = openedBy.current;
     openedBy.current = null;
-    if (chip === null || chips.includes(chip)) return;
-    // After the panel's own return of focus, which finds the suggestion gone.
-    requestAnimationFrame(() => {
+    if (chip === null || chips.includes(chip)) return undefined;
+    // What had focus as the panel closed: in the panel, which stays a moment, inert, as it slides out.
+    const closing = document.activeElement;
+    // After the panel's own return of focus, which finds the suggestion gone. Focus moves only from
+    // nowhere or from the closing panel, never from what the owner has focused since; and not at
+    // all once the panel opens again or Rules goes.
+    const frame = requestAnimationFrame(() => {
       const focused = document.activeElement;
-      if (focused !== null && page.current?.contains(focused) === true) return;
+      const fromClosingPanel = focused !== null && focused === closing && (!focused.isConnected || focused.closest('[inert]') !== null);
+      if (focused !== null && focused !== document.body && !fromClosingPanel) return;
       askRow.current?.querySelector('textarea')?.focus({ preventScroll: true });
     });
+    return () => cancelAnimationFrame(frame);
     // Only as the panel opens or closes, so `chips` is the suggestions drawn as it closed.
   }, [asking]);
 

@@ -11,6 +11,7 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { observeRequests, OWNER_ERROR_COPY, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
+import type { RuleCard } from '../../api/contracts.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
@@ -1443,6 +1444,53 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(screen.getByRole('textbox', { name: 'Ask Claude to change a rule' })).toHaveFocus();
   }
 
+  /**
+   * Rules with "Stop quoting on weekends" confirmed in Ask Claude, its suggestion gone, and the page
+   * scrolled down to Payments, the composer above out of view.
+   */
+  async function weekendsConfirmedAndScrolledDown() {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // The change has landed on its row before the page moves.
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const main = screen.getByRole('main').element();
+    screen.getByRole('region', { name: 'Payments' }).element().scrollIntoView({ block: 'start' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    expect(inView(composer.element(), main)).toBe(false);
+    return { panel, main, composer };
+  }
+
+  /**
+   * Holds every animation frame from here until `nextFrames()`, so a test can act before one runs.
+   * Until then the test waits with `until`: `expect.poll` and `expect.element` would advance the
+   * held frames as they poll.
+   */
+  function holdFrames(): { nextFrames: () => void } {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    return {
+      nextFrames: () => {
+        vi.advanceTimersToNextFrame();
+        vi.advanceTimersToNextFrame();
+      },
+    };
+  }
+
+  /** Waits in real time, without running held frames, until `check` holds. */
+  async function until(check: () => boolean, what: string): Promise<void> {
+    const deadline = performance.now() + 5_000;
+    while (!check()) {
+      if (performance.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  /** Ask Claude open beside the page, not the one sliding out as it closes. */
+  const openPanel = () => document.querySelector('.cd-app-shell__panel:not(.cd-app-shell__panel--leaving)');
+
   it('the_weekends_suggestion_goes_once_its_change_is_in_effect', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const { group, panel } = await confirmSuggestion(screen, 'Stop quoting on weekends');
@@ -1496,5 +1544,168 @@ describe("Rivera's fixed suggestions", () => {
     releaseRules();
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('the_composer_takes_focus_where_the_page_is', async () => {
+    const { main, composer } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, 'the composer above the suggestions').toBe(composer.element());
+    expect(main.scrollTop, 'the page stays where the owner left it').toBe(place);
+  });
+
+  it('focus_the_owner_moved_before_the_fallback_stays_where_they_put_it', async () => {
+    const { main } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    // A sidebar link takes focus before the frame in which the composer would.
+    const today = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).element() as HTMLElement;
+    today.focus();
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, 'the sidebar link keeps focus').toBe(today);
+    expect(main.scrollTop).toBe(place);
+  });
+
+  it('ask_claude_opened_again_before_the_fallback_keeps_focus', async () => {
+    const { main } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    // The suggestion still on offer opens it again before the frame in which the composer would take focus.
+    const chip = page.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Quote water heater installs up to $600', exact: true });
+    (chip.element() as HTMLElement).click();
+    await until(() => document.activeElement instanceof HTMLTextAreaElement && openPanel()?.contains(document.activeElement) === true, "focus in Ask Claude's own composer");
+    const focused = document.activeElement;
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, "Ask Claude's composer keeps focus").toBe(focused);
+    expect(main.scrollTop).toBe(place);
+  });
+
+  /** Rivera's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
+  function bothChangesInEffect(): void {
+    const main = desk();
+    const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
+    main.policy = { ...main.policy, cards: main.policy.cards.map((card) => (card.card_id === 'rv-quote' ? { ...card, hours: weekdays } : card)) };
+    const waterHeaters = { ...rivera.ruleCards['rv-quote'], card_id: 'card-water-heater-quotes', max_amount_cents: 60_000, hours: weekdays, reason: 'Water heater installs quoted up to $600, on weekdays.' };
+    mockStore.world.addActiveRules(main, [waterHeaters]);
+  }
+
+  /** Holds every read of the main Desk's rules until `release()`. */
+  function holdRules(): { release: () => void } {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    worker.use(http.get(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      await held;
+      return undefined;
+    }));
+    return { release };
+  }
+
+  it('with_both_changes_in_effect_a_cold_load_waits_for_needs_you_and_draws_its_question_with_the_body', async () => {
+    bothChangesInEffect();
+    const reads = holdNeedsYou();
+    const rules = holdRules();
+    const finished = finishedReads();
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    // Suggestions are read first, while the rules and Needs you are still being read: both
+    // suggestions show meanwhile, but they can't end the opening wait.
+    await expect.poll(() => finished.has('suggestions') && reads.held() > 0).toBe(true);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0], exact: true })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    rules.release();
+    await expect.poll(() => finished.has('rules')).toBe(true);
+    // The rules leave no suggestion of Rivera's own, so the page waits for Needs you, as another business's does.
+    await expect.element(group).not.toBeInTheDocument();
+    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+
+    const drawnWithoutQuestion: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      const body = pagePart('.cd-connector-list', screen.container) !== null;
+      const question = pagePart('.cd-suggestion-chips', screen.container)?.textContent?.includes('Why was this quote held?') === true;
+      if (body && !question) drawnWithoutQuestion.push(true);
+    });
+    observer.observe(screen.container, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(chipWords(screen.getByRole('group', { name: 'Suggestions' }))).toEqual(['Why was this quote held?']);
+    expect(drawnWithoutQuestion, 'the body and its hold question land together').toEqual([]);
+  });
+
+  it('with_both_changes_in_effect_a_cold_load_caps_the_wait_and_a_later_hold_does_not_move_the_connectors', async () => {
+    bothChangesInEffect();
+    const reads = holdNeedsYou();
+    const rules = holdRules();
+    const finished = finishedReads();
+    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
+    const rulesRead = new Promise<void>((resolve) => {
+      onTestFinished(observeRequests((outcome) => {
+        if (outcome.key === 'rules' && outcome.ok) resolve();
+      }));
+    });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    await expect.poll(() => finished.has('suggestions') && reads.held() > 0).toBe(true);
+    expect(chipWords(screen.getByRole('group', { name: 'Suggestions' }))).toEqual([...FIXED_CHIPS]);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    rules.release();
+    await rulesRead;
+    await vi.advanceTimersByTimeAsync(0);
+    await new Promise(requestAnimationFrame);
+    await vi.advanceTimersByTimeAsync(2_999);
+    await new Promise(requestAnimationFrame);
+    // Three seconds after the rules, less a millisecond: still waiting for Needs you.
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await new Promise(requestAnimationFrame);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+
+    vi.useRealTimers();
+    await settled(screen.container);
+    const before = connectorTops();
+    expect(before).toHaveLength(1);
+    reads.release();
+    await expect.poll(() => finished.has('needsYou')).toBe(true);
+    await settled(screen.container);
+    // The hold that came after the cap waits for the next visit, so the connectors stay put.
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    expect(connectorTops(), 'a late hold cannot move the connectors').toEqual(before);
+  });
+
+  it('with_both_changes_in_effect_back_returns_to_the_place_once_drawn', async () => {
+    bothChangesInEffect();
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const main = screen.getByRole('main').element();
+    main.scrollTop = main.scrollHeight;
+    const end = main.scrollTop;
+    expect(end).toBeGreaterThan(0);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+
+    // Back while Needs you is read again: the page waits for it, drawn short, then returns to its place.
+    const reads = holdNeedsYou();
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(end);
   });
 });
