@@ -10,7 +10,7 @@ tools/testbox/run make web-e2e
 tools/testbox/run make evals-tier1
 ```
 
-A lane's first call takes about 4.5 minutes, to sync the worktree and build the lane's environment
+A lane's first call takes about 5 minutes, to sync the worktree and build the lane's environment
 and kernel; later calls add seconds of overhead.
 
 Test runs and kernel builds go through this machine by default (AGENTS.md, "Tests"); run them locally only when it's unreachable. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
