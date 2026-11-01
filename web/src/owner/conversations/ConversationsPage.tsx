@@ -80,13 +80,15 @@ export function ConversationsPage() {
   // them open, and with none yet, the rows keep their usual status.
   const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
   const failure = useReadFailure(list, { pausedRoute: 'conversations' });
+  const needsFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
   const now = new Date();
   const items = list.data ?? [];
   const groups = groupsOf(items, business.timezone, now);
   const open = sessionId === undefined ? undefined : items.find((s) => s.session_id === sessionId);
   const replayed = items.some((s) => s.replayed === true);
-  // The list's first read has settled, data or failure: until then its region draws its shapes.
-  const listRead = list.data !== undefined || failure !== null;
+  // Needs you supplies callback statuses, so both first reads settle before rows replace shapes.
+  // Retained failures keep the list open while a reconnect or retry reads either part again.
+  const listRead = (list.data !== undefined || failure !== null) && (needsYou.data !== undefined || needsFailure !== null);
 
   let listBody;
   if (list.data !== undefined && items.length === 0) {
@@ -144,18 +146,19 @@ export function ConversationsPage() {
                 <RecordedHistoryLink href={entriesPath(deskId)} />
               </p>
             ) : null}
-            {failure !== null ? (
+            {[failure, needsFailure].map((failed, i) => failed === null ? null : (
               <Notice
+                key={i}
                 tone="error"
                 action={
-                  <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+                  <Button variant="secondary" busy={failed.retrying} onClick={failed.retry}>
                     Try again
                   </Button>
                 }
               >
-                {failure.line}
+                {failed.line}
               </Notice>
-            ) : null}
+            ))}
             {listBody}
           </div>
         </SkeletonScreen>

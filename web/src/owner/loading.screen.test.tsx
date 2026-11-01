@@ -1192,7 +1192,8 @@ it('conversation_lands_on_its_needs_you_error', async () => {
   mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
   await open();
   held.release();
-  const failed = screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true });
+  const failed = screen.getByRole('region', { name: 'Visitor', exact: true }).getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true });
+  await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true })).toBeVisible();
   await expect.element(failed).toBeVisible();
   await expect.element(screen.getByRole('log')).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
@@ -1612,6 +1613,48 @@ it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', asyn
     path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
     region: '.cd-rules__region', landed: '.cd-connector-list',
     prime: RULES, primeLanded: '.cd-connector-list', error: '.cd-rules > [role="alert"]',
+  });
+});
+
+it('conversations_wait_for_needs_you_before_landing_callback_statuses', async () => {
+  const world = mockStore.world;
+  const chat = world.addSession(world.desk(RIVERA.deskId)!);
+  world.visitorText(chat, 'Please ask the owner to call me.');
+  world.context(chat, 'en', '').openHandoff({ reason: 'Please call this visitor', callbackWindow: null, lead: 'A visitor' });
+  chat.displayName = null;
+  const held = holdReads(NEEDS_YOU_READ);
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await beforeSafety('desktop');
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  await router.navigate(CONVERSATIONS);
+  await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(client.getQueryState(['conversations', RIVERA.deskId])?.status).toBe('success'));
+  await nextFrames();
+  expect(landedElement('.cd-conversations__items'), 'Needs you still supplies the callback status').toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('.cd-conversations__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  held.release();
+  const callback = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Wants you/ });
+  await expect.element(callback).toBeVisible();
+  expect(callback.element().textContent).toContain('Visitor');
+  expect(callback.element().getAttribute('href')).toBe(`${CONVERSATIONS}/${chat.state.session_id}`);
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  // Reusing settled reads renders immediately, including the callback's status.
+  await router.navigate(PEOPLE);
+  await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  const layers = watchLayers();
+  await router.navigate(CONVERSATIONS);
+  await expect.element(callback).toBeVisible();
+  await nextFrames();
+  expect(layers()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversations_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: CONVERSATIONS, queryKey: needsYouKey(RIVERA.deskId), readPath: NEEDS_YOU_READ,
+    region: '.cd-conversations__region', landed: '.cd-conversations__items',
+    prime: CONVERSATIONS, primeLanded: '.cd-conversations__items',
   });
 });
 

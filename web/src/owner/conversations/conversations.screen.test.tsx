@@ -1221,13 +1221,15 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(SEEDED_HOLD), { pollScale: 100 });
     // With no card under it, the hold's receipt says why itself.
     await expect.element(receipt(screen, `Held for you. ${SEEDED_REASON}`)).toBeVisible();
-    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    const pane = screen.getByRole('region', { name: 'Visitor', exact: true });
+    const line = pane.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Reading again works: the request is there to answer, and the line goes.
-    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await pane.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
     // The card says why now, so the receipt over it names only the state.
