@@ -116,16 +116,22 @@ export function RulesPage() {
   // Suggested cards move the connectors at every width, so they join the same opening wait.
   const waitingForSuggestions = suggestions.data === undefined && !suggestions.isError && !suggestions.isPaused;
   const [openingWaitEnded, setOpeningWaitEnded] = useState(false);
-  const firstReadsReady = openingWaitEnded || (!waitingForNeedsYou && !waitingForSuggestions);
-  if (firstReadsReady && !openingWaitEnded) setOpeningWaitEnded(true);
+  const [openingWaitExpired, setOpeningWaitExpired] = useState(false);
+  const [skipHoldQuestion, setSkipHoldQuestion] = useState(false);
+  const firstReadsReady = openingWaitEnded || openingWaitExpired || (!waitingForNeedsYou && !waitingForSuggestions);
+  if (firstReadsReady && !openingWaitEnded) {
+    setOpeningWaitEnded(true);
+    // A hold arriving after the cap must not insert a chips row during this visit.
+    if (waitingForNeedsYou) setSkipHoldQuestion(true);
+  }
   const waitingForOpening = !firstReadsReady;
   useEffect(() => {
     if (!rules.isFetched || !waitingForOpening) return;
-    const timer = window.setTimeout(() => setOpeningWaitEnded(true), NEEDS_YOU_FIRST_LOAD_WAIT_MS);
+    const timer = window.setTimeout(() => setOpeningWaitExpired(true), NEEDS_YOU_FIRST_LOAD_WAIT_MS);
     return () => window.clearTimeout(timer);
   }, [rules.isFetched, waitingForOpening]);
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
-  const question = current ? holdQuestion(needsYou.data ?? []) : null;
+  const question = current && !skipHoldQuestion ? holdQuestion(needsYou.data ?? []) : null;
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);

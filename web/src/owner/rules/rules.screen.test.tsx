@@ -1123,6 +1123,9 @@ describe("Ask Claude's question about a hold", () => {
   it('another_business_caps_the_needs_you_wait_at_three_seconds_after_rules_settle', async () => {
     renameBusiness('Acme Accounting');
     const reads = holdNeedsYou();
+    const finished = finishedReads();
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS] });
+    const sectionTops = watchTop(() => document.querySelector('.cd-rules__suggestions'));
     let releaseRules!: () => void;
     const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
     onTestFinished(() => releaseRules());
@@ -1135,7 +1138,7 @@ describe("Ask Claude's question about a hold", () => {
         if (outcome.key === 'rules' && outcome.ok) resolve();
       }));
     });
-    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -1158,7 +1161,18 @@ describe("Ask Claude's question about a hold", () => {
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
 
     vi.useRealTimers();
+    await settled(screen.container);
+    const before = sectionTops();
+    expect(before).toHaveLength(1);
     reads.release();
+    await expect.poll(() => finished.has('needsYou')).toBe(true);
+    await settled(screen.container);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    expect(sectionTops(), 'late Needs you cannot move the first section').toEqual(before);
+
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
   });
 
