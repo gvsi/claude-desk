@@ -811,7 +811,7 @@ def _recovered_reply(shown: Any | None, block: dict) -> ToolOutcome:
     if shown is None:
         return not_run()
     result = delivered_result(shown.handoff, shown.ref_id, prose_shown=not prose_unshown(
-        block["input"], [shown_block.kind for shown_block in shown.blocks or []]))
+        block["input"], shown.blocks or []))
     return ToolOutcome(result, shown.handoff, delivered="handoff" if shown.handoff else "reply",
                        message_id=shown.ref_id)
 
