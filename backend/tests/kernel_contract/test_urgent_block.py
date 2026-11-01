@@ -54,6 +54,9 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     [fact] = result.facts
     assert fact.fact_id == result.model_view['fact_id'] and fact.kind == 'handoff'
     assert fact.claims == []
+    # no window to end at: a visitor's card lasts while the handoff is open; a preview's, which no
+    # Mark done closes, for a day
+    assert (fact.expires_at is None) != preview
     receipt = await read_decision(session, allowed.decision_id)
     assert receipt.visitor_plain == '“Urgent help”: urgent request sent to Maria Rivera'
     expected_body = 'Reported as urgent through “Urgent help”. ' + claudes_note((args['name'], args['contact'], args['reason']))
