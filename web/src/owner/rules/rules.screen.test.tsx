@@ -965,6 +965,54 @@ describe('rules page', () => {
 });
 
 describe("Ask Claude's question about a hold", () => {
+  it('both_opening_reads_share_one_cap_and_cannot_move_sections_when_they_land', async () => {
+    renameBusiness('Acme Accounting');
+    const reads = holdNeedsYou();
+    const finished = finishedReads();
+    let rulesReadAt = 0;
+    onTestFinished(observeRequests(({ key, ok }) => {
+      if (key === 'rules' && ok) rulesReadAt = performance.now();
+    }));
+    let releaseSuggestions!: () => void;
+    const until = new Promise<void>((resolve) => { releaseSuggestions = resolve; });
+    onTestFinished(() => releaseSuggestions());
+    mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until, times: 10_000 });
+    const connectorTops = watchTop(() => document.querySelector('.cd-connector-list'));
+    let bodyDrawnAt = 0;
+    const observer = new MutationObserver(() => {
+      if (bodyDrawnAt === 0 && document.querySelector('.cd-connector-list') !== null) bodyDrawnAt = performance.now();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100 });
+    await expect.poll(() => rulesReadAt > 0 && requests('suggestions').length > 0 && reads.held() > 0).toBe(true);
+    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 3_750 }).toBeVisible();
+    const elapsed = bodyDrawnAt - rulesReadAt;
+    expect(elapsed, 'one three-second cap, measured from the Rules response').toBeGreaterThanOrEqual(2_900);
+    expect(elapsed).toBeLessThan(3_750);
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(screen.container.querySelector('.cd-always-on')).not.toBeNull();
+    await settled(screen.container);
+    const before = connectorTops();
+    expect(before).toHaveLength(1);
+
+    reads.release();
+    releaseSuggestions();
+    await expect.poll(() => finished.has('needsYou') && finished.has('suggestions')).toBe(true);
+    await settled(screen.container);
+    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(connectorTops(), 'neither late read moves the connectors').toEqual(before);
+
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+  });
+
   it.each(['desktop', 'phone'] as const)('suggested_rules_and_connectors_land_together_when_suggestions_are_held at %s', async (viewport) => {
     const finished = finishedReads();
     let release!: () => void;

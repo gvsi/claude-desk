@@ -118,11 +118,13 @@ export function RulesPage() {
   const [openingWaitEnded, setOpeningWaitEnded] = useState(false);
   const [openingWaitExpired, setOpeningWaitExpired] = useState(false);
   const [skipHoldQuestion, setSkipHoldQuestion] = useState(false);
+  const [skipSuggestions, setSkipSuggestions] = useState(false);
   const firstReadsReady = openingWaitEnded || openingWaitExpired || (!waitingForNeedsYou && !waitingForSuggestions);
   if (firstReadsReady && !openingWaitEnded) {
     setOpeningWaitEnded(true);
-    // A hold arriving after the cap must not insert a chips row during this visit.
+    // Optional content still unknown at the cap waits for the next visit, keeping sections still.
     if (waitingForNeedsYou) setSkipHoldQuestion(true);
+    if (waitingForSuggestions) setSkipSuggestions(true);
   }
   const waitingForOpening = !firstReadsReady;
   useEffect(() => {
@@ -292,7 +294,7 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
-      {active === undefined || waitingForOpening ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+      {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {readError}
       {body}
       {waitingForOpening ? null : <AlwaysOnList />}
