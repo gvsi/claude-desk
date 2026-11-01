@@ -1445,29 +1445,46 @@ async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     assert [(item["kind"], item["ref_id"]) for item in listed] == [("booking", held.decision_id)]
 
 
-def purpose_payment_quote(scene: Scene, who: Guest, when: datetime, amount_cents: int = 5_000) -> str:
-    """A deposit taken through a purpose payment business tool: its quote record, as the kernel writes one, whose one
-    line names the business tool; returns its quote ID."""
-    desk = scene.fake.desks[scene.owner.desk_id]
-    quote_id = f"quote-deposit-{next(_CALL_IDS)}"
-    scene.fake._put("quotes", (quote_id,), {
-        "quote_id": quote_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "session_id": who.session_id,
-        "items": [{"item_id": "desk.deposit", "title": "Service call deposit", "qty": 1, "unit_cents": amount_cents}],
-        "list_cents": amount_cents, "discount_bp": 0, "amount_cents": amount_cents, "status": "available",
-        "expires_at": when + timedelta(hours=72), "created_at": when})
-    scene.fake.flush()
-    return quote_id
+async def allowed_deposit(scene: Scene, amount_cents: int = 5_000) -> str:
+    """A deposit the owner takes through a purpose payment business tool, added, reviewed and allowed up to its
+    amount through the owner's kernel calls; returns the tool's name."""
+    owner = scene.owner
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool="desk.deposit", title="Deposit", description="Take the service call deposit.",
+                        config={"block": "purpose_payment", "purpose": "Service call deposit",
+                                "amount_cents": amount_cents})
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[tool]), path={"id": owner.desk_id})
+    pin = ToolPin(tool=tool.tool, definition_sha256=scene.fake.desks[owner.desk_id].tools[tool.tool].definition_sha256)
+    confirmed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=owner.desk_id, tools=[pin],
+                                                                              enable=True))
+    active = await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id,
+                                                                             version=confirmed.draft.version))
+    draft = await kernel.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=owner.desk_id, expected_parent=active.version, auto_money_cap_cents=amount_cents, cards=[RuleCard(
+            card_id="deposit-auto", applies_to=tool.tool, mode="auto", who="anyone", max_amount_cents=amount_cents,
+            reason="Take the service call deposit.")]))
+    await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    return tool.tool
+
+
+async def take_deposit(scene: Scene, who: Guest, when: datetime, tool: str) -> None:
+    """The visitor's deposit through the tool, run on the kernel, which writes its quote record and payment link."""
+    scene.fake.now = when
+    _, result = await who.run(tool, {})
+    assert result.state == "succeeded"
+    assert {fact.kind for fact in result.facts} == {"quote", "payment_link"}
 
 
 async def test_a_deposit_is_never_a_bookings_amount_in_the_last_7_days(scene, clock):
+    deposit = await allowed_deposit(scene)
     # A deposit, then a booking: the booking has no quote behind it.
     deposit_only = await scene.visitor(local(2026, 10, 29, 10))
-    purpose_payment_quote(scene, deposit_only, local(2026, 10, 29, 10))
+    await take_deposit(scene, deposit_only, local(2026, 10, 29, 10), deposit)
     await scene.booking(deposit_only, local(2026, 10, 29, 10, 5))
     # A quote, a deposit, then a booking: the quote backs it.
     quoted = await scene.visitor(local(2026, 10, 29, 11))
     amount = await scene.quote(quoted, local(2026, 10, 29, 11))
-    purpose_payment_quote(scene, quoted, local(2026, 10, 29, 11, 1))
+    await take_deposit(scene, quoted, local(2026, 10, 29, 11, 1), deposit)
     await scene.booking(quoted, local(2026, 10, 29, 11, 5))
     clock.now = local(2026, 10, 30, 9)
     owner = scene.owner
