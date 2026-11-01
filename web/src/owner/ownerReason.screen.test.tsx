@@ -24,14 +24,17 @@ it('Today_keeps_the_refused_approval_in_place_with_its_owner_line_and_null_fallb
     const answer = world.answer.bind(world);
     const spy = vi.spyOn(world, 'answer').mockImplementation((record, given) => {
       const result = answer(record, given);
-      if (fallback) result.owner_plain = null;
+      result.owner_plain = fallback ? null : NOT_SHARED;
       return result;
     });
     try {
       await card.getByRole('button', { name: 'Allow this time', exact: true }).click();
-      await expect.poll(() => element.querySelector('.cd-approval-card__status-line')?.textContent).toBe("Your rules changed before this ran, so it wasn't done.");
+      const line = fallback ? "Your rules changed before this ran, so it wasn't done." : NOT_SHARED;
+      await expect.poll(() => element.querySelector('.cd-approval-card__status-line')?.textContent).toBe(line);
       expect(held.decision.state).toBe('refused_at_execution');
-      expect(held.decision.owner_plain).toBe(fallback ? null : "Your rules changed before this ran, so it wasn't done.");
+      expect(held.decision.owner_plain).toBe(fallback ? null : NOT_SHARED);
+      const row = screen.getByRole('heading', { name: 'Answer a held request', exact: true }).element().closest('li')!;
+      await expect.poll(() => row.querySelector('.cd-things__detail')?.textContent).toBe(line);
       expect(element.querySelector('.cd-status-dot--refused')).not.toBeNull();
       await expect.element(screen.getByRole('button', { name: 'Dismiss', exact: true }).first()).toBeVisible();
       expectNoHorizontalScroll();
@@ -56,6 +59,7 @@ it('the_owner_receipt_uses_the_execution_refusal_annotation_with_a_null_fallback
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/conversations/${held.session_id}`);
     const line = ownerPlain ?? event.visitor_plain;
     await expect.element(screen.getByRole('button', { name: `${line} Open the full trace.` })).toBeVisible();
+    await expect.element(screen.getByText(`Latest: ${line}`, { exact: true })).toBeVisible();
     const receipt = [...document.querySelectorAll('.cd-margin-receipt')].find((el) => el.textContent?.includes(line));
     expect(receipt?.querySelector('.cd-status-dot--refused')).not.toBeNull();
     expectNoHorizontalScroll();
