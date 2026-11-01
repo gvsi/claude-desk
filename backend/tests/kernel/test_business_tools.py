@@ -908,6 +908,7 @@ async def test_supported_blocks_gate_resolution_and_context_even_for_enabled_row
     from desk.kernel_service.adapters import blocks
 
     copy = await rivera(app, client)            # the seed's urgent tool needs its block supported
+    assert {'intake', 'purpose_payment', 'typed_booking', 'urgent'} <= blocks.SUPPORTED_BLOCKS
     monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake'}))
     assert blocks.SUPPORTED_BLOCKS == frozenset({'intake'})
     urgent = intake(tool='desk.urgent', title='Urgent support', description='Urgent-only marker.',

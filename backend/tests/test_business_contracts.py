@@ -9,7 +9,8 @@ from desk import contracts
 from desk.kernel_service import adapters
 
 MAIN_PROFILE_HASHES = {
-    'native.book': 'eeb10de9b6fe8879003b5d5b124da69fcda47a1868b5ba96505ddd75fa791827',
+    # The described, 200-character owner-only booking note deliberately changes the schema and pin.
+    'native.book': 'a42aea22caaa2953da85b6b29b1a80a4d76b9e5822695bbbf2e663603bfe3ce9',
     'native.capture_lead': '66c63000c5faecd60ab73ab6778097085ce248360a261ff0770183caa4fb1b13',
     'native.charge_mandate': '6ee1189c8d00aad5eac9fa882ec6395bec3c449508e93ef809fd468b0020e1d1',
     'native.fetch_website': '247265c3628112de0713def8c4f04b4213574c38f32216310eb4458dec6a94fd',
@@ -44,6 +45,21 @@ def test_business_contracts_keep_native_profile_hashes():
         with pytest.raises(ValidationError):
             TypeAdapter(contracts.BlockConfig).validate_python(
                 {'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': minutes})
+
+
+def test_booking_note_schema_describes_its_owner_only_bounded_details():
+    from desk.kernel_service.adapters.book import PROFILE
+    from desk.kernel_service.adapters.blocks import profile
+
+    definition = contracts.BusinessToolDef(title='Book a consult', description='Book an introduction.',
+        config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20})
+    for built in (PROFILE, profile('desk.consult', definition)):
+        schema = built.input_schema
+        note = schema['properties']['note']
+        assert note.get('description') == 'Optional details for the owner only.'
+        assert {'type': 'string', 'maxLength': 200} in note['anyOf']
+        assert {'type': 'null'} in note['anyOf']
+        assert note['default'] is None and 'note' not in schema['required']
 
 
 def test_business_description_quotes_every_owner_field():
