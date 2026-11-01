@@ -22,7 +22,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Separate regions by fill and a hairline, not by shadow. A card is `fill-card` with a 1 px `line-card` border. Chips, outlined pills and the whisper composer are outlined in `line-control`, `line-control-hover` on hover; the recorded-history link is underlined in it. Outline a text field in `line-field`: its outline is its boundary, so it reaches 3:1 against the ground.
 - Make the primary button `button-primary` with `button-primary-text`, `button-primary-hover` on hover: an inverted neutral, at most one per view. Secondary buttons are `fill-secondary` (`fill-secondary-hover` on hover) with `text-primary`; ghost buttons are transparent with `fill-hover` on hover. Visitor bubbles are `fill-bubble`; count pills and the segmented track are `fill-count`.
 - Give an answer that refuses the red look, and nothing else: `danger` buttons are `button-danger-fill` (`button-danger-fill-hover` on hover) with `button-danger-text`, and `danger-ghost` buttons are transparent with `button-danger-text`. They are the only red controls and the only red words in the system, with the items of Deny's menu on a held request, which use `button-danger-text` on `bg-surface`. Their words say what is refused ("Deny this time", "Always" in Deny's menu), and the red is never a status.
-- Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
+- Use `accent-blue` only for links and selection. Never put text on it, never use it as decoration and never for focus: the focus ring is `ring-focus`, the warm secondary ink.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only as the field behind the first-visit intro's illustration, and as the field of the Claude Desk app icon (`MarkAppIcon`), which counts as part of the mark (owner, 2026-10-30), and as the color of Claude's writing dots (`WritingIndicator`), at the owner's request (2026-10-31).
 - The Claude Desk mark has its own fixed colors, the same in every theme: `mark-clay`, `mark-ink`, `mark-ink-light`, `mark-tile` and `mark-hairline`. Nothing else uses them. The bell has no tile: on the dark grounds its ink is `mark-ink-light`, and on a light ground it keeps the drawing's dark ink, `mark-ink`. Only the app icon draws it on its white tile, `mark-tile`, with a `mark-hairline` edge.
@@ -120,23 +120,25 @@ The spinner's arc is a graphic, 3:1, drawn in the busy label color at full stren
 
 In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 
-Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
+Focus rings and status dots, 3:1:
 
-| Ground | `accent-blue` | `status-handled` | `status-held` | `status-refused` | `status-info` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `bg-app` | 7.3 | 6.1 | 9.4 | 6.3 | 7.3 |
-| `bg-panel` | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
-| `bg-surface` | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 |
-| `bg-selected` | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 |
-| `fill-card` over `bg-app` | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
-| `fill-hover` over `bg-app` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
-| `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
+| Ground | `ring-focus` | `accent-blue` | `status-handled` | `status-held` | `status-refused` | `status-info` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `bg-app` | 7.3 | 7.3 | 6.1 | 9.4 | 6.3 | 7.3 |
+| `bg-panel` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
+| `bg-surface` | 6.6 | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 |
+| `bg-muted` | 6.4 | not used | not used | not used | not used | not used |
+| `bg-selected` | 5.6 | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 |
+| `fill-card` over `bg-app` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
+| `fill-hover` over `bg-app` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
+| `fill-card` over `bg-panel` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
+| `fill-hover` over `bg-surface` | 5.8 | not used | not used | not used | not used | not used |
 
 The mark is a logo beside its written name, and its ink outline carries it. With no tile, `mark-ink-light` reads 16.3 on `bg-app`, 15.1 on `bg-panel` and 13.8 on `bg-surface` (the intro dialog), and the `mark-clay` dome 5.5, 5.1 and 4.7. On the intro illustration's light card, `mark-ink` reads 17.5. Two parts of the drawing fall just under 3:1, and are recorded here rather than listed as pairs: the light ink where it crosses the dome reads 2.96, and the dome on the light card 2.96; in both places the ink's outline (13.8 and up, and 17.5) sets the bell off its ground. On its tile, `mark-ink` reads 18.4 and `mark-clay` 3.1, and the dark ink reads 5.9 where it crosses the clay; `mark-tile` reads 17.2 on `bg-app`, as the stories show it. In the app icon, the clay field is the icon's edge and reads 6.5 on `bg-app`; the white tile on the field reads 2.64, recorded here rather than listed as a pair, as the intro's light cards on the same clay are: the icon is decorative, its edge is the field's, and the drawing on the tile carries its own contrast.
 
 Claude's writing dots carry the waiting status: `clay` on `bg-app` and `bg-panel` is listed at 3:1.
 
-`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1), and 3.2 on `fill-card` over `bg-app`, where it outlines an inline `CopyField`'s value in a card.
+`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1), and 3.2 on `fill-card` over `bg-app`, where it outlines an inline `CopyField`'s value in a card. `line-field-focus`, a focused field's border, reads 6.0 on `bg-surface` and 6.6 on `bg-app`.
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
@@ -144,7 +146,7 @@ On Share's printable card, the QR code's `qr-ink` modules read 13.8 on its `qr-t
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
 - `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `clay` (the intro illustration's field and the app icon's), `illustration-line`, `illustration-arc`, `qr-hairline`, `mark-hairline` and the connector brand colors (`connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill, or the recorded-history link it underlines, is identified by its own text. Never make an outline the only cue that something is a control.
-- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
+- Show keyboard focus with a solid 2 px `ring-focus` outline at a 2 px offset on every control, only while it matches `:focus-visible`, so a click shows none; the base stylesheet sets it. `ring-focus` is `text-secondary`, a warm off-white, never blue (owner, 2026-11-01). On the About pages' paper it points at the paper's secondary ink (`--va-ink-2`), which reads 6.3 on the paper, 6.8 on a figure's card and 5.7 on a band. Text entry is the exception: a text field, a text area or a composer's text box with focus shows its caret and its own edge one step stronger (a field's border `line-field-focus`, the composer's edge `line-field`), by pointer or keyboard, and no ring (the base stylesheet turns the ring off for them), so focus shows while the caret blinks off (owner, 2026-11-01, WCAG 2.4.7). A held, read-only field has no caret, so with focus, by click or keyboard, it rings like any control. A button inside the composer shows its own ring, and the composer's edge goes back to rest.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - A `ul` or `ol` drawn without markers says `role="list"`: Safari drops a list's semantics when its markers are removed, and a screen reader then gives no list navigation or count. `expectListsKeepTheirRole` (`test/expectListRoles.ts`) checks it in one story per component.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.

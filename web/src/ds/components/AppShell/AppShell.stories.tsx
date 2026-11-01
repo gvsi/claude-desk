@@ -194,7 +194,7 @@ export const SkipToContent: Story = {
       color: 'rgba(250, 249, 245, 0.92)',
       outlineStyle: 'solid',
       outlineWidth: '2px',
-      outlineColor: 'rgb(126, 174, 218)',
+      outlineColor: 'rgba(250, 249, 245, 0.64)',
     });
     const box = skip.getBoundingClientRect();
     await expect([box.left, box.top]).toEqual([8, 8]);

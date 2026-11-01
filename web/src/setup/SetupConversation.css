@@ -129,6 +129,9 @@
 
 .cd-setup-q3__row--other input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); }
 .cd-setup-q3__row--other input::placeholder { color: var(--text-secondary); }
+/* The "Something else" input draws no border of its own, so with focus its row takes the field's
+   focused edge, as every text entry does (owner, 2026-11-01). */
+.cd-setup-q3__row--other:has(input:focus) { box-shadow: inset 0 0 0 1px var(--line-field-focus); }
 /* The signed chat frame: the bar and dock keep their size; only the transcript scrolls. */
 .cd-setup--chat {
   height: 100dvh;
