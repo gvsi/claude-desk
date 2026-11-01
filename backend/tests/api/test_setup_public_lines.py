@@ -194,6 +194,61 @@ def refuse_charter(monkeypatch, detail):
     monkeypatch.setattr(KernelHttp, "_send", refuse)
 
 
+@pytest.mark.parametrize("method", ["put", "confirm"])
+async def test_refused_how_we_help_is_dropped_for_pricing(lines_setup, engine, fake, monkeypatch, caplog, method):
+    owner, state, path = lines_setup
+    calls = []
+    original = KernelHttp._send
+
+    async def refuse_help(self, route, request, **kwargs):
+        if route == "PUT /desks/{id}/charter":
+            claims = json.loads(request.content)["charter"]
+            calls.append({claim["key"]: claim["value"] for claim in claims})
+            if "policy:how_we_help" in calls[-1]:
+                return httpx.Response(422, json={"code": "invalid", "detail": {
+                    "policy:how_we_help": ["lex.en.promise"]}})
+        return await original(self, route, request, **kwargs)
+
+    monkeypatch.setattr(KernelHttp, "_send", refuse_help)
+    reply = await request_lines(owner.browser, path, method)
+    assert reply.status_code == 200, reply.text
+    assert len(calls) == 2
+    assert calls[1] == {key: value for key, value in calls[0].items() if key != "policy:how_we_help"}
+    pricing = "Quotes before repairs." if method == "put" else "Written quotes before work."
+    assert calls[1]["policy:pricing"] == pricing
+    assert "charter:policy:how_we_help" not in charter(fake, state["desk_id"])
+    assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == pricing
+    assert caplog.messages.count("setup public charter refused (key=policy:how_we_help)") == 1
+    assert "We answer questions." not in caplog.text
+
+
+@pytest.mark.parametrize("method", ["put", "confirm"])
+async def test_mixed_help_refusal_keeps_editable_line_strict(lines_setup, engine, fake, monkeypatch, caplog, method):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    calls = []
+    original = KernelHttp._send
+
+    async def refuse_mixed(self, route, request, **kwargs):
+        if route == "PUT /desks/{id}/charter":
+            calls.append(request)
+            return httpx.Response(422, json={"code": "invalid", "detail": {
+                "policy:how_we_help": ["digit"], "policy:pricing": ["currency"]}})
+        return await original(self, route, request, **kwargs)
+
+    monkeypatch.setattr(KernelHttp, "_send", refuse_mixed)
+    reply = await request_lines(owner.browser, path, method)
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": "policy:pricing", "reason": ["currency"]}
+    assert len(calls) == 1
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert caplog.messages.count("setup public charter refused (key=policy:pricing)") == 1
+    assert "We answer questions." not in caplog.text
+    assert "Quotes before repairs." not in caplog.text
+
+
 async def test_put_refusal_names_key_without_saving(lines_setup, engine, fake, monkeypatch, caplog):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])
@@ -206,6 +261,34 @@ async def test_put_refusal_names_key_without_saving(lines_setup, engine, fake, m
     assert charter(fake, state["desk_id"]) == published
     assert "setup public charter refused" in caplog.text
     assert "private marker" not in caplog.text
+
+
+@pytest.mark.parametrize("method", ["put", "confirm"])
+async def test_help_retry_refusal_saves_nothing(lines_setup, engine, fake, monkeypatch, caplog, method):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    calls = []
+    original = KernelHttp._send
+
+    async def refuse_twice(self, route, request, **kwargs):
+        if route == "PUT /desks/{id}/charter":
+            calls.append(request)
+            key = "policy:how_we_help" if len(calls) == 1 else "policy:pricing"
+            return httpx.Response(422, json={"code": "invalid", "detail": {key: ["digit"]}})
+        return await original(self, route, request, **kwargs)
+
+    monkeypatch.setattr(KernelHttp, "_send", refuse_twice)
+    reply = await request_lines(owner.browser, path, method)
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": "policy:pricing", "reason": ["digit"]}
+    assert len(calls) == 2
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    for key in ("policy:how_we_help", "policy:pricing"):
+        assert caplog.messages.count(f"setup public charter refused (key={key})") == 1
+    assert "We answer questions." not in caplog.text
+    assert "Written quotes before work." not in caplog.text
 
 
 async def test_how_we_help_is_not_editable(lines_setup, engine, fake):

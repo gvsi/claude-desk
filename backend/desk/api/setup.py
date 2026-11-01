@@ -2686,15 +2686,22 @@ async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: dateti
     timezone = (await _business(owner, interview.desk_id))["timezone"]
     parts = seed_parts(interview.answers, timezone, business_type=interview.business_type,
                        today=now.astimezone(ZoneInfo(timezone)).date())
-    try:
-        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter),
-                                path={"id": interview.desk_id})
-    except KernelFailed as failure:
-        if failure.status != 422:
-            raise
-        refused = _line_refused(failure)
-        logger.warning("setup public charter refused (key=%s)", refused.answer.key)
-        raise refused from None
+    charter = parts.charter
+    for attempt in range(2):
+        try:
+            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
+                                    path={"id": interview.desk_id})
+            return
+        except KernelFailed as failure:
+            if failure.status != 422:
+                raise
+            refused = _line_refused(failure)
+            logger.warning("setup public charter refused (key=%s)", refused.answer.key)
+            if attempt == 0 and set(failure.detail or {}) == {"policy:how_we_help"}:
+                # This claim is code-owned; editable lines must always be corrected by the owner.
+                charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
+                continue
+            raise refused from None
 
 
 async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
