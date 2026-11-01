@@ -616,6 +616,70 @@ async def test_a_connector_decision_that_cannot_commit_never_connects(proposals,
     assert connects == []
 
 
+@pytest.mark.parametrize("action", ["decision", "typed", "suggestions"])
+@pytest.mark.parametrize("failure", ["commit", "turn"])
+async def test_proposal_routes_roll_back_after_turn_or_final_commit(
+        proposals, model, engine, monkeypatch, action, failure):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+
+    async def snapshot():
+        # _save omits optional defaults; compare the same serialization on both sides.
+        async with engine.connect() as conn:
+            return setup._stored(await setup._load(conn, owner.copy_id, interview_id))
+
+    before = await snapshot()
+    original_commit = setup._commit
+    original_turn = setup.close_setup if action == "suggestions" else setup.card_turn
+    commits, turns, effects = [], [], []
+
+    async def commit(engine, ctx, interview, seen):
+        commits.append(interview.busy)
+        if failure == "commit" and len(commits) == 2:
+            assert turns == [True]
+            assert any(entry.connector_connect_attempted for entry in interview.transcript)
+            raise setup.ApiProblem(409, "conflict")
+        await original_commit(engine, ctx, interview, seen)
+
+    async def turn(ctx, engine, model, interview, *args, **kwargs):
+        await original_turn(ctx, engine, model, interview, *args, **kwargs)
+        turns.append(True)
+        assert next(card for card in interview.planned if card.proposal_id == ids[2]).state == "accepted"
+        if action == "suggestions":
+            assert interview.step == "tools"
+        if failure == "turn":
+            raise setup.ApiProblem(503, "model_unavailable")
+
+    async def connect(*args):
+        effects.append("stripe")
+
+    async def after(*args):
+        effects.append("after_finish")
+
+    monkeypatch.setattr(setup, "_commit", commit)
+    monkeypatch.setattr(setup, "close_setup" if action == "suggestions" else "card_turn", turn)
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    monkeypatch.setattr(setup, "after_finish", after)
+    if action == "typed":
+        model.add(card_answer("accept", next=next_ask("what_you_do")))
+    endpoint, body = {
+        "decision": (f"proposals/{ids[2]}", {"accept": True}),
+        "typed": ("answer", {"card": ids[2], "text": "Yes"}),
+        "suggestions": ("suggestions", {}),
+    }[action]
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == (409 if failure == "commit" else 503), reply.text
+    assert commits == ([True, False] if failure == "commit" else [True])
+    assert turns == [True]
+    saved = await snapshot()
+    assert saved == before
+    assert all(not entry.get("pending") for entry in saved["transcript"])
+    assert not any(entry.get("owner_decided") or entry.get("connector_connect_attempted")
+                   for entry in saved["transcript"])
+    assert effects == []
+
+
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
 @pytest.mark.parametrize("decision", ["click_decline", "decline", "none"])
 async def test_a_connector_without_an_accept_does_not_connect(proposals, model, engine, monkeypatch, decision, app_key):
