@@ -1673,11 +1673,12 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
             time = rf"{clock_forms}(?:\s*{matching_period}|{no_period})"
         return re.search(rf"(?<![\w:]){time}(?![\w:]|\.\d)", text) is not None
 
-    endpoint = r"\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?"
-    ranges = [match.group() for match in re.finditer(
+    endpoint = r"(\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?)"
+    ranges = [match.groups() for match in re.finditer(
         rf"(?<![\w:.-]){endpoint}\s*(?:to\b|until\b|[-–—])\s*{endpoint}(?![\w:]|[-–—]\w)", folded)]
+    # A range backs a window only in order, its start before the separator and its end after it.
     return all((has_time(window.start, folded, explicit=stated) and has_time(window.end, folded, explicit=stated))
-               or (stated and any(has_time(window.start, span) and has_time(window.end, span) for span in ranges))
+               or (stated and any(has_time(window.start, start) and has_time(window.end, end) for start, end in ranges))
                for window in cast(list[HoursAnswer], value))
 
 

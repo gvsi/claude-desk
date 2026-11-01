@@ -310,6 +310,7 @@ async def test_counts_on_another_question_never_back_hours_through_rules(proposa
     ("We repair plumbing. We're open 9am to 5pm weekdays.", True),
     ("We repair plumbing, 9 to 5 on weekdays.", True),
     ("We repair plumbing. Our 9-person team runs 5 vans.", False),
+    ("We repair plumbing with a 5-9 person crew.", False),
 ])
 async def test_off_topic_hours_are_the_owners_only_as_stated_times(proposals, model, engine, text, owned):
     from tests.api.test_setup_questions import answer, turn
@@ -347,6 +348,21 @@ async def test_off_topic_hours_are_the_owners_only_as_stated_times(proposals, mo
 ])
 def test_owner_supports_off_topic_hours_only_as_stated_times(owner_text, supported):
     window = [HoursAnswer(days=["mon"], start="09:00", end="17:00")]
+    assert setup.owner_supports("hours", window, owner_text, stated=True) is supported
+
+
+@pytest.mark.parametrize("start,end,owner_text,supported", [
+    # A range backs hours only from its start to its end: counts run upward, opening hours from high to low.
+    ("08:00", "18:00", "Most installs take 6-8 hours.", False),
+    ("09:00", "17:00", "We send a 5-9 person crew.", False),
+    ("09:00", "17:00", "Jobs take 5 to 9 days.", False),
+    ("09:00", "17:00", "9 to 5", True),
+    ("09:00", "17:00", "9-17 on weekdays", True),
+    ("09:00", "17:00", "from 9 until 5", True),
+    ("08:00", "18:00", "8am-6pm", True),
+])
+def test_off_topic_hour_ranges_run_from_start_to_end(start, end, owner_text, supported):
+    window = [HoursAnswer(days=["mon"], start=start, end=end)]
     assert setup.owner_supports("hours", window, owner_text, stated=True) is supported
 
 
