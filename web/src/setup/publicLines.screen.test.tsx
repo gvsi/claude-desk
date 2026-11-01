@@ -283,12 +283,15 @@ it.each([
   expect((save.element() as HTMLButtonElement).disabled).toBe(true);
   input.setSelectionRange(text.length, text.length);
   await userEvent.keyboard('{Backspace}');
-  expect(input.value).toBe('😀' + 'x'.repeat(limit - 1));
-  expect((save.element() as HTMLButtonElement).disabled).toBe(true);
-  await userEvent.keyboard('{Backspace}');
-  expect(input.value).toBe('😀' + 'x'.repeat(limit - 2));
+  const edited = '😀' + 'x'.repeat(limit - 1);
+  expect(input.value).toBe(edited);
+  expect(Array.from(input.value)).toHaveLength(limit);
   expect((save.element() as HTMLButtonElement).disabled).toBe(false);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
+  await save.click();
+  await expect.element(field).not.toBeInTheDocument();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine').at(-1)?.body).toEqual({ key, text: edited });
+  await expect.element(screen.getByText(edited, { exact: true })).toBeVisible();
 });
 
 it('disables Save for empty and whitespace-only text without sending a write', async () => {

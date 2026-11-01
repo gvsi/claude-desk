@@ -44,7 +44,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
   const limit = publicLineLimit(editingKey ?? '');
-  const invalid = text.trim() === '' || text.length > limit;
+  const invalid = text.trim() === '' || Array.from(text).length > limit;
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
   useEffect(() => {
