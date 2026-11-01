@@ -225,16 +225,18 @@ function everyFileButThisOne(): string[] {
 }
 
 // The Claude Desk mark's fixed colors and its parts' classes, only in the mark's folder; clay, the
-// intro illustration's field, only in the intro dialog's. Unlike the guards above, this one reads every
+// intro illustration's field, the About app icon's field and Claude's writing dots, only in their
+// allowed folders and files. Unlike the guards above, this one reads every
 // text file under `src/`, the design system included, but the token sources and the tables and tests
 // that list every token or prove the design system's own guards.
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
 const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
-// part of the mark (owner, 2026-10-30).
+// part of the mark (owner, 2026-10-30), plus Claude's writing dots and their story's computed color check.
 const CLAY_FOLDERS = ['ds/components/IntroDialog/', MARK_FOLDER] as const;
-const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+const CLAY_FILES = ['ds/components/WritingIndicator/WritingIndicator.css', 'ds/components/WritingIndicator/WritingIndicator.stories.tsx'];
+const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder)) || CLAY_FILES.includes(file);
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
 // A JavaScript name, and a reference to one of `names`: the name itself, or a namespace's member
@@ -1249,8 +1251,11 @@ describe('app source guards', () => {
     for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
       expect(files, file).toContain(file);
     }
-    // Clay's allowlist is two folders: the intro dialog's, and the mark's for the app icon's field.
+    // Clay's allowlist is the intro dialog's and mark's folders, plus the writing dots' CSS and story.
     expect(mayUseClay('ds/components/Mark/Mark.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.stories.tsx')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
     const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
@@ -1259,6 +1264,9 @@ describe('app source guards', () => {
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
     for (const folder of CLAY_FOLDERS) {
       expect(hits(CLAY_PARTS, everything.filter(({ file }) => file.startsWith(folder))).length, folder).toBeGreaterThan(0);
+    }
+    for (const allowed of CLAY_FILES) {
+      expect(hits(CLAY_PARTS, everything.filter(({ file }) => file === allowed)).length, allowed).toBeGreaterThan(0);
     }
     expect(hits(MARK_PARTS, everything.filter(({ file }) => !file.startsWith(MARK_FOLDER)))).toEqual([]);
     expect(hits(CLAY_PARTS, everything.filter(({ file }) => !mayUseClay(file)))).toEqual([]);

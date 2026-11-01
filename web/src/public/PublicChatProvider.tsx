@@ -28,6 +28,7 @@ import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
 import {
   chatReducer,
+  closesHold,
   initialChatState,
   lowerOnly,
   ownerInChatNow,
@@ -753,9 +754,9 @@ class VisitorChat {
         this.set({ cancelling: null });
         return;
       }
-      const applied = isUncertain(err) && (await this.wasResolved(decisionId));
+      const closed = isUncertain(err) && (await this.wasClosed(decisionId));
       if (generation !== this.generation) return;
-      this.set({ cancelling: null, cancelFailed: applied ? null : decisionId });
+      this.set({ cancelling: null, cancelFailed: closed ? null : decisionId });
     }
   }
 
@@ -815,13 +816,13 @@ class VisitorChat {
     }
   }
 
-  /** Whether the conversation holds an outcome for `decisionId`: a lost cancel that went through. */
-  private async wasResolved(decisionId: string): Promise<boolean> {
+  /** Whether approval or an outcome closed this hold before a lost cancel answer was checked. */
+  private async wasClosed(decisionId: string): Promise<boolean> {
     const generation = this.generation;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
       if (generation === this.generation) this.observeSession(transcript.state);
-      return transcript.items.some((item) => item.event?.type === 'resolved' && item.event.decision_id === decisionId);
+      return transcript.items.some((item) => closesHold(item.event) && item.event.decision_id === decisionId);
     } catch {
       return false;
     }

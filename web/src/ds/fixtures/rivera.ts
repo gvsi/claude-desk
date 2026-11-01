@@ -4,6 +4,8 @@
 // are the kernel's visitor templates, word for word, except that an executed receipt has its tool's
 // own line (`executedLine` in receipts.ts).
 
+import type { AnyToolName } from '../../api/views.ts';
+
 import type {
   CardBlock,
   CardOption,
@@ -25,7 +27,6 @@ import type {
   SessionState,
   SseEvent,
   StatusEvent,
-  ToolName,
   ToolProfile,
   VerifyStarted,
 } from '../../api/contracts';
@@ -1595,7 +1596,7 @@ function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<Chang
 }
 
 /** Each of Rivera's rule targets' effects, as the master plan's tool table lists them. */
-const TOOL_EFFECTS: Partial<Record<ToolName, Effect[]>> = {
+const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
   'native.quote': ['change'],
   'native.book': ['change'],
   'native.release_document': ['private_data', 'send_message'],

@@ -41,6 +41,8 @@ const BRAND = {
 
 export interface ConnectorIconProps {
   icon: ConnectorIconName;
+  /** Overrides the connector mark with a built-in glyph tile. */
+  glyph?: IconName;
   /**
    * `page` (48 px, a connector's own page), `section` (36 px, the hub and cards) or `inline` (in a line
    * of meta: 24 px for a built-in tile, 20 px for a brand mark, which fills its box).
@@ -53,9 +55,9 @@ export interface ConnectorIconProps {
  * line icon on a `fill-secondary` tile; a third-party connector's own mark, in its brand's color, with
  * no tile. An icon this build doesn't know shows an empty built-in tile.
  */
-export function ConnectorIcon({ icon, size }: ConnectorIconProps) {
-  const brand = Object.hasOwn(BRAND, icon) ? BRAND[icon as keyof typeof BRAND] : null;
-  const line = Object.hasOwn(BUILT_IN, icon) ? BUILT_IN[icon as keyof typeof BUILT_IN] : null;
+export function ConnectorIcon({ icon, glyph, size }: ConnectorIconProps) {
+  const brand = glyph === undefined && Object.hasOwn(BRAND, icon) ? BRAND[icon as keyof typeof BRAND] : null;
+  const line = glyph ?? (Object.hasOwn(BUILT_IN, icon) ? BUILT_IN[icon as keyof typeof BUILT_IN] : null);
   return (
     <span className={`cd-connector-icon cd-connector-icon--${size} cd-connector-icon--${brand ? 'brand' : 'built-in'}`} aria-hidden="true">
       {brand ? (

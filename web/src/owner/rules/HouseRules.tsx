@@ -13,7 +13,6 @@ import {
   Notice,
   PageHeader,
   ToolRulesCard,
-  type RuleRowProps,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
@@ -21,7 +20,8 @@ import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
-import { DEFAULT_SIDE } from './changeRows.ts';
+import { BusinessJobs } from './BusinessJobs.tsx';
+import { defaultRow } from './defaultRow.ts';
 import { hubSections, toolFallback, toolRuleRows, type HubSection } from './hub.ts';
 import { peopleQuery, rulesQuery } from './RuleDraftReview.tsx';
 import { RULES_TITLE } from './RulesPage.tsx';
@@ -29,11 +29,6 @@ import { RULES_TITLE } from './RulesPage.tsx';
 import './HouseRules.css';
 
 const TITLE = 'All rules';
-
-/** A tool no rule of the owner's covers: the default ask, in the house rules' words. */
-function defaultRow(tool: string): RuleRowProps {
-  return { rule: { card_id: `default:${tool}`, mode: DEFAULT_SIDE.mode, reason: DEFAULT_SIDE.reason }, words: [...DEFAULT_SIDE.words] };
-}
 
 /**
  * One connector's tools, each with every rule that governs it, read-only; each tool's name and line
@@ -108,6 +103,7 @@ export function HouseRules() {
             {failure.line}
           </Notice>
         )}
+        <BusinessJobs view={view} people={people.data ?? null} />
         {hubSections(view, people.data ?? null).map((section) => (
           <ConnectorRules key={section.connector.id} deskId={deskId} section={section} view={view} people={people.data ?? null} />
         ))}
