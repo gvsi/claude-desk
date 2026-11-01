@@ -64,6 +64,7 @@ from desk.contracts import Decision, DecisionState
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
 OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity
 LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activity this recent
+VISITOR_LINE_MAX = 200                             # a conversation's glimpse of the visitor's words, in characters
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
 KIND_ORDER = {"turned_down": 0, "booking": 1, "lead": 2, "answer": 3}
@@ -135,17 +136,29 @@ async def people(ctx: OwnerCtx, desk_id: str) -> People:
                   await ctx.ro.rows("leads", desk_id=desk_id))
 
 
-async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str]) -> dict[str, str]:
-    """What each session's visitor (or visiting agent) wrote last."""
+async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str],
+                     kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, str]:
+    """What each session's visitor (or visiting agent) wrote last: its newest row of `kinds`, read for every session
+    in one query."""
     wanted = sorted(set(session_ids))
     if not wanted:
         return {}
-    rows = await ctx.ro.conn.execute(
-        select(MESSAGES.c.session_id, MESSAGES.c.text)
-        .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
-               MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(VISITOR_TEXT))
-        .order_by(MESSAGES.c.n))
-    return {session_id: text for session_id, text in rows}          # the last row of each session stays
+    newest = (select(func.max(MESSAGES.c.n))
+              .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                     MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(kinds))
+              .group_by(MESSAGES.c.session_id))
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(MESSAGES.c.n.in_(newest)))
+    return dict(rows.all())
+
+
+def visitor_line(text: str | None) -> str | None:
+    """A visitor's message as the owner's one-line glimpse of it: whitespace runs collapsed to single spaces and
+    trimmed, and past `VISITOR_LINE_MAX` characters cut to the first 199 and "…". Nothing else is changed: it stays
+    the visitor's untrusted text. None when nothing is left."""
+    line = " ".join((text or "").split())
+    if len(line) > VISITOR_LINE_MAX:
+        return line[:VISITOR_LINE_MAX - 1] + "…"
+    return line or None
 
 
 async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state: DecisionState,
@@ -798,7 +811,8 @@ async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Repo
 
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
-    activity first."""
+    activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
+    visitor typed (`visitor_line`); an agent's carries none."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -811,6 +825,9 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         decided = utc(row["created_at"])
         if row["session_id"] not in latest or utc(latest[row["session_id"]]) < decided:
             latest[row["session_id"]] = decided
+    visitors = [session_id for session_id, row in who.sessions.items()
+                if session_id in latest and row["kind"] == "visitor" and not row["preview"]]
+    said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -818,7 +835,8 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
             mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
-            outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"]))
+            outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
+            latest_visitor_text=visitor_line(said.get(session_id))))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

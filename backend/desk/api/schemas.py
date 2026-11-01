@@ -388,7 +388,10 @@ class NeedsYouItem(BaseModel):
 class ConversationSummary(BaseModel):
     """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
     anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
-    preview."""
+    preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+    whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
+    never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
+    written yet."""
 
     session_id: str
     kind: ActorKind
@@ -398,6 +401,7 @@ class ConversationSummary(BaseModel):
     last_activity: AwareDatetime
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
+    latest_visitor_text: str | None
 
 
 class OwnerTranscript(BaseModel):

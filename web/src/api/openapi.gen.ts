@@ -314,7 +314,10 @@ export interface ConnectorProposal {
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview.
+ * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
+ * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
+ * written yet.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -327,6 +330,7 @@ export interface ConversationSummary {
     [k: string]: number;
   };
   owner_preview: boolean;
+  latest_visitor_text: string | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.

@@ -983,6 +983,41 @@ async def test_this_week_handled_versus_stepped_in(app, browser, fake, kernel_ht
         "conversations": 0, "stepped_in": 0, "handled": 0}
 
 
+async def test_conversations_carry_the_visitors_latest_words(scene, clock):
+    at = local(2026, 10, 30, 8, 57)                                    # every chat is live at 9:00
+    chat = await scene.visitor(at)
+    await scene.text(chat, at, "Do you fix leaks?")
+    await scene.text(chat, at + timedelta(minutes=1), "  My water\n\theater   is leaking,\r\n can someone come today?  ")
+    await scene.reply(chat, at + timedelta(minutes=2))                 # Claude's reply, newer, is never the line
+    long = await scene.visitor(at)
+    await scene.text(long, at, "Leak " + "x" * 245)                    # 250 characters
+    exact = await scene.visitor(at)
+    await scene.text(exact, at, "y" * 200)
+    preview = await scene.visitor(at, preview=True)                     # the owner's own preview
+    await scene.text(preview, at, "Testing my own Desk")
+    quiet = await scene.visitor(at)                                     # only Claude has written
+    await scene.reply(quiet, at)
+    scene.fake.now = at                                                 # another person's agent
+    agent, _ = scene.fake._new_session(scene.owner.copy_id, scene.owner.desk_id, "agent")
+    scene.fake.flush()
+    agent_ids = Ids(copy_id=scene.owner.copy_id, desk_id=scene.owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", at, text="Book the earliest visit for Alex Kim.")
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = {summary["session_id"]: summary
+              for summary in (await owner.get(f"desks/{owner.desk_id}/conversations")).json()}
+    live = {summary["session_id"]: summary
+            for summary in (await owner.get(f"desks/{owner.desk_id}/today")).json()["live"]}
+
+    expected = {chat.session_id: "My water heater is leaking, can someone come today?",
+                long.session_id: ("Leak " + "x" * 245)[:199] + "…", exact.session_id: "y" * 200,
+                preview.session_id: None, quiet.session_id: None, agent.session_id: None}
+    assert {session_id: listed[session_id]["latest_visitor_text"] for session_id in expected} == expected
+    assert len(listed[long.session_id]["latest_visitor_text"]) == 200
+    assert {session_id: live[session_id]["latest_visitor_text"] for session_id in expected} == expected
+
+
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     # Two quotes a second apart, then a booking: the second quote backs it.
     two_quotes = await scene.visitor(local(2026, 10, 29, 10))
