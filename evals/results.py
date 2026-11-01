@@ -861,6 +861,7 @@ def _check_unarmed(rev: str, base: str, root: Path) -> None:
             rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
                 else RecordedRates(history=[])
             landed = load_landed(tree / LANDED_PATH)
+            load_waivers(tree)
         except (OSError, ValueError) as error:
             raise CheckFailed(f"{whose} eval files don't load: {error}") from None
         try:
@@ -888,7 +889,7 @@ def _check_waiver_history(rev: str, base: str, root: Path) -> None:
             raise CheckFailed(f"{at}'s {WAIVERS_PATH} doesn't load: {error}") from None
         if not isinstance(entries, list):
             raise CheckFailed(f"{at}'s waivers.json isn't a list")
-        histories.append(entries)
+        histories.append([json.dumps(entry, sort_keys=True, ensure_ascii=False) for entry in entries])
     before, after = histories
     if after[:len(before)] != before:
         raise CheckFailed(f"waivers.json rewrites the history {base} holds; it only grows at its end")
