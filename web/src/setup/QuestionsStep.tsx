@@ -4,11 +4,13 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
+import { GrowingReply, settledWords } from '../lib/GrowingReply.tsx';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
 import { isCard, liveChoices } from './conversation.ts';
 import { SetupChoices } from './SetupChoices.tsx';
 import './SetupConversation.css';
+import { useSetupStream } from './setupStream.ts';
 import { useSetupWork } from './useSetupWork.ts';
 
 /** Plan 02's limit on an answer. */
@@ -99,7 +101,13 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const busy = state.busy === true;
   const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
   const blocked = busy || sending !== null || deciding !== null || suggesting || retrying || consenting !== null;
-  const panel = live && !closing && !asking && !dismissed.has(live.index) ? live : null;
+  // A turn's request is out (a decision's stays set while its turn runs busy), and the turn is
+  // followed as it is written from then until the interview is no longer busy.
+  const inFlight = sending !== null || consenting !== null || suggesting || (deciding !== null && !busy);
+  const stream = useSetupStream(id, !closing && (busy || inFlight), inFlight, reread);
+  const growing = stream.growing;
+  // The question panel and its choices show once the turn is saved, never while its reply is written.
+  const panel = live && !closing && !asking && !dismissed.has(live.index) && growing === null ? live : null;
   const closePanel = () => {
     if (live) setDismissed((previous) => new Set([...previous, live.index]));
   };
@@ -390,8 +398,16 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
           </Fragment>
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
-        {sending !== null || busy || deciding !== null || suggesting ? <WritingIndicator language="en" /> : null}
-        {consentBusy ? (
+        {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved turn replaces. */}
+        {growing?.labels.map((label) => <ToolLabel key={label.read} text={label.text} />)}
+        {growing !== null && settledWords(growing.text) !== '' ? (
+          <div className="cd-claude-message cd-setup-growing" lang="en" aria-busy="true">
+            <GrowingReply text={growing.text} streaming />
+          </div>
+        ) : sending !== null || busy || deciding !== null || suggesting ? (
+          <WritingIndicator language="en" />
+        ) : null}
+        {consentBusy && growing === null ? (
           <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>
         ) : null}
       </Transcript>
