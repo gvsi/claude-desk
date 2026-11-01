@@ -78,11 +78,17 @@ const receiptWords = (version: number) => `Confirmed. Version ${version} of your
 const SELECTED = 'rgb(60, 57, 47)';
 const CLEAR = 'rgba(0, 0, 0, 0)';
 
-/** The tool row on Rules named `name`. */
+/** The rows on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then each connector's tools. */
+function landingRows(root: HTMLElement): { name: string; row: HTMLElement }[] {
+  return [...root.querySelectorAll<HTMLElement>('.cd-business-jobs .cd-tool-rules, .cd-connector-section__tool')].map((row) => ({
+    name: row.querySelector('.cd-tool-rules__tool-name, .cd-connector-section__tool-name')?.textContent ?? '',
+    row,
+  }));
+}
+
+/** The row on Rules named `name`: a connector's tool, or one of the Desk's own jobs. */
 function toolRow(root: HTMLElement, name: string): HTMLElement {
-  const row = [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find(
-    (li) => li.querySelector('.cd-connector-section__tool-name')?.textContent === name,
-  );
+  const row = landingRows(root).find((each) => each.name === name)?.row;
   if (!row) throw new Error(`no ${name} row on Rules`);
   return row;
 }
@@ -414,11 +420,11 @@ function showsOutsideShapes(root: HTMLElement, selectorOrWords: string): boolean
 /** Text that starts with `words`, whatever follows them. */
 const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
-/** The names of the tool rows on Rules that say they were updated, in the page's order. */
+/** The names of the rows on Rules (jobs and tools) that say they were updated, in the page's order. */
 function updatedRows(root: HTMLElement): string[] {
-  return [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')]
-    .filter(saysUpdated)
-    .map((row) => row.querySelector('.cd-connector-section__tool-name')?.textContent ?? '');
+  return landingRows(root)
+    .filter(({ row }) => saysUpdated(row))
+    .map(({ name }) => name);
 }
 
 describe('a preset or a new payment limit', () => {
@@ -444,7 +450,7 @@ describe('a preset or a new payment limit', () => {
     expect(desk().policy.version).toBe(version);
     await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
     // Every row whose rules it changed lands, and those it left alone (the starter's own) don't.
-    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
+    const changed = ['Emergency callback', 'Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
     for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
     for (const name of ['Find open times', 'Save a lead', 'Request a callback']) expect(fillOf(toolRow(root, name)), name).toBe('none');
@@ -739,6 +745,9 @@ describe('focus once a review Rules opened returns', () => {
   });
 
   it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
+    // A Desk with no jobs: Rules' reading state, which shows until the new version is read, draws
+    // none, so on a Desk with them Rules would come back off its place by the jobs drawn above it.
+    desk().tools = desk().tools.filter((row) => row.source !== 'business');
     const { screen, main, place } = await reviewPaymentsLimit();
     await press(screen, 'Confirm change');
 
@@ -990,7 +999,7 @@ describe('under StrictMode, as the app renders', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
+    const changed = ['Emergency callback', 'Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
     expect(root.textContent).not.toContain('Your rules are updated.');
   });
