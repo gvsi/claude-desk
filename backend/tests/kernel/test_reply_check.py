@@ -2796,9 +2796,9 @@ def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_a
 def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():
     """Each free word is looked up once among the names' repeats, not once per repeat."""
     prose = "Your Free consult is free. " * 800
-    started = time.perf_counter()
+    started = time.process_time()      # CPU time: the scan is pure computation, and wall time varies with load
     found = reply_check.scan_prose(prose, approved_free_names=FREE_CONSULT * 20)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert [v.span for v in found] == ["free"] * 800
 
 
