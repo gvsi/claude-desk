@@ -12,7 +12,7 @@ contract test, before the task that first uses them.
 - Signatures are `"fake:" + sha256 hex` of the fields the kernel signs. Times come from `state.now`.
 - Every non-2xx body is a `KernelError`; a body that isn't the route's request model is 422 `invalid`;
   every answer is checked against the route's response model before it leaves.
-- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `verify`, `never`,
+- Knobs for tests: `fail`, `drop_response`, `set_mode`, `script`, `violation`, `soft_checks`, `verify`, `never`,
   `lower_link_limit`, `reconcile`, `in_flight` (with `finish`), `owner_verdict` (an owner's say, as
   `POST /owner/messages` answers it) and `calls` (with `called(route)`); `now` drives expiry and the 24-hour idle
   close. A `"timeout"` or `"connect"` failure is raised as httpx's own exception, which reaches the client through
@@ -825,7 +825,15 @@ FACTLESS_TEMPLATES = ("handoff", "verify_prompt")
 OTHER_LANGUAGE_WORDS = {"bonjour", "merci", "je", "vous", "nous", "olá", "obrigado", "você", "ciao", "grazie",
                         "danke"}
 SPANISH_WORDS = {"hola", "gracias", "puedo", "usted", "ayudar", "ayudarle", "con", "para", "buenos", "buenas", "días",
-                 "tardes", "quiero", "necesito", "cuánto", "cuando", "está", "estoy"}
+                 "tardes", "quiero", "necesito", "cuánto", "cuando", "está", "estoy", "el", "la", "los", "las",
+                 "un", "una", "claro", "aquí", "soy", "es", "hay", "su", "sus", "tu", "te"}
+ENGLISH_WORDS = frozenset("""
+    the an and or but of to in on at for with from by about into is are was were be been being am can could will
+    would should may might must have had does did this that these those there here what which who whom when where
+    how why i you she it we they my your his her its our their him us them not if just only also any some all more
+    very please thanks thank hello hi yes sure help need want like know get let see look call down up out off then
+    now until after before than too
+""".split())
 # The cards the fake renders plainly, and a verdict's status lines in the kernel's own words (its `reply_checked`,
 # `reply_handed_off`, `owner_said` and `owner_say_blocked` lines).
 REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply checked against {owner}'s rules",
@@ -842,11 +850,11 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
 # The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
 CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
-NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
+NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent_sign", re.compile(r"%")))
 
 
 def detect_language(prose: str) -> str:
-    """`en`, `es`, `other` (prose opening "Bonjour", or in another language) or `none` (no words)."""
+    """A small language stub: supported markers, positive other markers, or unmarked Latin prose."""
     words = re.findall(r"[^\W\d_]+", prose.lower())
     if not words:
         return "none"
@@ -854,6 +862,8 @@ def detect_language(prose: str) -> str:
         return "other"
     if set(words) & SPANISH_WORDS or any(mark in prose for mark in "ñ¿¡"):
         return "es"
+    if not set(words) & ENGLISH_WORDS:
+        return "unmarked" if len(words) >= 4 else "none"
     return "en"
 
 
@@ -1466,6 +1476,7 @@ class FakeKernelState:
         self._drops: dict[str, int] = {}
         self._scripts: dict[str, Script] = {}
         self._forced: list[str] = []                   # violation kinds the next reply checks carry
+        self._soft_checks: list[str] = []             # scripted soft-check tries, one per reply check that reaches it
         self._in_flight: dict[str, int] = {}           # tool -> executions left that find themselves running
         self._args: dict[str, dict] = {}                # action_id -> the call's args, as the action row binds them
         self.agent_keys: dict[str, AgentKey] = {}       # agent_key_id -> its public key
@@ -1679,6 +1690,17 @@ class FakeKernelState:
         """The next `times` reply checks carry a `kind` violation (any `Violation.kind`, `canary` included)."""
         Violation(kind=kind, span="", rule_id="fake")           # refuses an unknown kind
         self._forced.extend([kind] * times)
+
+    def soft_checks(self, *results: str) -> None:
+        """Stage the soft check's tries, one for each later reply check that reaches it (clean prose, as the kernel's
+        step 5 runs it): `pass`, `flag` (`soft.promise`), `denies_ai` (`soft.denies_ai`), or a try with no verdict,
+        `error`, `timeout`, `unparsable` or `refusal`, which is `check_unavailable` (`soft.unavailable`) with no
+        recheck inside the check, as the kernel's one try; a first attempt blocked by it is rewritable, and the final
+        check reads its own staged try. A check with nothing staged passes."""
+        if any(result not in {"pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"}
+               for result in results):
+            raise ValueError("unknown soft-check result")
+        self._soft_checks.extend(results)
 
     def called(self, route: str) -> list[FakeCall]:
         keys = route_keys(route)
@@ -3071,7 +3093,7 @@ class FakeKernelState:
         return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff, approved=approved)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
-        """Check Claude's draft; prose-only failures keep checked cards, other failures hand off. An agent's
+        """Check Claude's draft; a prose-only failure may keep checked cards. An agent's
         check may end its nonce's turn (`_end_agent_turn`)."""
         draft = body.draft
         session, desk = self.session_call(request, draft.session_id)
@@ -3087,12 +3109,14 @@ class FakeKernelState:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
-                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [],
+                                 [Violation(kind="session_paused", span="", rule_id="session_paused")], [],
                                  final=final)
         detected = detect_language(draft.prose)
         violations = []
         if detected == "other":
             violations.append(Violation(kind="unsupported_language", span=draft.prose[:40], rule_id="language"))
+        elif detected == "unmarked":
+            violations.append(Violation(kind="uncertain_language", span=draft.prose[:40], rule_id="language_uncertain"))
         elif detected in ("en", "es"):
             language = session.last_language = detected
             self._put_session(session)
@@ -3114,6 +3138,12 @@ class FakeKernelState:
             if fact_ids:
                 violations.append(Violation(kind="unknown_fact", span="policy", rule_id="policy_combined",
                                             fact_ids=fact_ids))
+        if not violations and draft.prose.strip() and self._soft_checks:
+            result = self._soft_checks.pop(0)              # one try, no recheck (the kernel's `soft_promises`)
+            if result != "pass":
+                kind = "soft_promise" if result in {"flag", "denies_ai"} else "check_unavailable"
+                rule_id = {"flag": "soft.promise", "denies_ai": "soft.denies_ai"}.get(result, "soft.unavailable")
+                violations.append(Violation(kind=kind, span=draft.prose[:40], rule_id=rule_id))
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
                              [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
@@ -3144,29 +3174,29 @@ class FakeKernelState:
                 violations: list[Violation]) -> RenderedBlock | None:
         """The clause's card, or None after adding the violation it earns."""
         def refuse(kind: str, rule_id: str) -> None:
-            violations.append(Violation(kind=kind, span=clause.template, fact_ids=[clause.fact_id or ""][:1],
-                                        rule_id=rule_id))
+            violations.append(Violation(kind=kind, span=clause.template, rule_id=rule_id,
+                                        fact_ids=[clause.fact_id] if clause.fact_id is not None else []))
 
         template = clause.template
         if template in KERNEL_ONLY_TEMPLATES:
             return refuse("unknown_fact", "kernel_only_template")
         if template in FACTLESS_TEMPLATES:
             if clause.fact_id is not None:
-                return refuse("unknown_fact", "template_mismatch")
+                return refuse("unknown_fact", "names_no_fact")
             key = "handoff" if template == "handoff" else "verify"
             text = REPLY_TEXT[language][key].format(owner=desk.owner_display_name)
             return RenderedBlock(kind="card", template=template, text=text, title=text)
         fact = desk.facts.get(clause.fact_id or "")
         if fact is None:
-            return refuse("unknown_fact", "unknown_fact")
+            return refuse("unknown_fact", "no_such_fact")
+        if not self._readable(session, fact):
+            return refuse("unentitled_fact", "not_a_reader")
         named = {"hours": fact.fact_id == "charter:hours", "contact": fact.fact_id == "charter:contact",
                  "policy": fact.fact_id.startswith("charter:policy:")}
         if fact.kind != TEMPLATE_KINDS.get(template) or not named.get(template, True):
             return refuse("unknown_fact", "template_mismatch")
         if not self._current(fact):
-            return refuse("stale_fact", "stale_fact")
-        if not self._readable(session, fact):
-            return refuse("unentitled_fact", "unentitled_fact")
+            return refuse("stale_fact", "not_current")
         block = self._render(desk, template, fact, language)
         if template == "contact" and not valid_public_contact(block.text):
             return refuse("unknown_fact", "contact_format")
@@ -3207,7 +3237,8 @@ class FakeKernelState:
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
-        """Step 7: keep checked cards on prose-only failures, else hand off; ledger and sign the verdict. An
+        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
+        clause when the draft has one, else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3236,7 +3267,9 @@ class FakeKernelState:
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
-            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids, "final": final},
+            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids,
+            "dropped": [],                  # cards refused at signing: the fake rechecks none
+            "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
             "handed_off" if not shown or any(block.template == "handoff" for block in blocks) else "checked")
