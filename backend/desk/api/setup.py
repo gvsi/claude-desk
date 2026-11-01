@@ -265,10 +265,10 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk import contracts
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
-    MONEY_EFFECTS,
     MONEY_TOOLS,
     BusinessSeed,
     CalendarSlot,
@@ -2717,7 +2717,7 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
 UTILITY_TOOLS = frozenset(card.applies_to for card in UTILITY_CARDS)
 EFFECT_TARGETS = tuple(f"effect:{effect}" for effect in get_args(Effect))
-MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in MONEY_EFFECTS}
+MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in contracts.MONEY_EFFECTS}
 # Where each tool a situation can call acts (as its profile says), for the probe's stand-in resource.
 RESOURCE_KINDS: dict[str, str] = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
