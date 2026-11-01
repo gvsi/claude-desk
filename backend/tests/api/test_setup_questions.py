@@ -1911,6 +1911,52 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
     assert all(entry.get("content") is None for entry in reads if entry["text"].startswith("Couldn't"))
 
 
+async def test_exhausted_homework_and_stalled_understanding_still_ask_the_first_question(
+    app, browser, kernel_http, model, engine, monkeypatch,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE, search_queries=["salon intake", "salon cancellations"])
+    homework = desk_setup._homework
+    model_cancelled = asyncio.Event()
+    budget_used = asyncio.Event()
+
+    async def blocked_read(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    async def exhausted_homework(*args, **kwargs):
+        started = asyncio.get_running_loop().time()
+        entries = await homework(*args, **kwargs)
+        assert asyncio.get_running_loop().time() - started >= desk_setup.HOMEWORK_BUDGET_S
+        assert all(entry.content is None for entry in entries)
+        budget_used.set()
+        return entries
+
+    async def stalled_understanding(request):
+        assert budget_used.is_set()
+        assert 0 < request.timeout_s <= 0.02
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            model_cancelled.set()
+            raise
+
+    monkeypatch.setattr(desk_setup, "execute_setup_tool", blocked_read)
+    monkeypatch.setattr(desk_setup, "_homework", exhausted_homework)
+    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.2)
+    monkeypatch.setattr(desk_setup, "UNDERSTAND_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", 15)
+    monkeypatch.setattr(desk_setup, "TURN_WAIT_S", 15)
+    model.add(stalled_understanding)
+    state = await consent(owner, state["interview_id"], True, model)
+    assert budget_used.is_set() and model_cancelled.is_set()
+    assert len(model.requests) == 2  # start and one timed-out understanding, without a retry
+    assert state["consent"] is True and state["question"] == "what_you_do" and not state["busy"]
+    row = await stored(engine, state["interview_id"])
+    assert row["transcript"][-1]["question"] == "what_you_do"
+    assert row["transcript"][-1]["text"] == question_text("what_you_do", "trade")
+    assert not any("suggested" in entry for entry in row["transcript"])
+
+
 async def test_a_search_execute_can_outlast_the_default_kernel_timeout(
     app, browser, fake, kernel_http, model, monkeypatch,
 ):
