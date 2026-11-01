@@ -570,13 +570,15 @@ function consultantProposals(): ProposalCard[] {
 export const CPA_COPY = {
   opening: [
     'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping for individuals and small businesses in San Jose. New clients start with a free 20-minute consult, and you price each engagement after it.',
-    'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now. We’ll take them one at a time, and you can change anything later.',
+    'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.',
     'One thing first, so I describe Chen & Co. the right way.',
   ],
   first: 'Who do you work with most?',
   clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
   consult: 'Got it. First, intro calls. To book one I need to know when you’re free, so I’ll use your opening hours from your website, Monday to Friday, 9 to 6.',
   calendarConnected: 'Connected. Now the intro call.',
+  connectorPending: 'Got it. You can connect it now or leave it for later.',
+  statusIntro: 'Clients also ask where their return stands.',
   intake: 'Great, I’ll set it up this way. Next: the questions new clients answer before their call.',
   updated: 'Sure. Here’s the updated version.',
   retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
@@ -628,6 +630,7 @@ function nextConsultant(interview: Interview): void {
       : job?.job === 'intake' ? CPA_COPY.intake
       : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe') ? CPA_COPY.stripeConnected : CPA_COPY.retainer
       : next.connector?.app === 'stripe' ? CPA_COPY.stripe
+      : job?.job === 'status' ? CPA_COPY.statusIntro
       : job?.how ?? next.connector!.why;
     if (intro) say(interview, 'claude', intro);
     interview.state.messages.push({ role: 'claude', text: '', choices: [], card: next });
@@ -782,7 +785,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       nextConsultant(interview);
     } else {
       // Questions and unknown words leave the proposal pending, with no permission granted.
-      say(interview, 'claude', card.job?.how ?? card.connector!.why);
+      say(interview, 'claude', card.job?.how ?? CPA_COPY.connectorPending);
     }
     return;
   }

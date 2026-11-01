@@ -103,6 +103,29 @@ async function cpaAt(kind: string): Promise<SetupState> {
 }
 
 describe('setup consultant run and decisions', () => {
+  it('keeps_an_unsupported_connector_answer_pending_with_a_neutral_reply', async () => {
+    let state = await cpaAt('google_calendar');
+    const pending = state.pending_card;
+    const card = structuredClone(state.messages.at(-1)!.card!);
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: pending, text: 'We actually use Outlook…' });
+    expect(state.pending_card).toBe(pending);
+    expect(state.messages.find(({ card }) => card?.proposal_id === pending)?.card).toEqual(card);
+    expect(state.messages.at(-1)).toMatchObject({ role: 'claude', text: 'Got it. You can connect it now or leave it for later.', card: null });
+  });
+
+  it('introduces_the_status_card_without_repeating_its_line', async () => {
+    const state = await cpaAt('status');
+    const card = state.messages.at(-1)!.card!;
+    expect(state.messages.at(-2)).toMatchObject({ role: 'claude', text: 'Clients also ask where their return stands.', card: null });
+    expect(state.messages.at(-2)?.text).not.toBe(card.job?.how);
+  });
+
+  it('does_not_assume_agreement_in_the_cpa_opening', async () => {
+    let state = await startState();
+    state = await setupState('setupConsent', state.interview_id, { allow: true });
+    expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
+  });
+
   it('names_the_cpa_booking_free_intro_call', async () => {
     const state = await cpaAt('schedule');
     expect(state.messages.at(-1)?.card?.job?.config).toEqual({ block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 });
