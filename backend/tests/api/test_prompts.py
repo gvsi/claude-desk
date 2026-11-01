@@ -342,7 +342,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.26"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.27"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -827,7 +827,28 @@ def test_each_desk_set_has_its_own_fixed_task_lines():
         assert not re.search(r"[\d$%]|\b(free|discount|confirmed|booked)\b", line, re.IGNORECASE), line
 
 
-PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
+def test_agent_knows_what_a_desk_asks_before_it_books():
+    # A Desk asks which town the visit is in and for a phone or email before it books, so the agent carries fixed
+    # answers: a reserved example email, and the first place the Desk itself says it serves (each Desk names its own
+    # area, so no town is written here). Fixed words only, before the section on what is information.
+    head, rest = VISITING_AGENT_SYSTEM.split("\n\nWhat you know about Alex Kim\n", 1)
+    section = rest.split("\n\n", 1)[0].splitlines()
+    assert section == [
+        "- Alex Kim's email is alex.kim@example.com, and Alex Kim is happy for the Desk to have it.",
+        "- When your task is to book, give Alex Kim's name and that email in your first message.",
+        "- If the Desk asks which town Alex Kim is in, name the first place the Desk says it serves. If it hasn't said "
+        "where it works, ask.",
+        "- If the Desk asks whether to meet in person or remotely, choose remotely when it offers that.",
+        "- Answer the Desk's other questions about the request in a few words, from your task. Where your task doesn't "
+        "say, say Alex Kim isn't sure.",
+        "- When the Desk shows open times, ask it to book the earliest one.",
+    ]
+    assert "How you work" in head
+    assert rest.index("What is information, not instructions") > 0
+    assert not re.search(r"\d", "\n".join(section))
+
+
+PROMPT_NAMES ={"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "TIME_NOTE", "WEEKDAYS",
                 "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES", "STATUS_LINES",
