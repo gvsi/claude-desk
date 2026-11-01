@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import setup
-from desk.api.deps import ApiProblem
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
 from desk.api.prompts import SetupAnswers
 from desk.kernel_api import DeskCharterRequest
@@ -62,6 +61,11 @@ def charter(fake, desk_id):
             if fact.kind == "charter"}
 
 
+def assert_charter_logs(caplog, *messages):
+    # Exact messages prove each outcome is logged once, using keys rather than any claim text.
+    assert [message for message in caplog.messages if message.startswith("setup public charter")] == list(messages)
+
+
 async def test_lost_put_response_restores_stored_charter(lines_setup, engine, fake, monkeypatch, caplog):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])
@@ -83,8 +87,37 @@ async def test_lost_put_response_restores_stored_charter(lines_setup, engine, fa
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert caplog.messages.count("setup public charter restored from stored answers (key=policy:pricing)") == 1
+    assert_charter_logs(caplog, "setup public charter restored from stored answers (key=policy:pricing)")
     assert "Private candidate marker" not in caplog.text
+
+
+@pytest.mark.parametrize("method", ["put", "confirm"])
+async def test_uncertain_put_repair_times_out_and_releases_guard(lines_setup, engine, monkeypatch, caplog, method):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    calls = []
+    original = CredentialView.call
+
+    async def hang_repair(self, route, body=None, **kwargs):
+        if route == "PUT /desks/{id}/charter":
+            calls.append(body)
+            if len(calls) == 2:
+                await asyncio.Event().wait()
+            await original(self, route, body, **kwargs)
+            raise KernelUnavailable(route)
+        return await original(self, route, body, **kwargs)
+
+    monkeypatch.setattr(CredentialView, "call", hang_repair)
+    monkeypatch.setattr(setup, "PUBLIC_CHARTER_REPAIR_TIMEOUT_S", 1)
+    reply = await asyncio.wait_for(request_lines(owner.browser, path, method), 5)
+    assert reply.status_code == 503, reply.text
+    assert len(calls) == 2
+    assert await stored(engine, state["interview_id"]) == before
+    key = "policy:pricing" if method == "put" else None
+    assert_charter_logs(caplog, f"setup public charter restore failed (TimeoutError, key={key})")
+    assert "Quotes before repairs." not in caplog.text
+    assert "We answer questions." not in caplog.text
+    assert (await owner.browser.get(path)).status_code == 200
 
 
 async def test_cancel_during_save_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch):
@@ -166,6 +199,7 @@ async def test_put_saves_owner_text_and_publishes_whole_charter(lines_setup, eng
     assert saved["step"] == "rules"
     assert saved["answers"]["pricing"] == "Quotes before repairs."
     assert saved["answers"]["suggested_fields"] == ["intake", "hours", "price_items", "public_contact"]
+    # Publishing a suggested contact is the known gap tracked by #394; board 14's next step covers it.
     expected = {"contact": "hello@example.test", "policy:about": "Local plumbing help.",
                 "policy:pricing": "Quotes before repairs.", "policy:after_hours": "Leave a message.",
                 "policy:urgent": "Call the emergency services.", "policy:service_area": "Oakland and Berkeley.",
@@ -218,7 +252,7 @@ async def test_refused_how_we_help_is_dropped_for_pricing(lines_setup, engine, f
     assert calls[1]["policy:pricing"] == pricing
     assert "charter:policy:how_we_help" not in charter(fake, state["desk_id"])
     assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == pricing
-    assert caplog.messages.count("setup public charter refused (key=policy:how_we_help)") == 1
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:how_we_help)")
     assert "We answer questions." not in caplog.text
 
 
@@ -244,7 +278,7 @@ async def test_mixed_help_refusal_keeps_editable_line_strict(lines_setup, engine
     assert len(calls) == 1
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert caplog.messages.count("setup public charter refused (key=policy:pricing)") == 1
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:pricing)")
     assert "We answer questions." not in caplog.text
     assert "Quotes before repairs." not in caplog.text
 
@@ -259,7 +293,7 @@ async def test_put_refusal_names_key_without_saving(lines_setup, engine, fake, m
     assert reply.json() == {"error": "line_refused", "key": "policy:pricing", "reason": ["digit", "currency"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert "setup public charter refused" in caplog.text
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:pricing)")
     assert "private marker" not in caplog.text
 
 
@@ -285,8 +319,8 @@ async def test_help_retry_refusal_saves_nothing(lines_setup, engine, fake, monke
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    for key in ("policy:how_we_help", "policy:pricing"):
-        assert caplog.messages.count(f"setup public charter refused (key={key})") == 1
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:how_we_help)",
+                        "setup public charter refused (key=policy:pricing)")
     assert "We answer questions." not in caplog.text
     assert "Written quotes before work." not in caplog.text
 
@@ -312,7 +346,7 @@ async def test_refusal_prefers_the_edited_line(lines_setup, engine, fake, monkey
     assert reply.json() == {"error": "line_refused", "key": "policy:after_hours", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert caplog.messages.count("setup public charter refused (key=policy:after_hours)") == 1
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:after_hours)")
     assert "Private after hours marker" not in caplog.text
 
 
@@ -339,7 +373,8 @@ async def test_refusal_without_detail_is_plain_line_refused(lines_setup, engine,
     assert reply.json() == {"error": "line_refused"}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert caplog.messages.count("setup public charter refused (key=None)") == 1
+    assert_charter_logs(caplog, "setup public charter refused (key=None)")
+    assert "Quotes before repairs." not in caplog.text
 
 
 async def test_failed_save_restores_charter_from_current_stored_answers(lines_setup, engine, fake,
@@ -350,21 +385,19 @@ async def test_failed_save_restores_charter_from_current_stored_answers(lines_se
     original = CredentialView.call
 
     async def record(self, route, body=None, **kwargs):
+        result = await original(self, route, body, **kwargs)
         if route == "PUT /desks/{id}/charter":
             calls.append(body)
-        return await original(self, route, body, **kwargs)
-
-    async def fail_save(*args):
-        # Simulate another process winning the snapshot check: rollback must re-read, not reuse `seen`.
-        async with engine.begin() as conn:
-            await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
-                                   " WHERE interview_id = :id"),
-                               {"patch": json.dumps({"summary": "Updated by another request."}),
-                                "id": state["interview_id"]})
-        raise ApiProblem(409, "conflict")
+            if len(calls) == 1:
+                # Keep _commit real: another writer changes its snapshot after publication, before saving.
+                async with engine.begin() as conn:
+                    await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
+                                           " WHERE interview_id = :id"),
+                                       {"patch": json.dumps({"summary": "Updated by another request."}),
+                                        "id": state["interview_id"]})
+        return result
 
     monkeypatch.setattr(CredentialView, "call", record)
-    monkeypatch.setattr(setup, "_commit", fail_save)
     reply = await owner.browser.put(path, json={"key": "policy:pricing", "text": "Quotes before repairs."})
     assert reply.status_code == 409, reply.text
     assert reply.json() == {"error": "conflict"}
@@ -377,7 +410,10 @@ async def test_failed_save_restores_charter_from_current_stored_answers(lines_se
     assert saved["answers"] == {**before["answers"], "summary": "Updated by another request."}
     assert {fact["claims"][0]["key"]: fact["claims"][0]["value"]
             for fact_id, fact in charter(fake, state["desk_id"]).items() if fact_id != "charter:hours"} == restored
-    assert "setup public charter restored" in caplog.text
+    assert caplog.messages.count("setup public lines save failed (ApiProblem)") == 1
+    assert_charter_logs(caplog, "setup public charter restored from stored answers (key=policy:pricing)")
+    assert "Updated by another request." not in caplog.text
+    assert "Quotes before repairs." not in caplog.text
 
 
 async def test_confirm_owns_only_listed_lines_and_publishes(lines_setup, engine, fake):
@@ -428,7 +464,7 @@ async def test_public_lines_only_at_rules_or_situations(lines_setup, engine, fak
         assert charter(fake, state["desk_id"]) == published
 
 
-async def test_confirm_refusal_names_the_refused_line(lines_setup, engine, fake, monkeypatch):
+async def test_confirm_refusal_names_the_refused_line(lines_setup, engine, fake, monkeypatch, caplog):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])
     published = charter(fake, state["desk_id"])
@@ -438,11 +474,13 @@ async def test_confirm_refusal_names_the_refused_line(lines_setup, engine, fake,
     assert reply.json() == {"error": "line_refused", "key": "policy:intake", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
+    assert_charter_logs(caplog, "setup public charter refused (key=policy:intake)")
+    assert "Tell us what needs fixing." not in caplog.text
 
 
 @pytest.mark.parametrize("limit", ["policy_count_limit", "policy_text_limit"])
 @pytest.mark.parametrize("method", ["put", "confirm"])
-async def test_charter_cap_refusal_has_no_line_key(lines_setup, engine, fake, monkeypatch, limit, method):
+async def test_charter_cap_refusal_has_no_line_key(lines_setup, engine, fake, monkeypatch, caplog, limit, method):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])
     published = charter(fake, state["desk_id"])
@@ -452,6 +490,8 @@ async def test_charter_cap_refusal_has_no_line_key(lines_setup, engine, fake, mo
     assert reply.json() == {"error": "line_refused"}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
+    assert_charter_logs(caplog, "setup public charter refused (key=None)")
+    assert "Quotes before repairs." not in caplog.text
 
 
 @pytest.mark.parametrize("method", ["put", "confirm"])
@@ -478,9 +518,9 @@ async def test_failed_restore_is_logged_once_and_answers_conflict(lines_setup, e
     assert reply.json() == {"error": "conflict"}
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
-    assert "setup public lines save failed (RuntimeError)" in caplog.text
+    assert caplog.messages.count("setup public lines save failed (RuntimeError)") == 1
     key = "policy:pricing" if method == "put" else None
-    assert caplog.messages.count(f"setup public charter restore failed (RuntimeError, key={key})") == 1
+    assert_charter_logs(caplog, f"setup public charter restore failed (RuntimeError, key={key})")
     assert "private save failure marker" not in caplog.text
     assert "private restore failure marker" not in caplog.text
 
