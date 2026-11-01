@@ -90,7 +90,7 @@ interface Interview {
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
-  /** The situations' words for the business the description names (`situationWordsOf`). */
+  /** The words and booking days of the business the description names, for its situations and draft rules (`situationWordsOf`). */
   words: SituationWords;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
   business: string;
@@ -360,11 +360,24 @@ function card(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'who' |
 /** The deposit an agent pays in the situations: within its signed limit, with Claude's second look. */
 const DEPOSIT_CENTS = 2000;
 
+/** The days a rule books on its own. */
+type BookingDays = NonNullable<RuleCard['hours']>['days'];
+const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+
 /**
- * A business's words for the six situations setup tries (`situationsFor`), in their order. Only
- * the words differ between businesses: what each situation tries, plans and gets is the same.
+ * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
+ * the rules its draft names them in. Only the words and the business's own booking days differ
+ * between businesses: what each situation tries, plans and gets is otherwise the same.
  */
 interface SituationWords {
+  /**
+   * The days the bookings rule (card-2) books on its own, in the same hours. A business open on
+   * Saturdays books them too, so its Saturday visitor isn't after hours; the answers still planned
+   * Saturdays to ask first (card-3), which keeps that booking not what they planned.
+   */
+  bookingDays: BookingDays;
+  /** What the bookings rule says it does: its reason, and the reason of each booking it allows. */
+  bookings: string;
   /** A booking on Tuesday afternoon, in the business's hours. */
   weekday: string;
   /** A discount the business doesn't offer. */
@@ -381,6 +394,8 @@ interface SituationWords {
 
 /** Rivera Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
+  bookingDays: WEEKDAYS,
+  bookings: 'Books weekday visits in your hours.',
   weekday: 'A visitor wants a drain cleared on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the service call deposit',
@@ -391,6 +406,8 @@ const PLUMBER_WORDS: SituationWords = {
 
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
 const ANY_BUSINESS_WORDS: SituationWords = {
+  bookingDays: WEEKDAYS,
+  bookings: 'Books weekday times in your hours.',
   weekday: 'A visitor wants to book a time on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the deposit',
@@ -414,6 +431,8 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
   [
     [CPA_FIRM, /\b(?:contab|contador|impuestos)/i],
     {
+      bookingDays: WEEKDAYS,
+      bookings: 'Books weekday consults in your hours.',
       weekday: 'A visitor wants a free consult on Tuesday afternoon',
       discount: 'A visitor asks for 10% off their tax return',
       agentPays: 'the retainer',
@@ -424,8 +443,12 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
   ],
   [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
   [
-    [/\b(?:salons?|hair\w*)\b/i, /\bpeluquer/i],
+    // Whole words only: "hairline cracks" is no salon.
+    [/\b(?:salons?|hair|haircuts?|hairdress(?:er|ers|ing)|hairstylists?)\b/i, /\bpeluquer/i],
     {
+      // Open Tuesday to Saturday, as its description says.
+      bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
+      bookings: 'Books appointments Tuesday to Saturday in your hours.',
       weekday: 'A visitor wants a cut on Tuesday afternoon',
       discount: 'A visitor asks for 10% off a cut and color',
       agentPays: 'the color appointment deposit',
@@ -437,6 +460,8 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
   [
     [/\b(?:apartments?|tenants?|landlords?|departamentos?|inquilinos?)\b/i],
     {
+      bookingDays: WEEKDAYS,
+      bookings: 'Books weekday viewings in your hours.',
       weekday: 'A visitor wants a viewing on Tuesday afternoon',
       discount: "A visitor asks for 10% off the first month's rent",
       agentPays: 'the application fee',
@@ -454,10 +479,11 @@ function situationWordsOf(description: string): SituationWords {
 
 /**
  * The cards setup drafts from the answers: "Ask me first"'s own, then the interview's (ids
- * `card-1`…). With a money limit that allows it, agents pay a deposit on their own after Claude's
- * second look, named as the business names it (`agentPays`).
+ * `card-1`…), in the business's words (`words`): bookings on its own days, and, with a money limit
+ * that allows it, agents paying a deposit on their own after Claude's second look, named as the
+ * business names it.
  */
-function setupCards(capCents: number, agentPays: string): RuleCard[] {
+function setupCards(capCents: number, words: SituationWords): RuleCard[] {
   return [
     ...PRESETS.ask_first.map((c) => ({ ...c })),
     card({ card_id: 'card-1', applies_to: 'native.quote', mode: 'auto', who: 'anyone', reason: 'Quotes from your price list, at list price.' }),
@@ -466,8 +492,8 @@ function setupCards(capCents: number, agentPays: string): RuleCard[] {
       applies_to: 'native.book',
       mode: 'auto',
       who: 'anyone',
-      hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
-      reason: 'Books weekday visits in your hours.',
+      hours: { days: [...words.bookingDays], start: '08:00:00', end: '18:00:00' },
+      reason: words.bookings,
     }),
     card({
       card_id: 'card-3',
@@ -489,7 +515,7 @@ function setupCards(capCents: number, agentPays: string): RuleCard[] {
             who: 'anyone',
             max_amount_cents: DEPOSIT_CENTS,
             review: true,
-            reason: `Agents pay ${agentPays} within their signed limit, checked by the reviewer.`,
+            reason: `Agents pay ${words.agentPays} within their signed limit, checked by the reviewer.`,
           }),
         ]
       : []),
@@ -535,7 +561,7 @@ function situationsFor(cards: readonly RuleCard[], words: SituationWords): Situa
   const add = (title: string, who: Situation['who'], expected: Situation['expected'], p: Probe, r: ProbeResult) =>
     rows.push([{ title, who, probe: p, expected }, r]);
   const weekday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-03T14:00:00-08:00' });
-  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
+  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }));
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
   add(words.discount, 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
   // Planned to happen after Claude's second look: the kernel holds it unless the reviewer agrees.
@@ -554,7 +580,9 @@ function situationsFor(cards: readonly RuleCard[], words: SituationWords): Situa
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
   add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
-  add(words.saturday, 'after_hours', 'hold', saturday, result(saturday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
+  // Open on Saturdays, a business's Saturday visitor isn't after hours.
+  const saturdayWho = words.bookingDays.includes('sat') ? 'public' : 'after_hours';
+  add(words.saturday, saturdayWho, 'hold', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add(words.someoneElses, 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
   return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));
@@ -980,7 +1008,7 @@ function proved(draft: RulesDraft): boolean {
 function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDraft {
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
-  const cards = setupCards(interview.capCents, interview.words.agentPays).map((rule): RuleCard => {
+  const cards = setupCards(interview.capCents, interview.words).map((rule): RuleCard => {
     if (!interview.consultant && !interview.usedSuggestions) return rule;
     // An unanswered or skipped limit never inherits the scripted run's automatic permission.
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };

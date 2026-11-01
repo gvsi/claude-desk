@@ -864,17 +864,56 @@ describe("the real situations, in the business's own words", () => {
     return { rows: tried.body as SituationResult[], draft };
   }
 
-  /** Everything a situation tries and what the kernel said, but its words. */
+  /** Where the two bookings the bookings rule (card-2) allows sit: a Tuesday afternoon, and the Saturday morning. */
+  const WEEKDAY = 0;
+  const SATURDAY = 4;
+  /**
+   * Everything a situation tries and what the kernel said, but its words. Two more fields follow
+   * each business's own days and are left out here, then checked on their own: the reason the
+   * bookings rule gives on the two bookings, and who the Saturday booking is (a salon open on
+   * Saturdays has no "after hours" there).
+   */
   const probed = (rows: readonly SituationResult[]) =>
-    rows.map(({ situation, result, matches }) => ({ who: situation.who, probe: situation.probe, expected: situation.expected, result, matches }));
-  /** The draft's cards, the agent payment's reason left out. */
-  const withoutReason = (draft: RulesDraft) => draft.cards.map((card) => (card.card_id === 'card-7' ? { ...card, reason: '' } : card));
-  const reasonOf = (draft: RulesDraft) => draft.cards.find((card) => card.card_id === 'card-7')?.reason;
+    rows.map(({ situation, result, matches }, at) => {
+      const booking = at === WEEKDAY || at === SATURDAY;
+      return {
+        who: at === SATURDAY ? null : situation.who,
+        probe: situation.probe,
+        expected: situation.expected,
+        result: booking ? { ...result, reason_plain: null } : result,
+        matches,
+      };
+    });
+  /** Each situation's who, plan and result, as the owner reads them. */
+  const outcomes = (rows: readonly SituationResult[]) =>
+    rows.map(({ situation, result, matches }) => [situation.who, situation.expected, result.outcome, result.reason_plain, result.card_ids, result.depends_on_review, matches]);
+  /** Rivera Plumbing's situations, as they always were. */
+  const RIVERA_OUTCOMES = [
+    ['public', 'allow', 'allow', 'Books weekday visits in your hours.', ['card-2'], false, true],
+    ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],
+    ['agent', 'allow_if_reviewed', 'hold', 'Within its signed limit, checked by the reviewer.', ['card-7'], true, true],
+    ['verified', 'allow', 'allow', 'Sends customers their own documents.', ['card-4'], false, true],
+    ['after_hours', 'hold', 'allow', 'Books weekday visits in your hours.', ['card-2'], false, false],
+    ['public', 'refuse', 'refuse', 'Private data only to its verified owner.', [], false, true],
+  ];
+  const cardOf = (draft: RulesDraft, id: string) => draft.cards.find((card) => card.card_id === id);
+  /** The draft's cards without the business's own words: the agent payment's reason, and the bookings rule's days and reason. */
+  const withoutBusinessWords = (draft: RulesDraft) =>
+    draft.cards.map((card) => {
+      if (card.card_id === 'card-7') return { ...card, reason: null };
+      if (card.card_id === 'card-2') return { ...card, reason: null, hours: card.hours ? { ...card.hours, days: null } : null };
+      return card;
+    });
 
   /** Words that belong to a plumber's work: none of them in another business's situations. */
   const PLUMBING = /\b(?:drains?|plumb\w*|leaks?|water heaters?|service calls?|visits?)\b/i;
-  /** The starters, in `START_EXAMPLES`' order: their situations, and the reason of the rule that lets agents pay. */
-  const STARTERS: readonly { business: string; titles: readonly string[]; reason: string }[] = [
+  const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  /**
+   * The starters, in `START_EXAMPLES`' order: their situations; the reason of the rule that lets
+   * agents pay; the days the bookings rule books on its own and its reason; and who the Saturday
+   * booking is.
+   */
+  const STARTERS: readonly { business: string; titles: readonly string[]; reason: string; days: readonly string[]; bookings: string; saturday: string }[] = [
     {
       business: 'Juniper Hair Studio',
       titles: [
@@ -886,6 +925,10 @@ describe("the real situations, in the business's own words", () => {
         "Someone asks for another client's phone number",
       ],
       reason: 'Agents pay the color appointment deposit within their signed limit, checked by the reviewer.',
+      // Open Tuesday to Saturday, so a Saturday visitor isn't after hours.
+      days: ['tue', 'wed', 'thu', 'fri', 'sat'],
+      bookings: 'Books appointments Tuesday to Saturday in your hours.',
+      saturday: 'public',
     },
     {
       // Rivera Plumbing's are the situations as they always were.
@@ -899,6 +942,9 @@ describe("the real situations, in the business's own words", () => {
         "Someone asks for another customer's address",
       ],
       reason: 'Agents pay the service call deposit within their signed limit, checked by the reviewer.',
+      days: WEEKDAYS,
+      bookings: 'Books weekday visits in your hours.',
+      saturday: 'after_hours',
     },
     {
       business: 'Maple Street Rentals',
@@ -911,6 +957,9 @@ describe("the real situations, in the business's own words", () => {
         'Someone asks which apartment another tenant lives in',
       ],
       reason: 'Agents pay the application fee within their signed limit, checked by the reviewer.',
+      days: WEEKDAYS,
+      bookings: 'Books weekday viewings in your hours.',
+      saturday: 'after_hours',
     },
     {
       business: 'Chen & Co.',
@@ -923,26 +972,45 @@ describe("the real situations, in the business's own words", () => {
         "Someone asks for another client's tax return",
       ],
       reason: 'Agents pay the retainer within their signed limit, checked by the reviewer.',
+      days: WEEKDAYS,
+      bookings: 'Books weekday consults in your hours.',
+      saturday: 'after_hours',
     },
   ];
+
+  /**
+   * The business's own bookings: the bookings rule books its days in the same hours with its own
+   * reason, which both bookings give; the Saturday booking is `saturday` and still not what the
+   * answers planned ("Saturday bookings ask you first."); and the agent payment's rule names
+   * `reason`.
+   */
+  function expectOwnBookings(rows: readonly SituationResult[], draft: RulesDraft, own: { days: readonly string[]; bookings: string; saturday: string; reason: string }, label: string): void {
+    expect(cardOf(draft, 'card-2'), label).toMatchObject({ applies_to: 'native.book', mode: 'auto', hours: { days: own.days, start: '08:00:00', end: '18:00:00' }, reason: own.bookings });
+    expect([rows[WEEKDAY]?.result.reason_plain, rows[SATURDAY]?.result.reason_plain], label).toEqual([own.bookings, own.bookings]);
+    expect([rows[SATURDAY]?.situation.who, rows[SATURDAY]?.matches], label).toEqual([own.saturday, false]);
+    expect(cardOf(draft, 'card-3'), label).toMatchObject({ applies_to: 'native.book', mode: 'ask', hours: { days: ['sat'] }, reason: 'Saturday bookings ask you first.' });
+    expect(cardOf(draft, 'card-7')?.reason, label).toBe(own.reason);
+  }
 
   it('each_starter_gets_its_own_words_with_riveras_probes_and_results', async () => {
     const rivera = await triedOn(START_EXAMPLES.en.examples[1]?.description ?? '');
     for (const language of ['en', 'es'] as const) {
       for (const [at, { chip, description }] of START_EXAMPLES[language].examples.entries()) {
         const starter = STARTERS[at];
+        if (!starter) throw new Error(`no starter at ${at}`);
         const { rows, draft } = await triedOn(description);
         const titles = rows.map(({ situation }) => situation.title);
-        expect(titles, `${chip}: ${starter?.business ?? ''}`).toEqual(starter?.titles);
-        if (starter?.business !== 'Rivera Plumbing') for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
-        // Only the words change: what each situation tries, plans and gets is Rivera's.
+        expect(titles, `${chip}: ${starter.business}`).toEqual(starter.titles);
+        if (starter.business === 'Rivera Plumbing') expect(outcomes(rows), chip).toEqual(RIVERA_OUTCOMES);
+        else for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
+        // Only the words, and the bookings that follow the business's own days, change: what each
+        // situation tries, plans and gets is otherwise Rivera's.
         expect(probed(rows), chip).toEqual(probed(rivera.rows));
-        // The rule that lets agents pay names what they pay as the situation does, and nothing else
-        // about the cards changes. The English CPA run drafts its other cards from its own answers,
-        // so only that rule is compared there.
-        expect(reasonOf(draft), chip).toBe(starter?.reason);
-        const consultant = language === 'en' && starter?.business === 'Chen & Co.';
-        const compared = (d: RulesDraft) => withoutReason(d).filter((card) => !consultant || card.card_id === 'card-7');
+        expectOwnBookings(rows, draft, starter, chip);
+        // Nothing else about the cards changes. The English CPA run drafts its other cards from
+        // its own answers, so only the two rules with the business's words are compared there.
+        const consultant = language === 'en' && starter.business === 'Chen & Co.';
+        const compared = (d: RulesDraft) => withoutBusinessWords(d).filter((card) => !consultant || card.card_id === 'card-2' || card.card_id === 'card-7');
         expect(compared(draft), chip).toEqual(compared(rivera.draft));
       }
     }
@@ -953,6 +1021,8 @@ describe("the real situations, in the business's own words", () => {
     for (const description of [
       "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
       'Soy Ana. Tengo la Panadería Ana en Oakland: pan de masa madre y pasteles por encargo.',
+      // A word that only starts like "hair" names no salon.
+      'Lake Dental is a dental practice treating cavities, chipped teeth and hairline cracks.',
     ]) {
       const { rows, draft } = await triedOn(description);
       const titles = rows.map(({ situation }) => situation.title);
@@ -966,8 +1036,13 @@ describe("the real situations, in the business's own words", () => {
       ]);
       for (const title of titles) expect(title, description).not.toMatch(PLUMBING);
       expect(probed(rows), description).toEqual(probed(rivera.rows));
-      expect(reasonOf(draft), description).toBe('Agents pay the deposit within their signed limit, checked by the reviewer.');
-      expect(withoutReason(draft), description).toEqual(withoutReason(rivera.draft));
+      expectOwnBookings(rows, draft, {
+        days: WEEKDAYS,
+        bookings: 'Books weekday times in your hours.',
+        saturday: 'after_hours',
+        reason: 'Agents pay the deposit within their signed limit, checked by the reviewer.',
+      }, description);
+      expect(withoutBusinessWords(draft), description).toEqual(withoutBusinessWords(rivera.draft));
     }
   });
 });
