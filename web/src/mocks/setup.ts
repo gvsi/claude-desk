@@ -368,7 +368,7 @@ const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 /**
  * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
  * the rules its draft names them in. Only the words and the business's own booking days differ
- * between businesses: what each situation tries, plans and gets is otherwise the same.
+ * between businesses: what each situation tries, plans and gets otherwise follows the draft alone.
  */
 interface SituationWords {
   /**
@@ -554,15 +554,35 @@ function situationMatches(planned: Situation['expected'], r: ProbeResult, cards:
 }
 
 /**
- * The six situations the check runs on the draft (`cards`), one of them not what the answers
- * planned, told in the business's words (`words`).
+ * What the kernel gives a situation the draft's rule `cardId` decides, from that rule as the draft
+ * (`cards`) has it: an ask rule holds it and a never rule refuses it, each with the rule's own
+ * reason; an automatic rule gives `onItsOwn`. Without the rule, `onItsOwn` too.
+ */
+function decidedBy(cards: readonly RuleCard[], cardId: string, p: Probe, onItsOwn: ProbeResult): ProbeResult {
+  const rule = cards.find((c) => c.card_id === cardId);
+  if (rule?.mode === 'ask') return result(p, 'hold', rule.reason, { card_ids: [cardId] });
+  if (rule?.mode === 'never') return result(p, 'refuse', rule.reason, { card_ids: [cardId] });
+  return onItsOwn;
+}
+
+/**
+ * The six situations the check runs on the draft (`cards`), told in the business's words
+ * (`words`). Each one a rule decides follows that rule as the draft has it (`decidedBy`), so a rule
+ * the answers left asking first asks here too, and is what they planned. One is planted as not
+ * what the answers planned: the Saturday booking, planned for what the bookings rule doesn't do.
  */
 function situationsFor(cards: readonly RuleCard[], words: SituationWords): SituationResult[] {
   const rows: [Situation, ProbeResult][] = [];
-  const add = (title: string, who: Situation['who'], expected: Situation['expected'], p: Probe, r: ProbeResult) =>
-    rows.push([{ title, who, probe: p, expected }, r]);
+  /**
+   * A situation planned as `planned` when it happens as `onItsOwn` says; one the draft's rule
+   * `cardId` asks or refuses instead is planned as just that.
+   */
+  const add = (title: string, who: Situation['who'], planned: Situation['expected'], p: Probe, onItsOwn: ProbeResult, cardId?: string) => {
+    const r = cardId === undefined ? onItsOwn : decidedBy(cards, cardId, p, onItsOwn);
+    rows.push([{ title, who, probe: p, expected: r === onItsOwn ? planned : r.outcome }, r]);
+  };
   const weekday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-03T14:00:00-08:00' });
-  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }), 'card-2');
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
   add(words.discount, 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
   // Planned to happen after Claude's second look: the kernel holds it unless the reviewer agrees.
@@ -577,13 +597,18 @@ function situationsFor(cards: readonly RuleCard[], words: SituationWords): Situa
     reviewed
       ? result(deposit, 'hold', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true, card_ids: ['card-7'] })
       : result(deposit, 'hold', 'Charges ask you first.'),
+    reviewed ? 'card-7' : undefined,
   );
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
-  add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
+  add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }), 'card-4');
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
   // Open on Saturdays, a business's Saturday visitor isn't after hours.
   const saturdayWho = words.bookingDays.includes('sat') ? 'public' : 'after_hours';
-  add(words.saturday, saturdayWho, 'hold', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  // The planted surprise, which the bookings rule decides as the draft has it: planned to ask first,
+  // as the answers' Saturday rule (card-3) says, unless that rule asks first too; then planned to be
+  // booked, so it stays the one row not what was planned.
+  const onSaturday = decidedBy(cards, 'card-2', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
+  rows.push([{ title: words.saturday, who: saturdayWho, probe: saturday, expected: onSaturday.outcome === 'hold' ? 'allow' : 'hold' }, onSaturday]);
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add(words.someoneElses, 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
   return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));

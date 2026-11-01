@@ -877,9 +877,11 @@ describe("the real situations, in the business's own words", () => {
     return { rows: tried.body as SituationResult[], draft };
   }
 
-  /** Where the two bookings the bookings rule (card-2) allows sit: a Tuesday afternoon, and the Saturday morning. */
+  /** Where the two bookings the bookings rule (card-2) decides sit: a Tuesday afternoon, and the Saturday morning. */
   const WEEKDAY = 0;
   const SATURDAY = 4;
+  /** Where the verified customer's own document sits. */
+  const DOCUMENT = 3;
   /**
    * Everything a situation tries and what the kernel said, but its words. Two more fields follow
    * each business's own days and are left out here, then checked on their own: the reason the
@@ -1016,13 +1018,17 @@ describe("the real situations, in the business's own words", () => {
         expect(titles, `${chip}: ${starter.business}`).toEqual(starter.titles);
         if (starter.business === 'Rivera Plumbing') expect(outcomes(rows), chip).toEqual(RIVERA_OUTCOMES);
         else for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
+        // The English CPA run drafts its other cards from its own answers, which never ask about
+        // documents: its document row follows its own documents rule
+        // (`chens_answered_run_changes_only_where_its_draft_asks`), so it isn't compared here.
+        const consultant = language === 'en' && starter.business === 'Chen & Co.';
+        const sameAsRivera = (r: readonly SituationResult[]) => probed(r).filter((_, row) => !consultant || row !== DOCUMENT);
         // Only the words, and the bookings that follow the business's own days, change: what each
         // situation tries, plans and gets is otherwise Rivera's.
-        expect(probed(rows), chip).toEqual(probed(rivera.rows));
+        expect(sameAsRivera(rows), chip).toEqual(sameAsRivera(rivera.rows));
         expectOwnBookings(rows, draft, starter, chip);
-        // Nothing else about the cards changes. The English CPA run drafts its other cards from
-        // its own answers, so only the two rules with the business's words are compared there.
-        const consultant = language === 'en' && starter.business === 'Chen & Co.';
+        // Nothing else about the cards changes. Only the two rules with the business's words are
+        // compared for the English CPA run.
         const compared = (d: RulesDraft) => withoutBusinessWords(d).filter((card) => !consultant || card.card_id === 'card-2' || card.card_id === 'card-7');
         expect(compared(draft), chip).toEqual(compared(rivera.draft));
       }
@@ -1057,6 +1063,74 @@ describe("the real situations, in the business's own words", () => {
       }, description);
       expect(withoutBusinessWords(draft), description).toEqual(withoutBusinessWords(rivera.draft));
     }
+  });
+
+  /**
+   * The situations setup tries on `description`'s draft and the draft itself, after "Use your
+   * suggestions" with the first question unanswered: every limit left unanswered asks first.
+   */
+  async function triedOnSuggestions(description: string): Promise<{ rows: SituationResult[]; draft: RulesDraft }> {
+    const id = (await startState(description)).interview_id;
+    expect((await setupState('setupConsent', id, { allow: false })).question, description).toBe('what_you_do');
+    await setupState('setupSuggestions', id, {});
+    const drafted = await mockStore.dispatch('setupRules', { params: { id } });
+    if ('network' in drafted || drafted.status !== 200) throw new Error('setup must draft its rules');
+    const tried = await mockStore.dispatch('setupSituations', { params: { id } });
+    if ('network' in tried || tried.status !== 200) throw new Error('setup must try its situations');
+    return { rows: tried.body as SituationResult[], draft: drafted.body as RulesDraft };
+  }
+
+  /** A situation's plan and result as the owner reads them, and whether it is what was planned. */
+  const read = (row: SituationResult | undefined) => [row?.situation.expected, row?.result.outcome, row?.result.reason_plain, row?.result.card_ids, row?.matches];
+  /** Where the rows the answers didn't plan for sit. */
+  const flagged = (rows: readonly SituationResult[]) => rows.flatMap((row, at) => (row.matches ? [] : [at]));
+  /** Juniper Hair Studio, Rivera Plumbing, and a business no starter describes. */
+  const SUGGESTED = [
+    START_EXAMPLES.en.examples[0]?.description ?? '',
+    START_EXAMPLES.en.examples[1]?.description ?? '',
+    "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+  ];
+
+  it('a_booking_asks_when_the_suggestions_left_bookings_asking', async () => {
+    // The Rules step showed "Bookings ask you first": the weekday booking asks, as planned.
+    for (const description of SUGGESTED) {
+      const { rows, draft } = await triedOnSuggestions(description);
+      expect(cardOf(draft, 'card-2'), description).toMatchObject({ applies_to: 'native.book', mode: 'ask', reason: 'Bookings ask you first.' });
+      expect(read(rows[WEEKDAY]), description).toEqual(['hold', 'hold', 'Bookings ask you first.', ['card-2'], true]);
+    }
+  });
+
+  it('a_customers_own_document_asks_when_the_suggestions_left_documents_asking', async () => {
+    // Juniper's Rules step showed "Documents ask you first": the client's receipt asks, as planned.
+    const { rows, draft } = await triedOnSuggestions(SUGGESTED[0] ?? '');
+    expect(cardOf(draft, 'card-4'), 'Juniper').toMatchObject({ applies_to: 'native.release_document', mode: 'ask', reason: 'Documents ask you first.' });
+    expect(rows[DOCUMENT]?.situation.title).toBe('A client asks for their last receipt');
+    expect(read(rows[DOCUMENT]), 'Juniper').toEqual(['hold', 'hold', 'Documents ask you first.', ['card-4'], true]);
+  });
+
+  it('only_the_saturday_booking_is_not_what_the_suggestions_planned', async () => {
+    // The planted surprise stays the one row flagged, and follows the draft as the others do.
+    for (const description of SUGGESTED) {
+      const { rows } = await triedOnSuggestions(description);
+      expect(flagged(rows), description).toEqual([SATURDAY]);
+      expect(read(rows[SATURDAY]).slice(1), description).toEqual(['hold', 'Bookings ask you first.', ['card-2'], false]);
+    }
+  });
+
+  it('chens_answered_run_changes_only_where_its_draft_asks', async () => {
+    // The CPA run never asks about documents, so its draft's documents rule asks first, as its
+    // Rules step shows: the client's return asks, as planned. Every other row is as it was.
+    const { rows, draft } = await triedOn(START_EXAMPLES.en.examples[3]?.description ?? '');
+    expect(cardOf(draft, 'card-4')).toMatchObject({ applies_to: 'native.release_document', mode: 'ask', reason: 'Documents ask you first.' });
+    const bookings = 'Books weekday consults in your hours.';
+    expect(outcomes(rows)).toEqual([
+      ['public', 'allow', 'allow', bookings, ['card-2'], false, true],
+      ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],
+      ['agent', 'allow_if_reviewed', 'hold', 'Within its signed limit, checked by the reviewer.', ['card-7'], true, true],
+      ['verified', 'hold', 'hold', 'Documents ask you first.', ['card-4'], false, true],
+      ['after_hours', 'hold', 'allow', bookings, ['card-2'], false, false],
+      ['public', 'refuse', 'refuse', 'Private data only to its verified owner.', [], false, true],
+    ]);
   });
 });
 
