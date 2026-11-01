@@ -21,6 +21,13 @@ async function mockApiPlugins(): Promise<PluginOption[]> {
 const fs = { allow: [searchForWorkspaceRoot(process.cwd()), '../docs'] };
 
 /**
+ * Streamdown imports `rehype-raw` for default plugins Claude's replies never use, since
+ * `ChatMarkdown` renders HTML in the text as text. Every mode takes a do-nothing stand-in, so its
+ * HTML parser stays out of the bundle and nothing can parse raw HTML into elements.
+ */
+const noRawHtml = { find: /^rehype-raw$/, replacement: fileURLToPath(new URL('./src/ds/components/ChatMarkdown/noRawHtml.ts', import.meta.url)) };
+
+/**
  * Mode `mock` (`npm run dev:mock`) serves the mock API from the dev server's own process, so every
  * tab of a browser shares one demo copy: its plugin is loaded in that mode only and applies only to
  * `vite dev`, never to a build. Mode `test` (the screen tests) serves the mock's service worker
@@ -28,6 +35,7 @@ const fs = { allow: [searchForWorkspaceRoot(process.cwd()), '../docs'] };
  */
 export default defineConfig(async ({ mode }) => ({
   plugins: [react(), ...(mode === 'mock' ? await mockApiPlugins() : [])],
+  resolve: { alias: [noRawHtml] },
   publicDir: mode === 'test' ? 'mock-public' : 'public',
   // The screen tests run the design system's board checks (`src/test/boards.ts`), which import
   // `storybook/test`, the share kit draws its QR code with `qrcode`, and the knowledge tests check
