@@ -91,6 +91,7 @@ export const ROUTE_MODELS = {
   setupPublicLines: 'SetupPublicLines',
   setupPublicLine: 'SetupPublicLines',
   setupPublicLinesConfirm: 'SetupPublicLines',
+  removePublicLine: 'SetupPublicLines',
 
   // Public
   publicDesk: 'PublicDesk',

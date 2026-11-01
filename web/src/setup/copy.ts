@@ -255,6 +255,11 @@ export const SETUP_COPY = {
   },
 
   publicLines: {
+    suggestedTitle: 'Suggested by Claude, please check',
+    suggestedIntro: 'Claude found these in your memory and online. Customers see them only once you choose “Looks right”.',
+    remove: 'Remove',
+    hours: 'Hours',
+    prices: 'Price list',
     title: 'What customers will read',
     subtitle: 'Your Desk answers customers from these. Check them before the safety check.',
     edit: 'Edit',

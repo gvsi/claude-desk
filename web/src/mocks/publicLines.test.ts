@@ -11,6 +11,66 @@ import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
+it('removes only suggested items and never publishes a removed item', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  storePublicLines(mockStore.world, params.id, (read.body as SetupPublicLines).lines.map((line) =>
+    line.key === 'policy:after_hours' ? { ...line, source: 'suggested' } : line,
+  ));
+  for (const key of ['contact', 'hours', 'prices', 'policy:after_hours']) {
+    const removed = await mockStore.dispatch('removePublicLine', { params: { ...params, key } });
+    expect(removed).toMatchObject({ status: 200 });
+    if ('network' in removed) throw new Error('remove failed');
+    const data = removed.body as SetupPublicLines;
+    if (key === 'hours' || key === 'prices') expect(data[key]).toBeNull();
+    else expect(data.lines.some((line) => line.key === key)).toBe(false);
+    expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key } })).toMatchObject({ status: 422, body: { error: 'not_suggested', key } });
+  }
+  expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key: 'policy:about' } })).toMatchObject({ status: 422, body: { error: 'not_suggested', key: 'policy:about' } });
+  expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200, body: { hours: null, prices: null } });
+  const setup = await mockStore.dispatch('setup', { params });
+  if ('network' in setup) throw new Error('setup failed');
+  const published = await mockStore.dispatch('publicDesk', { params: { slug: (setup.body as SetupState).slug } });
+  expect(JSON.stringify(published)).not.toMatch(/linda@chenandco.com|Tax return review|charter:hours|charter:policy:after_hours/);
+  await mockStore.dispatch('setupSafetyCheck', { params });
+  expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key: 'contact' } })).toMatchObject({ status: 409 });
+  expect(await mockStore.dispatch('removePublicLine', { params: { id: 'missing', key: 'contact' } })).toMatchObject({ status: 404 });
+  mockStore.reset('rivera', { signedIn: false });
+  expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key: 'contact' } })).toMatchObject({ status: 401 });
+});
+
+it('publishes suggestions only after an edit or confirmation, including structured hours and prices', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  const data = read.body as SetupPublicLines;
+  storePublicLines(mockStore.world, params.id, data.lines.map((line) =>
+    line.key === 'policy:service_area' ? { ...line, source: 'suggested' } : line,
+  ));
+  const setup = await mockStore.dispatch('setup', { params });
+  if ('network' in setup) throw new Error('setup failed');
+  const publicParams = { slug: (setup.body as SetupState).slug };
+  const publicRead = async () => {
+    const response = await mockStore.dispatch('publicDesk', { params: publicParams });
+    if ('network' in response) throw new Error('public read failed');
+    return response.body as { charter: { fact_id: string; title: string }[] };
+  };
+  for (const key of ['contact', 'hours', 'prices', 'policy:service_area']) {
+    expect((await publicRead()).charter.some((card) => card.fact_id === `charter:${key}`)).toBe(false);
+  }
+  expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'contact', text: 'linda@chenandco.com' } })).toMatchObject({ status: 200 });
+  expect((await publicRead()).charter).toContainEqual(expect.objectContaining({ fact_id: 'charter:contact', title: 'linda@chenandco.com' }));
+  expect((await publicRead()).charter.some((card) => card.fact_id === 'charter:hours')).toBe(false);
+  const confirmed = await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} });
+  expect(confirmed).toMatchObject({ status: 200, body: { hours: { source: 'owner' }, prices: { source: 'owner' } } });
+  if ('network' in confirmed) throw new Error('confirm failed');
+  expect((confirmed.body as SetupPublicLines).lines.every((line) => line.source === 'owner')).toBe(true);
+  expect((await publicRead()).charter.map((card) => card.fact_id)).toEqual(expect.arrayContaining([
+    'charter:contact', 'charter:hours', 'charter:policy:service_area',
+  ]));
+});
+
 async function atRules(answers: Partial<Record<QuestionKey, string>> = {}, description = START_EXAMPLES.en.examples[3]!.description) {
   const started = await mockStore.dispatch('startSetup', { body: {
     description,
@@ -113,18 +173,30 @@ it('seeds requested held keys per interview with owner words and defaults other 
   expect((otherRead.body as SetupPublicLines).lines.every((line) => line.held === false)).toBe(true);
 });
 
-it('reads the eight public lines in order without moving the interview', async () => {
+it('seeds exactly the CPA suggestions alongside owner lines without moving the interview', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   expect(read.status).toBe(200);
   const lines = (read.body as SetupPublicLines).lines;
   expect(lines.map((line) => line.key)).toEqual([
-    'policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours',
+    'policy:about', 'contact', 'policy:intake', 'policy:after_hours',
     'policy:urgent', 'policy:service_area', 'policy:how_we_help',
   ]);
   expect(lines.at(-1)).toMatchObject({ editable: false });
   expect(lines.at(-1)?.text.split('\n')).toHaveLength(3);
+  expect(read.body).toMatchObject({
+    lines: expect.arrayContaining([
+      { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true },
+      expect.objectContaining({ key: 'policy:about', source: 'owner' }),
+    ]),
+    hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
+    prices: { source: 'suggested', items: [
+      { title: 'Tax return review', unit_cents: 25000 },
+      { title: 'Business tax return', unit_cents: 60000 },
+      { title: 'Monthly bookkeeping', unit_cents: 15000 },
+    ] },
+  });
   expect(await mockStore.dispatch('setup', { params })).toMatchObject({ body: { step: 'rules' } });
 });
 
@@ -143,15 +215,14 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
   });
   const board = [
     ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
-    ['contact', '(408) 555-0199, linda@chenandco.com'],
-    ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
     ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
     ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
     ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
     ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
     ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
   ];
-  const expected = { lines: board.map(([key, text]) => ({ key: key === 'contact' ? key : `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
+  const expected = { lines: board.map(([key, text]) => ({ key: `policy:${key}`, text, source: 'owner', editable: key !== 'how_we_help' })) };
+  expected.lines.splice(1, 0, { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
   const read = await mockStore.dispatch('setupPublicLines', { params });
   expect(read).toMatchObject({ status: 200, body: expected });
   if ('network' in read) throw new Error('read failed');
@@ -265,7 +336,7 @@ it('shows saved and confirmed lines in the public charter for their claims', asy
   const { slug } = setup.body as SetupState;
   for (const [key, text] of [
     ['policy:about', 'We help local businesses.'],
-    ['policy:pricing', 'Ask Linda for a quote.'],
+    ['policy:intake', 'Ask Linda for a quote.'],
   ]) {
     expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text } })).toMatchObject({ status: 200 });
   }
@@ -275,9 +346,9 @@ it('shows saved and confirmed lines in the public charter for their claims', asy
   expect(await mockStore.dispatch('publicDesk', { params: { slug } })).toMatchObject({
     status: 200,
     body: {
-      charter: (confirmed.body as SetupPublicLines).lines.map(({ key, text }) => expect.objectContaining({
+      charter: [...(confirmed.body as SetupPublicLines).lines.map(({ key, text }) => expect.objectContaining({
         fact_id: `charter:${key}`, title: text,
-      })),
+      })), expect.objectContaining({ fact_id: 'charter:hours', title: 'Weekdays, 9:00 am to 6:00 pm' })],
     },
   });
 });
@@ -340,8 +411,8 @@ it('guards all three routes by owner, interview and stage, and isolates saved li
 it('refuses dollar amounts written as cents or with a sign', async () => {
   const params = await atRules();
   for (const text of ['From $.50', 'From $-20', 'From $+20']) {
-    expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:pricing', text } })).toMatchObject({
-      status: 422, body: { error: 'line_refused', key: 'policy:pricing' },
+    expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:intake', text } })).toMatchObject({
+      status: 422, body: { error: 'line_refused', key: 'policy:intake' },
     });
   }
 });
@@ -427,7 +498,9 @@ it('publishes only owner lines and adopts every suggestion on confirmation', asy
   const publicParams = { slug: (setup.body as SetupState).slug };
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
-  expect((read.body as SetupPublicLines).lines.every((line) => line.source === 'suggested')).toBe(true);
+  const suggested = (read.body as SetupPublicLines).lines.map((line) => ({ ...line, source: 'suggested' as const }));
+  storePublicLines(mockStore.world, params.id, suggested);
+  expect(suggested.every((line) => line.source === 'suggested')).toBe(true);
   expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject({ status: 200, body: { charter: [] } });
   const key = 'policy:about';
   const text = 'We help local businesses.';
@@ -442,7 +515,7 @@ it('publishes only owner lines and adopts every suggestion on confirmation', asy
   expect(lines.every((line) => line.source === 'owner')).toBe(true);
   expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({ status: 200, body: { lines } });
   expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject({
-    status: 200, body: { charter: lines.map(({ key, text }) => expect.objectContaining({ fact_id: `charter:${key}`, title: text })) },
+    status: 200, body: { charter: [...lines.map(({ key, text }) => expect.objectContaining({ fact_id: `charter:${key}`, title: text })), expect.objectContaining({ fact_id: 'charter:hours' })] },
   });
 });
 

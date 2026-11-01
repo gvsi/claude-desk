@@ -10,8 +10,6 @@ import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
   ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
-  ['contact', '(408) 555-0199, linda@chenandco.com'],
-  ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
   ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
@@ -28,12 +26,22 @@ function afterHoursOf(answer: string | undefined): string | undefined {
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 
-function seed(sv: Server, state: SetupState): SetupPublicLine[] {
+function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'> {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
-    return CPA_LINES.map(([key, text]): SetupPublicLine => ({
-      key: key === 'contact' ? key : `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help',
+    const lines = CPA_LINES.map(([key, text]): SetupPublicLine => ({
+      key: `policy:${key}`, text, source: 'owner', editable: key !== 'how_we_help',
     }));
+    lines.splice(1, 0, { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
+    return {
+      lines,
+      hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
+      prices: { source: 'suggested', items: [
+        { title: 'Tax return review', unit_cents: 25000 },
+        { title: 'Business tax return', unit_cents: 60000 },
+        { title: 'Monthly bookkeeping', unit_cents: 15000 },
+      ] },
+    };
   }
   const about = desk ? setupAbout(sv.world, desk) : null;
   const answers = new Map<string, string>();
@@ -50,8 +58,8 @@ function seed(sv: Server, state: SetupState): SetupPublicLine[] {
     ['about', about],
     ['after_hours', afterHoursOf(answers.get('contact_and_after_hours'))],
   ];
-  return values.flatMap(([key, text]): SetupPublicLine[] => text?.trim()
-    ? [{ key: `policy:${key}`, text, source: 'owner', editable: true }] : []);
+  return { lines: values.flatMap(([key, text]): SetupPublicLine[] => text?.trim()
+    ? [{ key: `policy:${key}`, text, source: 'owner', editable: true }] : []), hours: null, prices: null };
 }
 
 function read(sv: Server, req: Req): SetupPublicLines | Failure {
@@ -59,26 +67,31 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
   if (found.status !== 200) return found as Failure;
   const state = found.body as SetupState;
   if (state.step !== 'rules' && state.step !== 'situations') return { status: 409, body: { error: 'conflict' } };
-  let saved = storedPublicState(sv.world, state.interview_id);
-  if (!saved) {
-    const cpa = /^Chen & Co\.?(?: CPA)?$/i.test(sv.world.desk(state.desk_id)?.summary.business_name ?? '');
-    saved = storePublicState(sv.world, state.interview_id, {
-      lines: seed(sv, state).map((line): SetupPublicLine => {
+  let data = storedPublicState(sv.world, state.interview_id);
+  if (!data) {
+    const initial = seed(sv, state);
+    data = storePublicState(sv.world, state.interview_id, {
+      ...initial,
+      lines: initial.lines.map((line): SetupPublicLine => {
         const text = heldPublicLineSeed(sv.world, state.interview_id, line.key);
         return text === undefined ? { ...line, held: false } : { ...line, text, source: 'owner', held: true };
       }),
-      hours: cpa ? { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] } : null,
-      prices: cpa ? { source: 'suggested', items: [
-        { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
-        { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
-        { item_id: 'monthly-bookkeeping', title: 'Monthly bookkeeping', unit_cents: 15000 },
-      ] } : null,
     });
   }
-  return saved;
+  return data;
 }
 
 export const PUBLIC_LINES_ROUTES = {
+  removePublicLine(sv, req) {
+    const found = read(sv, req);
+    if ('status' in found) return found;
+    const key = req.params.key;
+    const item = key === 'hours' || key === 'prices' ? found[key] : found.lines.find((line) => line.key === key);
+    if (!item || item.source !== 'suggested') return { status: 422, body: { error: 'not_suggested', key } };
+    if (key === 'hours' || key === 'prices') found[key] = null;
+    else found.lines = found.lines.filter((line) => line.key !== key);
+    return { status: 200, body: structuredClone(found) };
+  },
   setupPublicLines(sv, req) {
     const found = read(sv, req);
     return 'status' in found ? found : { status: 200, body: structuredClone(found) };

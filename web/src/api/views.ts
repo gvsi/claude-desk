@@ -589,6 +589,8 @@ export interface SetupPublicLine {
   held?: boolean;
 }
 
+export type PublicHoursWindow = HoursWindow;
+
 export interface SetupPublicHours {
   source: 'owner' | 'suggested';
   windows: HoursWindow[];

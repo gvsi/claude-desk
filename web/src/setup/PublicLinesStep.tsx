@@ -6,10 +6,12 @@ import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '.
 import { Button, Card, cardChrome, CHANGED_REFRESHED, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 import { publicLineLimit } from './publicLineLimit.ts';
+import { formatPublicHours, formatPublicPrice } from './publicLinesFormat.ts';
 
 import './PublicLinesStep.css';
 
 const copy = SETUP_COPY.publicLines;
+const labelOf = (line: SetupPublicLine) => cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label;
 
 /** A malformed answer holds this step, including a 200 that cannot confirm what was checked. */
 function checkedLines(value: SetupPublicLines): SetupPublicLines {
@@ -22,6 +24,14 @@ function checkedLines(value: SetupPublicLines): SetupPublicLines {
       || typeof line.editable !== 'boolean' || (line.source !== 'owner' && line.source !== 'suggested')
       || (line.held !== undefined && typeof line.held !== 'boolean'),
     ) || new Set(value.lines.map((line) => line.key)).size !== value.lines.length
+    || !(value.hours === null || (value.hours && ['owner', 'suggested'].includes(value.hours.source)
+      && Array.isArray(value.hours.windows) && value.hours.windows.every((window) => window
+        && Array.isArray(window.days) && window.days.length > 0 && window.days.every((day) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(day))
+        && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.start) && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.end))))
+    || !(value.prices === null || (value.prices && ['owner', 'suggested'].includes(value.prices.source)
+      && Array.isArray(value.prices.items) && value.prices.items.every((item) => item
+        && typeof item.title === 'string' && item.title.trim() && Array.from(item.title).length <= 80
+        && Number.isSafeInteger(item.unit_cents) && item.unit_cents >= 0)))
   ) throw new Error('invalid public lines');
   return value;
 }
@@ -44,7 +54,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const fieldId = useId();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState<'save' | 'confirm' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'confirm' | 'remove' | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
   const notice = useRef<HTMLDivElement>(null);
@@ -79,7 +90,12 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const shown = PUBLIC_LINE_KEYS.flatMap((key) => lines.data?.lines.filter((line) => line.key === key && line.text.trim() !== '') ?? []);
   const confirmable = shown.filter((line) => !line.held);
   const unknown = lines.data?.lines.some((line) => !knownKey(line.key)) ?? false;
-  const empty = lines.data !== undefined && lines.data.lines.length === 0;
+  const suggested = shown.filter((line) => line.source === 'suggested');
+  const owned = shown.filter((line) => line.source === 'owner');
+  const hours = lines.data?.hours?.source === 'suggested' ? lines.data.hours.windows : [];
+  const prices = lines.data?.prices?.source === 'suggested' ? lines.data.prices.items : [];
+  const hasSuggestions = suggested.length > 0 || hours.length > 0 || prices.length > 0;
+  const empty = lines.data !== undefined && !lines.isError && lines.data.lines.length === 0 && !hasSuggestions;
   useEffect(() => {
     const current = lines.data;
     if (!current || openedHeldOnLoad.current) return;
@@ -115,7 +131,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     try {
       const saved = checkedLines(await request('setupPublicLine', { params: { id }, body: { key: editingKey, text } }));
       const savedLine = saved.lines.find((line) => line.key === editingKey);
-      if (!savedLine) throw new Error('missing edited line');
+      if (!savedLine || (!savedLine.held && savedLine.source !== 'owner')) throw new Error('unconfirmed edited line');
       queryClient.setQueryData(queryKey, saved);
       if (savedLine.held) setRefused(true);
       else cancel();
@@ -127,6 +143,26 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       } else setError(ownerErrorCopy(err));
     } finally {
       setBusy(null);
+    }
+  };
+  const remove = async (key: string, row: string) => {
+    if (editingKey !== null || busy !== null) return;
+    setBusy('remove');
+    setRemoving(row);
+    setError(null);
+    try {
+      const saved = checkedLines(await request('removePublicLine', { params: { id, key } }));
+      if (key === 'hours' || key === 'prices' ? saved[key] !== null : saved.lines.some((line) => line.key === key)) throw new Error('item not removed');
+      queryClient.setQueryData(queryKey, saved);
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'not_suggested'))) {
+        const current = await reread();
+        if (current && (current.step === 'rules' || current.step === 'situations')) await lines.refetch();
+        if (current === null) setError(ownerErrorCopy(err));
+      } else setError(ownerErrorCopy(err));
+    } finally {
+      setBusy(null);
+      setRemoving(null);
     }
   };
   const confirm = async () => {
@@ -141,6 +177,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: confirmable.map((line) => line.key), revision: lines.data.revision } }));
       queryClient.setQueryData(queryKey, confirmed);
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
+      if (confirmed.lines.some((line) => line.source !== 'owner') || confirmed.hours?.source === 'suggested' || confirmed.prices?.source === 'suggested') throw new Error('unconfirmed suggestions');
       onNext('safety_check');
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'invalid'))) {
@@ -166,6 +203,97 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
 
+  const renderLine = (line: SetupPublicLine) => (
+    <div className={`cd-public-lines__row${canEdit(line) || line.source === 'suggested' ? '' : ' cd-public-lines__row--readonly'}`} key={line.key}>
+      <label id={`${fieldId}-${line.key}`} htmlFor={editingKey === line.key ? fieldId : undefined} className="cd-public-lines__label cd-type-meta">
+        {labelOf(line)}
+      </label>
+      {editingKey === line.key ? (
+        <div className="cd-public-lines__editor">
+          <div className="cd-text-field cd-text-field--multiline">
+            <textarea
+              id={fieldId}
+              className="cd-text-field__input cd-type-body"
+              autoFocus
+              rows={4}
+              maxLength={limit}
+              value={text}
+              readOnly={busy !== null}
+              aria-invalid={refused || undefined}
+              aria-describedby={refused ? `${fieldId}-error` : undefined}
+              onChange={(event) => setText(event.target.value)}
+            />
+            <div className="cd-text-field__error-region" aria-live="polite">
+              {refused ? (
+                <p id={`${fieldId}-error`} className="cd-text-field__error cd-type-meta">
+                  <StatusDot tone="refused" /><span>{copy.refused}</span>
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="cd-setup-step__actions">
+            {invalid ? <Button variant="primary" disabled>{copy.save}</Button> : (
+              <Button variant="primary" busy={busy === 'save'} onClick={() => void save()}>{copy.save}</Button>
+            )}
+            <Button variant="ghost" waiting={busy !== null} onClick={cancel}>{copy.cancel}</Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="cd-public-lines__text" data-copy="user">
+            {line.text.split('\n').map((text, index) => <p key={index}>{text}</p>)}
+          </div>
+          {canEdit(line) || line.source === 'suggested' ? (
+            <div className="cd-public-lines__actions">
+              {canEdit(line) ? (
+                <Button
+                  variant="ghost"
+                  disabled={editingKey !== null} waiting={busy !== null}
+                  describedBy={`${fieldId}-${line.key}`}
+                  buttonRef={(button) => {
+                    if (button) editButtons.current.set(line.key, button);
+                    else editButtons.current.delete(line.key);
+                  }}
+                  onClick={() => edit(line)}
+                >
+                  {copy.edit}
+                </Button>
+              ) : null}
+              {line.source === 'suggested' ? (
+                <Button
+                  variant="ghost"
+                  waiting={editingKey !== null || busy !== null}
+                  busy={removing === line.key}
+                  describedBy={`${fieldId}-${line.key}`}
+                  onClick={() => void remove(line.key, line.key)}
+                >
+                  {copy.remove}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string) => (
+    <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={`${key}-${index}`}>
+      <span className="cd-public-lines__label cd-type-meta">{label}</span>
+      <div id={`${fieldId}-${key}-${index}`} className="cd-public-lines__text" data-copy="user">{value}</div>
+      <div className="cd-public-lines__actions">
+        <Button
+          variant="ghost"
+          waiting={editingKey !== null || busy !== null}
+          busy={removing === `${key}-${index}`}
+          describedBy={`${fieldId}-${key}-${index}`}
+          onClick={() => void remove(key, `${key}-${index}`)}
+        >
+          {copy.remove}
+        </Button>
+      </div>
+    </div>
+  );
+
   if (empty) return null;
 
   return (
@@ -182,77 +310,28 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
         ) : <LoadingLine>{SETUP_COPY.questions.loading}</LoadingLine>
       ) : (
         <>
-          <Card padding={16}>
-            <div className="cd-public-lines">
-              {shown.map((line) => (
-                <div className={`cd-public-lines__row${canEdit(line) ? '' : ' cd-public-lines__row--readonly'}`} key={line.key}>
-                  <label id={`${fieldId}-${line.key}`} htmlFor={editingKey === line.key ? fieldId : undefined} className="cd-public-lines__label cd-type-meta">
-                    {cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label}
-                  </label>
-                  {editingKey === line.key ? (
-                    <div className="cd-public-lines__editor">
-                      <div className="cd-text-field cd-text-field--multiline">
-                        <textarea
-                          id={fieldId}
-                          className="cd-text-field__input cd-type-body"
-                          autoFocus
-                          rows={4}
-                          maxLength={limit}
-                          value={text}
-                          readOnly={busy !== null}
-                          aria-invalid={refused || undefined}
-                          aria-describedby={refused ? `${fieldId}-error` : undefined}
-                          onChange={(event) => setText(event.target.value)}
-                        />
-                        <div className="cd-text-field__error-region" aria-live="polite">
-                          {refused ? (
-                            <p id={`${fieldId}-error`} className="cd-text-field__error cd-type-meta">
-                              <StatusDot tone="refused" /><span>{copy.refused}</span>
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="cd-setup-step__actions">
-                        {invalid ? <Button variant="primary" disabled>{copy.save}</Button> : (
-                          <Button variant="primary" busy={busy === 'save'} onClick={() => void save()}>{copy.save}</Button>
-                        )}
-                        <Button variant="ghost" waiting={busy !== null} onClick={cancel}>{copy.cancel}</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="cd-public-lines__text" data-copy="user">
-                        {line.text.split('\n').map((text, index) => <p key={index}>{text}</p>)}
-                      </div>
-                      {canEdit(line) ? (
-                        <Button
-                          variant="ghost"
-                          disabled={editingKey !== null}
-                          waiting={busy !== null}
-                          describedBy={`${fieldId}-${line.key}`}
-                          buttonRef={(button) => {
-                            if (button) editButtons.current.set(line.key, button);
-                            else editButtons.current.delete(line.key);
-                          }}
-                          onClick={() => edit(line)}
-                        >
-                          {copy.edit}
-                        </Button>
-                      ) : null}
-                    </>
-                  )}
+          {hasSuggestions ? (
+            <Card padding={16}>
+              <div className="cd-public-lines-suggested">
+                <div className="cd-public-lines-suggested__heading cd-type-control">
+                  <StatusDot tone="held" /><span>{copy.suggestedTitle}</span>
                 </div>
-              ))}
-            </div>
-          </Card>
+                <p className="cd-public-lines-suggested__intro cd-type-meta">{copy.suggestedIntro}</p>
+                <div className="cd-public-lines">
+                  {suggested.map(renderLine)}
+                  {hours.map((window, index) => renderStructured('hours', index, index === 0 ? copy.hours : '', formatPublicHours(window)))}
+                  {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item)))}
+                </div>
+              </div>
+            </Card>
+          ) : null}
+          {owned.length > 0 ? (
+            <Card padding={16}><div className="cd-public-lines cd-public-lines--owned">{owned.map(renderLine)}</div></Card>
+          ) : null}
           <div className="cd-setup-step__actions">
-            {editingKey !== null || unknown ? (
-              <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
-            ) : (
-              <Button variant="primary" size="main" busy={busy === 'confirm'} onClick={() => void confirm()}>
-                {SETUP_COPY.situations.looksRight}
-              </Button>
-            )}
+            <Button variant="primary" size="main" waiting={editingKey !== null || unknown || (busy !== null && busy !== 'confirm')} busy={busy === 'confirm'} onClick={() => void confirm()}>
+              {SETUP_COPY.situations.looksRight}
+            </Button>
           </div>
         </>
       )}

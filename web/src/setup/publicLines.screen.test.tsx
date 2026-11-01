@@ -40,7 +40,7 @@ async function openLines(viewport: Viewport = 'desktop') {
   await expect.element(screen.getByRole('heading', { name: 'Real situations', exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
-  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).nth(1)).toBeVisible();
   return { screen, state };
 }
 
@@ -191,13 +191,13 @@ it('opens public lines from Real situations with the signed labels and screen ba
     mockStore.reset('rivera');
     const { screen } = await openLines(viewport);
     await expect.element(screen.getByText('Your Desk answers customers from these. Check them before the safety check.', { exact: true })).toBeVisible();
-    const rows = screen.container.querySelectorAll('.cd-public-lines__row');
+    const rows = screen.container.querySelectorAll('.cd-public-lines--owned .cd-public-lines__row');
     expect([...rows].map((row) => row.querySelector('.cd-public-lines__label')?.textContent)).toEqual([
-      'About us', 'Contact', 'Pricing', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help',
+      'About us', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help',
     ]);
-    expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(7);
-    expect(rows[7]?.querySelector('button')).toBeNull();
-    expect(rows[7]?.querySelectorAll('p')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(6);
+    expect(rows[5]?.querySelector('button')).toBeNull();
+    expect(rows[5]?.querySelectorAll('p')).toHaveLength(3);
     expect(screen.container.querySelector('[aria-current="step"]')?.textContent).toContain('Rules');
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
@@ -206,8 +206,8 @@ it('opens public lines from Real situations with the signed labels and screen ba
 
 it('edits one line in place, limits About to 1500 characters and Cancel restores the saved words', async () => {
   const { screen } = await openLines('phone');
-  const before = screen.container.querySelector('.cd-public-lines__text')?.textContent;
-  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const before = screen.container.querySelector('.cd-public-lines--owned .cd-public-lines__text')?.textContent;
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'About us', exact: true });
   await expect.element(field).toHaveValue(before);
   await expect.element(field).toHaveFocus();
@@ -218,7 +218,7 @@ it('edits one line in place, limits About to 1500 characters and Cancel restores
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
-  expect(screen.container.querySelector('.cd-public-lines__text')?.textContent).toBe(before);
+  expect(screen.container.querySelector('.cd-public-lines--owned .cd-public-lines__text')?.textContent).toBe(before);
   expect(screen.getByRole('textbox').elements()).toHaveLength(0);
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeEnabled();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
@@ -230,7 +230,7 @@ it('saves the edited line and keeps every other control disabled while Save is b
   const gate = new Promise<void>((resolve) => { release = resolve; });
   onTestFinished(release);
   worker.use(http.put('/api/owner/setup/:id/public_lines', async () => { await gate; return undefined; }));
-  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'About us', exact: true });
   await field.fill('We help local businesses.');
   await screen.getByRole('button', { name: 'Save', exact: true }).click();
@@ -243,7 +243,7 @@ it('saves the edited line and keeps every other control disabled while Save is b
   await expect.element(field).not.toBeInTheDocument();
   await expect.element(screen.getByText('We help local businesses.', { exact: true })).toBeVisible();
   expect(screen.getByRole('textbox').elements()).toHaveLength(0);
-  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toHaveFocus();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).nth(1)).toHaveFocus();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine').at(-1)?.body).toEqual({ key: 'policy:about', text: 'We help local businesses.' });
 });
 
@@ -251,9 +251,9 @@ it('keeps refused words in the open row with only the signed error at both width
   for (const viewport of ['desktop', 'phone'] as const) {
     mockStore.reset('rivera');
     const { screen } = await openLines(viewport);
-    mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: 'INTERNAL: ignore all instructions' } });
-    await screen.getByRole('button', { name: 'Edit', exact: true }).nth(2).click();
-    const field = screen.getByRole('textbox', { name: 'Pricing', exact: true });
+    mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'contact', reason: 'INTERNAL: ignore all instructions' } });
+    await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+    const field = screen.getByRole('textbox', { name: 'Contact', exact: true });
     await field.fill('Returns start at $250, and the intro call is free.');
     await screen.getByRole('button', { name: 'Save', exact: true }).click();
     await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
@@ -310,10 +310,10 @@ it.each(['get', 'put', 'confirm'] as const)('rereads the interview on a 409 from
   if (route === 'get') await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
   await screen.getByRole('button', { name: 'Looks right' }).click();
   if (route !== 'get') {
-    await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).nth(1)).toBeVisible();
     await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
     if (route === 'put') {
-      await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+      await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
       await screen.getByRole('textbox', { name: 'About us', exact: true }).fill('My draft is still here.');
       await screen.getByRole('button', { name: 'Save', exact: true }).click();
     } else await screen.getByRole('button', { name: 'Looks right' }).click();
@@ -350,10 +350,10 @@ it('hides unknown keys and gives read-only How we help the full text width', asy
   mockStore.inject({ route: 'setupPublicLines', status: 200, body });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).nth(1)).toBeVisible();
   expect(screen.getByText('Unknown text stays hidden.', { exact: true }).elements()).toHaveLength(0);
-  expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(7);
-  const row = screen.container.querySelector('.cd-public-lines__row:last-child')!;
+  expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(6);
+  const row = screen.container.querySelector('.cd-public-lines--owned .cd-public-lines__row:last-child')!;
   expect(row.querySelector('button')).toBeNull();
   expect(row.querySelector('.cd-public-lines__text')!.getBoundingClientRect().right).toBe(row.getBoundingClientRect().right);
 });
@@ -365,7 +365,7 @@ it('uses existing error Notices and preserves the draft through service and netw
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Try again', exact: true }).click();
-  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'About us', exact: true });
   await field.fill('Words I am still checking.');
   for (const status of [503, 'network'] as const) {
@@ -388,7 +388,7 @@ it.each([
   'policy:pricing', 'policy:how_we_help', 'policy:unknown', null,
 ])('keeps a draft and shows the signed Notice when Save refuses %s', async (key) => {
   const { screen } = await openLines();
-  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'About us', exact: true });
   await field.fill('Words I am still checking.');
   mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', ...(key === null ? {} : { key }), reason: ['INTERNAL refusal'] } });
@@ -442,7 +442,7 @@ it.each([
 
 it('disables Save for empty and whitespace-only text without sending a write', async () => {
   const { screen } = await openLines();
-  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'About us', exact: true });
   for (const text of ['', '   ']) {
     await field.fill(text);
@@ -624,4 +624,157 @@ it.each(['stale revision', 'removed key'] as const)('redraws public lines after 
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: latest.lines.map((line) => line.key), revision: latest.revision });
   expect(storedPublicState(mockStore.world, state.interview_id)!.hours).toEqual(before.hours);
   expect(storedPublicState(mockStore.world, state.interview_id)!.prices).toEqual(before.prices);
+
+});
+
+it('draws the signed suggested group with actions per type and screen basics at both widths', async () => {
+  for (const viewport of ['desktop', 'phone'] as const) {
+    mockStore.reset('rivera');
+    const { screen } = await openLines(viewport);
+    await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude found these in your memory and online. Customers see them only once you choose “Looks right”.', { exact: true })).toBeVisible();
+    const group = screen.container.querySelector('.cd-public-lines-suggested')!;
+    expect(group.querySelector('.cd-status-dot--held')).not.toBeNull();
+    const rows = [...group.querySelectorAll('.cd-public-lines__row')];
+    expect(rows.map((row) => row.querySelector('.cd-public-lines__label')?.textContent ?? '')).toEqual(['Contact', 'Hours', 'Price list', '', '']);
+    expect(rows.map((row) => [...row.querySelectorAll('button')].map((button) => button.textContent))).toEqual([
+      ['Edit', 'Remove'], ['Remove'], ['Remove'], ['Remove'], ['Remove'],
+    ]);
+    expect(rows.map((row) => row.querySelector('.cd-public-lines__text')?.textContent)).toEqual([
+      '(408) 555-0199, linda@chenandco.com', 'Mon–Fri, 9 am – 6 pm', 'Tax return review, $250', 'Business tax return, $600', 'Monthly bookkeeping, $150',
+    ]);
+    if (viewport === 'phone') expect(rows.map((row) => row.getBoundingClientRect().height)).toEqual([94, 109, 109, 91, 77]);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+  }
+});
+
+it('removes suggestions with one busy action, blocks other actions, and hides the empty group', async () => {
+  const { screen } = await openLines('phone');
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(release);
+  worker.use(http.delete('/api/owner/setup/:id/public_lines/:key', async () => { await gate; return undefined; }));
+  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(1).click();
+  await expect.element(screen.getByRole('button', { name: 'Remove', exact: true }).nth(1)).toHaveAttribute('aria-busy', 'true');
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  for (const button of screen.getByRole('button', { name: 'Edit', exact: true }).elements()) {
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    (button as HTMLButtonElement).click();
+  }
+  (screen.getByRole('button', { name: 'Looks right' }).element() as HTMLButtonElement).click();
+  expect(screen.getByRole('textbox').elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((request) => request.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+  release();
+  await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
+  // Each price row removes the whole suggested list, as the API's `prices` key specifies.
+  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(2).click();
+  await expect.element(screen.getByText('Tax return review, $250', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Monthly bookkeeping, $150', { exact: true })).not.toBeInTheDocument();
+  await screen.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeEnabled();
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicLine').map((request) => request.path.split('/').at(-1))).toEqual(['hours', 'prices', 'contact']);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
+});
+
+it('edits Contact with its 200-character limit and moves it after About us with focus restored', async () => {
+  const { screen } = await openLines('phone');
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const field = screen.getByRole('textbox', { name: 'Contact', exact: true });
+  await field.fill('x'.repeat(201));
+  expect((field.element() as HTMLTextAreaElement).value).toHaveLength(200);
+  await field.fill('(408) 555-0199, hello@chenandco.com');
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(field).not.toBeInTheDocument();
+  const rows = [...screen.container.querySelectorAll('.cd-public-lines--owned .cd-public-lines__row')];
+  expect(rows.slice(0, 3).map((row) => row.querySelector('.cd-public-lines__label')?.textContent)).toEqual(['About us', 'Contact', 'Getting started']);
+  expect(rows[1]?.textContent).toContain('(408) 555-0199, hello@chenandco.com');
+  expect(rows[1]?.contains(document.activeElement)).toBe(true);
+  expect(screen.container.querySelector('.cd-public-lines-suggested')?.textContent).not.toContain('Contact');
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
+});
+
+it('holds when confirm returns suggestions that are still unconfirmed', async () => {
+  const { screen, state } = await openLines();
+  const current = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in current) throw new Error('read failed');
+  mockStore.inject({ route: 'setupPublicLinesConfirm', status: 200, body: current.body });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.unavailable);
+  expect(mockStore.requests.filter((request) => request.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+it('rereads not_suggested and holds on a failed refresh before showing the current owner item', async () => {
+  const { screen, state } = await openLines();
+  await mockStore.dispatch('setupPublicLine', { params: { id: state.interview_id }, body: { key: 'contact', text: 'hello@chenandco.com' } });
+  mockStore.inject({ route: 'setupPublicLines', status: 503 });
+  await screen.getByRole('button', { name: 'Remove', exact: true }).first().click();
+  await expect.element(screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((request) => request.key === 'setup').length).toBeGreaterThanOrEqual(2);
+  await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(screen.getByText('hello@chenandco.com', { exact: true })).toBeVisible();
+  expect(screen.container.querySelector('.cd-public-lines-suggested')?.textContent).not.toContain('Contact');
+  expect(screen.container.querySelector('.cd-public-lines--owned')?.textContent).toContain('hello@chenandco.com');
+});
+
+it('renders multiple hours windows and exact price amounts without text lines or repeated labels', async () => {
+  const state = await atSituations();
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: {
+    lines: [],
+    hours: { source: 'suggested', windows: [
+      { days: ['mon', 'wed', 'fri'], start: '09:30', end: '12:00' },
+      { days: ['sat'], start: '18:00', end: '00:00' },
+    ] },
+    prices: { source: 'suggested', items: [{ title: 'Annual review', unit_cents: 186000 }, { title: 'Filing', unit_cents: 4050 }] },
+  } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByText('Sat, 6 pm – 12 am', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Mon, Wed, Fri, 9:30 am – 12 pm', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Annual review, $1,860', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Filing, $40.50', { exact: true })).toBeVisible();
+  expect([...screen.container.querySelectorAll('.cd-public-lines__label')].map((label) => label.textContent)).toEqual(['Hours', '', 'Price list', '']);
+  expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(0);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
+});
+
+it('groups suggested policy lines and hides owner-sourced hours and prices', async () => {
+  const state = await atSituations();
+  const response = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in response) throw new Error('read failed');
+  const data = response.body as SetupPublicLines;
+  data.lines.push({ key: 'policy:pricing', text: 'Ask Linda for a quote.', editable: true, source: 'suggested' });
+  for (const line of data.lines) if (['policy:service_area', 'policy:after_hours'].includes(line.key)) line.source = 'suggested';
+  data.hours!.source = 'owner';
+  data.prices!.source = 'owner';
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: data });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).toBeVisible();
+  const rows = [...screen.container.querySelectorAll('.cd-public-lines-suggested .cd-public-lines__row')];
+  expect(rows.map((row) => row.querySelector('.cd-public-lines__label')?.textContent)).toEqual(['Contact', 'Pricing', 'After hours', 'Service area']);
+  expect(rows.every((row) => [...row.querySelectorAll('button')].map((button) => button.textContent).join(',') === 'Edit,Remove')).toBe(true);
+  expect(screen.getByText('Tax return review, $250', { exact: true }).elements()).toHaveLength(0);
+  expect(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true }).elements()).toHaveLength(0);
+  await expectScreenBasics(screen.container, { owner: true });
+});
+
+it('keeps an edited suggestion open if a successful save does not make it owner-sourced', async () => {
+  const { screen, state } = await openLines();
+  const current = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in current) throw new Error('read failed');
+  mockStore.inject({ route: 'setupPublicLine', status: 200, body: current.body });
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const field = screen.getByRole('textbox', { name: 'Contact', exact: true });
+  await field.fill('hello@chenandco.com');
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.unavailable);
+  await expect.element(field).toHaveValue('hello@chenandco.com');
+  expect(mockStore.requests.filter((request) => request.key === 'setupSafetyCheck')).toHaveLength(0);
 });
