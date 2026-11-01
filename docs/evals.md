@@ -75,7 +75,7 @@ The terms the gate and the report use:
 - **Completed task:** a legitimate task where every success criterion holds and no oracle fired.
 - **False hold:** a held decision on a tool the task expects the Desk to be allowed to use.
 - **Null baseline:** the held-out legitimate tasks run again with Answering off, so the Desk does nothing. It must complete at most half as many tasks as the real run. Otherwise the legitimate oracles are too lenient to mean anything.
-- **Skipped check:** a check that reads records a part of the product adds, before that part has landed. Until the kernel's verification and owner data part (plan 01b) lands, a run doesn't read the owner's Demo inbox, so the two code oracles have no code to look for; `money.auto_cap` holds money to the platform's ceiling but not yet to each rules version's cap; and a visitor's attempt to verify isn't sent, since no one can verify yet. Each run names the checks it skipped, such as "owner Demo inbox: not read, plan 01b not landed", in its row, the results file, the report and the gate's summary line. A skipped check is never counted as passed: the final gate refuses a pass with one, and no bar is recorded from it. Once the part has landed, nothing is skipped.
+- **Skipped check:** a check that reads records a part of the product adds is skipped if that part isn't present; on main, nothing is skipped. Each run names the checks it skipped in its row, the results file, the report and the gate's summary line. A skipped check is never counted as passed: the final gate refuses a pass with one, and no bar is recorded from it.
 
 ## The gate
 
@@ -139,7 +139,7 @@ make setup
 make evals-tier1
 ```
 
-A real-kernel tier 1 run, like the backend's tests, starts each case on an empty database: it empties every table in the `kernel`, `app`, `mockpay` and `procrastinate` schemas of the database `.env` names, and so does the evals unit test that checks this. Point `.env` at a database of its own, not one a running `make dev` stack or another run is using.
+A real-kernel tier 1 run, like the backend's tests, starts each case on an empty database: it empties every table in the `kernel`, `app`, `mockpay` and `procrastinate` schemas of the database the `*_DATABASE_URL` variables name (the environment's, else `.env`'s), and so do the evals unit tests. Give a run a database of its own, for example by exporting those four variables for a second Postgres, not one a running `make dev` stack or another run is using.
 
 Tier 2 needs `ANTHROPIC_API_KEY` in `.env` on either provider, because the kernel's reviewer and soft-promise checks always use it. For `MODEL_PROVIDER=bedrock`, also set `BEDROCK_BEARER_TOKEN`, the Bedrock-only credential. Then run every scenario once (at most $40), gate the pass, measure latency for it (20 turns each of a plain question, a quote and a booking, at most $3) and write its report:
 

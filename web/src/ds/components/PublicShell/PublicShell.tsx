@@ -64,8 +64,9 @@ export interface PublicShellProps {
    *
    * Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens
    * or reloads, kept current by the stream's `owner_joined` and `owner_left`. The line tells the
-   * visitor a person is in the chat, so it is never set from anything else. The web app is to set
-   * it this way; it doesn't yet.
+   * visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes
+   * `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag
+   * is false while the stream is disconnected or catching up, or the session mode is not confirmed.
    */
   ownerInChat?: boolean;
   /**

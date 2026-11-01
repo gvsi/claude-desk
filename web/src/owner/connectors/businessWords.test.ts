@@ -1,12 +1,22 @@
 import { expect, it } from 'vitest';
 
 import type { BusinessToolDef } from '../../api/views.ts';
-import { businessGlyph, businessLine, businessRows, businessRulesDescription, isBusinessDef } from './businessWords.ts';
+import { businessGlyph, businessLine, businessOwnerLine, businessRows, businessRulesDescription, isBusinessDef } from './businessWords.ts';
 
 const booking: BusinessToolDef = {
   title: 'Book a free intro call', description: 'Books an intro call.',
   config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
 };
+
+it('returns the signed owner line for every block and no line for an unknown block', () => {
+  expect(businessOwnerLine({ block: 'intake' })).toBe("Saves the person's name, contact details and answers to your questions, so you can follow up.");
+  expect(businessOwnerLine({ block: 'typed_booking' })).toBe('Books one open time on your calendar for this kind of appointment.');
+  expect(businessOwnerLine({ block: 'purpose_payment' })).toBe('Sends a secure payment link for this purpose, for the amount you set.');
+  expect(businessOwnerLine({ block: 'urgent' })).toBe('Takes an urgent callback request and alerts you right away.');
+  for (const config of [null, undefined, {}, [], { block: 'unknown' }, { block: '__proto__' }, { block: 'toString' }, { block: 1 }]) {
+    expect(businessOwnerLine(config)).toBeNull();
+  }
+});
 
 it('describes Rules intake by its questions and other jobs by their configuration', () => {
   const intake: BusinessToolDef = {

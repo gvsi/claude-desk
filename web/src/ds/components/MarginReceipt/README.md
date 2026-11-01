@@ -12,7 +12,7 @@
 ## What the consumer provides
 
 - `source`, `plain` and `ledgerSeq`, from `receiptFromEvent(event)`. Never write a status mapping or status copy on a screen.
-- `plain` is always the event's `visitor_plain`, unchanged, with no clock time.
+- `plain` is the event's `visitor_plain`, unchanged, with no clock time. The owner-only exception is a `refused_at_execution` status: the owner screen passes the transcript item's `owner_plain` verbatim when present, falling back to the event's `visitor_plain`. The signed event stays unchanged; no owner annotation reaches visitor surfaces.
 - On owner screens only, for the receipt that reports what the kernel decided (a decision's first receipt when its state is in `OWNER_REASON_STATES`: `held`, `refused`, `executed` or `allowed`):
   - `reason`: the decision's `reason_plain`. It is written once, at decide time, so it explains only that receipt.
   - `cardBelow`: the request's `ApprovalCard` is drawn right under this receipt's row.
@@ -67,7 +67,7 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `source` | `ReceiptSource` | Required. `{ kind: 'reply'; handoff }` or `{ kind: 'decision'; state }`. |
-| `plain` | `string` | Required. The event's `visitor_plain`, unchanged. |
+| `plain` | `string` | Required. The event's `visitor_plain`, unchanged, except an owner screen's `refused_at_execution` status uses the transcript item's `owner_plain` verbatim when present, with `visitor_plain` as its fallback. |
 | `ledgerSeq` | `number` | Required. The entry the event was signed with. |
 | `reason` | `string` | Owner screens only. The decision's `reason_plain`, for the receipt that reports what the kernel decided: a `decision` receipt in `OWNER_REASON_STATES` reads "{words}. {reason}" (see "The line"). Ignored on a `reply` and on any other state; an empty one keeps `plain`. |
 | `cardBelow` | `boolean` | Owner screens only. The request's `ApprovalCard` is right under this row: a `held` decision reads "Held for you" alone. Ignored on a `reply` and on any other state. |
