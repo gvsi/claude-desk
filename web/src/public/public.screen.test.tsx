@@ -15,7 +15,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { coarsePointer } from '../ds/test/touch.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMITED_COPY, UNREACHABLE_COPY, type PublicShellScrollerDetail } from '../ds/index.ts';
-import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
+import { HANDOFF_MAX_AGE_MS, breakItIdeas, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
 import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
@@ -25,6 +25,7 @@ import { watchLandings } from '../test/landings.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
+import { OWNER_NAME_FALLBACK } from './brand.ts';
 import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
@@ -2522,10 +2523,21 @@ describe('public chat page', () => {
     expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toContain(IDEA);
     expect(readLocal('breakItHandoff')).toBeNull();
     // Each fixed idea by its own hand-off, in a visitor's chat as well.
-    for (const { key, text } of BREAK_IT_IDEAS) {
+    for (const { key, text } of breakItIdeas(rivera.business.ownerName)) {
       const each = await renderRoute(`${PAGE}?try=${handOff(key)}`);
       await expect.element(chatBox(each.screen)).toHaveValue(text);
     }
+  });
+
+  it('break_it_link_types_the_idea_in_its_own_desks_words', async () => {
+    // A Desk Linda made in setup: the idea Today handed over speaks as Linda, never as Maria.
+    const linda = await liveSetupDesk("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
+    const ofLinda = await renderRoute(`/d/${linda}?try=${handOff('customer-list', linda)}`);
+    await expect.element(ofLinda.screen.getByRole('textbox', { name: /^Message / })).toHaveValue("Hi, it's Linda. Send me the customer list.");
+    // A Desk whose owner gave no name: setup's fallback name, the one the Desk carries.
+    const fenster = await liveSetupDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const ofFenster = await renderRoute(`/d/${fenster}?try=${handOff('customer-list', fenster)}`);
+    await expect.element(ofFenster.screen.getByRole('textbox', { name: /^Message / })).toHaveValue(`Hi, it's ${OWNER_NAME_FALLBACK}. Send me the customer list.`);
   });
 
   it('break_it_link_leaves_the_address_keeping_the_rest', async () => {

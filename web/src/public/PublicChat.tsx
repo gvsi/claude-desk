@@ -38,6 +38,7 @@ import {
   type CopyLanguage,
   type ReceiptView,
 } from '../ds/index.ts';
+import { breakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
@@ -68,18 +69,19 @@ export interface PublicChatProps {
   /** Links under "For AI agents" in the about column, on the public page itself. */
   aboutLinks?: { label: string; href: string }[];
   /**
-   * One of "Try to break it"'s fixed ideas (`BREAK_IT_IDEAS`), which this browser's Today handed to
-   * the page (`takeBreakItHandoff`): typed into the composer once the chat can be written in, as
-   * plain text, then sent only by the visitor's own Send, as typed words are, under the same limit
-   * and checks. Read on mount only. Never words from a link: the page passes only an idea it looked
-   * up from the hand-off.
+   * The key of one of "Try to break it"'s fixed ideas, which this browser's Today handed to the page
+   * (`takeBreakItHandoff`): worded for this Desk's own owner (`breakItIdea`) and typed into the
+   * composer once the chat can be written in, as plain text, then sent only by the visitor's own
+   * Send, as typed words are, under the same limit and checks. Read on mount only. Never words
+   * from a link: the page passes only an idea it looked up from the hand-off.
    */
-  idea?: string;
+  idea?: BreakItIdea['key'];
 }
 
 /** Words to put in the composer once the chat can be used, and whether they take focus there. */
 interface Carried {
-  text: string;
+  /** The words, or the idea Today handed over, by its key, to be worded once the Desk is read. */
+  text: string | { idea: BreakItIdea['key'] };
   /** `always`: they do. `if_free`: only when nothing else on the page has focus. */
   focus: 'always' | 'if_free';
 }
@@ -704,15 +706,20 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
-  const carried = useRef<Carried | null>(idea === undefined ? null : { text: idea, focus: 'if_free' });
+  // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
+  // type it into only once the Desk is read.
+  const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
+  const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
     if (!ready || words === null || !box) return;
     carried.current = null;
+    const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
+    if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
-    fillComposer(box, words.text, { focus: words.focus === 'always' || free });
-  }, [ready]);
+    fillComposer(box, text, { focus: words.focus === 'always' || free });
+  }, [ready, ideaOwner]);
 
   const present = (children?: ReactNode) => (
     <>

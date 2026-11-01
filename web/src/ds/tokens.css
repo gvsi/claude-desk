@@ -48,6 +48,9 @@
   --illustration-line: rgba(28,27,25,0.14);
   --illustration-handled: #3f7a2e;
   --illustration-arc: rgba(250,249,245,0.12);
+  --qr-tile: #eae6dc;
+  --qr-ink: var(--bg-app);
+  --qr-hairline: rgba(28,27,25,0.13);
   --connector-stripe: #ffffff;
   --connector-google-blue: #4285f4;
   --shadow-composer: 0 4px 20px rgba(0,0,0,0.25);

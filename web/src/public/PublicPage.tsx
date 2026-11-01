@@ -3,10 +3,11 @@
  * opens the owner's preview of that Desk; for anyone else it falls back to a visitor's chat. Its
  * about column links to the page for AI agents, and to that page's "Send an agent" panel.
  *
- * Today's "Try to break it" hands one of its fixed ideas (`BREAK_IT_IDEAS`) over in this browser's
- * storage and adds the hand-off's one-time token, `?try=<token>`: as the page opens, it types that
- * idea into its chat box, for the visitor to send or not, only when the link has exactly one `try`,
- * equal to the token of the hand-off this browser holds for this Desk, under ten minutes old. Taking
+ * Today's "Try to break it" hands one of its fixed ideas (`breakItIdeas`) over, by its key, in this
+ * browser's storage and adds the hand-off's one-time token, `?try=<token>`: as the page opens, it
+ * types that idea into its chat box, worded for this Desk's own owner, for the visitor to send or
+ * not, only when the link has exactly one `try`, equal to the token of the hand-off this browser
+ * holds for this Desk, under ten minutes old. Taking
  * it removes that record in the same step; a link with another token leaves a waiting hand-off for
  * the tab it was made for. Anything else types nothing:
  * an idea's key or words in the address, an unknown or used token, another Desk's hand-off, an old
@@ -20,7 +21,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
-import { takeBreakItHandoff } from '../lib/breakItIdeas.ts';
+import { takeBreakItHandoff, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { AGENTS_COPY } from './agents/copy.ts';
 import { PublicChat } from './PublicChat.tsx';
@@ -31,8 +32,8 @@ const TRY = 'try';
 /** An older link's words for the chat box: ignored, never typed in, and taken out of the address. */
 const DRAFT = 'draft';
 
-/** The idea handed over to `slug`'s page under the link's one `try` token, taken; none for anything else. */
-function ideaFrom(params: URLSearchParams, slug: string): string | null {
+/** The key of the idea handed over to `slug`'s page under the link's one `try` token, taken; none for anything else. */
+function ideaFrom(params: URLSearchParams, slug: string): BreakItIdea['key'] | null {
   const tokens = params.getAll(TRY);
   return tokens.length === 1 && tokens[0] !== undefined ? takeBreakItHandoff(tokens[0], slug) : null;
 }
