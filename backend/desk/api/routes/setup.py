@@ -233,7 +233,8 @@ async def setup_rules(interview_id: InterviewId, request: Request,
     the kernel couldn't check them ("Rules can't be checked right now"); 409 `conflict` before the questions are
     done or once the rules are confirmed."""
     async def work(owner: OwnerCtx, state: Runtime) -> RulesDraft:
-        return await setup.rules(owner, state.database(), state.model, interview_id, state.clock())
+        return await setup.rules(owner, state.database(), state.model, interview_id, state.clock(),
+                                 setup_policy_claims_enabled=state.settings.setup_policy_claims_enabled)
 
     return await _proving(request, ctx, interview_id, work, model=True)
 

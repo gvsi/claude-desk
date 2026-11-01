@@ -1807,12 +1807,15 @@ SETUP_POLICY_CLAIMS = {
 }
 
 
-def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date) -> SeedParts:
+def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
+               publish_policies: bool = True) -> SeedParts:
     """The Desk's parts from the answers: the public charter (the contact and business policies, omitting policy
-    fields filled from unconfirmed suggestions), the hours, the price list, the calendar and notification defaults."""
+    fields filled from unconfirmed suggestions or all policies when disabled), the hours, the price list,
+    the calendar and notification defaults."""
     claim_values = [("contact", answers.public_contact)]
-    claim_values.extend((key, getattr(answers, field)) for field, key in SETUP_POLICY_CLAIMS.items()
-                        if field not in answers.suggested_fields)
+    if publish_policies:
+        claim_values.extend((key, getattr(answers, field)) for field, key in SETUP_POLICY_CLAIMS.items()
+                            if field not in answers.suggested_fields)
     charter = [Claim(key=key, kind="text", value=value.strip())
                for key, value in claim_values
                if value and value.strip()]
@@ -2061,7 +2064,7 @@ async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, vers
 
 
 async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str,
-                now: datetime) -> RulesDraft:
+                now: datetime, *, setup_policy_claims_enabled: bool = True) -> RulesDraft:
     """The new Desk's parts and its first rules draft. The first time, the parts go to the kernel, then Claude
     drafts the cards, each set stored before the kernel drafts it; a set the kernel refuses as invalid gets Claude's
     one retry (`draft_cards`). Any later request re-posts the stored cards and never drafts again. A proof that is
@@ -2078,7 +2081,8 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
     if not cards:
         timezone = (await _business(owner, desk_id))["timezone"]
         today = now.astimezone(ZoneInfo(timezone)).date()
-        await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today))
+        await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today,
+                                                  publish_policies=setup_policy_claims_enabled))
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first

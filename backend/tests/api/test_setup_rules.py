@@ -19,6 +19,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
 from types import SimpleNamespace
@@ -176,6 +177,27 @@ def test_seed_parts_skip_suggested_policy_fields(field: str, key: str):
     assert parts.calendar == calendar_slots(hours, TIMEZONE, date(2026, 10, 31))
 
 
+@pytest.mark.parametrize("public_contact", ["  hello@example.test  ", None])
+def test_seed_parts_can_disable_policy_claims_without_changing_other_parts(public_contact):
+    answers = SetupAnswers(**{field: f"Answer for {field}." for field in SETUP_POLICY_CLAIMS},
+                           public_contact=public_contact, hours=[window.window() for window in HOURS],
+                           price_items=PRICES)
+    saved = answers.model_dump()
+    enabled = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    disabled = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31),
+                          publish_policies=False)
+
+    assert {claim.key: claim.value for claim in disabled.charter} == (
+        {"contact": public_contact.strip()} if public_contact else {})
+    assert disabled.hours == enabled.hours
+    assert disabled.prices == enabled.prices
+    assert disabled.calendar == enabled.calendar
+    assert disabled.notifications == enabled.notifications
+    assert answers.model_dump() == saved
+    assert seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31)) == enabled
+    assert {claim.key for claim in enabled.charter if claim.key.startswith("policy:")} == set(SETUP_POLICY_CLAIMS.values())
+
+
 @pytest.fixture
 def model() -> ScriptedModel:
     return ScriptedModel()
@@ -233,6 +255,39 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
     reply = await owner.browser.post(policy(state, "rules"))
     assert reply.status_code == 200, reply.text
     return RulesDraft.model_validate(reply.json())
+
+
+@pytest.mark.parametrize("reenable", [False, True])
+async def test_setup_reads_policy_claim_switch_at_each_charter_write(app, browser, fake, kernel_http, model, engine,
+                                                                    reenable):
+    owner, state = await ready(app, browser, kernel_http, model)
+    saved_answers = (await stored(engine, state["interview_id"]))["answers"]
+    runtime = app.state.runtime
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=False)
+    fake.calls.clear()
+
+    # An interrupted draft leaves another charter write to retry after the runtime switch changes.
+    model.add(cut_short(DraftedRules(cards=GOOD_CARDS)))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    (off,) = fake.called("PUT /desks/{id}/charter")
+    assert off.body["charter"] == [{"key": "contact", "kind": "text", "value": "(510) 555-0142"}]
+    assert (await stored(engine, state["interview_id"]))["answers"] == saved_answers
+
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=reenable)
+    await drafted_rules(owner, model, state)
+    _, on = fake.called("PUT /desks/{id}/charter")
+    assert {claim["key"]: claim["value"] for claim in on.body["charter"]} == {
+        "contact": saved_answers["public_contact"],
+        **({key: saved_answers[field].strip() for field, key in SETUP_POLICY_CLAIMS.items()
+            if saved_answers.get(field) and field not in saved_answers["suggested_fields"]} if reenable else {}),
+    }
+    for part in ("hours", "prices", "calendar", "notifications"):
+        first, second = fake.called(f"PUT /desks/{{id}}/{part}")
+        assert first.body == second.body
+    assert (await stored(engine, state["interview_id"]))["answers"] == saved_answers
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    assert (await owner.browser.post(policy(state, "go_live"))).status_code == 200
 
 
 async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
