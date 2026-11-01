@@ -39,6 +39,7 @@ import type {
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
+import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -339,6 +340,16 @@ export class MockWorld {
   /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
   ownerNameOf(session: SessionRecord): string {
     return this.deskOf(session).ownerName ?? BUSINESS.owner_display_name;
+  }
+
+  /**
+   * Whom the session's Desk hands a visitor to on its handoff card: its owner, by display name, or
+   * the business when the owner gave no name and the Desk carries setup's fallback, "Owner", which
+   * is no one's name and which the public page never shows (`brandFrom`).
+   */
+  handoffNameOf(session: SessionRecord): string {
+    const owner = this.ownerNameOf(session);
+    return owner === OWNER_NAME_FALLBACK ? this.deskOf(session).summary.business_name : owner;
   }
 
   sessionsOf(deskId: string): SessionRecord[] {
@@ -870,11 +881,16 @@ export class MockWorld {
 
   /** The step context for one turn of `session`, in `language`. */
   context(session: SessionRecord, language: Language, text: string): TurnContext {
+    // Looked up only when a step hands off, so making a context still never reads the Desk.
+    const handoffName = () => this.handoffNameOf(session);
     return {
       language,
       text,
       get person() {
         return session.person;
+      },
+      get handoffName() {
+        return handoffName();
       },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),

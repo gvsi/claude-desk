@@ -1,15 +1,21 @@
 /**
  * The mock's setup interview, driven the way its handlers drive it: the business's name it reads
  * from the owner's description, the way a reader would, and the slug and first question that follow;
- * and the unfinished setup the owner's Desks name until the Desk goes live.
+ * the unfinished setup the owner's Desks name until the Desk goes live; the situations it tries,
+ * titled for the business; and the Desk it makes, handing a visitor off to its own owner.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { PublicDesk } from '../api/contracts.ts';
+import type { PublicDesk, RenderedBlock, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, RulesDraft, SetupState, SetupTools, SituationResult, Today } from '../api/views.ts';
+import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today } from '../api/views.ts';
+import { cardBlock, rivera } from '../ds/fixtures/index.ts';
+import { PUBLIC_COPY } from '../public/copy.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
+import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
+import { EVENT_GAP_MS } from './script.ts';
+import { RIVERA } from './seed.ts';
 import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo } from './setup.ts';
 import { mockStore } from './store.ts';
 
@@ -1126,5 +1132,93 @@ describe("a Desk's unfinished setup, in the owner's Desks", () => {
     const desks = (me.body as CopyOut).desks;
     expect(desks.map((desk) => [desk.desk_id, desk.setup])).toEqual([...(await setups())]);
     expect(desks.find((desk) => desk.desk_id === deskId)?.setup).toEqual({ interview_id: id, step: 'questions' });
+  });
+});
+
+describe('a Desk setup made, asked for its owner', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A Desk the mock's setup made from `description` and took live, the owner taking Claude's suggestions: its slug. */
+  async function liveDesk(description: string): Promise<string> {
+    const { interview_id: id, slug } = await startState(description);
+    const steps: [RouteKey, unknown][] = [
+      ['setupConsent', { allow: false }],
+      ['setupSuggestions', {}],
+      ...(['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive'] as const).map((key): [RouteKey, unknown] => [key, undefined]),
+    ];
+    for (const [key, body] of steps) {
+      const answer = await mockStore.dispatch(key, { params: { id }, body });
+      if ('network' in answer || answer.status !== 200) throw new Error(`the mock answers ${key}`);
+    }
+    return slug;
+  }
+
+  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
+    const opened = await mockStore.dispatch('openSession', { params: { slug } });
+    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+    const events: SseEvent[] = [];
+    const stop = mockStore.listen(slug, 0, (_seq, ev) => events.push(ev));
+    const before = events.length;
+    const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
+    if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
+    stop();
+    return events.slice(before).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+  }
+
+  it('asking_for_the_owner_hands_off_to_that_owner_by_name', async () => {
+    // What the public page's "Ask for Linda" sends, in either language, as the kernel's handoff card
+    // answers it on her Desk.
+    const slug = await liveDesk(CPA);
+    expect(await repliesTo(slug, PUBLIC_COPY.en.askForOwner('Linda'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }),
+    ]);
+    expect(await repliesTo(slug, PUBLIC_COPY.es.askForOwner('Linda'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    ]);
+    // Rivera's Desk still hands off to Maria Rivera, in the fixtures' own words.
+    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.en.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.en]);
+    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.es]);
+  });
+
+  it('with_no_owner_name_the_handoff_names_the_business', async () => {
+    // Setup's fallback, "Owner", is no one's name, and the page never shows it: what "Ask for a
+    // person" sends is handed to the business, with one stop after a name that ends in one.
+    const fenster = await liveDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    expect(await repliesTo(fenster, PUBLIC_COPY.en.askForOwner(null))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Fenster & Fenster.', lines: ['Fenster & Fenster will reply here.'] }),
+    ]);
+    const chen = await liveDesk('Chen & Co. is a two-person CPA firm in San Jose.');
+    expect(await repliesTo(chen, PUBLIC_COPY.en.askForOwner(null))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Chen & Co.', lines: ['Chen & Co. will reply here.'] }),
+    ]);
+    expect(await repliesTo(chen, PUBLIC_COPY.es.askForOwner(null))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Chen & Co.', lines: ['Chen & Co. te responderá aquí.'] }),
+    ]);
+  });
+
+  it('an_agent_at_a_desk_not_yet_live_is_handed_to_its_owner', async () => {
+    // Until the Desk goes live its Answering is off, so the built-in agent's booking gets the
+    // handoff, to the Desk's own owner.
+    const { slug } = await startState(CPA);
+    const opened = await mockStore.dispatch('openSession', { params: { slug } });
+    if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
+    const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'agent-at-linda' } });
+    if ('network' in sent || sent.status !== 202) throw new Error('the mock sends the agent');
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
+    const read = await mockStore.dispatch('agentRun', { params: { slug, run_id: (sent.body as { run_id: string }).run_id } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the run');
+    const run = read.body as DemoAgentRun;
+    expect(run.state).toBe('done');
+    expect(run.turns.filter((turn) => turn.author === 'desk').map((turn) => turn.blocks)).toEqual([
+      [cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] })],
+    ]);
   });
 });
