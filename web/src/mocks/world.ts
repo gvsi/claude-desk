@@ -838,15 +838,17 @@ export class MockWorld {
   }
 
   /**
-   * A reply of Claude's, checked and recorded. One that shows the handoff card opens the owner's
-   * handoff first, as the kernel's check does (`openCardHandoff`), except in history the seed or a
-   * test writes: the kernel's seed holds its request without checking a reply.
+   * A reply of Claude's, checked and recorded. Outside the owner's preview, one that shows the
+   * handoff card opens the owner's handoff first, as the kernel's check does (`openCardHandoff`),
+   * except in history the seed or a test writes: the kernel's seed holds its request without
+   * checking a reply.
    */
   reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean; paused?: boolean } = {}): EvMessage {
     const paused = opts.paused ?? false;
     const blocked = paused || (opts.blocked ?? false);
+    const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
-    if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
+    if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
     const checked = this.appendLedger(this.deskOf(session), {
       kind: 'reply',
       origin: 'kernel',
@@ -860,9 +862,9 @@ export class MockWorld {
       generation: session.state.generation,
       author: 'claude',
       language,
-      handoff: blocked,
+      handoff,
       blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
-      visitor_plain: VISITOR_PLAIN[language][blocked ? 'reply_handed_off' : 'reply_checked'],
+      visitor_plain: VISITOR_PLAIN[language][handoff ? 'reply_handed_off' : 'reply_checked'],
       ledger_seq: checked.seq,
       signature: sign(messageId),
     };

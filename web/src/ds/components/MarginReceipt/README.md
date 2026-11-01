@@ -43,8 +43,8 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 
 | Source | Dot |
 | --- | --- |
-| A reply that passed its check (`handoff: false`) | handled |
-| A reply whose draft was blocked and handed to the owner (`handoff: true`) | held |
+| A reply showing no handoff clause, including checked cards kept when its prose failed (`handoff: false`) | handled |
+| A reply showing the handoff clause, whether its draft passed or failed (`handoff: true`) | held |
 | `allowed`, `approved`, `executed` | handled |
 | `held`, `unknown` | held |
 | `refused`, `denied`, `failed`, `refused_at_execution` | refused |

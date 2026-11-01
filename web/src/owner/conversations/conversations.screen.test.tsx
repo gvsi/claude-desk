@@ -14,7 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
-import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, turnEnd, writing } from '../../mocks/script.ts';
+import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
@@ -1299,6 +1299,66 @@ describe('Conversations', () => {
     expect(translation.element().parentElement?.textContent).toBe('Translated by Claude: Can you come Thursday afternoon?');
     await expectScreenBasics(screen.container, { owner: true });
   });
+  it('passed_handoff_card_shows_its_held_receipt_in_the_owner_transcript', async () => {
+    const chat = session(DANA_LIVE);
+    const ctx = mockStore.world.context(chat, 'en', 'Talk to Maria');
+    const rule = SCRIPT.find((rule) => rule.name === 'talk');
+    if (!rule) throw new Error('the script has its handoff row');
+    for (const step of [...rule.steps, turnEnd]) mockStore.world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    await expect.element(line).toBeVisible();
+    expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
+
+  it('cards_only_failure_shows_its_handled_check_in_the_owner_transcript', async () => {
+    const world = mockStore.world;
+    const desk = world.desk(RIVERA.deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const chat = world.addSession(desk);
+    const text = 'cards-only';
+    world.visitorText(chat, text);
+    const ctx = world.context(chat, 'en', text);
+    for (const step of [...matchRule(text).steps, turnEnd]) world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const card = log(screen).getByRole('article', { name: 'Quote', exact: true });
+    await expect.element(card).toBeVisible();
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_checked);
+    await expect.element(line).toBeVisible();
+    expect(line.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
+    expect(log(screen).getByRole('article', { name: 'Handed to a person', exact: true }).elements()).toHaveLength(0);
+    const row = line.element().closest('.cd-transcript-row');
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
+  });
+
+  it('kept_cards_with_drafted_handoff_show_the_held_line_in_the_owner_transcript', async () => {
+    const world = mockStore.world;
+    const desk = world.desk(RIVERA.deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const chat = world.addSession(desk);
+    const text = 'cards-kept-handoff';
+    world.visitorText(chat, text);
+    const ctx = world.context(chat, 'en', text);
+    for (const step of [...matchRule(text).steps, turnEnd]) world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const quote = log(screen).getByRole('article', { name: 'Quote', exact: true });
+    await expect.element(quote).toBeVisible();
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    await expect.element(line).toBeVisible();
+    const row = line.element().closest('.cd-transcript-row');
+    expect(row?.contains(quote.element())).toBe(true);
+    expect([...row!.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
+    expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
+  });
+
   it('owner_receipts_show_the_kernel_reason', async () => {
     const { chat, refund, refunded, quote, booking } = danasChatWithThreeDecisions();
     const replyChecked = VISITOR_PLAIN.en.reply_checked;
@@ -1321,8 +1381,11 @@ describe('Conversations', () => {
     await expect.element(receipt(screen, booking.visitor_plain)).toBeVisible();
     expect(log(screen).getByText(booking.reason_plain, { exact: false }).elements()).toHaveLength(0);
     expect(decisionReads(booking.decision_id)).toHaveLength(0);
-    // Each reply's check keeps its own line.
-    await expect.poll(() => receipt(screen, replyChecked).elements().length).toBe(3);
+    // The quote's reply keeps its checked line; the refund and booking replies show a handoff.
+    await expect.poll(() => receipt(screen, replyChecked).elements().length).toBe(1);
+    const handedOff = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    expect(handedOff.elements()).toHaveLength(2);
+    for (const line of handedOff.elements()) expect(line.querySelector('.cd-status-dot--held')).not.toBeNull();
     // The visitor's words for the hold and the quote show nowhere: the owner's replace them.
     expect(log(screen).getByText(refund.visitor_plain, { exact: true }).elements()).toHaveLength(0);
     expect(log(screen).getByText(quote.visitor_plain, { exact: true }).elements()).toHaveLength(0);

@@ -18,7 +18,7 @@ import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMI
 import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
-import { DEMO_CODE, HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
+import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
@@ -647,6 +647,46 @@ describe('public chat page', () => {
     }
     expect(observed).toEqual(expected);
   }, 20_000);
+
+  it('passed_handoff_card_shows_its_held_receipt_to_a_stranger', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: { name: 'rivera', signedIn: false } });
+    await ready(screen);
+    await say(screen, 'Talk to Maria');
+    const row = rowOf(screen.getByRole('article', { name: 'Handed to a person', exact: true }).element());
+    expect(receiptsOf(row)).toEqual([VISITOR_PLAIN.en.reply_handed_off]);
+    expect(row.querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
+
+  it.each([false, true])('cards_only_failure_shows_its_check_only_in_owner_preview_%s', async (ownerPreview) => {
+    const path = ownerPreview ? `${PAGE}?preview=${RIVERA.deskId}` : PAGE;
+    const { screen } = await renderRoute(path, { seed: { name: 'rivera', signedIn: ownerPreview } });
+    await ready(screen);
+    await say(screen, 'cards-only');
+    const card = screen.getByRole('article', { name: 'Quote', exact: true });
+    await expect.element(card).toBeVisible();
+    const row = rowOf(card.element());
+    const quoted = "Quoted from Maria Rivera's price list";
+    expect(receiptsOf(row)).toEqual(ownerPreview ? [VISITOR_PLAIN.en.reply_checked, quoted] : [quoted]);
+    expect(row.querySelectorAll('.cd-reply-card')).toHaveLength(1);
+    expect(row.querySelector('.cd-claude-message__prose')).toBeNull();
+    expect(row.querySelectorAll('.cd-status-dot--handled')).toHaveLength(ownerPreview ? 2 : 1);
+  });
+
+  it('kept_cards_with_drafted_handoff_show_the_held_line_to_a_stranger', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: { name: 'rivera', signedIn: false } });
+    await ready(screen);
+    await say(screen, 'cards-kept-handoff');
+    const quote = screen.getByRole('article', { name: 'Quote', exact: true });
+    const handoff = screen.getByRole('article', { name: 'Handed to a person', exact: true });
+    await expect.element(quote).toBeVisible();
+    await expect.element(handoff).toBeVisible();
+    const row = rowOf(quote.element());
+    expect(rowOf(handoff.element())).toBe(row);
+    expect([...row.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
+    expect(row.querySelector('.cd-claude-message__prose')).toBeNull();
+    expect(receiptsOf(row)).toEqual([VISITOR_PLAIN.en.reply_handed_off, "Quoted from Maria Rivera's price list"]);
+    expect(row.querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
 
   it('held_request_shows_the_kernel_line', async () => {
     const { screen } = await renderRoute(PAGE);
@@ -3542,6 +3582,8 @@ function expectReceiptsUnderTheirMessages(screen: RenderResult): void {
 
 /** A message for each row of the script, in English and, where the row reads it, Spanish. */
 const SCRIPT_SAMPLES: Record<RuleName, string[]> = {
+  'cards-only': ['cards-only', 'solo-tarjetas'],
+  'cards-kept-handoff': ['cards-kept-handoff', 'tarjetas-con-traspaso'],
   discount: ['Can I get 15% off if I pay cash?', '¿Me hacen un descuento?'],
   invoice: ['Can you send my invoice?', 'Necesito mi factura'],
   deposit: ['How do I pay the deposit?', 'Quiero pagar'],
