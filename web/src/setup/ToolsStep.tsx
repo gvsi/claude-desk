@@ -116,8 +116,9 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
 
 /**
  * "What Claude can use": the new Desk's connectors from `setupTools`, grouped by the catalog. A
- * built-in connector that isn't on, or the mock payments server (connected first while it can
- * be, or already connected and waiting for review), opens its review (`ConnectorReview`); "Turn it
+ * built-in connector that isn't on, or the mock payments server (not connected yet, and then
+ * connected on the same screen, or already connected and waiting for review), opens its review
+ * (`ConnectorReview`); "Turn it
  * on" sends one `confirmTool` for its tools, each at the hash it was listed at, and its draft shows
  * inline; "Confirm and turn on" confirms it, and only then, read again, do the tools read "On".
  * "Continue" goes on to the rules. The calls behind each press, in their order, are
@@ -195,13 +196,17 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     }
     if (connector === null) return null;
     const turnedOn = toolsToTurnOn(connector, rows);
+    // An app is connected on this same screen: until it is, its tools can't be known, and "Connect
+    // Stripe" connects it here; then its tools show for review, with "Turn it on".
+    const app = connector.view.source.kind === 'external';
     return (
       <ConnectorReview
         connector={connector.view}
+        {...(app ? { connection: flow.mustConnect ? 'not_connected' : 'connected', onConnect: () => void flow.connect() } as const : {})}
         tools={turnedOn.map((row) => reviewTool(row, cards))}
         onTurnOn={() => void flow.turnOn(view.key, turnedOn)}
         onCancel={flow.cancel}
-        pending={turningOn}
+        pending={turningOn || connecting}
         {...(reviewError === undefined ? {} : { error: reviewError })}
       />
     );
@@ -244,10 +249,9 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       <SkeletonScreen loading={tools.data === undefined && !tools.isError} status={copy.loading} skeleton={<ToolsListSkeleton />} className="cd-setup-step__region">
         {list}
       </SkeletonScreen>
-      {connecting ? <LoadingLine>{copy.connecting}</LoadingLine> : null}
       {listError === null ? null : <Notice tone="error">{listError}</Notice>}
       <div className="cd-setup-step__actions">
-        <Button variant="primary" size="main" waiting={connecting} onClick={onContinue}>
+        <Button variant="primary" size="main" onClick={onContinue}>
           {copy.continue}
         </Button>
       </div>

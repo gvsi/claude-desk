@@ -19,6 +19,15 @@ For a business job, pass `job` instead of `connector`: `{ title, glyph, rows: { 
   - none: "No rule of yours covers this yet, so it starts at Ask me first." (or "No rule of yours covers this yet." once the owner picked another outcome).
 - Each tool's outcome at the right, an `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; with `onChangeOutcome` each outcome is a menu, and without it, words and a dot. Each row lays out by its own width: under 640 px the outcome sits on its own line under its words.
 - A primary "Turn it on", a secondary "Cancel", and "You'll see the change to your rules before anything runs." in secondary meta.
+
+## An app connected on the same screen
+
+Setup connects its one app (the mock payments server, Stripe) on this screen, with `connection`:
+
+- `not_connected`: its tools can't be known until it is connected. The lead reads "Connect it first, so Claude Desk can read what {name} lets Claude do. Nothing runs until you turn it on." The Tools card holds one row: "{name}'s tools", "They show here once {name} is connected, each with the rule it starts at." in secondary meta, and "Not connected" with the held dot where an outcome sits. The buttons are a primary "Connect {name}", which calls `onConnect` once per press and waits as "Turn it on" does, and "Cancel"; the hint reads "{name} asks you to sign in. Then you review its tools here."
+- `connected`: the review as above, with the lead "Connected to {name}'s test account. Nothing runs until you turn it on."
+
+Built-in connectors and jobs take no `connection`, and neither does the add flow on Connectors, where the app was signed in to first.
 - `error`, in an error `Notice` under them.
 
 ## Long names
@@ -40,6 +49,8 @@ A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s 
 | `intro` | `string` | An app's promise, after "Nothing runs until you turn it on." |
 | `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[] }`. |
 | `onChangeOutcome` | `(key: string, mode: RuleMode) => void` | Makes each outcome a menu. |
+| `connection` | `'not_connected' \| 'connected'` | An app connected on this screen (setup's Stripe). |
+| `onConnect` | `() => void` | "Connect {name}", while `not_connected`. |
 | `onTurnOn` | `() => void` | Required. |
 | `onCancel` | `() => void` | Required. |
 | `pending` | `boolean` | The screen is drafting the change. |

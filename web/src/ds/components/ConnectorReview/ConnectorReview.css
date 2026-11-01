@@ -133,6 +133,14 @@
   min-width: 0;
 }
 
+/* "Not connected" where a tool's outcome sits, as a read-only outcome draws its words and dot. */
+.cd-connector-review__status {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
 .cd-connector-review__name {
   margin: 0;
   color: var(--text-primary);

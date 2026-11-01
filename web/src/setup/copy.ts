@@ -210,7 +210,6 @@ export const SETUP_COPY = {
     turnOnTitle: (connector: string) => `Turn on ${connector}`,
     turnOnSubtitle: "Here's exactly what changes on your Desk. Nothing changes until you confirm.",
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
-    connecting: 'Connecting Stripe',
   },
 
   rules: {

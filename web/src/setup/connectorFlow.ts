@@ -1,7 +1,7 @@
 /**
  * How a connector turns on in setup, apart from how its screens look: the owner-API calls behind
- * each of the owner's presses, in their order. Today's three screens (the list, the review, the
- * change to confirm) run them through `useConnectorFlow`, and so will the one screen that merges them.
+ * each of the owner's presses, in their order. The Tools step's screens (the list, a connector's one
+ * screen to connect it and review its tools, the change to confirm) run them through `useConnectorFlow`.
  *
  * - An app setup can still connect (the mock payments server, Stripe): `setupConnect`, then
  *   `setupTools` read again. Its tool definitions exist only once it is connected: the kernel lists
@@ -114,11 +114,10 @@ export type ConnectorView =
  * The Tools step's connector flow: which view shows, what is in flight and what failed, and the
  * owner's presses, each running `connectorFlow`'s calls in their order.
  *
- * - `choose(key)`: the list's button today. The mock payments server, while it can be connected,
- *   connects first, then its review opens; any other connector's review opens at once.
- * - `open(key)` and `connect()`: the same, split for one screen that opens before it connects. `open`
- *   shows the connector, with its definitions when `needsConnect` is false; `connect` connects it
- *   there and stays, its definitions then read.
+ * - `choose(key)` and `open(key)`: a connector's one screen opens at once, and connects nothing. The
+ *   mock payments server, while it can be connected (`mustConnect`), opens not connected: its tools
+ *   can't be known yet. `connect()` connects it there ("Connect Stripe") and stays, its definitions
+ *   then read and shown for review.
  * - `turnOn(key, rows)`: drafts the change ("Turn it on"); `confirm()` is the owner's confirm of it.
  */
 export function useConnectorFlow({ interviewId, deskId, tools }: { interviewId: string; deskId: string; tools: SetupTools | undefined }) {
@@ -163,11 +162,9 @@ export function useConnectorFlow({ interviewId, deskId, tools }: { interviewId: 
     setView({ kind: 'review', key });
   };
 
-  const choose = async (key: ConnectorKey) => {
+  const choose = (key: ConnectorKey) => {
     setListError(null);
-    setReviewError(undefined);
-    if (needsConnect(key, tools) && !(await connect())) return;
-    setView({ kind: 'review', key });
+    open(key);
   };
 
   const backToList = async () => {

@@ -1821,7 +1821,26 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Verification').getByText('Always on', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
+
+    // One screen for the app. Its tools exist only once it is connected, so before that its card
+    // holds one row that says so, and nothing is connected until the owner connects it here.
+    await expect.element(screen.getByText('Connect it first, so Claude Desk can read what Stripe lets Claude do. Nothing runs until you turn it on.', { exact: true })).toBeVisible();
+    const waiting = screen.getByRole('region', { name: 'Tools' });
+    await expect.element(waiting.getByText("Stripe's tools", { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText('They show here once Stripe is connected, each with the rule it starts at.', { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText('Not connected', { exact: true })).toBeVisible();
+    expect(waiting.element().querySelector('.cd-status-label .cd-status-dot--held')).not.toBeNull();
+    expect(waiting.getByRole('listitem').elements()).toHaveLength(1);
+    await expect.element(screen.getByText('Stripe asks you to sign in. Then you review its tools here.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Turn it on' }).elements()).toHaveLength(0);
+    expect(requests('setupConnect', mark)).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText("Connected to Stripe's test account. Nothing runs until you turn it on.", { exact: true })).toBeVisible();
     expect(requests('setupConnect', mark).map((r) => r.body)).toEqual([{ server: 'mock_payments' }]);
+    expect(screen.getByText('Not connected', { exact: true }).elements()).toHaveLength(0);
     const tools = ['payments.list_charges', 'payments.create_refund'];
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const review = screen.getByRole('region', { name: 'Tools' });
@@ -1859,6 +1878,16 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: /^(Connect|Review) Stripe$/ }).elements()).toHaveLength(0);
     expect(requests('confirmTool', mark)).toHaveLength(1);
+
+    // The same calls in the same order as before the screens were merged: connect, the tools read
+    // again, one confirm at the pinned hashes, the rules read again, then the owner's confirm.
+    const order = ['setupConnect', 'setupTools', 'confirmTool', 'rules', 'confirmRules'];
+    const keys = mockStore.requests.slice(mark).map((r) => r.key);
+    let at = -1;
+    for (const key of order) {
+      at = keys.indexOf(key as RouteKey, at + 1);
+      expect(at, `${key} after the one before`).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('built_in_connector_turns_on_only_after_its_change_is_confirmed', async () => {
@@ -1980,6 +2009,8 @@ describe('setup', () => {
   it('tool_confirm_conflicts_fail_closed', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
     const mark = mockStore.requests.length;
