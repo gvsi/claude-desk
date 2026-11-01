@@ -34,7 +34,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, render, reply_check
-from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS
+from desk.next_steps import NEXT_STEPS
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
@@ -45,11 +45,11 @@ from .test_approvals import answered
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
 
-# A stranger's steps on a fresh Rivera copy, in tool-name order: the seed's urgent tool,
-# `desk.emergency-callback` (the urgent block's step), then the native tools'.
-VISITOR_NEXT_STEPS = [BUSINESS_BLOCK_STEPS["urgent"], *(NEXT_STEPS[tool] for tool in (
-    "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-    "native.quote", "native.request_callback", "native.start_verification"))]
+# A stranger's steps on a fresh Rivera copy, in tool-name order. The seed's urgent tool, first by
+# name, offers the native call-back's step, which is listed once, there.
+VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
+    "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+    "native.quote", "native.start_verification")]
 
 ROUTE = "POST /check_reply"
 
