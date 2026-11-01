@@ -1,10 +1,9 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
 import type { PublicLine, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
-import { SETUP_QUESTIONS, SETUP_ROUTES, setupPublicDesk } from './setup.ts';
+import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
 import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
-
-const REFUSED = /\$\s*[-+]?(?:\d|\.\d)|\d\s*%|\b\d{1,2}(?:\s*(?:am|pm)\b|:\d{2}\b|\s+to\s+\d{1,2}\b)|\b(?:guarantee|promise|always|never)\b/i;
+import { publicLineRefused } from './publicLineScan.ts';
 
 /** The signed Chen & Co. board's starter lines. */
 const CPA_LINES = [
@@ -19,7 +18,7 @@ const CPA_LINES = [
 
 function seed(sv: Server, state: SetupState): PublicLine[] {
   const desk = sv.world.desk(state.desk_id);
-  const about = desk ? setupPublicDesk(sv.world, desk, 'en')?.charter[0] : undefined;
+  const about = desk ? setupAbout(sv.world, desk) : null;
   const answers = new Map<string, string>();
   let question: string | undefined;
   for (const message of state.messages) {
@@ -31,7 +30,7 @@ function seed(sv: Server, state: SetupState): PublicLine[] {
     }
   }
   const values: Record<string, string | undefined> = {
-    about: about && 'title' in about ? about.title ?? undefined : undefined,
+    about: about ?? undefined,
     intake: answers.get('what_you_do'),
     service_area: answers.get('hours_and_area'),
     pricing: answers.get('quote_limit'),
@@ -72,7 +71,7 @@ export const PUBLIC_LINES_ROUTES = {
       return { status: 422, body: { error: 'invalid' } };
     }
     if (!line.editable) return { status: 422, body: { error: 'not_editable', key: line.key } };
-    if (REFUSED.test(text)) return { status: 422, body: { error: 'line_refused', key: line.key, reason: 'mock_scan' } };
+    if (publicLineRefused(text)) return { status: 422, body: { error: 'line_refused', key: line.key, reason: 'mock_scan' } };
     line.text = text.trim();
     line.source = 'owner';
     return { status: 200, body: structuredClone(found) };
@@ -83,7 +82,7 @@ export const PUBLIC_LINES_ROUTES = {
     if (req.malformed || typeof req.body !== 'object' || req.body === null || Array.isArray(req.body) || Object.keys(req.body).length !== 0) {
       return { status: 422, body: { error: 'invalid' } };
     }
-    const refused = found.lines.find((line) => line.editable && REFUSED.test(line.text));
+    const refused = found.lines.find((line) => line.editable && publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: 'mock_scan' } };
     return { status: 200, body: structuredClone(found) };
   },

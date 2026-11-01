@@ -41,6 +41,7 @@ import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { storedPublicLines } from './publicLineStore.ts';
+import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
@@ -1267,9 +1268,14 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
   return [...interviewsOf(world).values()].find((interview) => interview.state.desk_id === deskId);
 }
 
+/** The unreviewed About for the owner's draft, kept even when the public scan refuses it. */
+export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
+  return interviewForDesk(world, desk.summary.desk_id)?.about ?? null;
+}
+
 /**
- * A setup Desk's public page: its name, owner and saved public lines (the original About before
- * its lines are seeded); null for any other Desk.
+ * A setup Desk's public page: its name, owner and public lines that pass the mock scan (the
+ * original About before its lines are seeded, also scanned); null for any other Desk.
  */
 export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: Language): PublicDesk | null {
   const interview = interviewForDesk(world, desk.summary.desk_id);
@@ -1280,8 +1286,8 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
-    charter: lines?.map(({ key, text }) => cardBlock('policy', { fact_id: `charter:${key}`, title: text }))
-      ?? (interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
+    charter: lines?.filter(({ text }) => !publicLineRefused(text)).map(({ key, text }) => cardBlock('policy', { fact_id: `charter:${key}`, title: text }))
+      ?? (interview.about === null || publicLineRefused(interview.about) ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
     agent_card: [],
     open_status: null,
   };
