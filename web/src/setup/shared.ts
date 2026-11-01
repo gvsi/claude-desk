@@ -7,6 +7,7 @@ import { Fragment, createElement, type ReactNode } from 'react';
 import { ApiError, request } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import { SETUP_STEPS, type SetupStep } from '../api/views.ts';
+import { afterName } from '../lib/names.ts';
 import { SETUP_COPY } from './copy.ts';
 
 /**
@@ -50,7 +51,7 @@ export function setupRulesQuery(id: string) {
  */
 export function aroundBusiness([before, after]: readonly [string, string] | readonly string[], business: string): ReactNode {
   const name = business === '' ? SETUP_COPY.yourBusiness : createElement('span', { 'data-copy': 'user' }, business);
-  const suffix = /[.!?]$/.test(business.trimEnd()) && after?.startsWith('.') ? after.slice(1) : after;
+  const suffix = after === undefined ? after : afterName(business, after);
   return createElement(Fragment, null, before, name, suffix);
 }
 
