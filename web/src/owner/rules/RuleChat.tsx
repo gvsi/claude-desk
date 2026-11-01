@@ -7,10 +7,12 @@ import type { QueryClient } from '@tanstack/react-query';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 import type { RenderedBlock } from '../../api/contracts.ts';
-import { ApiError, RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
+import { ApiError, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { askRuleChat } from '../../api/ruleChatStream.ts';
 import type { RuleChatOut, RulesDraft } from '../../api/views.ts';
 import { AskClaudePanel, ClaudeMessage, Notice, VisitorMessage, type NoticeTone } from '../../ds/index.ts';
 import { aboveMoneyCapCopy } from '../../lib/format.ts';
+import { GrowingReply } from '../../lib/GrowingReply.tsx';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { land } from './landing.ts';
 import { RuleDraftReview, rulesQuery } from './RuleDraftReview.tsx';
@@ -46,17 +48,27 @@ function isRulesDraft(out: RuleChatOut | RulesDraft): out is RulesDraft {
   return 'version' in out && 'cards' in out;
 }
 
+/** How a turn shows its answer as it is written, and closes its stream. */
+export interface ChatTurnOptions {
+  /** The answer so far, as it grows; `''` when it starts again. Only Claude's words: never a draft. */
+  onText?: (text: string) => void;
+  /** Closes the stream: the turn then says nothing. */
+  signal?: AbortSignal;
+}
+
 /**
  * Asks Claude about `text` and says what came back: its answer, with the change it drafted built
  * against the active rules (read now, so the review compares with what applies); or why it
- * couldn't. Never throws.
+ * couldn't. The answer shows as it is written through `onText`; what came back is only ever the
+ * final answer. Never throws.
  */
-export async function chatTurn(deskId: string, text: string, queryClient: QueryClient): Promise<NewTurn[]> {
+export async function chatTurn(deskId: string, text: string, queryClient: QueryClient, { onText = () => {}, signal }: ChatTurnOptions = {}): Promise<NewTurn[]> {
   let out: RuleChatOut;
   try {
-    const answered: RuleChatOut | RulesDraft = await request('ruleChat', { params: { desk_id: deskId }, body: { text } });
+    const answered: RuleChatOut | RulesDraft = await askRuleChat(deskId, text, { onText, signal });
     out = isRulesDraft(answered) ? { answer: '', draft: answered } : answered;
   } catch (err) {
+    if (signal?.aborted) return [];
     const failure = draftFailure(err);
     return failure === null ? [] : [{ kind: 'notice', ...failure }];
   }
@@ -78,6 +90,8 @@ export interface RuleChatProps {
   turns: readonly ChatTurn[];
   /** A request is out: "Claude is writing". */
   busy: boolean;
+  /** Claude's answer so far, while it is written; null or empty before its first word. */
+  growing?: string | null;
   /** Another change, from the panel's composer. */
   onSend: (text: string) => void;
   /** "Close" or Escape. */
@@ -148,17 +162,36 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
 }
 
 /**
+ * Keeps the end of the answer being written in view as it grows, as a new turn is brought into
+ * view, never taking the owner's words that lead the exchange above the conversation's top.
+ */
+function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], growing: string | null): void {
+  const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
+  useEffect(() => {
+    if (growing === null) return;
+    const answer = root.current?.querySelector<HTMLElement>('.cd-rule-chat__growing');
+    const log = answer?.closest<HTMLElement>('[role="log"]');
+    if (!answer || !log) return;
+    const lead = leadId === undefined ? answer : (root.current?.querySelector<HTMLElement>(`[data-turn="${leadId}"]`) ?? answer);
+    revealExchange(log, lead, answer, answer);
+  }, [root, leadId, growing]);
+}
+
+/**
  * The panel and the conversation in it, in order: the owner's words in a bubble, Claude's answer
  * in serif and the change it drafted as an inline review, and any line on what went wrong. Once a
  * change is confirmed, its receipt takes the review's place, and Rules shows where it landed.
  */
-export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, onSend, onClose, onSettled }, ref) {
+export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, growing = null, onSend, onClose, onSettled }, ref) {
   const root = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLDivElement, []);
   useRevealNewTurns(root, turns);
+  // The answer's words, once it has some, take the writing dots' place.
+  const writing = growing !== null && growing.trim() !== '' ? growing : null;
+  useRevealGrowing(root, turns, writing);
   return (
     <div ref={root} className="cd-rule-chat">
-      <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy}>
+      <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy && writing === null}>
         {turns.map((turn) => {
           if (turn.kind === 'owner') {
             return (
@@ -198,6 +231,14 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
             </div>
           );
         })}
+        {writing === null ? null : (
+          // Claude's answer as it is written: its words only. What it drafts shows once the answer is final.
+          <div className="cd-rule-chat__turn cd-rule-chat__answer cd-rule-chat__growing" aria-busy="true">
+            <div className="cd-claude-message" lang="en">
+              <GrowingReply text={writing} streaming />
+            </div>
+          </div>
+        )}
       </AskClaudePanel>
     </div>
   );
