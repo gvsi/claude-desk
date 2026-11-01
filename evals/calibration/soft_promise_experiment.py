@@ -1,12 +1,13 @@
 """One budgeted old/new soft-promise experiment, with an immutable baseline and saved manifest.
 
-MAX_USD is the remaining allowance for this invocation. Reusing --output retains the
-cumulative spend and refuses any attempt that would exceed the experiment's $1.70 cap.
+MAX_USD is the remaining allowance for this invocation. A canonical ledger per baseline
+retains cumulative spend regardless of --output and enforces the experiment's $1.70 cap.
 Rescore each arm's saved results with soft_promise --rescore; no model is called there.
 """
 
 import argparse
 import asyncio
+import fcntl
 import hashlib
 import json
 import math
@@ -86,6 +87,19 @@ def aggregate_acceptance(history: dict, output: Path) -> dict:
 
 
 async def experiment(config: Experiment, deps: sp.Deps) -> dict:
+    ledger = deps.root / "evals/out/soft-promise" / f"{config.baseline_sha}.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    # Keep one lock through admission, reservations and settlement. A second process
+    # refuses immediately instead of blocking an event loop or racing its allowance.
+    with ledger.with_suffix(".lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise sp.Refused("the experiment ledger is in use; retry after it finishes") from None
+        return await _experiment(config, deps, ledger)
+
+
+async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
     if config.arms != "old,new":
         raise sp.Refused("--arms must be old,new, both arms of one experiment")
     cases = sp.load_cases(deps.cases)
@@ -100,14 +114,25 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
     revision = {"experiment": identity, "identity_sha256": digest(identity)}
     history = {**revision, "revisions": [revision], "total_cap_usd": TOTAL_USD,
                "cumulative_spend_usd": 0.0, "attempts": []}
-    if config.output.exists():
+    source = ledger
+    if not source.exists():
+        # Import the pre-ledger experiment, including any paid run, before admitting
+        # more calls. Its conventional output is discovered even with another --output.
+        legacy = ledger.parent / "next-steps-experiment.json"
+        source = legacy if legacy.exists() else config.output
+    if source.exists():
         try:
-            history = json.loads(config.output.read_text())
+            history = json.loads(source.read_text())
             if history["experiment"]["baseline_sha"] != config.baseline_sha:
                 raise sp.Refused("the experiment baseline is frozen; keep its original --baseline-sha")
             previous = float(history["cumulative_spend_usd"])
             if not math.isfinite(previous) or previous < 0 or previous > TOTAL_USD:
                 raise ValueError
+            for prior in history["attempts"]:
+                for arm in prior["arms"].values():
+                    arm["results"] = str((source.parent / arm["results"]).resolve())
+                    if "outcome" not in arm:
+                        arm["outcome"] = json.loads(Path(arm["results"]).read_text())
             if history["identity_sha256"] != digest(identity):
                 # A wording iteration is still the same experiment and allowance. Retain
                 # the old full manifest and hashes; its answers certify no revised input.
@@ -116,7 +141,7 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
                 for attempt in history["attempts"]:
                     attempt["stale"] = True
         except (OSError, ValueError, KeyError, TypeError):
-            raise sp.Refused("--output is not a valid experiment ledger") from None
+            raise sp.Refused("the experiment ledger is invalid") from None
     remaining = min(config.max_usd, TOTAL_USD - history["cumulative_spend_usd"])
     estimate = round(len(cases) * config.samples * 2 * sp.PER_CALL_USD, 6)
     if estimate > remaining + sp.EPSILON:
@@ -132,7 +157,11 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
     config.output.parent.mkdir(parents=True, exist_ok=True)
 
     def save():
-        config.output.write_text(json.dumps(history, ensure_ascii=False, indent=1) + "\n")
+        data = json.dumps(history, ensure_ascii=False, indent=1) + "\n"
+        for target in dict.fromkeys((ledger, config.output)):
+            temporary = target.with_suffix(".tmp")
+            temporary.write_text(data)
+            temporary.replace(target)
 
     save()
     for arm in ("old", "new"):
@@ -149,7 +178,7 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
         history["cumulative_spend_usd"] += outcome.spend_usd - reservation
         attempt["reserved_usd"] = 0
         attempt["spend_usd"] += outcome.spend_usd
-        attempt["arms"][arm] = {"results": str(path.relative_to(config.output.parent)),
+        attempt["arms"][arm] = {"results": str(path.resolve()),
                                "spend_usd": outcome.spend_usd,
                                "outcome": outcome.model_dump(mode="json")}
         remaining -= outcome.spend_usd
