@@ -74,7 +74,7 @@ describe('useSetupStream', () => {
     await vi.waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
     expect(allClosed()).toBe(true);
     await hook.rerender({ watching: false, inFlight: false });
-    expect(hook.result.current).toEqual({ growing: null, fellBack: false });
+    expect(hook.result.current).toMatchObject({ growing: null, fellBack: false });
   });
 
   it('keeps_the_words_till_the_saved_turn_is_read_and_drops_them_once_it_is', async () => {
@@ -117,6 +117,18 @@ describe('useSetupStream', () => {
     // The request answers with the saved turn: the words go in the same render.
     await hook.rerender({ watching: false, inFlight: false, saved: 4 });
     expect(hook.result.current.growing).toBeNull();
+  });
+
+  it('counts_what_the_stream_brings_as_progress', async () => {
+    worker.use(
+      sse<Named>(EVENTS_URL, ({ client }) => {
+        client.send({ event: 'reading', data: { run: 'r_10', read: 'memory', host: null } });
+        client.send({ event: 'label', data: { run: 'r_10', read: 'memory', text: 'Searched your Claude memory' } });
+        client.send({ event: 'delta', data: { run: 'r_10', text: 'Thanks.' } });
+      }),
+    );
+    const hook = await follow({ watching: true, inFlight: false });
+    await vi.waitFor(() => expect(hook.result.current.progress).toBe(3));
   });
 
   it('shows_the_reads_labels_and_clears_the_text_on_reset', async () => {
@@ -233,7 +245,7 @@ describe('useSetupStream', () => {
       }),
     );
     const hook = await follow({ watching: true, inFlight: true });
-    await vi.waitFor(() => expect(hook.result.current).toEqual({ growing: null, fellBack: true }));
+    await vi.waitFor(() => expect(hook.result.current).toMatchObject({ growing: null, fellBack: true }));
     await new Promise((resolve) => setTimeout(resolve, REOPEN_MS * 2));
     expect(requests).toBe(1);
     expect(allClosed()).toBe(true);

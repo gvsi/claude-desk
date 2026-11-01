@@ -75,6 +75,8 @@ export interface SetupStream {
   growing: Growing | null;
   /** The stream couldn't follow this turn: the step reads the interview every so often instead. */
   fellBack: boolean;
+  /** How many reads and pieces of the reply the stream has brought: it grows while the turn writes. */
+  progress: number;
 }
 
 /**
@@ -91,6 +93,7 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
   const [fellBack, setFellBack] = useState(false);
   /** Bumped to open the stream again. */
   const [attempt, setAttempt] = useState(0);
+  const [progress, setProgress] = useState(0);
   const growingRef = useRef<Growing>(NOTHING_YET);
   const inFlightRef = useRef(inFlight);
   inFlightRef.current = inFlight;
@@ -156,6 +159,7 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
         const step = stepSetupStream(growingRef.current, ev, inFlightRef.current);
         if (step.growing !== growingRef.current) show(step.growing);
         if (ev.type === 'delta' || ev.type === 'label') reopens.current = 0;
+        if (ev.type === 'delta' || ev.type === 'reset' || ev.type === 'reading' || ev.type === 'label') setProgress((n) => n + 1);
         if (step.next === 'read_on') return;
         close();
         if (ev.type === 'done' && ev.run !== null) setDoneAt(savedRef.current);
@@ -196,5 +200,5 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
   }, [inFlight, watching]);
 
   const shown = watching && !superseded && (growing.labels.length > 0 || growing.text.trim() !== '') ? growing : null;
-  return { growing: shown, fellBack: watching && fellBack };
+  return { growing: shown, fellBack: watching && fellBack, progress };
 }

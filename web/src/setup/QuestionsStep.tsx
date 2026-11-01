@@ -125,7 +125,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const askAt = asking && !busy && consenting === null ? state.messages.findLastIndex((message) => message.role === 'claude' && !isCard(message)) : -1;
   const consentPanel = askAt >= 0 ? askAt : null;
   useEffect(() => { if (!busy) setDeciding(null); }, [busy]);
-  const work = useSetupWork(state, reread);
+  const work = useSetupWork(state, reread, stream.progress);
   const wasBusy = useRef(busy);
   useEffect(() => {
     if (wasBusy.current && !busy && asking) setConsentError(stillCheckingLine());

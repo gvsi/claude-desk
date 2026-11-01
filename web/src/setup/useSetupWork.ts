@@ -3,8 +3,12 @@ import { UNSAFE_DataRouterContext, useLocation } from 'react-router';
 
 import type { SetupState } from '../api/views.ts';
 
-/** Polls only work still running on the questions step. `reread` updates the page's interview. */
-export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>) {
+/**
+ * Polls only work still running on the questions step. `reread` updates the page's interview.
+ * `progress` counts what the turn's stream has said so far: the 90 s wait starts again with each,
+ * so a turn that is visibly writing never reads as given up.
+ */
+export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>, progress = 0) {
   const working = state.step === 'questions' && state.busy === true;
   const [gaveUp, setGaveUp] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -35,6 +39,11 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       controller.abort();
     };
   }, [state.interview_id, router, pathname]);
+
+  // The turn's stream said something more: it hasn't given up, and the wait starts again.
+  useEffect(() => {
+    setGaveUp(false);
+  }, [progress]);
 
   useEffect(() => {
     if (!working) {
@@ -76,7 +85,7 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       signal.removeEventListener('abort', stop);
       stop();
     };
-  }, [state.interview_id, working, gaveUp, reread, visit]);
+  }, [state.interview_id, working, gaveUp, reread, visit, progress]);
 
   /** Read first: a failed read keeps the notice; a still-busy interview gets a fresh 90 s. */
   const retry = useCallback(async () => {
