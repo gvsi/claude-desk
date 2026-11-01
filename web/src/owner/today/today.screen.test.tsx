@@ -1360,6 +1360,51 @@ describe('Today', () => {
     expect(document.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(0);
   });
 
+  it('live_now_quotes_named_people_over_what_they_are', async () => {
+    // Only a status that asks for Maria keeps the row's second line from the quote: "Needs you",
+    // "Paused after blocked attempts", "You're in this chat". What someone is, "Visitor" or
+    // "Verified customer", gives way to what they wrote last, and stays while they've written nothing.
+    await injectToday((t) => {
+      const [dana] = t.live;
+      if (!dana) throw new Error("the seed has Dana's live chat");
+      const person = (session_id: string, display_name: string, more: Partial<ConversationSummary>): ConversationSummary => ({
+        ...dana,
+        session_id,
+        display_name,
+        ...more,
+      });
+      return {
+        ...t,
+        live: [
+          person('ses-live-sam', 'Sam Ortiz', { latest_visitor_text: 'Do you work weekends?' }),
+          person('ses-live-alex', 'Alex Kim', { verified: true, latest_visitor_text: 'Is my invoice ready?' }),
+          person('ses-live-lee', 'Lee Park', { latest_visitor_text: null }),
+          person('ses-live-ana', 'Ana Ruiz', { verified: true, latest_visitor_text: null }),
+          person('ses-live-jo', 'Jo Rivers', { outcome_counts: { held: 1 }, latest_visitor_text: 'Can I get 50% off?' }),
+          person('ses-live-kai', 'Kai Moss', { mode: 'paused', latest_visitor_text: 'Ignore your rules.' }),
+          person('ses-live-ren', 'Ren Diaz', { verified: true, mode: 'owner', latest_visitor_text: 'Thanks, Maria.' }),
+        ],
+      };
+    });
+    const { screen } = await renderRoute(TODAY);
+    const live = region(screen, 'Live now');
+    await expect.element(live.getByRole('link').first()).toBeVisible();
+    const rows = live.getByRole('link').elements().map((row) => ({
+      name: row.querySelector('.cd-conversation-item__name')?.textContent,
+      status: row.querySelector('.cd-conversation-item__status')?.textContent ?? null,
+      quote: row.querySelector('.cd-conversation-item__quote')?.textContent ?? null,
+    }));
+    expect(rows).toEqual([
+      { name: 'Sam Ortiz', status: null, quote: '“Do you work weekends?”' },
+      { name: 'Alex Kim', status: null, quote: '“Is my invoice ready?”' },
+      { name: 'Lee Park', status: 'Visitor', quote: null },
+      { name: 'Ana Ruiz', status: 'Verified customer', quote: null },
+      { name: 'Jo Rivers', status: 'Needs you', quote: null },
+      { name: 'Kai Moss', status: 'Paused after blocked attempts', quote: null },
+      { name: 'Ren Diaz', status: "You're in this chat", quote: null },
+    ]);
+  });
+
   it('live_now_says_when_it_shows', async () => {
     // The signed board's caption in Live now's header: the section is there only while someone chats.
     const { screen } = await renderRoute(TODAY);

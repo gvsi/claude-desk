@@ -23,7 +23,7 @@
 - `status` from the screen's one status table: a `StatusTone` for the dot and the words. Leave it out when the name already says all the status would ("Visitor" for someone who gave no name), so the row never says it twice.
 - `href`, the conversation's page, and `current` for the one that is open.
 - `recorded` for a conversation the kernel marks as replayed into this copy. The page then shows a `RecordedHistoryLink` under its title.
-- `quote` (optional), what the person last wrote, as the API gives it. Only Today's "Live now" passes it; the Conversations list doesn't. It is untrusted and renders as text only, never markup.
+- `quote` (optional), what the person last wrote, as the API gives it. Only Today's "Live now" passes it; the Conversations list doesn't. Beside a quote, Live now passes only a status that asks for the owner, such as "Needs you", and leaves out what the person is ("Visitor", "Verified customer"), so their words take that line. It is untrusted and renders as text only, never markup.
 
 ## Props
 
