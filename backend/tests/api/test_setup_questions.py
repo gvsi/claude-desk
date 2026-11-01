@@ -48,6 +48,7 @@ from desk.api.prompts import (
     SetupPatch,
     SetupStart,
     SetupNextStep,
+    SetupUnderstanding,
     LIMIT_CHOICES,
     question_text,
 )
@@ -1635,6 +1636,7 @@ async def test_setup_searches_the_web_after_consent(app, browser, fake, kernel_h
     ]
     fake.script("native.web_search", model_view={"results": results, "simulated": False, "kind": "cited_excerpts"})
     state = await begin(owner, model, website=WEBSITE, search_queries=queries)
+    await wrote_memory(kernel_http, owner, state)
     assert not fake.called("POST /decide")
     opening = (await stored(engine, state["interview_id"]))["transcript"][0]
     assert opening["search_queries"] == queries
@@ -1653,7 +1655,10 @@ async def test_setup_searches_the_web_after_consent(app, browser, fake, kernel_h
     labels = [message["text"] for message in state["messages"] if message["role"] == "tool_label"]
     assert labels == ["Searched your Claude memory", "Read rivera-plumbing.example",
                       *[f"Searched the web: {query}" for query in queries]]
-    text = turn_text(model)
+    request = next(request for request in model.requests if request.output_schema is SetupUnderstanding)
+    (message,) = request.messages
+    (block,) = message["content"]
+    text = block["text"]
     assert text.index("<memory>") < text.index("<website") < text.index("<web_search>")
     content = "\n".join(result[key] for result in results for key in ("title", "url", "snippet"))
     assert text.count(f"<web_search>{content}</web_search>") == 2
