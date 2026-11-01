@@ -735,8 +735,10 @@ async def _open_desk(ctx: KernelCtx, request: Request, desk_id: str) -> None:
                         named=Named(copy_id=ctx.copy_id, desk_id=desk_id))
 
 
-def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:
-    return JSONResponse(KernelError(code=code).model_dump(), status_code=status, headers=headers)
+def error_response(status: int, code: str, headers: dict[str, str] | None = None, *,
+                   detail: dict[str, list[str]] | None = None) -> JSONResponse:
+    return JSONResponse(KernelError(code=code, detail=detail).model_dump(exclude_none=True),
+                        status_code=status, headers=headers)
 
 
 async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
@@ -754,7 +756,7 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
     else:
         log.info("kernel_failure route=%s status=%d code=%s reason=%s", route_template(request), exc.status,
                  exc.code, exc.reason)
-    return error_response(exc.status, exc.code)
+    return error_response(exc.status, exc.code, detail=exc.detail)
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:

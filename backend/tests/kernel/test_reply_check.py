@@ -43,6 +43,23 @@ from .test_execute import executed
 ROUTE = "POST /check_reply"
 
 
+@pytest.mark.parametrize(("prose", "detected"), [
+    ("In Des Moines.", "en"),
+    ("Nos vemos.", "none"),
+    ("No des vueltas.", "none"),
+    ("Une ambos tubos.", "none"),
+    ("Vos estás cerca.", "es"),
+])
+async def test_honest_english_spanish_language_and_real_reply(app, client, prose, detected):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    verify_verdict(app.state.kernel.signer.public_key_hex(), visitor.session_id, verdict)
+    assert verdict.ok and verdict.violations == []
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert lang.detect(prose) == detected
+    assert not lang.positive_other_language(prose)
+
+
 def clause(template: str, fact_id: str | None = None) -> dict:
     return {"template": template, "fact_id": fact_id}
 
@@ -747,6 +764,7 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
     "Don't pour grease down the drain.",            # "pour" and "et" mark no other language
     "Don't pour it.",
     "We fix sinks, tubs, et cetera.",
+    "We serve Des Moines.",
 ])
 async def test_plumbing_english_with_a_dropped_word_reads_as_english(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -1745,3 +1763,195 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
         desk.deleted_at = frozen_clock.now()
     deleted = await client.get(f"/public/{copy.slug}")
     assert (deleted.status_code, deleted.json()) == (404, {"code": "not_found"})
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("$50 deposit", ["currency", "digit"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("we guarantee", ["lex.en.promise"]),
+    ("refund within 30 days", ["digit", "lex.en.promise"]),
+    ("within two hours", ["lex.en.date", "lex.en.number"]),
+    ("after 6 pm", ["digit", "lex.en.date"]),
+    ("Monday to Friday", ["lex.en.date"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("garantizamos", ["lex.es.promise"]),
+    ("reembolso", ["lex.es.promise"]),
+    ("You're booked.", ["lex.en.booking"]),
+    ("Tu cita está confirmada.", ["lex.es.booking"]),
+    ("$50, $50, twenty dollars and veinte pesos", ["currency", "digit", "lex.en.money", "lex.en.number",
+                                                "lex.es.money", "lex.es.number"]),
+    ("We work with small businesses and families.", []),
+    ("Tell us what you need and we'll suggest next steps.", []),
+    ("Ask about our services.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
+    ("Pregunte por nuestros servicios aquí.", []),
+])
+def test_scan_public_text(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
+                                     "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
+                                     "\u00ad", "\ufeff", "\U000e0001"])
+@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios aquí."])
+def test_public_text_refuses_format_controls(control, honest):
+    assert reply_check.scan_public_text(honest) == []
+    assert reply_check.scan_public_text(honest + control) == ["format_control"]
+
+
+@pytest.mark.parametrize(("values", "fields"), [
+    ({"policy:c": "charge.", "policy:a": "No", "policy:b": "extra"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b", "policy:c")}),
+    ({"policy:a": "Your appointment is" + " " * 100, "policy:b": "confirmed."},
+     {key: ["lex.en.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Oﬃce.", "policy:b": "No", "policy:c": "charge.", "policy:d": "Ask about our services."},
+     {key: ["lex.en.promise"] for key in ("policy:b", "policy:c")}),
+    ({"policy:a": "Once your appointment is", "policy:b": "confirmed."}, {}),
+    ({"policy:a": "Tu cita está", "policy:b": "pendiente."}, {}),
+    ({"policy:a": "quedó hecha", "policy:b": "la reserva", "policy:c": "Pregunte aquí."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "libres", "policy:b": "para todos"},
+     {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "You are free to", "policy:b": "all clients"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+])
+def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
+    assert reply_check.scan_public_policies(values) == fields
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("We work with small businesses and families.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", []),
+    ("Cash, card, Venmo accepted", []),
+    ("Emergency service available", []),
+    ("Emergency service available weekends", ["lex.en.date"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("Привет мир.", ["language"]),
+    ("OK", []),
+    ("No", []),
+    ("", []),
+])
+def test_public_policy_language_requires_positive_evidence(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
+    ("Pour-over coffee available", []),
+    ("Open 9-5 EST", ["digit"]),
+    ("Les ofrecemos envío a domicilio", []),
+])
+def test_public_policy_language_recognizes_short_french_promises(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+def test_public_policy_language_checks_the_combined_rendering():
+    parts = {"policy:a": "nous the", "policy:b": "vous la y"}
+    assert all(reply_check.scan_public_text(value) == [] for value in parts.values())
+    assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
+
+
+PUBLIC_ALLOW_WORD_CASES = [
+    ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
+    ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
+    ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
+    ({"a:title": "Free", "b:type": "to all new clients"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    *[({"a:title": title, "b:type": audience},
+       {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]})
+      for title, audience in [
+          ("Free to", "all clients"), ("Free", "-to all clients"),
+          ("Frée to", "all clients"), ("Frée", "-to all clients"),
+          ("Ｆｒｅｅ ｔｏ", "ａｌｌ ｃｌｉｅｎｔｓ"), ("Ｆｒｅｅ", "－ｔｏ ａｌｌ ｃｌｉｅｎｔｓ"),
+      ]],
+    ({"a:title": "Intro consult no", "b:type": "charge"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "mixed_script"]}),
+    ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
+    ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
+    ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
+]
+
+
+@pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
+def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, fields):
+    allowed = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_policies(values, allow_words={"a:title": allowed}) == fields
+    if len(values) == 1 and "a:title" in values:
+        assert reply_check.scan_public_text(values["a:title"], allow_words=allowed) == fields.get("a:title", [])
+
+
+@pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
+                                  "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
+def test_public_text_allows_only_explicit_owner_words_with_reply_folding(word):
+    assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_text(word)  # default callers remain strict
+
+
+
+@pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
+def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
+    from time import perf_counter
+
+    # Forty policies totaling exactly 8,000 characters, with many ordinary lexical hits.
+    values = {f"policy:{index:02d}": (phrase * 8)[:200] for index in range(40)}
+    scanned_lengths = []
+    scan = reply_check._prose_hits
+
+    def counted(text, *args, **kwargs):
+        scanned_lengths.append(len(text))
+        return scan(text, *args, **kwargs)
+
+    monkeypatch.setattr(reply_check, "_prose_hits", counted)
+    start = perf_counter()
+    assert reply_check.scan_public_policies(values) == {key: ["lex.en.promise"] for key in values}
+    elapsed = perf_counter() - start
+    assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
+    assert elapsed < 0.75
+
+
+@pytest.mark.parametrize("text", [
+    "Nos prestations : la visite, la pose, la réparation sont offertes.",
+    "Une garantie pour la pose et la réparation.",
+    "Consultas sem custo para todos os clientes.",
+    "La consegna e la posa sono senza costi.",
+    "Beratung kostenlos für alle Kunden.",
+    "GRATUIT", "gratuites", "offerts", "sans frais", "remise", "rabais",
+    "garantis", "garanties", "remboursées", "remboursements",
+    "GRÁTIS", "gra\u0301tis", "sem custos", "sem taxa", "sem taxas",
+    "descontos", "garantidos", "garantidas", "senza costo", "sconti", "omaggi",
+    "garantiti", "garantite", "rimborsi", "umsonst", "Rabatte", "garantiert", "Erstattungen",
+    "ｇｒａｔｕｉｔ", "grátuit", "оffеrtеs", "sеm custo",
+])
+def test_public_policy_other_commitment_terms_ignore_language_vote(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize(("left", "right"), [
+    ("sans", "frais"), ("sem", "custo"), ("sem", "taxas"), ("senza", "costi"),
+])
+def test_public_policy_other_commitment_split_attribution(left, right, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    values = {"policy:a": left, "policy:b": right, "policy:z": "Ask about our services."}
+    assert reply_check.scan_public_text(left) == reply_check.scan_public_text(right) == []
+    assert reply_check.scan_public_policies(values) == {
+        "policy:a": ["language"], "policy:b": ["language"]}
+
+
+def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert reply_check.scan_public_text("gratuitous remiseness garage offerings") == []
+    assert "language" not in reply_check.scan_public_text("gratis")
+    assert "language" not in reply_check.scan_public_text("reembolso")
+    assert reply_check.scan_prose("Is it gratuit?") == []
+    assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
+        kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []

@@ -30,7 +30,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
-   pass; their refusals follow the scan's.
+   pass; their refusals follow the scan's. The shown prose followed by free-text charter policy
+   cards is also scanned in reply order, separated by newlines, using the public-text rules.
+   Unsafe policy clauses are refused as `unknown_fact` / `policy_combined`, naming the facts
+   contributing to the match. Structured cards stay outside this public-text scan.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
@@ -75,7 +78,9 @@ import json
 import logging
 import re
 import unicodedata
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import desk_kernel
@@ -99,6 +104,9 @@ from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
+PUBLIC_POLICY_MAX_COUNT = 40
+PUBLIC_POLICY_MAX_CHARS = 8_000
+FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
@@ -217,13 +225,13 @@ def _plain(ch: str) -> str:
 
 
 def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES,
-          acute: bool = False) -> tuple[str, list[int]]:
+          acute: bool = False, keep_accents: bool = False) -> tuple[str, list[int]]:
     """`text` for the lexicons: accents and other combining marks dropped, each letter that looks
     like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), each of `strokes` (by
     default the bare strokes) read as `stroke`, each dash and hyphen as "-", each apostrophe as
     "’", and each run of whitespace one space, but with `acute`, a whitespace character before a
     combining acute (how NFKC writes ´) as "’"; and the index in `text` each folded character
-    came from."""
+    came from. `keep_accents` preserves marks for accent-sensitive policy entries."""
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -237,7 +245,7 @@ def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES,
                 origin.append(i)
             continue
         for part in unicodedata.normalize("NFKD", _plain(ch)):
-            if unicodedata.category(part) not in ("Mn", "Me"):
+            if keep_accents or unicodedata.category(part) not in ("Mn", "Me"):
                 part = _plain(part)
                 chars.append(stroke if part in strokes else LOOKALIKES.get(part, part))
                 origin.append(i)
@@ -265,6 +273,36 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 BOOKING_LINES = [(f"lex.{language}.booking", pattern) for language, entries in LEXICONS.items()
                  for category, pattern in entries if category == "booking"]
+
+
+def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
+    """Policy-only terms; accented entries preserve marks in both pattern and reading."""
+    path = LEXICON_DIR / "other_promises.txt"
+    entries: dict[bool, list[re.Pattern[str]]] = {False: [], True: []}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        reading, tab, pattern = line.partition("\t")
+        if not tab or reading not in ("folded", "accented") or not pattern.strip():
+            raise ValueError(f"{path.name}:{number} is not a <reading>\\t<regex> line")
+        keep_accents = reading == "accented"
+        folded, _ = _fold(pattern, keep_accents=keep_accents)
+        entries[keep_accents].append(re.compile(rf"(?<!\w)(?:{folded})(?!\w)", re.IGNORECASE))
+    return entries
+
+
+OTHER_PROMISES = _load_other_promises()
+
+
+def _other_promise_spans(text: str) -> set[tuple[int, int]]:
+    """Whole commitment spans for policies, independent of the language detector."""
+    spans = set()
+    for keep_accents, patterns in OTHER_PROMISES.items():
+        for reading, origin in _readings(text, keep_accents=keep_accents).items():
+            for pattern in patterns:
+                for match in pattern.finditer(reading):
+                    spans.add((origin[match.start()], origin[match.end() - 1] + 1))
+    return spans
 
 
 def _named_reach(text: str, names: Iterable[str]) -> list[int]:
@@ -297,7 +335,7 @@ def _blank_canaries(text: str, canaries: Mapping[str, str]) -> tuple[str, list[s
     return "".join(chars), [document_id for document_id in canaries if document_id in found]
 
 
-def _readings(text: str) -> dict[str, list[int]]:
+def _readings(text: str, *, keep_accents: bool = False) -> dict[str, list[int]]:
     """The readings of `text` the lexicons take (`_fold`), each with the
     index in `text` each of its characters came from: a bare stroke as l, as I, and an ASCII
     capital I as l too ("doIIars"); where NFKC wrote an acute accent as a space and a combining
@@ -306,7 +344,7 @@ def _readings(text: str) -> dict[str, list[int]]:
     variants: list[dict] = [{}, {"stroke": "i"}, {"strokes": STROKES_AND_I}]
     if SPACED_ACUTE.search(text):
         variants += [variant | {"acute": True} for variant in variants]
-    return dict(_fold(text, **variant) for variant in variants)
+    return dict(_fold(text, keep_accents=keep_accents, **variant) for variant in variants)
 
 
 def _marked(text: str) -> bool:
@@ -325,7 +363,27 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
-def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
+@dataclass(frozen=True)
+class _Lookahead:
+    """A matched expression and its original reading, retained only for right-context checks."""
+
+    reading: str
+    origin: Sequence[int]
+    pattern: re.Pattern[str]
+    start: int
+    end: int
+
+    def holds_at(self, boundary: int) -> bool:
+        # Match only this expression at its known start; never rescan a growing full prefix.
+        match = self.pattern.match(self.reading, self.start, bisect_left(self.origin, boundary))
+        return match is not None and match.end() == self.end
+
+
+RightContext = dict[tuple[int, int, str], list[_Lookahead]]
+
+
+def _booking_claims(text: str, readings: dict[str, list[int]],
+                    right_context: RightContext | None = None) -> list[tuple[int, int, str, Violation]]:
     """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
     such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
@@ -333,20 +391,24 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
     found: set[tuple[int, int, str]] = set()
     for reading, origin in readings.items():
         reach = -1       # the furthest end of a conditioned claim starting at or before this one
-        for start, end, rule_id in sorted((match.start(), match.end(), rule_id) for rule_id, pattern in BOOKING_LINES
-                                          for match in pattern.finditer(reading) if match.end() > match.start()):
+        matches = ((match.start(), match.end(), rule_id, pattern) for rule_id, pattern in BOOKING_LINES
+                   for match in pattern.finditer(reading) if match.end() > match.start())
+        for start, end, rule_id, pattern in sorted(matches, key=lambda hit: hit[:3]):
             if _conditioned(text, reading, origin, start):     # the same for every claim starting here
                 reach = max(reach, end)
             if reach < end:
-                found.add((origin[start], origin[end - 1] + 1, rule_id))
-    hits: list[tuple[int, str, Violation]] = []
+                hit = (origin[start], origin[end - 1] + 1, rule_id)
+                found.add(hit)
+                if right_context is not None and "(?=" in pattern.pattern:
+                    right_context.setdefault(hit, []).append(_Lookahead(reading, origin, pattern, start, end))
+    hits: list[tuple[int, int, str, Violation]] = []
     reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
         if previous is not None and previous != (start, end):
             reach = max(reach, previous[1])
         previous = (start, end)
         if reach < end:
-            hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
+            hits.append((start, end, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
     return hits
 
 
@@ -378,30 +440,40 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
     apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
     space and as "’". The canary comes first, then the rest in the order they appear."""
+    return [violation for _, _, _, violation in _prose_hits(text, canaries, names, booking_card=booking_card)]
+
+
+def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
+                booking_card: bool = False,
+                right_context: RightContext | None = None) -> list[tuple[int, int, str, Violation]]:
+    """The prose scan with full match offsets in `shown(text)`, before display spans are truncated."""
     text, found = _blank_canaries(shown(text), canaries)
-    hits: list[tuple[int, str, Violation]] = [(-1, "canary", canary_violation(found))] if found else []
+    hits: list[tuple[int, int, str, Violation]] = [(-1, -1, "canary", canary_violation(found))] if found else []
     i = 0
     while i < len(text):
         category = unicodedata.category(text[i])
         if text[i] in PERCENT_SIGNS:
-            hits.append((i, "percent_sign", Violation(kind="number_in_prose", span=text[i], rule_id="percent_sign")))
+            hits.append((i, i + 1, "percent_sign", Violation(kind="number_in_prose", span=text[i],
+                                                            rule_id="percent_sign")))
         elif text[i] == KEYCAP_TEN:
-            hits.append((i, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
+            hits.append((i, i + 1, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
         if _numeral(text[i]) or text[i] in ZERO_OR_ONE:
             end = _number_end(text, i)          # no currency or percent sign inside, so passed over once
             if any(_numeral(ch) for ch in text[i:end]) or (_alone(text, i, end) and not text[i:end].isascii()):
-                hits.append((i, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]), rule_id="digit")))
+                hits.append((i, end, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]),
+                                                        rule_id="digit")))
             i = end
             continue
         if category == "Sc":
-            hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
+            hits.append((i, i + 1, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
     reach = _named_reach(text, names)
-    hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
+    hits += [(start, start + len(word), "mixed_script", Violation(kind="unsupported_language", span=_span(word),
+                                                                rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
     if not booking_card:
-        hits += _booking_claims(text, readings)
+        hits += _booking_claims(text, readings, right_context)
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
@@ -413,12 +485,129 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
                 if match.end() == match.start():
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
+                # Expressions with the same consumed span can require different right
+                # context. Preserve every dependency before deduplicating display hits.
+                if right_context is not None and "(?=" in pattern.pattern:
+                    right_context.setdefault((start, end, rule_id), []).append(
+                        _Lookahead(reading, origin, pattern, match.start(), match.end()))
                 if (rule_id, start, end) in seen:
                     continue
                 seen.add((rule_id, start, end))
-                hits.append((start, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
-                                                       rule_id=rule_id)))
-    return [violation for _, _, violation in sorted(hits, key=lambda hit: (hit[0], hit[1]))]
+                hits.append((start, end, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
+                                                           rule_id=rule_id)))
+    return sorted(hits, key=lambda hit: (hit[0], hit[2]))
+
+
+def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
+    """Only a whole promise match equal to an explicitly allowed folded word may pass."""
+    return (rule.startswith("lex.") and rule.endswith(".promise")
+            and _fold(text[start:end])[0].casefold() in allow_words)
+
+
+def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:
+    """Rule IDs for public text: the prose scan with no canaries, names or booking card.
+
+    Both prose lexicons run, whatever the text's language. Positive language evidence or
+    a policy-only other-language commitment is refused; undetermined text keeps passing.
+    Format controls are refused because
+    policy cards render the original text, whereas the prose scan reads normalized text.
+    Pure: no reads or writes, and no matched text returned to callers that record a refusal.
+    """
+    normalized = shown(text)
+    rules = {rule for start, end, rule, _ in _prose_hits(normalized)
+             if not _allowed_public_hit(normalized, start, end, rule, allow_words)}
+    if lang.positive_other_language(normalized) or _other_promise_spans(normalized):
+        rules.add("language")
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    return sorted(rules)
+
+
+def scan_public_policies(values: Mapping[str, str],
+                         allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+    """Scan policies individually and as adjacent paragraphs/cards, separated by a newline.
+
+    Keys sort like their `charter:<key>` fact IDs on the public page (C collation). Offsets
+    refer to normalized pieces, so Unicode expansion cannot shift a hit onto another key.
+    Keep full match ranges for attribution, even when a violation's display span is truncated.
+    Only contributing keys and rule IDs leave the scan. Allowed words apply to one key only;
+    matches or their required right context crossing a key boundary remain refused.
+    """
+    return _scan_public_parts(sorted(values.items()), allow_words)
+
+
+def _scan_public_parts(values: Sequence[tuple[str | None, str]],
+                       allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+    """The public-text rules in the supplied rendering order, attributed to policy IDs.
+
+    A None key is reply prose: it supplies context, but its own refusals stay with the
+    existing prose checks. Newline boundaries keep separate cards from joining word fragments.
+    """
+    fields: dict[str, set[str]] = {}
+    for key, value in values:
+        if key is not None:
+            fields.setdefault(key, set()).update(scan_public_text(value, allow_words.get(key, frozenset())))
+    ranges: list[tuple[str | None, int, int]] = []
+    pieces: list[str] = []
+    offset = 0
+    for key, value in values:
+        text = shown(value)
+        pieces.append(text)
+        ranges.append((key, offset, offset + len(text)))
+        offset += len(text) + 1
+    combined = "\n".join(pieces)
+    if lang.positive_other_language(combined):
+        for key, low, high in ranges:
+            if key is not None and low < high:
+                fields[key].add("language")
+    # Attribute lexical commitments only to intersecting policies. A term wholly inside
+    # reply prose stays with the existing prose rules, even beside a harmless policy card.
+    for start, end in _other_promise_spans(combined):
+        for key, low, high in ranges:
+            if key is not None and low < high and low < end and start < high:
+                fields[key].add("language")
+    right_context: RightContext = {}
+    hits = _prose_hits(combined, right_context=right_context)
+    boundaries = [high for _, _, high in ranges]
+    starts = [low for _, low, _ in ranges]
+    for start, end, rule, _ in hits:
+        match_end = end
+        # Ordinary matches already carry their full range from the single combined scan.
+        # Only a positive lookahead may depend on text beyond that range ("libres" /
+        # "para todos"). Find the first card boundary preserving every expression's
+        # dependency, so an allowance cannot hide a longer cross-key dependency.
+        if (start, end, rule) in right_context:
+            for boundary in boundaries[bisect_left(boundaries, end):]:
+                if all(match.holds_at(boundary) for match in right_context[start, end, rule]):
+                    end = boundary
+                    break
+        contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
+        if any(key is not None and low <= start and end <= high
+               and _allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               for key, low, high in contributors):
+            continue
+        for key, low, high in contributors:
+            if key is not None and low < high:
+                fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
+
+
+def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
+    """Refuse unsafe policy text in the order a reply would show it, before signing.
+
+    Only free-text charter policies join the prose; structured cards legitimately carry
+    numbers. Keep contributing fact IDs in reply order and never echo policy text.
+    """
+    policies = [(card.fact_id, card.text) for card in cards
+                if card.template == "policy" and card.fact_id is not None
+                and card.fact_id.startswith("charter:policy:")]
+    if not policies:
+        return []
+    refused = _scan_public_parts([(None, prose), *policies])
+    fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+    if not fact_ids:
+        return []
+    return [Violation(kind="unknown_fact", span="policy", rule_id="policy_combined", fact_ids=fact_ids)]
 
 
 # ---- Clauses --------------------------------------------------------------------------------------
@@ -580,6 +769,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
+    violations += policy_card_violations(prose, cards)
     usage = None
     handoff_backed = False                  # the soft-promise check was shown an open handoff's card
     if not violations and prose.strip():

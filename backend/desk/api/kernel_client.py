@@ -51,9 +51,10 @@ KERNEL_FAULTS = frozenset({"seed_unproved", "internal"})             # treated a
 class KernelFailed(Exception):
     """The kernel refused the call with a 4xx `KernelError`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, detail: dict[str, list[str]] | None = None):
         super().__init__(f"kernel answered {status} {code}")
         self.status, self.code = status, code
+        self.detail = detail
 
     @property
     def ends_session(self) -> bool:
@@ -85,11 +86,12 @@ class KernelUnavailable(Exception):
 def _failure(route: str, response: httpx.Response) -> KernelFailed | KernelUnavailable:
     """The error a non-2xx answer raises."""
     try:
-        code = KernelError.model_validate_json(response.content).code
+        error = KernelError.model_validate_json(response.content)
+        code, detail = error.code, error.detail
     except ValidationError:
-        code = None
+        code, detail = None, None
     if response.is_client_error and code is not None and code not in KERNEL_FAULTS:
-        return KernelFailed(response.status_code, code)
+        return KernelFailed(response.status_code, code, detail)
     return KernelUnavailable(route, response.status_code, code if code in KERNEL_FAULTS else None)
 
 

@@ -256,9 +256,10 @@ PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify again
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, detail: dict[str, list[str]] | None = None):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+        self.detail = detail
 
 
 class AdapterCheckRefused(Exception):
@@ -874,6 +875,80 @@ def scan_prose(prose: str, canaries: dict[str, str]) -> list[Violation]:
 
 def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
+
+
+PUBLIC_POLICY_PATTERNS = (
+    ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
+     r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
+     r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
+    ("lex.en.promise", r"\b(?:free|discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
+    ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
+)
+
+
+def unsupported_public_policy_language(text: str) -> bool:
+    """Mirror positive other-language evidence; unmarked names and lists keep passing."""
+    text = unicodedata.normalize("NFKC", text)
+    letters = [char for char in text if char.isalpha()]
+    non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
+    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+
+
+def public_commitment_reading(text: str) -> tuple[str, list[int]]:
+    """Fold accents for the fake's examples, retaining original offsets for attribution."""
+    chars, origin = [], []
+    for index, char in enumerate(text):
+        for part in unicodedata.normalize("NFKD", char):
+            if unicodedata.category(part) not in ("Mn", "Me"):
+                chars.append(part)
+                origin.append(index)
+    return "".join(chars), origin
+
+
+def public_policy_rules(text: str) -> list[str]:
+    """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
+
+    The real scan imports kernel-service modules; this API test fake stays outside that boundary.
+    Exhaustive lexicon behavior is covered by the real kernel's own tests.
+    """
+    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id for hit in scan_prose(text, {})}
+    if unsupported_public_policy_language(text):
+        rules.add("language")
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    for rule, pattern in PUBLIC_POLICY_PATTERNS:
+        if re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE):
+            rules.add(rule)
+    if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
+        rules.add("language")
+    return sorted(rules)
+
+
+def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[str]]:
+    """Attribute the contract's policy examples in the actual public or reply order."""
+    fields = {key: set(public_policy_rules(value)) for key, value in parts if key is not None}
+    ranges, pieces, offset = [], [], 0
+    for key, value in parts:
+        value = unicodedata.normalize("NFKC", value)
+        ranges.append((key, offset, offset + len(value)))
+        pieces.append(value)
+        offset += len(value) + 1
+    combined = "\n".join(pieces)
+    if unsupported_public_policy_language(combined):
+        for key in fields:
+            fields[key].add("language")
+    for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
+        reading, origin = (public_commitment_reading(combined) if rule == "language" and "grátis" not in pattern
+                           else (combined, list(range(len(combined)))))
+        for match in re.finditer(pattern, reading, re.IGNORECASE):
+            start, end = origin[match.start()], origin[match.end() - 1] + 1
+            for key, low, high in ranges:
+                if key is not None and low < end and start < high:
+                    fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
 # Signed agents ---------------------------------------------------------------------------------------
@@ -2051,6 +2126,10 @@ class FakeKernelState:
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
                     charter.append(self._render(desk, template, fact, language))
+        # Scan the final rendered group: filtering can bring separate promise fragments together.
+        policies = [(block.fact_id, block.text) for block in charter if block.template == "policy"]
+        if public_policy_fields(policies):
+            charter = [block for block in charter if block.template != "policy"]
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
@@ -2827,6 +2906,14 @@ class FakeKernelState:
             card = self._clause(session, desk, clause, language, violations)
             if card is not None:
                 cards.append(card)
+        policies = [(card.fact_id, card.text) for card in cards if card.template == "policy"
+                    and card.fact_id is not None and card.fact_id.startswith("charter:policy:")]
+        if policies:
+            refused = public_policy_fields([(None, draft.prose), *policies])
+            fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+            if fact_ids:
+                violations.append(Violation(kind="unknown_fact", span="policy", rule_id="policy_combined",
+                                            fact_ids=fact_ids))
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
                              [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
@@ -3070,6 +3157,7 @@ class FakeKernelState:
         if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
+        self._refuse_policy_promises(copy.copy_id, body.desk.charter, "desk")
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
         desk = self._create_desk(copy.copy_id, body.business, body.desk, tools=native, cards=ASK_FIRST_CARDS)
         copy.desk_ids.append(desk.desk_id)
@@ -3142,13 +3230,30 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": part, "refs": []})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
+    def _refuse_policy_promises(self, copy_id: str, charter: list[Claim], part: str,
+                                desk: Desk | None = None) -> None:
+        keys = [claim.key for claim in charter]
+        if len(set(keys)) != len(keys):
+            raise Refusal(422, "invalid")
+        values = {claim.key: claim.value for claim in charter
+                  if claim.key.startswith("policy:") and claim.kind == "text"}
+        if len(values) > 40:
+            raise Refusal(422, "invalid", {"charter": ["policy_count_limit"]})
+        if sum(map(len, values.values())) > 8_000:
+            raise Refusal(422, "invalid", {"charter": ["policy_text_limit"]})
+        fields = public_policy_fields(sorted(values.items()))
+        if fields:
+            targets = [desk] if desk is not None else sorted(
+                (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+            for target in targets:
+                self.append(target, "desk_data", {"part": part, "refused": "promise", "fields": fields})
+            raise Refusal(422, "invalid", fields)
+
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
         stays, since the hours write it); a key given twice is 422."""
         desk = self._owners_desk(request, request.path_params["id"])
-        keys = [claim.key for claim in body.charter]
-        if len(set(keys)) != len(keys):
-            raise Refusal(422, "invalid")
+        self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
                         if fact.kind == "charter" and fact_id != "charter:hours"]:
             del desk.facts[fact_id]
@@ -3997,8 +4102,9 @@ FAKE_ROUTES: dict[str, str] = {
 }
 
 
-def _error(status: int, code: str) -> Response:
-    return Response(KernelError(code=code).model_dump_json(), status_code=status, media_type="application/json")
+def _error(status: int, code: str, detail: dict[str, list[str]] | None = None) -> Response:
+    return Response(KernelError(code=code, detail=detail).model_dump_json(exclude_none=True),
+                    status_code=status, media_type="application/json")
 
 
 def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any], Any]):
@@ -4034,7 +4140,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if state._take_drop(key):
             raise httpx.ReadTimeout("the fake kernel committed, then timed out")
         if isinstance(result, Refusal):
-            return _error(result.status, result.code)
+            return _error(result.status, result.code, result.detail)
         if isinstance(result, Response):                # a document's bytes
             return result
         if response_adapter is None:

@@ -2509,6 +2509,219 @@ def quote_card(**limits) -> RuleCard:
                     reason="Quotes from the price list, at list price.", **limits)
 
 
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Consultas sem custo para todos os clientes.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
+    ("Привет мир.", ["language"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("We offer \u202eeerf\u202c consultations.", ["format_control"]),
+    ("Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
+])
+async def test_charter_public_promise_refusal_keeps_fields_and_rules(kernel, ro_read, text, rules):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    path = {"id": desk_id}
+    honest = "We work with small businesses and families."
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="policy:about", kind="text", value=honest)]), path=path)
+    query = "SELECT fact_id, claims FROM {ro}.facts WHERE desk_id = %s AND kind = 'charter' ORDER BY fact_id"
+    before = ro_read(schema, copy.copy_id, query, (desk_id,))
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    fields = {"policy:about": rules, "policy:pricing": rules}
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+            Claim(key=key, kind="text", value=text) for key in fields]), path=path)
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", fields)
+    assert ro_read(schema, copy.copy_id, query, (desk_id,)) == before
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert entry.event.kind == "desk_data"
+    assert entry.event.summary == {"part": "charter", "refused": "promise", "fields": fields}
+    [desk] = ro_read(schema, copy.copy_id, "SELECT slug FROM {ro}.desks WHERE desk_id = %s", (desk_id,))
+    public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": desk["slug"]})
+    [policy] = [block for block in public.charter if block.template == "policy"]
+    assert policy.text == honest
+    assert text not in public.model_dump_json()
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("unsafe", "honest", "rules"), [
+    ("20% off for first-time clients", "We work with small businesses and families.", ["digit", "percent_sign"]),
+    ("20 % de descuento", "Trabajamos con pequeños negocios y familias.",
+     ["digit", "lex.es.promise", "percent_sign"]),
+    ("free consultation", "Ask about our services.", ["lex.en.promise"]),
+    ("Nous garantissons des consultations gratuites pour tous les clients.",
+     "Ask about our services.", ["language"]),
+    ("garantizamos", "Pregunte por nuestros servicios aquí.", ["lex.es.promise"]),
+    ("We offer \u202eeerf\u202c consultations.", "Ask about our services.", ["format_control"]),
+    ("Ofrecemos consultas \u202esitarg\u202c.", "Pregunte por nuestros servicios aquí.", ["format_control"]),
+])
+async def test_creation_public_promise_refusal_keeps_rows_and_audits(kernel, ro_read, unsafe, honest, rules):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    query = "SELECT desk_id FROM {ro}.desks ORDER BY desk_id"
+    before = ro_read(schema, copy.copy_id, query)
+    seq = (await ledger_page(owner, copy.desk_ids[0])).entries[-1].seq
+    body = a_new_desk()
+    body.desk.charter = [Claim(key="policy:about", kind="text", value=unsafe)]
+    fields = {"policy:about": rules}
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("POST /desks", body)
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", fields)
+    assert ro_read(schema, copy.copy_id, query) == before
+    [entry] = [entry for entry in (await ledger_page(owner, copy.desk_ids[0])).entries if entry.seq > seq]
+    assert entry.event.summary == {"part": "desk", "refused": "promise", "fields": fields}
+    assert unsafe not in entry.event.model_dump_json()
+    body.desk.charter[0].value = honest
+    created = await owner.call("POST /desks", body)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": created.slug})
+    [policy] = [block for block in page.charter if block.template == "policy"]
+    assert policy.text == honest
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("create", [False, True], ids=["replace", "create"])
+@pytest.mark.parametrize(("unsafe", "honest", "rule"), [
+    (("No", "charge for consultations."), ("Ask about", "our services."), "lex.en.promise"),
+    (("Sin", "costo para consultas aquí."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
+    (("Your appointment is", "confirmed."), ("Tell us", "what you need."), "lex.en.booking"),
+    (("Tu cita está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.booking"),
+])
+async def test_split_public_promise_refusal_keeps_contributing_keys(kernel, ro_read, create, unsafe, honest, rule):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    query = "SELECT desk_id, fact_id, claims FROM {ro}.facts WHERE kind = 'charter' ORDER BY desk_id, fact_id"
+    before = ro_read(schema, copy.copy_id, query)
+
+    async def write(parts):
+        claims = [Claim(key=key, kind="text", value=value) for key, value in (
+            ("policy:z", "Ask about our services."), ("policy:c", parts[1]),
+            ("contact", "(510) 555-0199"), ("policy:b", parts[0]), ("policy:a", "Pregunte por nuestros servicios aquí."))]
+        if create:
+            body = a_new_desk()
+            body.desk.charter = claims
+            return await owner.call("POST /desks", body)
+        return await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+
+    with pytest.raises(KernelFailed) as refused:
+        await write(unsafe)
+    fields = {"policy:b": [rule], "policy:c": [rule]}
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", fields)
+    assert ro_read(schema, copy.copy_id, query) == before
+    [entry] = [entry for entry in (await ledger_page(owner, desk_id)).entries if entry.seq > seq]
+    assert entry.event.summary == {"part": "desk" if create else "charter", "refused": "promise", "fields": fields}
+    updated = await write(honest)
+    [desk] = ro_read(schema, copy.copy_id, "SELECT slug FROM {ro}.desks WHERE desk_id = %s", (updated.desk_id,))
+    public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": desk["slug"]})
+    assert [block.text for block in public.charter if block.template == "policy"] == [
+        "Pregunte por nuestros servicios aquí.", *honest, "Ask about our services."]
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("source", ["cards", "prose"])
+@pytest.mark.parametrize("parts", [
+    ("No", "charge for consultations."),
+    ("Sin", "costo para consultas aquí."),
+    ("Your appointment is", "confirmed."),
+    ("Tu cita está", "confirmada."),
+])
+async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, source, parts):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    claims = [Claim(key="policy:a", kind="text", value=parts[1]),
+              Claim(key="policy:z", kind="text", value="Ask about our services.")]
+    if source == "cards":
+        claims.append(Claim(key="policy:b", kind="text", value=parts[0]))
+    await http.owner(copy.owner_token).call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                                           path={"id": desk_id})
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    ids = ["charter:policy:b", "charter:policy:a"] if source == "cards" else ["charter:policy:a"]
+    cited = ["charter:policy:z", *ids] if source == "cards" else ids
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation,
+                       prose=parts[0] if source == "prose" else "",
+                       clauses=[Clause(template="policy", fact_id=fact_id) for fact_id in cited])
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok is False
+    assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("unknown_fact", "policy_combined", ids)]
+    assert len(verdict.blocks) == 1 and verdict.blocks[0].template == "handoff"
+    assert verdict.signature and all(block.template != "policy" for block in verdict.blocks)
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("parts", [
+    ("Portland Beaverton", "Cash card"),
+    ("Garage parking available", "Offering estimates by appointment"),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
+     "Emergency service available"),
+])
+async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    path = {"id": copy.desk_ids[0]}
+    claims = [Claim(key=f"policy:{index}", kind="text", value=text) for index, text in enumerate(parts)]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path=path)
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "policy"] == list(parts)
+    visitor = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                       clauses=[Clause(template="policy", fact_id=f"charter:{claim.key}") for claim in claims])
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == list(parts)
+    assert verdict.signature
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("stored", ["discount", "other_commitment", "private", "expired"])
+async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    path = {"desk_slug": desk_slug(ro_read, schema, copy)}
+    if stored in ("discount", "other_commitment"):
+        arrange.stored_policy(copy, "arrival", "20% off for first-time clients" if stored == "discount"
+                              else "Consultas sem custo para todos os clientes.")
+    else:
+        texts = {"arrival": "No", "first_visit": "Ask about our services.",
+                 "service_area": "charge for consultations."}
+        for key, text in texts.items():
+            arrange.stored_policy(copy, key, text)
+        # The visible middle card separates the promise until read filtering removes it.
+        before = await http.public().call("GET /public/{desk_slug}", path=path)
+        assert [block.text for block in before.charter if block.template == "policy"] == list(texts.values())
+        arrange.stored_policy(copy, "first_visit", texts["first_visit"],
+                              readers=("owner",) if stored == "private" else ("public",),
+                              expired=stored == "expired")
+    for language in ("en", "es"):
+        page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
+        assert all(block.template != "policy" for block in page.charter)
+        assert {"hours", "contact"} <= {block.template for block in page.charter}
+    if stored == "other_commitment":
+        visitor = await new_visitor(http, path["desk_slug"])
+        draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                           clauses=[Clause(template="policy", fact_id="charter:policy:arrival")])
+        verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok
+        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("policy_combined", ["charter:policy:arrival"])]
+        assert len(verdict.blocks) == 1 and verdict.blocks[0].template == "handoff"
+        assert verdict.signature
+
+
 async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):
     return await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
                                                                      expected_parent=parent))

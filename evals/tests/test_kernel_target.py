@@ -84,7 +84,7 @@ class StandInKernel:
             self.requests += 1
             body = {"code": "stale_generation"}
             if request.path_params["id"] == "d-detail":
-                body["detail"] = "generation 3 is current"   # a field KernelError doesn't declare
+                body["diagnostic"] = "generation 3 is current"   # a field KernelError doesn't declare
             if request.path_params["id"] == "d-keyed":
                 body[LEAKED_CODE] = True   # one whose key is a code
             if request.path_params["id"] == "d-token":
@@ -238,7 +238,7 @@ async def test_an_undeclared_response_field_fails_the_call(kernel: StandInKernel
     """A valid `VerifyStarted` with an extra `verification_code` field fails the call as a contract
     break showing where the field is, never its name or value, and records nothing: the response
     models drop what they don't declare, so a code or a canary there would otherwise vanish before
-    any scan saw it. The same for a `KernelError` with a `detail` beside its code, and with a code
+    any scan saw it. The same for a `KernelError` with a `diagnostic` beside its code, and with a code
     as a key: a key the contract doesn't declare is the answer's own choice, so the failure shows
     it as `*`. What the kernel did send is kept on each recorded call as `raw`, beside the
     contract's reading of it."""
@@ -251,7 +251,7 @@ async def test_an_undeclared_response_field_fails_the_call(kernel: StandInKernel
         with pytest.raises(ContractError, match=r"KernelError doesn't declare: \['\*'\]") as failure:
             await target.call("GET /decisions/{id}", path={"id": "d-detail"}, auth=Auth.none(),
                               expect=Expect(status=409, fields={"code": "stale_generation"}))
-        assert "generation 3" not in str(failure.value) and "detail" not in str(failure.value)
+        assert "generation 3" not in str(failure.value) and "diagnostic" not in str(failure.value)
         with pytest.raises(ContractError, match=r"doesn't declare: \['\*'\]") as failure:
             await target.call("GET /decisions/{id}", path={"id": "d-keyed"}, auth=Auth.none(),
                               expect=Expect(status=409, fields={"code": "stale_generation"}))

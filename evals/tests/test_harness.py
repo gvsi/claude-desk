@@ -89,7 +89,7 @@ def test_undeclared_response_fields_are_found_by_path():
     assert undeclared_fields(leaking, VerifyStarted.model_validate(leaking)) == ["*"]
     nested = {**started, "inbox": [notice, {**notice, "code": "482913"}]}
     assert undeclared_fields(nested, VerifyStarted.model_validate(nested)) == ["inbox.1.*"]
-    error = {"code": "invalid", "detail": "five attempts used"}
+    error = {"code": "invalid", "diagnostic": "five attempts used"}
     assert undeclared_fields(error, KernelError.model_validate(error)) == ["*"]
     whoami = build(WhoAmI, Expect(fields={"session.kind": "visitor"})).model_dump(mode="json")
     in_session = {**whoami, "session": {**whoami["session"], "person_id": "p-dana"}}
@@ -933,3 +933,13 @@ def test_a_model_call_outside_a_target_fails_the_run(tier1, pytester: pytest.Pyt
     result = run("stub")
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*1 unscripted model calls reached the fake model server (claude-opus-5-5)*"])
+
+
+async def test_stub_preserves_valid_public_policy_refusal_detail():
+    detail = {"policy:about": ["language", "lex.en.promise"]}
+    expect = Expect(status=422, fields={"code": "invalid", "detail": detail})
+    stub = ContractStub()
+    error = await stub.call("POST /decide", body=decide_body(), auth=Auth.none(), expect=expect)
+    assert error == KernelError(code="invalid", detail=detail)
+    assert undeclared_fields(stub.responses[-1].body, error) == []
+    assert stub.responses[-1].body == {"code": "invalid", "detail": detail}
