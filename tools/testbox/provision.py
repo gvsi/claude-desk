@@ -12,11 +12,18 @@ import uuid
 HERE = pathlib.Path(__file__).resolve().parent
 TAGS = [{"Key": "Project", "Value": "claude-desk"}, {"Key": "Purpose", "Value": "agent-test-box"}]
 NAME = "claude-desk-test-box"
+SESSION_POLICY_NAME = NAME + "-session"
+SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCommandOnly", "Effect": "Allow", "Action": [
+    "ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
+    "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel", "ec2messages:AcknowledgeMessage",
+    "ec2messages:DeleteMessage", "ec2messages:FailMessage", "ec2messages:GetEndpoint",
+    "ec2messages:GetMessages", "ec2messages:SendReply"], "Resource": "*"}]}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", required=True)
+    parser.add_argument("--check", action="store_true", help="read-only validation of the existing machine; never start or bootstrap it")
     args = parser.parse_args()
     created = []
 
@@ -88,28 +95,43 @@ def main():
     try:
         existing = optional("iam", "get-role", role_name=role)
         if existing:
-            if not owned(existing["Role"].get("Tags", [])):
+            role_info = existing["Role"]
+            if not owned(role_info.get("Tags", [])):
                 raise RuntimeError("Refusing an existing IAM role without this project's ownership tags")
         else:
-            aws("iam", "create-role", role_name=role, tags=TAGS,
-                assume_role_policy_document={"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]})
+            if args.check:
+                raise RuntimeError("Test box role is missing")
+            role_info = aws("iam", "create-role", role_name=role, tags=TAGS,
+                assume_role_policy_document={"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]})["Role"]
             created.append("role")
+            aws("iam", "put-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME, policy_document=SESSION_POLICY)
         policies = aws("iam", "list-attached-role-policies", role_name=role)["AttachedPolicies"]
-        if any(p["PolicyName"] != "AmazonSSMManagedInstanceCore" for p in policies) or aws("iam", "list-role-policies", role_name=role)["PolicyNames"]:
-            raise RuntimeError("Test box role has unexpected policies; refusing broader privileges")
-        aws("iam", "attach-role-policy", role_name=role, policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore")
+        inline = aws("iam", "list-role-policies", role_name=role)["PolicyNames"]
+        if policies or inline != [SESSION_POLICY_NAME]:
+            raise RuntimeError("Test box role must have only the inline session policy and no managed policies")
+        document = aws("iam", "get-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME)["PolicyDocument"]
+        # IAM may reorder actions, but no extra action, statement, condition or resource is accepted.
+        def canonical(value):
+            if isinstance(value, dict):
+                return {k: canonical(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return sorted((canonical(v) for v in value), key=lambda v: json.dumps(v, sort_keys=True))
+            return value
+        if canonical(document) != canonical(SESSION_POLICY):
+            raise RuntimeError("Test box inline session policy differs from the required document")
         existing = optional("iam", "get-instance-profile", instance_profile_name=profile)
         if existing:
-            if not owned(existing["InstanceProfile"].get("Tags", [])):
+            profile_info = existing["InstanceProfile"]
+            if not owned(profile_info.get("Tags", [])):
                 raise RuntimeError("Refusing an existing instance profile without ownership tags")
-            roles = existing["InstanceProfile"]["Roles"]
-            if roles and [r["RoleName"] for r in roles] != [role]:
-                raise RuntimeError("Instance profile holds an unexpected role")
+            roles = profile_info["Roles"]
+            if len(roles) != 1 or roles[0].get("RoleName") != role or roles[0].get("Arn") != role_info["Arn"]:
+                raise RuntimeError("Instance profile must hold exactly the expected role by name and ARN")
         else:
-            aws("iam", "create-instance-profile", instance_profile_name=profile, tags=TAGS)
+            if args.check:
+                raise RuntimeError("Test box instance profile is missing")
+            profile_info = aws("iam", "create-instance-profile", instance_profile_name=profile, tags=TAGS)["InstanceProfile"]
             created.append("profile")
-            roles = []
-        if not roles:
             aws("iam", "add-role-to-instance-profile", instance_profile_name=profile, role_name=role)
             time.sleep(10)
         vpcs = aws("ec2", "describe-vpcs", filters=[{"Name": "is-default", "Values": ["true"]}])["Vpcs"]
@@ -124,6 +146,8 @@ def main():
             if groups[0]["IpPermissions"]:
                 raise RuntimeError("Test box security group has inbound rules; refusing it")
         else:
+            if args.check:
+                raise RuntimeError("Test box security group is missing")
             group = aws("ec2", "create-security-group", group_name=NAME, description="Disposable agent tests; SSM access only; no inbound", vpc_id=vpc,
                         tag_specifications=[{"ResourceType": "security-group", "Tags": TAGS}])["GroupId"]
             created.append("group")
@@ -136,12 +160,19 @@ def main():
             instance = i["InstanceId"]
             if i["InstanceType"] != "c8g.24xlarge" or i["MetadataOptions"]["HttpTokens"] != "required" or [s["GroupId"] for s in i["SecurityGroups"]] != [group]:
                 raise RuntimeError("Existing test box differs from required instance, metadata or network configuration")
+            if i.get("IamInstanceProfile", {}).get("Arn") != profile_info["Arn"]:
+                raise RuntimeError("Existing test box has an unexpected attached instance profile ARN")
+            if args.check:
+                print("Test box check: expected profile ARN, role ARN and exact inline session policy; no managed policies; instance/network configuration valid")
+                return
             aws("ec2", "modify-instance-attribute", instance_id=instance, disable_api_termination={"Value": True})
             if i["State"]["Name"] == "stopped":
                 aws("ec2", "start-instances", instance_ids=[instance])
             print(f"Existing test box: {instance} ({args.region}); checking bootstrap version")
             bootstrap_and_wait(instance)
             return
+        if args.check:
+            raise RuntimeError("Test box instance is missing")
         image = aws("ssm", "get-parameter", name="/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id")["Parameter"]["Value"]
         subnets = aws("ec2", "describe-subnets", filters=[{"Name": "vpc-id", "Values": [vpc]}, {"Name": "default-for-az", "Values": ["true"]}])["Subnets"]
         offerings = aws("ec2", "describe-instance-type-offerings", location_type="availability-zone", filters=[{"Name": "instance-type", "Values": ["c8g.24xlarge"]}])["InstanceTypeOfferings"]
@@ -190,7 +221,7 @@ def main():
                     aws("iam", "remove-role-from-instance-profile", instance_profile_name=profile, role_name=role)
                     aws("iam", "delete-instance-profile", instance_profile_name=profile)
                 elif resource == "role":
-                    aws("iam", "detach-role-policy", role_name=role, policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore")
+                    aws("iam", "delete-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME)
                     aws("iam", "delete-role", role_name=role)
                 print(f"Rolled back {resource}", file=sys.stderr)
             except Exception as cleanup_error:
