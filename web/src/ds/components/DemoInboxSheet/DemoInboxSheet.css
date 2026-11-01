@@ -12,6 +12,8 @@
   border: 0;
   background: var(--bg-surface);
   color: var(--text-primary);
+  /* A sheet owns its text wrapping even inside a demo bar whose actions stay on one line. */
+  white-space: normal;
 }
 
 .cd-demo-inbox-sheet::backdrop {

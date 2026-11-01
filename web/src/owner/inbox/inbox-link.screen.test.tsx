@@ -93,6 +93,36 @@ afterEach(() => {
 });
 
 describe('Demo inbox request link', () => {
+  it.each([[1440, 900], [390, 844]])('sheet_wraps_long_alerts_inside_the_demo_bar_at_%sx%s', async (width, height) => {
+    const held = seededHold();
+    const entry = alertFor(held.decision_id);
+    entry.body = 'A stranger asked to get a quote for $153 with 15% off. It goes past your rule, so it waits for you: “Quotes from your price list, at list price.” ' + 'LongReference'.repeat(30);
+    const { screen } = await renderRoute(TODAY, { viewport: { width, height } });
+    const button = inboxButton(screen);
+    await expect.element(button).toBeVisible();
+    expect(getComputedStyle(button.element().closest('.cd-reviewer-bar__actions')!).whiteSpace).toBe('nowrap');
+    const label = button.element().querySelector('.cd-demo-inbox-sheet__button > span')!;
+    const words = document.createRange();
+    words.selectNodeContents(label);
+    expect(new Set([...words.getClientRects()].map(rect => Math.round(rect.top))).size).toBe(1);
+    const sheet = (await openInbox(screen, held.decision_id)).element();
+    expect(getComputedStyle(sheet).whiteSpace).toBe('normal');
+    const edge = sheet.getBoundingClientRect();
+    const text = sheet.querySelectorAll<HTMLElement>('h2, p, span, a, button');
+    expect(text.length).toBeGreaterThan(5);
+    for (const element of text) {
+      expect(element.scrollWidth, element.className).toBeLessThanOrEqual(element.clientWidth);
+      expect(element.getBoundingClientRect().right, element.className).toBeLessThanOrEqual(edge.right);
+    }
+    // The bar's meta type does not change the sheet's explicit body and heading styles.
+    const body = sheet.querySelector('.cd-demo-inbox__body')!;
+    const bodyStyle = getComputedStyle(body);
+    expect([bodyStyle.fontSize, bodyStyle.lineHeight, bodyStyle.fontWeight]).toEqual(['14px', '20px', '380']);
+    const heading = getComputedStyle(sheet.querySelector('h2')!);
+    expect([heading.fontSize, heading.lineHeight, heading.fontWeight]).toEqual(['15px', '20px', '520']);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  });
+
   it('answered_and_dismissed_request_has_no_link', async () => {
     // Denied and dismissed on Today, the request is no longer held: its alert stays in the inbox,
     // with no "Open the request" that would only close the sheet.

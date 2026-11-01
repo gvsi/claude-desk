@@ -71,6 +71,8 @@ describe('design tokens', () => {
       'status-held': '#dabe4a',
       'status-refused': '#dc8290',
       clay: '#e08968',
+      'size-reading': '640px',
+      'size-conversation': '768px',
       'radius-control': '8px',
       'radius-card': '12px',
       'radius-composer': '16px',
