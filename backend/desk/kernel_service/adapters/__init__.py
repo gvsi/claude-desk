@@ -64,6 +64,8 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
         Tool.desk_id == desk_id, Tool.tool == tool).execution_options(populate_existing=True)))).one_or_none()
     if row is None or row.source != "business" or row.profile is None or row.profile.business is None:
         return None
+    if row.profile.business.config.block not in blocks.SUPPORTED_BLOCKS:
+        return None                    # configured future blocks are expected, not factory failures
     try:
         expected = blocks.profile(tool, row.profile.business)
         if (row.profile.tool != tool or row.profile.source != "business"
@@ -71,6 +73,7 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
                 or row.profile.definition_sha256 != expected.definition_sha256
                 or row.profile_sha256 != profile_sha256(expected)
                 or row.profile_sha256 != profile_sha256(row.profile)):
+            log.warning("business_adapter_pin_mismatch desk_id=%s tool=%s", desk_id, tool)
             return None
         adapter = blocks.adapter_for(expected.business, tool)
         _check(adapter)

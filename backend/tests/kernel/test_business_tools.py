@@ -215,6 +215,36 @@ async def test_resolver_logs_a_supported_block_with_no_registered_adapter(app, c
     assert marker not in caplog.text
 
 
+@pytest.mark.parametrize('supported', [False, True])
+async def test_resolver_is_quiet_for_unsupported_blocks_and_warns_on_stale_hashes(app, client, caplog, supported):
+    import logging
+
+    copy = await rivera(app, client)
+    marker = 'Owner-only description marker'
+    config = {'block': 'intake', 'questions': ['What?']} if supported else {'block': 'urgent', 'urgent_when': marker}
+    assert (await put(client, copy, [intake(description=marker, config=config)])).status_code == 200
+    if supported:
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            row = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+                Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))).one()
+            row.profile_sha256 = '0' * 64
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger='desk.kernel_service.adapters'):
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            assert await adapters.resolve(ctx, copy.desk_id, 'desk.new-enquiry') is None
+    records = [record for record in caplog.records if record.name == 'desk.kernel_service.adapters']
+    if supported:
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert records[0].getMessage().startswith('business_adapter_pin_mismatch ')
+        assert records[0].exc_info is None
+    else:
+        assert records == []
+    assert marker not in caplog.text
+
+
 def test_fake_does_not_give_a_supported_block_without_a_registered_adapter(monkeypatch):
     from types import SimpleNamespace
     from desk.contracts import BusinessToolDef
