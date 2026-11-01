@@ -4040,7 +4040,7 @@ describe('consultant setup', () => {
     await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'A few questions', exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: "Let's set up your Desk", exact: true }).elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-setup-dock')).toBeNull();
   });
 
@@ -4284,7 +4284,7 @@ describe('consultant setup', () => {
     const state = await consultantAt('intake');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByText('Here’s the rest, as I’d set it up.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
     const payment = screen.getByRole('article', { name: 'Send a retainer link' });
@@ -4469,7 +4469,7 @@ describe('consultant setup', () => {
   it('opens_with_choices_and_no_cards_or_question_subtitle', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeVisible();
     expect(screen.getByRole('article').elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();

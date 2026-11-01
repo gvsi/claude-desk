@@ -160,7 +160,7 @@ export const SETUP_COPY = {
   },
 
   questions: {
-    title: 'A few questions',
+    title: "Let's set up your Desk",
     suggestions: 'Use your suggestions',
     suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
     dismiss: 'Dismiss', other: 'Something else…',
