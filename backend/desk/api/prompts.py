@@ -609,7 +609,7 @@ hours, area, contact and website, as fit.
 - connected_apps: up to four apps a business like this would already use, with no repeats. Choose only from \
 google_calendar (Google Calendar), gmail (Gmail), google_drive (Google Drive), quickbooks (QuickBooks), stripe \
 (Stripe), square (Square) and calendly (Calendly).
-- search_queries: up to three web searches that teach you how this kind of business works with its customers: new customer intake, booking, deposits and payment, no-shows and cancellations, and what counts as urgent. The owner sees each one, so write them the way a person types into a search engine: short keyword phrases of at most eight words, never questions or sentences. About the kind of business, and its area when that matters, never this business by name, its competitors, or prices or fees. For a dog groomer in Austin: "dog groomer new client intake form", "dog grooming deposit and no-show policy"."""
+- search_queries: up to three web searches that teach you how this kind of business works with its customers: new customer intake, booking, deposits and payment, no-shows and cancellations, and what counts as urgent. The owner sees each one, so write them the way a person types into a search engine: short keyword phrases of at most eight words, never questions or sentences. About the kind of business, and its area when that matters, never this business by name, its competitors, prices or fees. For a dog groomer in Austin: "dog groomer new client intake form", "dog grooming deposit and no-show policy"."""
 
 _CONTEXT = """\
 You're Claude, setting up a Claude Desk with a small business owner. A Desk is an AI front desk on a public page: it \
