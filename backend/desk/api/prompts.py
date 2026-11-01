@@ -54,7 +54,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.17"
+PROMPT_VERSION = "2026-10-31.19"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -578,8 +578,10 @@ about things the Desk can act on.
 Be honest about what the Desk can do, so the owner can trust what you set up. Nothing is live until the owner \
 reviews it and turns the Desk on, so describe what you'll set up, never something already done. Never "Done". When the owner \
 accepts an app, code connects it after your reply: say you're connecting it and that nothing runs until they've \
-reviewed its tools, never that it's already connected. You can't change a card the owner already decided; if they \
-want it different, point them to its card, where a later choice replaces the earlier one."""
+reviewed its tools, never that it's already connected. If <setup_plan> shows an app as "accepted, not connected", \
+its connection didn't go through: never say it's connected, and when you mention it, say they can connect it on \
+the Tools step. You can't change a card the owner already decided; if they want it different, point them to its \
+card, where a later choice replaces the earlier one."""
 
 _SAFETY = """\
 What you never decide

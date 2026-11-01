@@ -1593,6 +1593,27 @@ def test_only_stripe_reserves_a_real_attempt_regardless_of_connectable(app_key, 
     assert state.connected == []  # Reserving an attempt is not a completed connection.
 
 
+def test_setup_plan_shows_an_accepted_app_whose_connection_did_not_go_through():
+    calendar = ConnectorProposal(app="google_calendar", label="App", why="Book visits", connectable=False)
+    entries = proposal_entries([], [calendar, stripe()])
+    state = plan_state(entries)
+    calendar_id, stripe_id = (entry.card.proposal_id for entry in entries)
+
+    def status(proposal_id):
+        return next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == proposal_id)
+
+    setup.apply_decision(state, calendar_id, setup.SetupProposalIn(accept=True))
+    state.transcript.append(entries[1])
+    setup.apply_decision(state, stripe_id, setup.SetupProposalIn(accept=True))
+    # The decision turn itself: code connects Stripe only after Claude's reply.
+    assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
+    assert setup._claim_connector_connect(state, stripe_id) is True
+    # The one real attempt failed (or is still running): Claude must not call it connected.
+    assert (status(stripe_id), status(calendar_id)) == ("accepted, not connected", "accepted")
+    setup._mark_stripe_connected(state, {stripe_id})
+    assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
@@ -2083,7 +2104,7 @@ async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, 
     assert reloaded.json() == reply.json()
 
 
-async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engine, monkeypatch, caplog):
+async def test_a_failed_connector_accept_still_saves_and_answers(proposals, model, engine, monkeypatch, caplog):
     from desk.api.kernel_client import KernelFailed
 
     owner, state, ids = proposals
@@ -2111,6 +2132,16 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engi
     async with engine.connect() as conn:
         interview = await setup._load(conn, owner.copy_id, state["interview_id"])
     assert interview.connected == []
+    # The next setup turn tells Claude the connection didn't go through, so it never calls Stripe connected.
+    before = len(model.requests)
+    following = await owner.browser.post(
+        f"/api/owner/setup/{state['interview_id']}/proposals/{reply.json()['pending_card']}?cards=1",
+        json={"accept": False})
+    assert following.status_code == 200, following.text
+    request = next(request for request in model.requests[before:] if request.output_schema is setup.SetupNextStep)
+    text = request.messages[0]["content"][0]["text"]
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    assert next(item for item in plan["items"] if item["id"] == ids[2])["status"] == "accepted, not connected"
 
 
 @pytest.mark.parametrize("conflicts", [1, 2])
