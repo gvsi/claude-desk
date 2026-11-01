@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
+import { Pill } from '../Pill/Pill.tsx';
 import { TextField } from '../TextField/TextField.tsx';
 
 import './MoneyLimit.css';
@@ -37,6 +39,12 @@ interface MoneyLimitEditable extends MoneyLimitLine {
   onCancel: () => void;
   /** A draft is in flight: the buttons wait. */
   disabled?: boolean;
+  /**
+   * The owner's confirmed change set this limit since they opened the page: the line carries
+   * "Updated", and the words that changed cross-fade as it arrives. The screen keeps it until the
+   * owner leaves the page.
+   */
+  updated?: boolean;
 }
 
 /**
@@ -54,6 +62,7 @@ interface MoneyLimitReadOnly extends MoneyLimitLine {
   onReview?: undefined;
   onCancel?: undefined;
   disabled?: undefined;
+  updated?: undefined;
 }
 
 export type MoneyLimitProps = MoneyLimitEditable | MoneyLimitReadOnly;
@@ -92,7 +101,7 @@ export function MoneyLimit(props: MoneyLimitProps) {
     );
   }
 
-  const { label = 'Most a payment can be without asking you, in dollars', value, hint, error, onEdit, onChange, onReview, onCancel, disabled = false } = props;
+  const { label = 'Most a payment can be without asking you, in dollars', value, hint, error, onEdit, onChange, onReview, onCancel, disabled = false, updated = false } = props;
   const review = (event?: FormEvent) => {
     event?.preventDefault();
     if (disabled) return;
@@ -118,7 +127,12 @@ export function MoneyLimit(props: MoneyLimitProps) {
       ) : (
         <div className="cd-money-limit__reading">
           <p id={lineId} className="cd-money-limit__line cd-type-body">
-            {line}
+            <CrossFade text={line} fade={updated} byWord />
+            {updated ? (
+              <span className="cd-money-limit__updated">
+                <Pill>Updated</Pill>
+              </span>
+            ) : null}
           </p>
           <Button variant="secondary" waiting={disabled} describedBy={lineId} onClick={() => onEdit()}>
             Change

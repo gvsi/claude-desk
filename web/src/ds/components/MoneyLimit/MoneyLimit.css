@@ -34,6 +34,22 @@
   font-weight: 520;
 }
 
+/* Once a confirmed change set it, "Updated" follows the line, 8 px after its last word, centered
+   on it, growing from 95% as it fades in on motion-base. */
+.cd-money-limit__updated {
+  display: inline-flex;
+  margin-left: var(--space-8);
+  vertical-align: middle;
+  animation: cd-money-limit-updated var(--motion-base) var(--motion-ease-emphasis) backwards;
+}
+
+@keyframes cd-money-limit-updated {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
 .cd-money-limit__reading > .cd-button {
   flex: none;
 }
@@ -63,5 +79,11 @@
   .cd-money-limit__line {
     flex: none;
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-money-limit__updated {
+    animation: none;
   }
 }
