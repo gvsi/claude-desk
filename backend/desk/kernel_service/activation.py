@@ -787,7 +787,17 @@ def _due(row: PolicyVersionRow, tools: Sequence[Tool]) -> bool:
     return rebuild_due(row, desks.enabled_of(tools))
 
 
-Rebuilt = dict[tuple[str, int], str | None]   # (desk_id, version): None when rebuilt, else why not
+Rebuilt = dict[tuple[str, int], str | None]   # None = rebuilt, string = why not; no-longer-due versions omitted
+
+
+ProofSource = Literal["live", "cached"]
+
+
+@dataclass(frozen=True)
+class RebuildSuccess:
+    """A version rebuilt in the caller's transaction, with the source of its proof report."""
+
+    proof_source: ProofSource
 
 
 @dataclass(frozen=True)
@@ -1043,8 +1053,9 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
                     lock_s: float) -> tuple[int, str | None] | str | None:
     """Brings the Desk's native tools up to date (`desks.update_native_tools`), then rebuilds its
     active version if it is due (`rebuild_due`; `rebuild_version`, proving live only when `prove`),
-    each in a transaction of its own. Returns the version it rebuilt and what became of it, None
-    when the Desk's version needs no rebuild, or `FAILED` when either step raised: that is logged,
+    each in a transaction of its own. Returns `(version, None)` when rebuilt or `(version, reason)`
+    when refused; None when the Desk's version needs no rebuild (including the recheck under the
+    versions lock), or `FAILED` when either step raised: that is logged,
     the Desk is left as it was (without a tool, it can't be called on it; with an outdated version
     left as stored, it decides nothing), and its callers try it again. A Desk whose tools couldn't
     be brought up to date isn't rebuilt over the old ones. Each transaction's lock waits are held to
@@ -1068,22 +1079,27 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
             if deleted is not None or row is None or not rebuild_due(row, await desks.enabled_profiles(ctx, desk_id)):
                 return None
             version = row.version
-            done = version, await rebuild_version(ctx, desk_id, version, prove=prove)
+            outcome = await rebuild_version(ctx, desk_id, version, prove=prove)
+            if outcome is None:               # no longer active or due after taking the versions lock
+                return None
+            done = version, None if isinstance(outcome, RebuildSuccess) else outcome
         # The context manager has committed: never claim a rolled-back rebuild succeeded.
-        if done[1] is None:
+        if isinstance(outcome, RebuildSuccess):
             log.info("version_rebuilt copy_id=%s desk_id=%s version=%s proved=%s",
-                     copy_id, desk_id, version, "live" if prove else "cached")
+                     copy_id, desk_id, version, outcome.proof_source)
         return done
     except Exception as exc:
         log_error(log, exc, "version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
         return FAILED
 
 
-async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: bool = True) -> str | None:
+async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *,
+                          prove: bool = True) -> RebuildSuccess | str | None:
     """Rebuilds the Desk's active version `version`, due a rebuild (`rebuild_due`), in the
     caller's transaction, under the Desk's `versions` lock with the row `FOR UPDATE`, as a confirm
-    takes them. Returns None when it is rebuilt, or when it is no longer active or due; otherwise
-    why it can't be. A rebuilt version is ledgered `policy` `{version, status: "active", rebuilt:
+    takes them. Returns `RebuildSuccess` with the actual proof source when rebuilt, None when it
+    is no longer active or due, or a string saying why it can't be rebuilt. A rebuilt version is
+    ledgered `policy` `{version, status: "active", rebuilt:
     true, auto_money_cap_cents, cedar_sha256, from_cedar_sha256}`. One that can't be is left as
     stored; the attempt is ledgered `policy` `{version, rebuilt: false, refused: <why>}`. An
     outdated one keeps refusing, so the attempt also alerts the owner in the Demo inbox whatever
@@ -1108,22 +1124,25 @@ async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: 
         await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
             kind="policy", origin="kernel", summary={"version": version, "rebuilt": False, "refused": rebuilt}))
         return rebuilt
+    rebuilt_row, proof_source = rebuilt
     stored = row.cedar_sha256
     for column in _REBUILT_COLUMNS:
-        setattr(row, column, getattr(rebuilt, column))
+        setattr(row, column, getattr(rebuilt_row, column))
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel",
         summary={"version": version, "status": "active", "rebuilt": True,
                  "auto_money_cap_cents": row.auto_money_cap_cents, "cedar_sha256": row.cedar_sha256,
                  "from_cedar_sha256": stored}))
-    return None
+    return RebuildSuccess(proof_source)
 
 
-async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *, prove: bool) -> PolicyVersionRow | str:
+async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *,
+                   prove: bool) -> tuple[PolicyVersionRow, ProofSource] | str:
     """`row` compiled again as a draft of its own cards would be, at its own cap, over the Desk's
-    enabled profiles, with a proof of all seven obligations; or why it can't be (`NEEDS_PROOF`
-    when only a live proof would answer and `prove` is false)."""
+    enabled profiles, with a proof of all seven obligations and its actual source (`cached` for a
+    stored report, `live` if this call ran the prover); or why it can't be (`NEEDS_PROOF` when only
+    a live proof would answer and `prove` is false)."""
     desk_id, cap = row.desk_id, row.auto_money_cap_cents
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         return "invalid_money_cap"
@@ -1144,18 +1163,20 @@ async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *, prove: bool) -> Pol
                   compiled=compiled):
         return "unloadable"
     report = ctx.policies.cache.get(hashes)               # a shipped report, or one this process proved
+    proof_source: ProofSource = "cached"
     if report is None and proof_mode() == "symcc":
         if not prove:
             return NEEDS_PROOF
         report = await prove_or_check(ctx.policies.engine, owned, profiles, key_prefix=f"rebuild:{desk_id}",
                                       auto_money_cap_cents=cap)
+        proof_source = "live"
         ctx.policies.cache.put(hashes, report)
     if report is None or not proved(report):
         return "not_proved"
     return version_row(copy_id=row.copy_id, desk_id=desk_id, version=row.version, parent_version=row.parent_version,
                        compiled=compiled, a0=a0, schema=schema, hashes=hashes, auto_money_cap_cents=cap,
                        status=row.status, proof=report, created_at=row.created_at, preset=row.preset,
-                       draft_key_sha256=row.draft_key_sha256)
+                       draft_key_sha256=row.draft_key_sha256), proof_source
 
 
 # ---- Owner drafts --------------------------------------------------------------------------------
