@@ -20,7 +20,7 @@ import {
   type SetupJobRow,
 } from '../ds/index.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOn, isBusinessToolName, isCatalogTool, toolDisplayName, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
-import { businessGlyph, businessLine, businessRows, isBusinessDef } from '../owner/connectors/businessWords.ts';
+import { businessGlyph, businessLine, businessOwnerLine, businessRows, isBusinessDef } from '../owner/connectors/businessWords.ts';
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
@@ -72,13 +72,13 @@ function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
 export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
   const business = businessTools([row]);
   const name = toolDisplayName(row.tool, business) ?? 'A connected tool';
-  const line = row.source === 'business' && isBusinessToolName(row.tool) && isBusinessDef(row.business)
-    ? row.description_confirmed : (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
+  const line = row.source === 'business'
+    ? businessOwnerLine(row.business?.config) : (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
   const covering = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.is_default !== true);
   return {
     key: row.tool,
     name,
-    description: `${line} ${describeEffects(row.effects, row.reversible)}`,
+    description: [line, describeEffects(row.effects, row.reversible)].filter(Boolean).join(' '),
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };

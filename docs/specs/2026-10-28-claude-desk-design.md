@@ -38,7 +38,7 @@ The prototype must show the product is real, not slideware: someone using it can
 
 ## Product
 
-- **Where it lives:** a standalone app, with Claude Design (claude.ai/design) as precedent.
+- **Where it lives:** a standalone app, with Claude Design as precedent.
 - **Desk types:** business, personal, team/internal and public service all appear; only **business** works for real, the rest are mocks.
 - **Owners:** designed for a solo trade (Rivera Plumbing), a small office (Chen & Co. CPA) and a landlord (Maple Street Rentals) equally.
 - **Devices:** desktop and phone equally; phone screens are designed to feel native **(mock design)** over a responsive web app.
