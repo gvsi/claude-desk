@@ -60,8 +60,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
-fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
-connections. Any turn while busy returns that state without running or counting on the limits.
+fails in time, or 202 with the stored busy state. Consent doesn't wait: it answers 202 with the busy state once it is
+stored. Cancelling the request leaves the task working on its own connections. Any turn while busy returns that state without running or counting on the limits.
 The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
 seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
 `TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
@@ -1385,7 +1385,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                    runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                    check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
                    turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
-                   keep_staged: bool = True,
+                   keep_staged: bool = True, wait: bool = True,
                    after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
                    render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
     """Store staged entries, run a detached owner turn, and return its landed or busy state.
@@ -1393,7 +1393,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
-    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state (`wait=False`
+    answers the busy state as soon as it is stored).
     `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
     acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
@@ -1489,6 +1490,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
+    if not wait:
+        return pending
     done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
@@ -1498,7 +1501,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    """Run consent and its reads through the shared turn runner, answering the busy state once it is stored; no
+    reads run after no."""
     def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
@@ -1520,7 +1524,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn,
+                          check=check, stage=stage, turn=turn, wait=False,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 

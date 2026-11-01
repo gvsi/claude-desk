@@ -127,12 +127,23 @@ async def wrote_memory(kernel_http, owner: Owner, state: dict) -> None:
 
 
 async def consent(owner: Owner, interview_id: str, allow: bool, model: ScriptedModel, *, cards: bool = False) -> dict:
+    """Consent, which answers busy at once, then the state it lands."""
     # Existing question tests exercise the fallback unless they script an opening.
     if not model.script:
         model.add(unavailable())
     answer = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent?cards={int(cards)}", json={"allow": allow})
-    assert answer.status_code == 200, answer.text
-    return answer.json()
+    assert answer.status_code == 202 and answer.json()["busy"] is True, answer.text
+    return await landed(owner, interview_id, cards=cards)
+
+
+async def landed(owner: Owner, interview_id: str, *, cards: bool = False) -> dict:
+    """The interview once its running turn has landed (polling its state, as the web falls back to) and released the
+    interview, so the next turn isn't refused as one still running."""
+    path = f"/api/owner/setup/{interview_id}?cards={int(cards)}"
+    async with asyncio.timeout(5):
+        while (state := (await owner.browser.get(path)).json())["busy"] or interview_id in desk_setup._RUNNING:
+            await asyncio.sleep(0.01)
+    return state
 
 
 def _empty(annotation: object) -> object:
@@ -256,8 +267,8 @@ async def test_the_opening_shows_no_cards_and_keeps_the_plan_hidden(
     model.add(unparsed(opening))
     path = f"/api/owner/setup/{state['interview_id']}"
     response = await owner.browser.post(path + "/consent?cards=1", json={"allow": True})
-    assert response.status_code == 200, response.text
-    state = response.json()
+    assert response.status_code == 202, response.text
+    state = await landed(owner, state["interview_id"], cards=True)
     messages = state["messages"][4:]
     assert [message["text"] for message in messages] == [opening["reply"], opening["question"]]
     assert all(message["card"] is None for message in state["messages"])
@@ -518,7 +529,8 @@ async def test_a_dropped_draft_gets_one_retry_with_its_errors(
     before = len(model.requests)
     model.add(unparsed(first), unavailable() if retry == "unavailable" else unparsed(second))
     response = await owner.browser.post(path, json=body)
-    assert response.status_code == 200, response.text
+    assert response.status_code == (202 if where == "understanding" else 200), response.text
+    await landed(owner, interview_id)
     assert len(model.requests) == before + 2
     errors = model.requests[-1].messages[-1]["content"][0]["text"]
     assert "purpose" in errors and "max_length=60" in errors and private not in errors
@@ -787,7 +799,8 @@ async def test_invalid_jobs_and_apps_are_dropped_and_the_rest_stands(
     before = len(model.requests)
     response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent?cards=1",
                                         json={"allow": False})
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    await landed(owner, state["interview_id"], cards=True)
     cards = [card for entry in (await stored(engine, state["interview_id"]))["transcript"]
              for card in entry.get("planned", [])]
     assert [card["job"]["job"] for card in cards if card["job"]] == ["intake", "schedule"]
@@ -814,7 +827,8 @@ async def test_cards_take_capabilities_and_never_an_amount(
     model.add(unparsed(opening))
     response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent?cards=1",
                                         json={"allow": False})
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    await landed(owner, state["interview_id"], cards=True)
     cards = [card for entry in (await stored(engine, state["interview_id"]))["transcript"]
              for card in entry.get("planned", [])]
     jobs = [card["job"] for card in cards if card["job"]]
@@ -841,8 +855,8 @@ async def test_a_failed_understanding_still_asks_the_first_question(
     model.add(*([unparsed({}), unparsed({})] if invalid else [unavailable()]))
     response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent?cards=1",
                                         json={"allow": False})
-    assert response.status_code == 200, response.text
-    state = response.json()
+    assert response.status_code == 202, response.text
+    state = await landed(owner, state["interview_id"], cards=True)
     assert state["question"] == "what_you_do"
     assert state["messages"][-1] == {"role": "claude", "text": question_text("what_you_do", "trade"),
                                        "choices": [], "card": None}
@@ -1018,8 +1032,9 @@ async def test_card_messages_reach_the_owner_only_with_cards_1(
                                {"id": interview_id})
         model.add(unavailable())
         response = await owner.browser.post(path + "/consent" + query, json={"allow": False})
-        assert response.status_code == 200, response.text
+        assert response.status_code == 202, response.text
         check(response.json(), cards)
+        check(await landed(owner, interview_id, cards=cards), cards)
         model.add(turn())
         response = await owner.browser.post(path + "/answer" + query,
                                             json={"question": "what_you_do", "text": "Individuals"})
@@ -2631,9 +2646,9 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_answe
     finally:
         release.set()
     reply = await first
-    assert reply.status_code == 200, reply.text
-    assert [message["text"] for message in reply.json()["messages"][1:3]] == ["Yes, use it",
-                                                                             "Searched your Claude memory"]
+    assert reply.status_code == 202, reply.text
+    assert [message["text"] for message in (await landed(owner, interview_id))["messages"][1:3]] == [
+        "Yes, use it", "Searched your Claude memory"]
 
 
 async def test_an_answer_saves_nothing_when_the_interview_changed_meanwhile(app, browser, fake, kernel_http, model,
@@ -3649,7 +3664,8 @@ async def test_a_client_without_cards_never_gets_a_card_ask(app, browser, kernel
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do", connectors=[])))
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/consent", json={"allow": False})
-    assert response.status_code == 200
+    assert response.status_code == 202
+    await landed(owner, interview_id)
     row = await stored(engine, interview_id)
     proposal_id = next(card["proposal_id"] for entry in row["transcript"] for card in entry.get("planned", []))
     response = await answer(owner, model, interview_id, "Repairs.",

@@ -2,7 +2,8 @@
 and an interview is read only within it.
 
 - Under `/api/owner/setup`: the interview (start, consent, answers), and the new Desk's tools and their connection.
-  Consent and answers use one turn runner: 200 when done within its wait, otherwise 202 `SetupState` with `busy`.
+  Consent and answers use one turn runner. An answer is 200 when done within its wait, otherwise 202 `SetupState`
+  with `busy`; consent is 202 with `busy` as soon as it is stored.
   A busy repeat runs nothing and never counts on the limits. GET recovers abandoned turns.
 - Under `/api/owner/policy/setup/{id}` (`id` is the interview's), the proving routes: the rules draft, the
   situations, the safety check, the confirm and going live. Each runs its work through `desk.api.proving`: past
@@ -145,9 +146,10 @@ async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request
                         ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Use the shared turn runner to store consent, then read Claude memory and the named website through the
     kernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the
-    busy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.
-    Cancelling the request leaves the run working. A repeat while busy answers 202 without starting or
-    counting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent."""
+    busy commit, then answer 202 `SetupState` with `busy: true` at once; the turn's events stream follows the
+    reads and Claude's opening, and the state route has the result. Cancelling the request leaves the run
+    working. A repeat while busy answers 202 without starting or counting another run; after it lands, consent
+    is 409 `conflict`. Failed or abandoned runs reopen consent."""
     state = runtime(request).started()
 
     async def admit() -> None:
