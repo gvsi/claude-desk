@@ -305,7 +305,7 @@ class ContextClock(BaseModel):            # public kernel time, with no data lab
     timezone: str                        # the business's IANA time zone
 
 class SessionContext(BaseModel):          # GET /context/{session_id}; facts and knowledge filtered by labels
-    clock: ContextClock | None = None     # older kernels omit it; current kernels always supply their clock
+    clock: ContextClock
     tools: list[ToolProfile]              # the profiles this session may call now
     tools_declared: list[ToolProfile]     # every profile a session of its kind could ever be given
     facts: list[Fact]

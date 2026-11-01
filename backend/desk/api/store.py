@@ -392,12 +392,10 @@ async def append_note_once(conn: AsyncConnection, ids: Ids, text: str, *, wake: 
 TIME_NOTE_REF = "business_local_time:"
 
 
-async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock | None) -> int | None:
+async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock) -> int | None:
     """Keep the kernel's business time in a model-only note; its ref_id retains local_now with its UTC offset.
 
     Read and write under the events lock, so a concurrent refresh can't append the same note twice."""
-    if clock is None:
-        return None
     local = datetime.fromisoformat(clock.local_now)
     await lock_events(conn, ids.session_id)
     previous = (await conn.execute(select(MESSAGES.c.ref_id).where(

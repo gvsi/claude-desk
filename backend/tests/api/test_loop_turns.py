@@ -220,24 +220,6 @@ async def test_time_notes_refresh_at_local_midnight_before_ten_minutes(api_conn,
         for weekday, date, at in (("Saturday", "2026-10-31", "23:59"), ("Sunday", "2026-11-01", "00:00"))]
 
 
-async def test_a_kernel_without_a_context_clock_still_runs_the_turn(api_conn, caller, fake, visitor):
-    class WithoutClock(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            result = await httpx.ASGITransport(app=fake_kernel_app(fake)).handle_async_request(request)
-            if request.url.path.startswith("/context/"):
-                body = json.loads(await result.aread())
-                body.pop("clock")
-                return httpx.Response(result.status_code, json=body)
-            return result
-
-    await said(api_conn, caller, "Can you help?")
-    model = ScriptedModel([response(reply("Yes, what do you need?"))])
-    async with KernelHttp("http://fake-kernel", transport=WithoutClock()) as http:
-        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
-    assert len(model.requests) == 1
-    assert await rows(api_conn, caller.session_id, "note", "text") == []
-
-
 async def test_a_fresh_context_keeps_only_the_latest_time_note(api_conn, caller, fake):
     fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
     model = ScriptedModel([response(reply("How can I help?")) for _ in range(3)])
