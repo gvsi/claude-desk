@@ -411,6 +411,19 @@ async def test_public_receipt_title_refuses_promises_money_and_percent(app, clie
     assert response.status_code == 200, response.text
 
 
+async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client):
+    copy = await rivera(app, client)
+    for title in ('Classes for all ages', 'Try a class', 'Coffee cup orders',
+                  'SOS plumbing callback', "Bob's garage intake"):
+        response = await put(client, copy, [intake(title=title)])
+        assert response.status_code == 200, (title, response.text)
+    original = (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256
+    for title in ('USD', 'Pay 20 CHF', 'EUR deposit'):
+        response = await put(client, copy, [intake(title=title)])
+        assert response.status_code == 422, (title, response.text)
+        assert (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256 == original
+
+
 @pytest.mark.parametrize('title,config,status', [
     ('Book a free intro consult', {'block': 'intake', 'questions': ['What?']}, 200),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}, 200),
