@@ -1011,7 +1011,7 @@ class KnowledgeRow(BaseModel):
     title: str | None
     text: str | None
     readers: list[str]
-    source: Literal["website", "upload", "setup", "memory_import"]
+    source: Literal["website", "upload", "setup", "memory_import", "web_search"]
     created_at: AwareDatetime | None
 
 

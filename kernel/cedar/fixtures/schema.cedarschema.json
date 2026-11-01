@@ -418,6 +418,24 @@
             "type": "DeskContext"
           }
         }
+      },
+      "native.web_search": {
+        "memberOf": [
+          {
+            "id": "effect:read"
+          }
+        ],
+        "appliesTo": {
+          "principalTypes": [
+            "Owner"
+          ],
+          "resourceTypes": [
+            "Desk"
+          ],
+          "context": {
+            "type": "DeskContext"
+          }
+        }
       }
     }
   }

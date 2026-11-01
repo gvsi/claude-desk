@@ -23,7 +23,7 @@ export interface ThingsToTryProps {
   /** The final decisions of the requests answered on Today in this view. */
   answered: Iterable<{ state: Decision['state'] }>;
   /** The final decision of the request answered on Today last, kept when its card is dismissed. */
-  latestAnswer: { decision_id: string; state: Decision['state'] } | null;
+  latestAnswer: { decision_id: string; state: Decision['state']; owner_plain?: string | null } | null;
   /** "Open the request": brings the held request's card into view and focus. */
   onFocusRequest: () => void;
 }
@@ -139,7 +139,10 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   // else not drawn.
   const answerDone = rowDone(signals.done.answer, ANSWER.done);
   const answerEnd: RowEnd | null =
-    answerDone ?? (!waiting && settledAs !== null ? { line: UNCOUNTED_ANSWER_LINES[settledAs], ticks: false, atLoad: false } : null);
+    answerDone ?? (!waiting && settledAs !== null ? {
+      line: settledAs === 'refused_at_execution' ? latestAnswer?.owner_plain ?? UNCOUNTED_ANSWER_LINES[settledAs] : UNCOUNTED_ANSWER_LINES[settledAs],
+      ticks: false, atLoad: false,
+    } : null);
   const answerRow = answerDone !== null ? 'done' : waiting ? 'waiting' : answerEnd !== null ? 'settled' : 'absent';
 
   return (

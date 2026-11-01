@@ -45,10 +45,13 @@ export function setupRulesQuery(id: string) {
 /**
  * A line around the business's name: the name is the owner's own words (`data-copy="user"`), never
  * read as the screen's; "your business" until the API names it.
+ * When the name already ends a sentence ('.', '!' or '?'), the line's own leading '.' is dropped,
+ * so 'Chen & Co.' doesn't read 'Chen & Co..'.
  */
 export function aroundBusiness([before, after]: readonly [string, string] | readonly string[], business: string): ReactNode {
   const name = business === '' ? SETUP_COPY.yourBusiness : createElement('span', { 'data-copy': 'user' }, business);
-  return createElement(Fragment, null, before, name, after);
+  const suffix = /[.!?]$/.test(business.trimEnd()) && after?.startsWith('.') ? after.slice(1) : after;
+  return createElement(Fragment, null, before, name, suffix);
 }
 
 /**

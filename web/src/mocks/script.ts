@@ -97,6 +97,7 @@ export const VISITOR_PLAIN = {
 const NO_EXECUTED_LINE = {
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
 function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
@@ -772,6 +773,12 @@ export function allows(answer: ApprovalAnswer): boolean {
   return answer === 'allow_once' || answer === 'allow_person';
 }
 
+/** The owner annotation never enters a queued visitor turn, even when it is null. */
+export function visitorSafe(decision: Decision): Decision {
+  const { owner_plain: _ownerPlain, ...visitor } = decision;
+  return visitor;
+}
+
 /**
  * What the visitor's chat gets once the owner has answered: the signed approved receipt when
  * allowed, then the resolved outcome, then Claude's follow-up (the quote, refund or handoff).
@@ -779,10 +786,13 @@ export function allows(answer: ApprovalAnswer): boolean {
  * is Claude's, so it does.
  */
 export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  decision = visitorSafe(decision);
   // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
   if (approved !== null && (approved.decision_id !== decision.decision_id
     || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
+  if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
+  if (decision.state === 'refused_at_execution') return [resolved];
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {

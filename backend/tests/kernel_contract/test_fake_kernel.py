@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
 from desk.contracts import CopyCreated, NormalizedAction, Probe, ResourceRef, SessionCreated, ToolCall
 from desk.kernel_api import (
-    CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health, PolicyProbeRequest, ToolPin,
+    CreateCopyRequest, CreateSessionRequest, DecideRequest, DemoAgentRequest, Health, PolicyProbeRequest, ToolPin,
     ToolsConfirmRequest, ToolsConnectRequest, TurnRequest,
 )
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
@@ -481,3 +481,26 @@ async def test_demo_agents_are_minted_for_the_desk_and_limited_per_copy(fake):
     assert state.desks[desk_id].ledger[-1].event.kind == "rate_limit"
     state.now += timedelta(hours=1)
     assert (await owner.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))).mandate.desk_id == desk_id
+
+
+async def test_owner_web_search_is_canned_and_visitor_cannot_call_it(fake):
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    owner = http.owner(copy.owner_token)
+    session = (await owner.whoami()).session
+    desk_id = copy.desk_ids[0]
+    assert "native.web_search" in [p.tool for p in (await context(owner, session.session_id, desk_id)).tools]
+    assert "native.web_search" not in [p.tool for p in (await context(
+        http.session(visitor.session_token), visitor.state.session_id)).tools]
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=0, desk_id=desk_id,
+        call={"call_id": "search", "tool": "native.web_search", "args": {"query": "plumber services"}}))
+    assert decision.outcome == "allow"
+    result = await execute(owner, decision, 0)
+    assert result.state == "succeeded"
+    assert result.model_view["simulated"] is False and result.model_view["kind"] == "cited_excerpts"
+    assert result.model_view["results"] == [{"title": "Plumbing services", "url": "https://plumbing.example/services",
+                                               "snippet": "Plumbers repair leaks and clear drains."}]
+    refused = await decide(http.session(visitor.session_token), visitor.state.session_id, 0, "visitor-search",
+                           "native.web_search", {"query": "plumber services"})
+    assert refused.outcome == "refuse"
