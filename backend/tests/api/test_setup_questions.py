@@ -242,6 +242,7 @@ async def test_the_opening_shows_no_cards_and_keeps_the_plan_hidden(
 ):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
+    await wrote_memory(kernel_http, owner, state)
     opening = understanding()
     model.add(unparsed(opening))
     path = f"/api/owner/setup/{state['interview_id']}"
