@@ -14,8 +14,9 @@ call (the web never makes Desks outside setup), and the kernel's clock does not 
 An outside Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live.
 Identifying the exact Desk without those assumptions requires a kernel request tag on the Desk.
 
-Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
-untrusted text; nothing here reaches a visitor or a model.
+Names, notes, reasons and texts a visitor typed are passed on as they are (a conversation's glimpse of the visitor's
+latest message only has its whitespace collapsed and its length cut: `visitor_line`), for the owner's screens to show
+as untrusted text; nothing here reaches a visitor or a model.
 
 Recorded history (Plan 01d): a copy may open on a night the kernel replayed into it. Today flags each section that
 counts any of it, and the reports flag themselves when they do (`recorded_history`), from what the API's reads carry:
