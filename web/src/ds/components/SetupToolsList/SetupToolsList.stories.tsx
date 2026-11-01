@@ -1,11 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { chenBusinessTools } from '../../../mocks/businessTools.ts';
+import { businessGlyph, businessLine } from '../../../owner/connectors/businessWords.ts';
+
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
-import { SetupToolsList, type SetupToolsRow } from './SetupToolsList.tsx';
+import { SetupToolsList, type SetupJobRow, type SetupToolsRow } from './SetupToolsList.tsx';
 
 const { views } = rivera.connectors;
 
@@ -185,5 +188,50 @@ export const Phone: Story = {
       await expect(end.getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
     }
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+const onReviewJob = fn();
+const JOBS: SetupJobRow[] = chenBusinessTools.map((row) => {
+  if (!row.business) throw new Error('A job has its definition');
+  const line = businessLine(row.business);
+  const glyph = businessGlyph(row.business.config);
+  if (!line || !glyph) throw new Error('A job has a supported configuration');
+  const job = { key: row.tool, title: row.business.title, line, glyph };
+  return row.status === 'enabled' ? { ...job, state: 'on' } : { ...job, state: 'needs_review', onReview: onReviewJob };
+});
+
+export const BusinessJobs: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: { jobs: JOBS, builtIn: [{ connector: views.verification, state: 'always_on' }] },
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4tools-1512; intake is already on to show both states. The board is not yet in the reference registry.' },
+  play: async ({ canvas, userEvent }) => {
+    onReviewJob.mockClear();
+    const groups = canvas.getAllByRole('region');
+    await expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Your Desk’s jobs', 'Built in', 'Connect your own']);
+    const jobs = within(groups[0]!);
+    await expect(jobs.getByText('Needs review')).toBeVisible();
+    await expect(jobs.getByText('On', { exact: true })).toBeVisible();
+    const review = jobs.getByRole('button', { name: 'Review Book a free intro call' });
+    review.focus();
+    await expect(review).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(onReviewJob).toHaveBeenCalledTimes(1);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const BusinessJobsPhone: Story = {
+  ...BusinessJobs,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4tools-390, not yet in the reference registry.' },
+  play: async (context) => {
+    await BusinessJobs.play?.(context);
+    for (const row of rowsOf(context.canvas, 'Your Desk’s jobs')) {
+      const text = row.querySelector('.cd-connector-summary')!;
+      const end = row.querySelector('.cd-setup-tools__end')!;
+      await expect(end.getBoundingClientRect().left).toBe(text.getBoundingClientRect().left);
+      await expect(end.getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
+    }
   },
 };
