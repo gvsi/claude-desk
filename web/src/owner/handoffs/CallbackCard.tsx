@@ -19,7 +19,8 @@ export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
  * A visitor who wants the owner, a way into the chat, and a way to close it. A call-back request
  * says their name, contact and reason as they typed them, and the callback they were promised; a
  * conversation the handoff card handed over says the Desk's reason and the visitor's last words,
- * and promises no call back. Either says Claude's summary of the chat when the API sends one.
+ * and promises no call back. Either says Claude's note on a stopped reply in the chat when the API
+ * sends one, unless the chat has a request held (`showSummary`).
  */
 interface CallbackCardProps {
   item: CallbackItem;
@@ -27,15 +28,20 @@ interface CallbackCardProps {
   showJoin?: boolean;
   /** The handoff closed: restore focus before the refreshed read removes its button. */
   onDone?: () => void;
+  /**
+   * False while the same chat has a request held: Claude's AI-written note never sits beside an
+   * approval it could sway (owner decision, 2026-11-01).
+   */
+  showSummary?: boolean;
 }
 
-export function CallbackCard({ item, showJoin = true, onDone }: CallbackCardProps) {
+export function CallbackCard({ item, showJoin = true, onDone, showSummary = true }: CallbackCardProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { handoff } = item;
-  const summary = item.claude_summary?.trim() ? item.claude_summary : null;
+  const summary = showSummary && item.claude_summary?.trim() ? item.claude_summary : null;
   const [joining, setJoining] = useState(false);
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +105,7 @@ export function CallbackCard({ item, showJoin = true, onDone }: CallbackCardProp
           </p>
         ) : null}
         {/* Claude's own summary of the chat, for the owner alone: plain text, never quoted or marked as the visitor's. */}
-        {summary !== null ? <p className="cd-callback__context cd-type-meta">{`Claude's summary: ${summary}`}</p> : null}
+        {summary !== null ? <p className="cd-callback__context cd-type-meta">{`Claude's note on a stopped reply: ${summary}`}</p> : null}
         {/* A call back is promised only on a call-back request: one the API names so, or sends with no kind yet. */}
         {handoff.kind === undefined || handoff.kind === 'callback' ? (
           <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>

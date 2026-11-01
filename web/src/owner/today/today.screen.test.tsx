@@ -1988,7 +1988,7 @@ describe('Today', () => {
 
     const { screen } = await renderRoute(TODAY);
     const wants = screen.getByRole('article', { name: 'Wants you' });
-    const line = wants.getByText(`Claude's summary: ${summary}`, { exact: true });
+    const line = wants.getByText(`Claude's note on a stopped reply: ${summary}`, { exact: true });
     await expect.element(line).toBeVisible();
     const said = wants.getByText('Can I talk to Maria?', { exact: true }).element().parentElement;
     if (!said) throw new Error("the visitor's words sit in their line");
@@ -2005,6 +2005,27 @@ describe('Today', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('handoff_summary_waits_while_its_chat_has_a_request_held', async () => {
+    // A summary never sits beside an approval it could sway: while the same chat has a request held,
+    // its handoff card leaves Claude's note out (owner decision, 2026-11-01).
+    const summary = 'Asked for a discount; the Desk stopped a draft.';
+    await visitorSays('Can I talk to Maria?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const heldChat = items.find((item) => item.decision != null)?.decision?.session_id;
+    if (!heldChat) throw new Error('the seed holds a request');
+    mockStore.inject({
+      route: 'needsYou', status: 200, times: 10_000,
+      body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary, handoff: { ...item.handoff, session_id: heldChat } })),
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants).toBeVisible();
+    await expect.element(heldCard(screen, rivera.decisions.held.reason_plain)).toBeVisible();
+    expect(wants.element().textContent).not.toContain("Claude's note");
+  });
+
   it('callback_shows_claudes_summary_under_its_reason', async () => {
     // A call-back request quotes nothing more than its reason, so the summary sits under the reason
     // and over the call-back time.
@@ -2016,14 +2037,14 @@ describe('Today', () => {
 
     const { screen } = await renderRoute(TODAY);
     const wants = screen.getByRole('article', { name: 'Wants you' });
-    const line = wants.getByText(`Claude's summary: ${summary}`, { exact: true });
+    const line = wants.getByText(`Claude's note on a stopped reply: ${summary}`, { exact: true });
     await expect.element(line).toBeVisible();
     expect(line.element().previousElementSibling?.textContent).toBe(CALLBACK_REASON);
     expect(line.element().nextElementSibling?.textContent).toBe("You'll call back on Monday, between 8:00 am and 9:00 am.");
   });
 
   it('handoff_without_a_summary_draws_no_summary_line', async () => {
-    // Null, empty or only whitespace: the card has no "Claude's summary" line, as before it was sent.
+    // Null, empty or only whitespace: the card has no "Claude's note" line, as before it was sent.
     await visitorSays('Can I talk to Maria?');
     await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
     const items = await needsYouRead();
@@ -2032,7 +2053,7 @@ describe('Today', () => {
       const { screen } = await renderRoute(TODAY);
       const wants = screen.getByRole('article', { name: 'Wants you' });
       await expect.element(wants.getByText('Can I talk to Maria?', { exact: true })).toBeVisible();
-      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain("Claude's summary");
+      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain("Claude's note");
     }
   });
 
@@ -2045,7 +2066,7 @@ describe('Today', () => {
     const card = heldCard(screen, SEEDED_REASON);
     await expect.element(card).toBeVisible();
     expect(card.element().textContent).toContain('From the visitor: “');
-    expect(card.element().textContent).not.toContain("Claude's summary");
+    expect(card.element().textContent).not.toContain("Claude's note");
     expect(card.element().textContent).not.toContain('allow it');
   });
 

@@ -361,15 +361,38 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(SEEDED_HOLD));
     const held = heldCard(screen, SEEDED_REASON);
     await expect.element(held).toBeVisible();
-    expect(screen.container.textContent).not.toContain("Claude's summary");
+    expect(screen.container.textContent).not.toContain("Claude's note");
     await held.getByRole('button', { name: 'Deny this time' }).click();
 
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
-    const line = card.getByText(`Claude's summary: ${triage.summary}`, { exact: true });
+    const line = card.getByText(`Claude's note on a stopped reply: ${triage.summary}`, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     expect(line.element().previousElementSibling?.textContent).toMatch(/^From the visitor: “.+”$/);
     expect(line.element().closest('[data-copy="user"]')).toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_note_waits_while_the_chat_has_a_request_held', async () => {
+    // While this chat still has a request held, its handoff card leaves Claude's note out, so the
+    // note never sits beside an approval it could sway (owner decision, 2026-11-01).
+    // A handoff opened in Dana's chat, shown as this held chat's, with a note in it.
+    mockStore.world.reply(named(DANA_LIVE, DANA), [rivera.blocks.handoff.en], 'en');
+    const read = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads Needs you');
+    const items = read.body as NeedsYouItem[];
+    expect(items.some((item) => item.handoff != null)).toBe(true);
+    mockStore.inject({
+      route: 'needsYou', status: 200, times: 10_000,
+      body: items.map((item) => (item.handoff == null ? item : {
+        ...item, claude_summary: 'Asked for a discount; the Desk stopped a draft.', handoff: { ...item.handoff, session_id: SEEDED_HOLD },
+      })),
+    });
+
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    expect(card.element().textContent).not.toContain("Claude's note");
   });
 
   it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {
