@@ -51,3 +51,20 @@ export function continueSetupLine(step: UnfinishedSetupStep, answering: boolean)
   const { pickUp, answeringOff } = CONTINUE_SETUP_LINES[step];
   return answering ? pickUp : `${pickUp} ${answeringOff}`;
 }
+
+/** Literal Today copy shared by the page and its word-free loading measurements. */
+export const TODAY_COPY = {
+  chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
+  breakBeforeOwner: "Ask for a discount, another customer's address or ",
+  breakAfterOwner: "'s home number. Safety shows what was refused and why.",
+  waiting: 'A request is waiting for your answer.',
+  heldBy: 'Held by your rule: ',
+  createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
+  publicDescription: 'Chats on it are real conversations with your Desk. They show up in Conversations.',
+  handledTitle: 'Handled by Claude, or by you',
+  turnedDownEmpty: 'Nothing turned down in the last 7 days.',
+  vision: 'Vision: where a Desk could go next',
+} as const;
+
+export const handledCount = (count: number) => `Claude handled ${count}`;
+export const steppedInCount = (count: number) => `You stepped in ${count} ${count === 1 ? 'time' : 'times'}`;

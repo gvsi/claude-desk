@@ -1154,6 +1154,7 @@ describe('OwnerLayout', () => {
     await expectTodayHoldsForItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
     await screen.getByRole('button', { name: 'Start over' }).click();
     await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
@@ -1170,6 +1171,7 @@ describe('OwnerLayout', () => {
     const late = nextAnswerTo('ownerInbox');
     oldInbox.release();
     await late.settled;
+    newInbox.release();
     newDesks.release();
 
     // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
