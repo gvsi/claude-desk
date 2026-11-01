@@ -133,13 +133,17 @@ async def test_card_retention_never_salvages_non_prose_failures(app, client, rev
 @pytest.mark.parametrize("kind", ["number_in_prose", "promise_word", "soft_promise", "uncertain_language",
                                   "check_unavailable", "denies_ai"])
 @pytest.mark.parametrize("final", [False, True])
-async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewer, kind, final):
+@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
+async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewer, kind, final, drafted):
+    """A shown block failing only for its prose keeps its checked cards and drops the prose. A
+    handoff clause Claude drafted follows them and opens the owner's item and alert, as the handoff
+    card does (the owner's ruling of 2026-11-01); without one, no owner item opens."""
     from desk.kernel_service.decisions import CallUsage
 
     copy, visitor = await visitor_of(app, client)
     clauses = await quote_and_payment(client, reviewer, visitor)
-    # A cited handoff must be removed too; retaining a card must never open the owner's handoff.
-    clauses.insert(1, clause("handoff"))
+    if drafted:          # drafted between the cards: it is shown after them
+        clauses.insert(1, clause("handoff"))
     prose = {"number_in_prose": "Here is $20.", "promise_word": "I guarantee it.",
              "uncertain_language": "Absolutely. Payment link below.",
              "denies_ai": "I'm a real person at the shop, not a bot."}.get(kind, "Here is your quote.")
@@ -155,15 +159,24 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     verdict = await checked(client, visitor, prose, clauses, final=final)
     assert not verdict.ok
     assert {v.kind for v in verdict.violations} == {"soft_promise" if kind == "denies_ai" else kind}
-    assert [b.template for b in verdict.blocks] == (["quote", "payment_link"] if final or kind == "check_unavailable" else [])
-    assert all(b.kind == "card" for b in verdict.blocks)
-    assert await handoffs_of(app, copy) == []
-    assert await handoff_alerts(app, copy) == []
+    shown = final
+    assert [b.template for b in verdict.blocks] == (
+        ["quote", "payment_link"] + (["handoff"] if drafted else []) if shown else [])
+    assert all(b.kind == "card" for b in verdict.blocks)                    # the prose is never kept
+    assert prose not in [b.text for b in verdict.blocks]
+    opened = shown and drafted
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == ([("card", "open")] if opened else [])
+    assert len(await handoff_alerts(app, copy)) == int(opened)
+    assert verdict.visitor_plain == ("Passed to Maria Rivera to answer" if opened or not shown
+                                     else "Reply checked against Maria Rivera's rules")
     verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
 @pytest.mark.parametrize("session", ["card open", "call-back open", "hold awaiting", "preview"])
-async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, client, reviewer, session):
+@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
+async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, client, reviewer, session, drafted):
+    """Kept cards, and a drafted handoff kept after them, open no second owner item: not while a
+    handoff or a held request is open, and never in the owner's preview."""
     from desk.kernel_service.decisions import CallUsage
 
     copy, visitor = await visitor_of(app, client)
@@ -174,6 +187,8 @@ async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, 
         created = SessionCreated.model_validate(response.json())
         visitor = Visitor(session_id=created.state.session_id, token=created.session_token)
     clauses = await quote_and_payment(client, reviewer, visitor)
+    if drafted:
+        clauses.append(clause("handoff"))
     if session == "card open":
         await checked(client, visitor, BLOCKED)
     elif session == "call-back open":
@@ -187,9 +202,12 @@ async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, 
         return None, CallUsage(model="claude-haiku-5-5", status="refusal", latency_ms=0)
 
     reviewer.soft_promise = refusal
-    verdict = await checked(client, visitor, CLEAN, clauses, final=False)
+    # A first attempt is rewritten (the owner's ruling of 2026-11-01): nothing shows, no owner item.
+    first = await checked(client, visitor, CLEAN, clauses, final=False)
+    assert [v.kind for v in first.violations] == ["check_unavailable"] and first.blocks == []
+    verdict = await checked(client, visitor, CLEAN, clauses, final=True)
     assert not verdict.ok and [v.kind for v in verdict.violations] == ["check_unavailable"]
-    assert [b.template for b in verdict.blocks] == ["quote", "payment_link"]
+    assert [b.template for b in verdict.blocks] == ["quote", "payment_link"] + (["handoff"] if drafted else [])
     assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == before
     assert len(await handoff_alerts(app, copy)) == alerts_before
 

@@ -16,7 +16,7 @@ import pytest
 
 from desk.kernel_service import decisions, ledger
 from desk.next_steps import NEXT_STEPS
-from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYSTEM, AnthropicDecisions,
+from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYSTEM, AnthropicDecisions, CallUsage,
                                            SoftPromiseInput, SoftPromiseVerdict)
 
 from .fakes import FakeAnthropicClient, FakeDecisions, model_message
@@ -276,6 +276,13 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     else:
         assert_handed_off(verdict)
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+    # Why the card went is ledgered, whether the draft passed or was already blocked for its prose:
+    # the fact and the refusal's rule, never text.
+    [entry] = [entry for entry in await reply_entries(app, copy) if entry.event.ref_id == verdict.message_id]
+    assert entry.event.summary["dropped"] == [
+        {"fact_id": clauses[0]["fact_id"], "rule_id": "not_a_reader" if change == "readers" else "not_current"}]
+    assert entry.event.summary["violations"] == (["soft_promise"] if flagged else [
+        "unentitled_fact" if change == "readers" else "stale_fact"])
 
 
 @pytest.mark.parametrize("part", ["charter", "hours"])
@@ -329,6 +336,8 @@ async def test_signing_rechecks_claims_after_an_owner_replacement(app, client, r
         expected_cards = baseline.blocks[1:] if changed else baseline.blocks
         assert [block for block in verdict.blocks if block.kind == "card"] == expected_cards
         assert any(block.kind == "prose" for block in verdict.blocks) == (not flagged)
+    [entry] = [entry for entry in await reply_entries(app, copy) if entry.event.ref_id == verdict.message_id]
+    assert entry.event.summary["dropped"] == ([{"fact_id": fact_id, "rule_id": "claims_changed"}] if changed else [])
 
 
 async def test_soft_promise_request_shape():
@@ -444,7 +453,7 @@ async def test_a_promise_beyond_the_cards_is_blocked(app, client, reviewer):
     [entry] = await reply_entries(app, copy)
     summary = entry.event.summary
     assert (summary["ok"], summary["violations"], summary["rule_ids"]) == (False, ["soft_promise"], ["soft.promise"])
-    assert summary["soft_promise"] == FakeDecisions.SOFT_USAGE | {"status": "ok", "first_status": "ok", "tries": 1}
+    assert summary["soft_promise"] == FakeDecisions.SOFT_USAGE | {"status": "ok"}
 
 
 @pytest.mark.parametrize(("prose", "language"), [
@@ -513,9 +522,10 @@ async def test_soft_promise_failures_block(app, client, reviewer, case, monkeypa
         assert len(model.requests) == 1                                   # one try: no recheck, no fallback
     entries = await reply_entries(app, copy)
     assert [entry.event.summary["rule_ids"] for entry in entries] == [["soft.unavailable"]] * len(replies)
-    assert {(entry.event.summary["soft_promise"]["model"], entry.event.summary["soft_promise"]["status"],
-             entry.event.summary["soft_promise"]["first_status"], entry.event.summary["soft_promise"]["tries"])
-            for entry in entries} == {(SONNET, status, status, 1)}
+    assert {(entry.event.summary["soft_promise"]["model"], entry.event.summary["soft_promise"]["status"])
+            for entry in entries} == {(SONNET, status)}
+    # the one try's usage, as every model call's is ledgered: no tries count, no first status
+    assert all(set(entry.event.summary["soft_promise"]) == set(CallUsage.model_fields) for entry in entries)
     failures = [record.getMessage() for record in caplog.records if record.name == "desk.kernel_service.decisions"]
     assert [message.split()[0] for message in failures] == ["soft_promise_failed"] * len(replies)
     assert all(f"status={status}" in message for message in failures) and MARKER not in caplog.text
@@ -750,18 +760,16 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
 @pytest.mark.parametrize(("status", "expected", "shown"), [
     ("pass", [], True),
     ("flag", [("soft_promise", "soft.promise")], False),
-    ("timeout", [("check_unavailable", "soft.unavailable")], True),
-    ("error", [("check_unavailable", "soft.unavailable")], True),
-    ("invalid", [("check_unavailable", "soft.unavailable")], True),
-    ("refusal", [("check_unavailable", "soft.unavailable")], True),
+    ("timeout", [("check_unavailable", "soft.unavailable")], False),
+    ("error", [("check_unavailable", "soft.unavailable")], False),
+    ("invalid", [("check_unavailable", "soft.unavailable")], False),
+    ("refusal", [("check_unavailable", "soft.unavailable")], False),
 ])
 async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, status, expected, shown):
     """The owner's decision of 2026-10-31: one Sonnet try within `SOFT_PROMISE_TIMEOUT_S`, no recheck
-    and no fallback. No verdict is `check_unavailable`, shown at once even on a first attempt; a
-    flag on a first attempt is rewritten, so nothing is shown. The ledger keeps the usage summary's
-    shape, with one try whose first status is its status."""
-    from desk.kernel_service.decisions import CallUsage
-
+    and no fallback. No verdict is `check_unavailable`; on a first attempt it is rewritten like a
+    flag (the owner's ruling of 2026-11-01), so nothing is shown and no handoff opens. The ledger keeps the one try's usage,
+    as it keeps every model call's."""
     copy, visitor = await visitor_of(app, client)
     inputs = []
 
@@ -781,5 +789,4 @@ async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, st
     assert len(hands) == int(bool(expected) and shown)
     [entry] = await reply_entries(app, copy)
     deciding = "ok" if status in ("pass", "flag") else status
-    assert entry.event.summary["soft_promise"] == {
-        **reviewer.SOFT_USAGE, "status": deciding, "first_status": deciding, "tries": 1}
+    assert entry.event.summary["soft_promise"] == {**reviewer.SOFT_USAGE, "status": deciding}

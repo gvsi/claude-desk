@@ -23,7 +23,7 @@ Desk the key was minted for); then the nonce, which lasts one A2A turn (Plan 01c
   /sessions` with the same body hash returns the session the nonce opened, creating nothing;
 - bound or spent, with another session or body hash: 401;
 - the turn ends (spent) at a verdict with `ok`, an immediate-handoff violation (`canary`,
-  `unsupported_language`, `session_paused`, `check_unavailable`: those outside `desk.rewrites.REWRITABLE`), a blocked
+  `unsupported_language`, `session_paused`: those outside `desk.rewrites.REWRITABLE`), a blocked
   `/check_reply` the API sent with `final: true`, or the turn's second `/check_reply` (`end_turn`),
   or `NONCE_TTL_S` after its first use;
 - spent: the same call again is 409 `replayed`, but a resent `POST /sessions` still returns the

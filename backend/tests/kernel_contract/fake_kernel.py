@@ -247,7 +247,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -2990,13 +2990,14 @@ class FakeKernelState:
         if not ok and author == "owner":
             blocks = []
         elif not ok:
-            prose_only = {"number_in_prose", "promise_word", "soft_promise", "uncertain_language", "check_unavailable"}
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
-            if kept and all(violation.kind in prose_only for violation in violations):
-                blocks = kept
+            text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
+            handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
+            if kept and all(violation.kind in PROSE_ONLY for violation in violations):
+                drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
+                blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
             else:
-                text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
-                blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+                blocks = [handoff]
         shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
         if author == "claude" and not shown:
             blocks = []                     # the API rewrites it: no handoff card is signed that no handoff backs

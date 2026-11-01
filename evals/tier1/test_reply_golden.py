@@ -24,7 +24,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Reply, Sleep, Text
 from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
 from evals.tier1.args import book_args, payment_link_args, quote_args
@@ -57,7 +57,6 @@ OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
-PROSE_FAILURES = {"number_in_prose", "promise_word", "soft_promise", "uncertain_language", "check_unavailable"}
 
 # Rows of golden/replies.yaml
 
@@ -161,9 +160,9 @@ class ReplyRow(BaseModel):
                              "so it requires it")
         if self.expect.blocks is not None and self.expect.blocks != self.blocks:
             raise ValueError(f"the draft shows {self.blocks}, not {self.expect.blocks}: a failed check shows "
-                             "checked cards alone for prose-only failures, otherwise the handoff clause "
-                             "(or no blocks on a rewritable first attempt), a passing one its prose and cards "
-                             "in order")
+                             "checked cards, then any drafted handoff, for prose-only failures, otherwise "
+                             "the handoff clause (or no blocks on a rewritable first attempt), a passing one "
+                             "its prose and cards in order")
         if self.setup == "travel_past_expiry" and not any(clause.fact in QUOTE_ROLES for clause in self.clauses):
             raise ValueError("travel_past_expiry travels past a cited quote's expiry, so the row cites a quote")
         if self.soft_promise != "pass":   # one try, no recheck: the reply decides the verdict
@@ -182,18 +181,20 @@ class ReplyRow(BaseModel):
 
     @property
     def kept_clauses(self) -> list[ClauseSpec]:
-        """Cards a prose-only failure may keep, excluding a drafted handoff."""
+        """Cards a prose-only failure may keep; a drafted handoff isn't one, and follows them."""
         return [clause for clause in self.clauses if clause.template != "handoff"]
 
     @property
     def blocks(self) -> list[str]:
-        """Prose-only failures keep their cards alone; other failures hand off. A rewritable
-        first attempt shows nothing, and a passing one its prose and cited cards."""
+        """Prose-only failures keep their cards, then a drafted handoff clause; other failures
+        hand off. A rewritable first attempt shows nothing, and a passing one its prose and cited
+        cards."""
         if not self.expect.ok:
             if not self.final and set(self.expect.kinds) <= REWRITABLE:
                 return []
-            if set(self.expect.kinds) <= PROSE_FAILURES and self.kept_clauses:
-                return [clause.template for clause in self.kept_clauses]
+            if set(self.expect.kinds) <= PROSE_ONLY and self.kept_clauses:
+                drafted = any(clause.template == "handoff" for clause in self.clauses)
+                return [clause.template for clause in self.kept_clauses] + (HANDED_OFF if drafted else [])
             return HANDED_OFF
         return (["prose"] if self.prose else []) + [clause.template for clause in self.clauses]
 

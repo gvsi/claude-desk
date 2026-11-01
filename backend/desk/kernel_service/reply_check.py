@@ -39,7 +39,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
-   (`soft.unavailable`), final. While the session has an open handoff the handoff card opened
+   (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
+   of 2026-11-01); the final check makes its own try. While the session has an open handoff the
+   handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
@@ -53,7 +55,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
-   keeps checked cards alone, without a cited handoff; any other failure, or no card to keep,
+   keeps checked cards without the prose, then the handoff clause if Claude drafted one, which
+   opens the owner's handoff as the handoff card does; any other failure, or no card to keep,
    shows only the handoff clause. A first attempt the API rewrites (`final` false, every
    violation one a rewrite can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
@@ -102,12 +105,12 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
-from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
+from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
 from desk.next_steps import next_steps
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -116,8 +119,6 @@ NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one nu
 NO_CANARIES = labels.NO_CANARIES
 logger = logging.getLogger(__name__)
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
-PROSE_ONLY = frozenset({"number_in_prose", "promise_word", "soft_promise", "uncertain_language",
-                        "check_unavailable"})
 
 # ---- Prose ----------------------------------------------------------------------------------------
 
@@ -597,11 +598,15 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
 
 def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
                    language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
-    """Keep checked cards alone for prose-only failures; all other failures hand off."""
+    """Keep checked cards for prose-only failures, without the prose, and after them the handoff
+    clause when Claude drafted one (the owner's ruling of 2026-11-01), rendered by the kernel in the
+    reply's language; `finalize` then opens the owner's handoff for it as for any shown handoff
+    card. All other failures, or no card to keep, show the handoff clause alone."""
     if violations and all(violation.kind in PROSE_ONLY for violation in violations):
         kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
         if kept:
-            return kept
+            drafted = any(card.kind == "card" and card.template == "handoff" for card in cards)
+            return kept + ([handoff(language, desk)] if drafted else [])
     return [handoff(language, desk)]
 
 
@@ -706,7 +711,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None, dict]:
+                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), with the session's fixed next steps from its
     resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
@@ -714,8 +719,8 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
     error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
     Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
-    the prose's start. Returns the violations, Sonnet's usage as one try (its first status its
-    status) and both verdicts for the ledger. (`finalize` adds
+    the prose's start. Returns the violations, Sonnet's usage and both verdicts for the ledger.
+    (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
         Desk.desk_id == session_row.desk_id)))).one()
@@ -724,13 +729,12 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
                             next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
-        (verdict, call), jev_result = await asyncio.gather(
+        (verdict, usage), jev_result = await asyncio.gather(
             ctx.decisions.soft_promise(data),
             jev.evaluate(data.prose, data.cards, data.next_steps, api_key=ctx.settings.typesafe_api_key))
     else:
-        verdict, call = await ctx.decisions.soft_promise(data)
+        verdict, usage = await ctx.decisions.soft_promise(data)
         jev_result = jev.Result(status="off")
-    usage = None if call is None else SoftPromiseUsage(**call.model_dump(), first_status=call.status, tries=1)
     if verdict is None:
         violations = [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")]
     else:
@@ -759,21 +763,22 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None,
+                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None,
                    soft_checks: dict | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
                    handoff_backed: bool = False, final: bool = True,
                    rendered_claims: Mapping[str, list[Claim]] | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, final}`, the reply
-    receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
-    `reply_handed_off` exactly when its blocks include the handoff clause (template `handoff`),
-    otherwise `reply_checked`. The receipt, the API's delivered event flag `handoff` and the public
-    chat's handling of the "Reply checked" line all follow this same shown-block rule. A blocked
-    first attempt with no shown blocks keeps `reply_handed_off`. The owner's say ends here too, with
-    its own receipts and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, dropped,
+    final}`, the reply receipt and the signature, at the session's generation as the request read it.
+    `dropped` names each card refused at signing (`{fact_id, rule_id}`, never text), so a card a
+    prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the
+    status line `visitor_plain_key`, or for a shown reply `reply_handed_off` exactly when its blocks
+    include the handoff clause (template `handoff`), otherwise `reply_checked`, so checked cards
+    kept alone after a prose-only failure carry the reply receipt. A blocked first attempt with no
+    shown blocks keeps `reply_handed_off`. The owner's say ends here too, with its own receipts and
+    the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
     holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
@@ -791,8 +796,9 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
-    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards alone; with
-    none to keep it substitutes the handoff card, which may open a new handoff.
+    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards, and a drafted
+    handoff after them; with none to keep it substitutes the handoff card, which may open a new
+    handoff.
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
     closed_at, person and assurance are read afresh, then all cited facts' readers, status and
@@ -823,8 +829,10 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+    dropped: list[Violation] = []      # cards refused at signing, whether or not the prose had passed
     if author == "claude":
         blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
+        dropped = refused
         if refused:
             # A passing draft may have relied on a card just withdrawn: none of its prose is safe
             # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
@@ -842,10 +850,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
                "violations": [violation.kind for violation in violations],
                "rule_ids": [violation.rule_id for violation in violations],
-               "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
-                            else ledger.safe_ref(fact_id) for fact_id in fact_ids],
+               "fact_ids": [_ref(fact_id, canaries) for fact_id in fact_ids],
                "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
                "soft_checks": soft_checks,
+               "dropped": [{"fact_id": _ref(fact_id, canaries), "rule_id": violation.rule_id}
+                           for violation in dropped for fact_id in violation.fact_ids],
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
@@ -860,6 +869,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
 
+
+
+def _ref(fact_id: str, canaries: Mapping[str, str]) -> str:
+    """A fact ID as a reply's ledger entry names it: one holding a canary only as its hash's marker."""
+    return ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries) else ledger.safe_ref(fact_id)
 
 # ---- The handoff the card opens -------------------------------------------------------------------
 
