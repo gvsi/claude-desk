@@ -288,6 +288,40 @@ describe('public chat page', () => {
     await expect.element(chatBox(screen)).toHaveFocus();
   });
 
+  it('touch_pick_sends_without_focusing_the_composer', async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) => {
+      const result = matchMedia(query);
+      return query === '(pointer: coarse)' ? { matches: true } as MediaQueryList : result;
+    });
+    onTestFinished(() => media.mockRestore());
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const chip = screen.getByRole('button', { name: 'How much is drain clearing?', exact: true });
+    // A pointer click clears keyboard focus visibility, just as a touch activation does.
+    await chip.click();
+    await turnEnded(0);
+    await expect.element(chatBox(screen)).not.toHaveFocus();
+    expect(requests('sendMessage')).toHaveLength(1);
+  });
+
+  it('keyboard_pick_on_a_coarse_pointer_moves_focus_to_the_composer', async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
+      query === '(pointer: coarse)' ? { matches: true } as MediaQueryList : matchMedia(query));
+    onTestFinished(() => media.mockRestore());
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    await userEvent.tab();
+    const chip = screen.getByRole('button', { name: 'How much is drain clearing?', exact: true });
+    chip.element().focus();
+    expect(chip.element().matches(':focus-visible')).toBe(true);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(chatBox(screen)).toHaveFocus();
+    await turnEnded(0);
+    expect(requests('sendMessage')).toHaveLength(1);
+  });
+
   it('first_view_invites_a_question_in_the_business_name', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);

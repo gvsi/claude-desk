@@ -700,7 +700,9 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
           words: (desk.starters ?? []).slice(0, 3),
           disabled: !ready,
           onPick: (text) => {
-            composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+            if (document.activeElement?.matches('.cd-chip:focus-visible') || !window.matchMedia('(pointer: coarse)').matches) {
+              composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+            }
             send(text);
           },
         }}
