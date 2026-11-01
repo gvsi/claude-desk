@@ -177,6 +177,7 @@ const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 const NOTHING = "When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page.";
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
+const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -491,6 +492,22 @@ describe('Safety', () => {
     // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
     // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
     expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
+  });
+
+  it.each(['desktop', 'phone'] as const)('header_says_what_the_page_is_on_%s', async (viewport) => {
+    // Under its title, as the other owner pages do, one quiet line says what Safety holds: both of
+    // its views, before the headline's count.
+    const { screen } = await renderRoute(SAFETY, { viewport });
+    const title = screen.getByRole('heading', { level: 1, name: 'Safety', exact: true });
+    await expect.element(title).toBeVisible();
+    const subtitle = screen.getByText(SUBTITLE, { exact: true });
+    await expect.element(subtitle).toBeVisible();
+    expect(subtitle.element().className).toBe('cd-page-header__subtitle cd-type-body');
+    const headline = screen.getByText(/^I (turned down \d+ requests?|didn't turn down any requests) this week\.$/);
+    await expect.element(headline).toBeVisible();
+    expect(subtitle.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('record_is_closed_for_each_entry_opened', async () => {

@@ -17,6 +17,7 @@ import { AttemptDetail } from './AttemptDetail.tsx';
 import {
   CATEGORY_LABELS,
   NOT_SORTED,
+  SAFETY_SUBTITLE,
   anythingStoppedIn,
   anythingTurnedDownIn,
   attemptTime,
@@ -315,7 +316,7 @@ export function SafetyPage() {
 
   return (
     <div className="cd-safety" onClick={followInAppLinks(navigate)}>
-      <PageHeader title={TITLE} actions={<HeldForYou deskId={deskId} />} />
+      <PageHeader title={TITLE} subtitle={SAFETY_SUBTITLE} actions={<HeldForYou deskId={deskId} />} />
       <SkeletonScreen loading={view === 'attempts' && !ready} status="Reading what was stopped" skeleton={<SafetySkeleton withHeader={false} />} className="cd-safety__region">
         <Headline deskId={deskId} slug={desk.slug} />
         <div className="cd-safety__bar">

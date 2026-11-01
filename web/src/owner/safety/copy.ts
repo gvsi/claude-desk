@@ -111,6 +111,9 @@ export function rowLabel(a: Pick<Attempt, 'kind' | 'cause' | 'triage'>): string 
   return causeLabel(a);
 }
 
+/** What Safety holds, under its title as the other owner pages say theirs: both of its views, in the owner's signed words. */
+export const SAFETY_SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
+
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';
 
