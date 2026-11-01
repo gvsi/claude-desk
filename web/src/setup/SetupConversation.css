@@ -172,6 +172,11 @@
   max-width: 720px;
   margin: 0 auto;
 }
+.cd-setup-dock .cd-composer__kept {
+  max-height: 6lh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 @media (max-width: 639px) {
   .cd-setup-chat__column {
     padding: var(--space-24) var(--space-16);

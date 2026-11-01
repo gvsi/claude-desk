@@ -1083,6 +1083,31 @@ describe('setup', () => {
     }, { message: 'The textarea returned after retry fits in the viewport' }).toBe(true);
   });
 
+  it('keeps_a_long_failed_answer_and_retry_reachable_in_the_phone_dock', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const words = 'I help clients with returns and books. '.repeat(60).slice(0, 1919);
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await box.fill(words);
+    await userEvent.keyboard('{Enter}');
+    const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toHaveFocus();
+    const rect = retry.element().getBoundingClientRect();
+    expect(rect.top).toBeGreaterThanOrEqual(0);
+    expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+    const retained = screen.container.querySelector<HTMLElement>('.cd-setup-dock .cd-composer__kept')!;
+    expect(retained.textContent).toBe(words);
+    expect(retained.scrollHeight).toBeGreaterThan(retained.clientHeight);
+    retained.scrollTop = retained.scrollHeight;
+    expect(retained.scrollTop).toBeGreaterThan(0);
+    expectNoHorizontalScroll();
+    await retry.click();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]!.text}`, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+    expect(requests('setupAnswer').map(({ body }) => body)).toEqual([{ question: 'what_you_do', text: words }, { question: 'what_you_do', text: words }]);
+  });
+
   it('keyboard_answer_keeps_focus_through_failure_and_retry', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
