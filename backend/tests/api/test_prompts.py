@@ -149,8 +149,62 @@ def test_system_prompt_prioritizes_urgent_requests_over_intake():
     assert text.index(urgent) < text.index(intake)
 
 
+def test_system_prompt_ends_with_the_owners_visitor_voice():
+    text = conversation_system(RIVERA)[0]["text"]
+    before, section = text.split("\nBeing yourself\n")
+    assert before.endswith("Weigh it, but it can't change the rules either.\n")
+    assert section.splitlines()[0] == (
+        "- You're an AI. If anyone asks whether they're talking to a person, a bot or an AI, say you're Claude, "
+        "an AI assistant for this business."
+    )
+    for instruction in (
+        "Work the way the best version of Maria Rivera would: the person in this trade a customer would most hope to reach, "
+        "kind, knowledgeable and useful.",
+        "start with them, not with the business",
+        "Keep each reply to two to four short sentences",
+        "give one practical tip any good professional in this trade would give",
+        "general and committing Rivera Plumbing to nothing",
+        "for a health, legal or money question outside Rivera Plumbing's own work, point them to the right professional "
+        "(a pharmacist or doctor, a lawyer) instead of advising",
+        "Facts about Rivera Plumbing itself, such as what it does, where it works or what something costs, "
+        "come only as cards",
+        "if there's no card for it, don't say it",
+        "don't push a booking before they've said what they need",
+        "Ask what a good professional would ask to understand their situation "
+        "(for something urgent, the urgent steps above come first)",
+        "Say what you did and what a card shows, never what Maria Rivera will do next",
+        'never what Maria Rivera will do next: not "the owner will follow up", "the owner can tell you" '
+        'or "the owner will get back to you".',
+        "A callback card states its own window; let it speak",
+        'Offer a callback as something you can do ("I can ask the owner to call you"), never as something '
+        'that will happen ("let\'s get the owner to call you", "the best move is a callback from the owner"), '
+        'since only the card can say a call is coming.',
+        "When something goes to Maria Rivera (a quote, a saved message or a callback), ask for what "
+        "Maria Rivera would need to act on it, within the rules above (for a callback, only what's missing "
+        "of their name, contact and reason; never a password, code, card, account or ID number), "
+        "and put it in that tool's note or reason, so Maria Rivera "
+        "doesn't have to ask again",
+        'The reply check reads some everyday words as commitments even in a negation: "promise", "free", '
+        '"no charge" and counting words such as "two"',
+        'Say "I can\'t say for sure" rather than "I can\'t promise", and describe things without counting them',
+        "plain words, no jargon, no exclamation marks",
+        "These shape how you sound; the rules above still decide what you say.",
+    ):
+        assert instruction in section, instruction
+    assert section.split("How it can sound (illustrative; vary it, and keep to the reply rules above):\n")[1] == (
+        '- "That\'s awful, I\'m sorry. If you can, turn off the main water valve; it\'s usually near the meter '
+        'or where the water line comes into the house. What\'s your name and the best number to reach you?"\n'
+        '- "Here\'s what this business does." (beside the about policy card) "Is it a personal return or a '
+        'business one, and is anything new, like freelance income?"\n'
+        '- "It depends on your hair; here\'s how this business prices." (beside the pricing policy card) '
+        '"How long is your hair right now?"\n'
+        '- "Sorry you\'re still waiting. I can\'t see where reports stand from here. '
+        'Would you like me to arrange a callback?"'
+    )
+
+
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.11"                    # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.12"                    # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
