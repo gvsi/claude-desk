@@ -679,12 +679,8 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
     async def paused(visitor):
         fake.set_mode(visitor.ids.session_id, "paused")
 
-    async def unavailable_check(visitor):
-        fake.soft_checks("error")
-
     cases = [("canary", canary, "Here's what the invoice says."),
              ("unsupported_language", None, "Bonjour, je peux vous aider."),
-             ("check_unavailable", unavailable_check, "Here is the information."),
              ("session_paused", paused, "Happy to help.")]
     for kind, arrange, prose in cases:
         visitor = await new_visitor(kernel_http, fake)
@@ -706,6 +702,28 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
         ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
         assert (ref_id, kept["draft"], [violation["kind"] for violation in kept["violations"]]) == (
             message.message_id, {"prose": prose, "clauses": []}, [kind]), kind
+
+
+async def test_an_unavailable_first_check_gets_the_outage_correction_and_the_final_check_tries_again(
+        api_conn, caller, fake):
+    # The soft check's one try gave no verdict on the first attempt: nothing is shown and no handoff opens, Claude
+    # gets the outage's fixed correction, and the final check makes its own try.
+    fake.soft_checks("error", "pass")
+    draft = {"prose": "Here is the information.", "clauses": []}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
+
+    assert first.result == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "delivered": False,
+                            "violations": [{"kind": "check_unavailable", "rule_id": "soft.unavailable"}],
+                            "diagnostics": [tools.REPLY_DIAGNOSTICS["soft.unavailable"]]}
+    assert (first.is_error, first.delivered) == (True, None)
+    assert await events(api_conn, caller.session_id) == [] and fake.handoffs == {}
+
+    second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_2")
+    (message,) = await events(api_conn, caller.session_id)
+    assert second.result == {"outcome": "delivered", "message_id": message.message_id}
+    assert not message.handoff and [block.text for block in message.blocks] == ["Here is the information."]
+    assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
+    assert fake.handoffs == {}
 
 
 class Replayed(httpx.AsyncBaseTransport):

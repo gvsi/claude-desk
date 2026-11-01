@@ -134,24 +134,55 @@ async def test_uncertain_caption_gets_one_cause_specific_final_rewrite(api_conn,
         "Here is the information."]
 
 
-@pytest.mark.parametrize("unavailable", ["error", "timeout", "unparsable", "refusal"])
-async def test_an_unavailable_soft_check_is_one_try_that_keeps_the_cards(api_conn, caller, fake, unavailable):
-    # One soft-check try per reply check: a try with no verdict is final there and then, and the staged pass after
-    # it is never read. The prose fails and the hours card it checked is shown alone, so it isn't a handoff.
+@pytest.mark.parametrize(("unavailable", "final_try"), [
+    ("error", "pass"), ("timeout", "pass"), ("unparsable", "pass"), ("refusal", "pass"), ("error", "error")])
+async def test_an_unavailable_soft_check_gets_one_correction_and_the_final_check_tries_again(
+        api_conn, caller, fake, unavailable, final_try):
+    # One soft-check try per reply check, with no recheck inside it. A first try with no verdict is rewritable:
+    # nothing is shown, Claude gets the outage's correction, and the final check's own try decides. When that try
+    # has no verdict either, the prose fails and the hours card it checked is shown alone, which isn't a handoff.
     await said(api_conn, caller, "When are you open?")
-    fake.soft_checks(unavailable, "pass")
+    fake.soft_checks(unavailable, final_try)
     model = ScriptedModel([response(reply("Here is the information.", HOURS)),
                            response(reply("Here is the information.", HOURS))])
     assert await run_turn(api_conn, caller, model) == "done"
-    assert len(fake.called("/check_reply")) == len(model.requests) == 1
-    (entry,) = [entry for entry in fake.desks[caller.desk_id].ledger if entry.event.kind == "reply"]
-    assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (
-        ["check_unavailable"], ["soft.unavailable"])
-    message = next(e for e in await events(api_conn, caller.session_id) if e.type == "message")
-    assert not message.handoff and [b.template for b in message.blocks] == ["hours"]
-    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
-    assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": message.message_id,
-                                                 "prose_shown": False}
+    checks = fake.called("/check_reply")
+    assert len(checks) == len(model.requests) == 2          # the correction's call, and none after the delivery
+    assert [check.body["final"] for check in checks] == [False, True]
+    feedback = tool_results(model.requests[1])[0]["content"]
+    assert feedback["violations"] == [{"kind": "check_unavailable", "rule_id": "soft.unavailable"}]
+    assert feedback["diagnostics"] == [prompts.REPLY_DIAGNOSTICS["soft.unavailable"]]
+    assert [entry.event.summary["rule_ids"] for entry in fake.desks[caller.desk_id].ledger
+            if entry.event.kind == "reply"] == [["soft.unavailable"], [] if final_try == "pass" else ["soft.unavailable"]]
+    (message,) = [e for e in await events(api_conn, caller.session_id) if e.type == "message"]
+    assert not message.handoff and fake.handoffs == {}
+    *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    if final_try == "pass":
+        assert [b.template for b in message.blocks] == [None, "hours"]
+        assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": message.message_id}
+    else:
+        assert [b.template for b in message.blocks] == ["hours"]
+        assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": message.message_id,
+                                                     "prose_shown": False}
+
+
+async def test_a_prose_failure_shows_the_kept_cards_then_the_drafted_handoff_and_ends_the_turn(api_conn, caller,
+                                                                                                fake):
+    # Only the prose fails, twice: the final verdict keeps the checked hours card and, after it, the handoff clause
+    # Claude drafted. That one shown handoff opens the owner's item and ends the turn: no further model call, no
+    # further reply check, and no handoff of the API's own.
+    await said(api_conn, caller, "When are you open? I'd also like Maria to look at this.")
+    drafted = reply("It's $89 for the visit.", HOURS, {"template": "handoff"})
+    model = ScriptedModel([response(drafted), response(drafted)])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    assert len(model.requests) == 2
+    assert [check.body["final"] for check in fake.called("/check_reply")] == [False, True]
+    (message,) = [e for e in await events(api_conn, caller.session_id) if e.type == "message"]
+    assert message.handoff and [b.template for b in message.blocks] == ["hours", "handoff"]
+    assert "$89" not in json.dumps([b.model_dump() for b in message.blocks])
+    assert card_handoffs(fake, caller) == ["open"]
+    *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
 
 
 async def test_a_soft_check_flag_on_its_one_try_gets_one_correction(api_conn, caller, fake):

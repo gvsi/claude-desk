@@ -1482,8 +1482,9 @@ class FakeKernelState:
     def soft_checks(self, *results: str) -> None:
         """Stage the soft check's tries, one for each later reply check that reaches it (clean prose, as the kernel's
         step 5 runs it): `pass`, `flag` (`soft.promise`), `denies_ai` (`soft.denies_ai`), or a try with no verdict,
-        `error`, `timeout`, `unparsable` or `refusal`, which is `check_unavailable` (`soft.unavailable`) at once, as
-        the kernel's one try has no recheck. A check with nothing staged passes."""
+        `error`, `timeout`, `unparsable` or `refusal`, which is `check_unavailable` (`soft.unavailable`) with no
+        recheck inside the check, as the kernel's one try; a first attempt blocked by it is rewritable, and the final
+        check reads its own staged try. A check with nothing staged passes."""
         if any(result not in {"pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"}
                for result in results):
             raise ValueError("unknown soft-check result")
@@ -2980,7 +2981,8 @@ class FakeKernelState:
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
-        """Step 7: checked cards alone for prose-only failures, else the handoff, ledgered and signed. An
+        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
+        clause when the draft has one, else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3009,7 +3011,9 @@ class FakeKernelState:
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
-            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids, "final": final},
+            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids,
+            "dropped": [],                  # cards refused at signing: the fake rechecks none
+            "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
             "handed_off" if not shown or any(block.template == "handoff" for block in blocks) else "checked")

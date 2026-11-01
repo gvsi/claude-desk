@@ -667,11 +667,13 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     Claude may rewrite only attempt 1, and only while the turn has a model call left (`call_left`); that check alone
     is sent with `final` false, every other one final, for every kind of session. A non-final reply blocked with
     only kinds a rewrite can fix (`desk.rewrites.REWRITABLE`) shows nothing and sends Claude the violations and
-    `REWRITE_INSTRUCTION`. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
-    `session_paused`, `check_unavailable`) or a final check's, shows the verdict's blocks with no further kernel
-    call: checked cards alone when they survive, otherwise the handoff the kernel opened for the owner.
-    Any shown handoff clause ends the turn as `delivered_handoff`, even when the draft passed. A failed check
-    that keeps only cards answers `delivered` with `prose_shown` false, so Claude knows its prose wasn't shown.
+    `REWRITE_INSTRUCTION`; a soft check that gave no verdict (`check_unavailable`) is one of them, and the final
+    check makes its own try. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
+    `session_paused`) or a final check's, shows the verdict's blocks with no further kernel call: the checked cards
+    when they survive (with Claude's drafted handoff clause after them, when it drafted one), otherwise the handoff
+    the kernel opened for the owner. Any shown handoff clause ends the turn as `delivered_handoff`, even when the
+    draft passed. A failed check that keeps only cards answers `delivered` with `prose_shown` false, so Claude knows
+    its prose wasn't shown.
     Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.

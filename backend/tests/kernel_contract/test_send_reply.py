@@ -106,6 +106,29 @@ async def test_a_passing_handoff_clause_is_delivered_as_a_handoff(kernel, ro_rea
 
 
 @pytest.mark.kernel_plan("01b")
+async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_handoff(kernel, ro_read, conn):
+    """Only the prose fails on the final check: the checked hours card and, after it, the handoff clause Claude
+    drafted are shown as one handoff, which opens the owner's item, with one check and no handoff of the API's own."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    draft = {"prose": "It comes to $89 for the visit.",
+             "clauses": [{"template": "hours", "fact_id": "charter:hours"}, {"template": "handoff"}]}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept_then_handoff")
+    assert outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.delivered == "handoff" and outcome.is_error
+    assert [check["final"] for check in caller.kernel.checks] == [True]
+    assert await delivered(conn, session_id) == [["hours", "handoff"]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert payload["handoff"] and "89" not in str(payload["blocks"])
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
+        ("card", "open")]
+    assert await handed_to_you(http, copy) == 1
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_rewritten_first_draft_opens_no_handoff_through_the_api(kernel, ro_read, conn):
     """A blocked first draft the API will rewrite is sent with `final` false: it shows nothing, and the kernel records
     it as not final and opens no handoff and no alert. The clean rewrite, sent as final, is what the visitor sees,
