@@ -297,6 +297,13 @@ it('a_reference_link_keeps_its_address_from_another_paragraph', () => {
   expect([...reply(mounted?.host as HTMLElement).children].map((block) => block.textContent)).toEqual(['You can Book (https://example.com/book) here.', 'Anything else?']);
 });
 
+it('a_reference_defined_inside_a_quote_keeps_its_address', () => {
+  const text = 'You can [Book][1] here.\n\nAnything else?\n\n> [1]: https://example.com/book';
+  const md = reply(mount(<ChatMarkdown links="open" text={text} />));
+  expect([...md.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Book', 'https://example.com/book']]);
+  expect(md.textContent).not.toContain('[Book][1]');
+});
+
 it('a_row_wider_than_its_header_keeps_every_word', () => {
   // GitHub Markdown drops cells past the header's; the header gains empty cells instead.
   const md = reply(mount(<ChatMarkdown text={'| Item |\n| --- |\n| Service | Do not book yet |\n| Deposit |'} />));

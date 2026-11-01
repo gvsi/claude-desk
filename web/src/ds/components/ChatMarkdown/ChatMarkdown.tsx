@@ -44,8 +44,8 @@ const REMARK_PLUGINS: Record<NonNullable<ChatMarkdownProps['links']>, Streamdown
   inert: [...SHARED_REMARK_PLUGINS, linksAsText],
 };
 
-/** A reference definition, `[1]: https://…`, which may sit in its own paragraph. */
-const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+/** A reference definition, `[1]: https://…`, which may sit in its own paragraph, a quote or an indented list item. */
+const REFERENCE_DEFINITION = /^[ \t>]*\[[^\]]+\]:/m;
 
 /**
  * Streamdown renders a reply block by block, so a reference definition in its own paragraph
