@@ -1,8 +1,8 @@
 /**
- * What setup's steps share: the rules draft's read, the line around the business's name, and how
- * to tell the client's own proving give-up from the server's answer.
+ * What setup's steps share: the rules draft's read, the line around the business's name, how to
+ * tell the client's own proving give-up from the server's answer, and each step opening at its top.
  */
-import { Fragment, createElement, type ReactNode } from 'react';
+import { Fragment, createElement, useLayoutEffect, useRef, type ReactNode } from 'react';
 
 import { ApiError, request } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
@@ -62,4 +62,20 @@ export function aroundBusiness([before, after]: readonly [string, string] | read
  */
 export function gaveUp(err: unknown): boolean {
   return err instanceof ApiError && err.code === 'rules_cannot_be_checked' && err.status === null;
+}
+
+/**
+ * Brings the window to its top, at once, whenever `screen` changes to another of setup's screens:
+ * each opens at its top with its title in view, rather than where the owner had scrolled on the one
+ * before (on a phone, its end, where its main button is), while what it reads is still out and once
+ * it lands. The first screen keeps where the window is, and `null` (no screen yet) moves nothing.
+ */
+export function useOpensAtTop(screen: string | number | null): void {
+  const shown = useRef(screen);
+  useLayoutEffect(() => {
+    if (screen === null || screen === shown.current) return;
+    const first = shown.current === null;
+    shown.current = screen;
+    if (!first) window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [screen]);
 }

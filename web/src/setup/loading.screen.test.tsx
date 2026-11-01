@@ -628,6 +628,47 @@ it('setup_public_lines_hands_off', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+/** Each step the owner opens with the main button at the end of the one before, and that button. */
+const ENTRIES = [
+  { from: 'tools', press: 'Continue', to: 'rules', title: 'Your rules' },
+  { from: 'rules', press: 'Check real situations', to: 'situations', title: 'Real situations' },
+  { from: 'situations', press: 'Looks right', to: 'public_lines', title: 'What customers will read' },
+  { from: 'public_lines', press: 'Looks right', to: 'safety_check', title: 'Safety check' },
+] as const;
+
+it.each(ENTRIES)('a_step_opened_from_the_end_of_the_one_before_starts_at_its_top: $title', async ({ from, press, to, title }) => {
+  // On a phone the owner scrolls to the step's end to go on. The next step opens at its top, its
+  // title in view while its read is out, and stays there as what it read lands.
+  // What customers will read is longer than a phone's window with Claude's suggestions on it.
+  const state = from === 'public_lines' ? await linesInterview(true) : await interviewAt(from);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  if (from === 'public_lines') {
+    await openLines();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What customers will read', exact: true })).toBeVisible();
+  }
+  const button = screen.getByRole('button', { name: press, exact: true });
+  await expect.element(button).toBeEnabled();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  button.element().scrollIntoView({ block: 'end' });
+  await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(0));
+  const read = STEPS[to].hold(state);
+  (button.element() as HTMLButtonElement).click();
+
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  const heading = screen.getByRole('heading', { level: 1, name: title, exact: true });
+  await expect.element(heading).toBeInTheDocument();
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')).not.toBeNull());
+  expect(window.scrollY, 'the step opens at its top').toBe(0);
+  const top = heading.element().getBoundingClientRect().top;
+  expect(top).toBeGreaterThanOrEqual(0);
+  expect(heading.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+
+  read.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(window.scrollY, 'nothing jumps as the step lands').toBe(0);
+  expect(heading.element().getBoundingClientRect().top).toBe(top);
+});
+
 it('setup_tools_first_read_failure_clears_the_skeleton', async () => {
   const state = await interviewAt('tools');
   const tools = holdReads(path('setupTools', state));
