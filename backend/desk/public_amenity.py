@@ -8,7 +8,7 @@ these words stays refused in Claude's own reply prose. Pure, and shared by the k
 import re
 import unicodedata
 
-EN_WORDS = frozenset({"free", "complimentary"})
+EN_WORDS = frozenset({"free", "complimentary", "no cost", "at no cost"})
 ES_WORDS = frozenset({"gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
 
 _EN = r"(?:parking|wi-?fi|coffee|water|tea|snacks?|(?:a\s+)?waiting\s+(?:area|room))"
@@ -21,6 +21,7 @@ _EN_AFTER = re.compile(
 _ES_BEFORE = re.compile(
     rf"(?:^|[.!?:;¡¿(]\s*|\b(?:hay|ofrecemos|tenemos|con)\s+){_ES}(?:{_JOIN}{_ES}){{0,5}}\s+$",
     re.IGNORECASE)
+_EN_BEFORE = re.compile(rf"(?:^|[.!?:;(]\s*){_EN}(?:{_JOIN}{_EN}){{0,5}}\s+$", re.IGNORECASE)
 _DASHES = dict.fromkeys(map(ord, "‐‑‒–—−"), "-")
 
 
@@ -30,14 +31,17 @@ def _plain(text: str) -> str:
 
 
 def offers_amenity(text: str, start: int, end: int) -> bool:
-    """Whether the promise word at `text[start:end]` offers an amenity: "free" or "complimentary" right before a
+    """Whether the price phrase at `text[start:end]` offers an amenity: "free", "complimentary" or "no cost" before a
     complete list of at most six amenities (parking, wi-fi, coffee, water, tea, snacks, a waiting area),
     or "gratis" or "gratuito" right after one (estacionamiento, aparcamiento, wifi, café, agua, sala de espera)
-    that starts at a sentence boundary or a fixed offering word. `text` is one policy's text, so a
+    that starts at a sentence boundary or a fixed offering word. "Costs nothing" follows a complete
+    English list at a sentence boundary. `text` is one policy's text, so a
     neighbouring card never supplies the amenity. Each context window is at most 200 characters."""
-    word = _plain(text[start:end]).casefold()
+    word = re.sub(r"[\s-]+", " ", _plain(text[start:end])).casefold()
     if word in EN_WORDS:
         return _EN_AFTER.match(_plain(text[end:end + 200])) is not None
     if word in ES_WORDS:
         return _ES_BEFORE.search(_plain(text[max(0, start - 200):start])) is not None
+    if word in {"cost nothing", "costs nothing"}:
+        return _EN_BEFORE.search(_plain(text[max(0, start - 200):start])) is not None
     return False

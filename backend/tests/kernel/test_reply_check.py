@@ -2820,3 +2820,17 @@ def test_public_policy_language_ignores_addresses_and_english_non_compounds(text
 ])
 def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
     assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in policy_cases.COST_AMENITIES],
+    *[(text, [rule]) for text, rule in policy_cases.COST_SERVICE_REFUSALS],
+])
+def test_public_policy_no_cost_amenities_require_a_complete_phrase(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:about": text}) == ({"policy:about": rules} if rules else {})
+
+
+def test_public_policy_costs_nothing_amenity_cannot_cross_cards():
+    assert reply_check.scan_public_policies({"policy:a": "Parking", "policy:b": "costs nothing."}) == {
+        "policy:b": ["policy.free_price"]}

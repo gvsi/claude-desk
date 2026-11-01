@@ -946,7 +946,7 @@ PUBLIC_POLICY_PATTERNS = (
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b))\b"),
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b))\b"),
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))\b"),
-    ("lex.en.promise", r"\b(?:complimentary|discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.en.promise", r"\b(?:no[\s-]+costs?|complimentary|discounts?|refunds?|guarantees?|no\s+charge)\b"),
     ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
     ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
     ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
@@ -1046,7 +1046,7 @@ def public_policy_rules(text: str, key: str | None = None) -> list[str]:
         reading, origin = (public_commitment_reading(text) if rule == "language" or rule.startswith("policy.")
                            else (text, list(range(len(text)))))
         if any(not (allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
-                    or (rule.endswith(".promise")
+                    or ((rule.endswith(".promise") or rule == "policy.free_price")
                         and offers_amenity(text, origin[match.start()], origin[match.end() - 1] + 1)))
                for match in re.finditer(pattern, reading, re.IGNORECASE)):
             rules.add(rule)
@@ -1077,7 +1077,8 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
             # A service area's allowed number or a free amenity passes when its own card holds it ("Free parking.").
             if any(key is not None and low <= start and end <= high
                    and (allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
-                        or (rule.endswith(".promise") and offers_amenity(combined[low:high], start - low, end - low)))
+                        or ((rule.endswith(".promise") or rule == "policy.free_price")
+                            and offers_amenity(combined[low:high], start - low, end - low)))
                    for key, low, high in ranges):
                 continue
             for key, low, high in ranges:

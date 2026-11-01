@@ -536,13 +536,14 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 
 def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
     """A promise hit in public text passes only as a real word the owner allowed for this key, read across
-    case, width and accents without substituting lookalikes, or as "free", "complimentary", "gratis" or
-    "gratuito" offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
+    case, width and accents without substituting lookalikes, or as an English or Spanish free-price
+    phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
     "Consultations are complimentary." don't. `text` is the key's own text."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
-    return (rule.startswith("lex.") and rule.endswith(".promise")
-            and (word in allow_words or offers_amenity(text, start, end)))
+    promise = rule.startswith("lex.") and rule.endswith(".promise")
+    return ((promise and word in allow_words)
+            or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -635,7 +636,8 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
              if not _allowed_public_hit(normalized, start, end, rule, allow_words)
              and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
-    rules.update(rule for _, _, rule in _policy_phrase_spans(normalized))
+    rules.update(rule for start, end, rule in _policy_phrase_spans(normalized)
+                 if not _allowed_public_hit(normalized, start, end, rule, allow_words))
     if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
@@ -684,6 +686,11 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     # Attribute lexical commitments only to intersecting policies. A term wholly inside
     # reply prose stays with the existing prose rules, even beside a harmless policy card.
     for start, end, rule in _policy_phrase_spans(combined):
+        if any(key is not None and low <= start and end <= high
+               and _allowed_public_hit(combined[low:high], start - low, end - low, rule,
+                                       allow_words.get(key, frozenset()))
+               for key, low, high in ranges):
+            continue
         for key, low, high in ranges:
             if key is not None and low < high and low < end and start < high:
                 fields[key].add(rule)

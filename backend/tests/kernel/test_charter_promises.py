@@ -26,6 +26,7 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
 
 
 @pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.COST_SERVICE_REFUSALS,
     *policy_cases.AI_DENIAL_REFUSALS,
     *policy_cases.AMENITY_REFUSALS,
     ("You are chatting with a human receptionist.", "policy.ai_denial"),
@@ -336,6 +337,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
 
 
 @pytest.mark.parametrize("text", [
+    *policy_cases.COST_AMENITIES,
     *policy_cases.HUMAN_OCCUPATIONS,
     *policy_cases.AI_DENIAL_CONTROLS,
     *policy_cases.AMENITY_ACCEPTED,

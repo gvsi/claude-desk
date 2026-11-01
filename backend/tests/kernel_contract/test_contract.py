@@ -2573,6 +2573,7 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.COST_SERVICE_REFUSALS,
     *policy_cases.AI_DENIAL_REFUSALS,
     *policy_cases.AMENITY_REFUSALS,
     ("You are chatting with a human receptionist.", "policy.ai_denial"),
@@ -2785,6 +2786,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
+    *[(text,) for text in policy_cases.COST_AMENITIES],
     *[(text,) for text in policy_cases.HUMAN_OCCUPATIONS],
     *[(text,) for text in policy_cases.AI_DENIAL_CONTROLS],
     *[(text,) for text in policy_cases.AMENITY_ACCEPTED],

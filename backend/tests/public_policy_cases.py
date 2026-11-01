@@ -32,3 +32,10 @@ CONTACT_FORMS = [
     "Call or text us at (510) 555-0142", "Text or call (510) 555-0142",
     "(510) 555-0142 (call or text)", "WhatsApp: +1 510 555 0142", "calendly.com/maria-rivera/30min",
 ]
+
+COST_AMENITIES = ["No cost parking.", "No-cost parking.", "Parking costs nothing.", "Coffee and water cost nothing."]
+COST_SERVICE_REFUSALS = [
+    ("No cost repairs.", "lex.en.promise"), ("No-cost water heater flush.", "lex.en.promise"),
+    ("Parking and repairs cost nothing.", "policy.free_price"),
+    ("Water heater inspections cost nothing.", "policy.free_price"),
+]
