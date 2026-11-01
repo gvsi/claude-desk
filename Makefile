@@ -1,5 +1,11 @@
 .PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
+# Run this worktree's tests/builds on the isolated SSM test machine (docs/testbox.md).
+.PHONY: remote
+remote:
+	$(if $(strip $(value CMD)),,$(error remote: give CMD="make kernel"))
+	tools/testbox/run sh -c '$(subst ','"'"',$(value CMD))'
+
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
 # CVC5 or PATH.
@@ -63,13 +69,13 @@ db-roles:
 	fi
 
 # For a database thrown away after the run, as each CI job's is: skip durable commits (no WAL flush
-# at commit, no fsync), since the tests spend much of their time committing. ALTER SYSTEM changes the
+# at commit, no fsync, no full-page writes), since the tests spend much of their time committing. ALTER SYSTEM changes the
 # whole Postgres instance, and a crash with fsync off can corrupt it, so the target refuses to run
-# unless CI is set: never on a database whose data matters, such as docker-compose's. Discard the
+# unless CI is true, as GitHub Actions sets it: never on a database whose data matters, such as docker-compose's. Discard the
 # instance afterwards rather than turning the settings back on.
 db-throwaway: DB_NAME ?= desk
 db-throwaway:
-	@if [ -z "$$CI" ]; then echo "db-throwaway: only for CI's throwaway database (CI isn't set): it turns off durable commits for the whole Postgres instance" >&2; exit 1; fi; \
+	@if [ "$$CI" != true ]; then echo "db-throwaway: only for CI's throwaway database (CI isn't true): it turns off durable commits for the whole Postgres instance" >&2; exit 1; fi; \
 	if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	PGPASSWORD="$$DESK_ADMIN_PASSWORD" psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h "$(DB_HOST)" -p "$(DB_PORT)" -U desk_admin \
 		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
@@ -273,13 +279,16 @@ evals-tier1:
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
 # the head's inputs is complete and its gate passes, or every head scenario is pending (no recorded rate).
+# HISTORY_SINCE preserves rate, waiver and landed-plan histories from every first-parent commit since it.
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
 # their merge base and a scenario can run under their combined landed plans or in their merge.
 # Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
+# It also requires exactly one Alembic head in the actual merge tree, regardless of results input changes.
 .PHONY: evals-tier2 evals-key evals-results-check evals-merge-ready
 RUNS ?= 1
 MAX_USD ?= 40
 BASE ?= origin/main
+HISTORY_SINCE ?=
 HEAD ?= HEAD
 
 evals-tier2:
@@ -289,7 +298,7 @@ evals-key:
 	@$(EVALS) python -m evals.run key
 
 evals-results-check:
-	@$(EVALS) python -m evals.run results-check --base $(BASE)
+	@$(EVALS) python -m evals.run results-check --base $(BASE) $(if $(HISTORY_SINCE),--history-since "$(HISTORY_SINCE)")
 
 evals-merge-ready:
 	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"
@@ -335,7 +344,11 @@ evals-reviewer:
 # evals-report writes the pass's report, latest.json and this month's spend.csv under evals/reports and
 # the latest results in docs/evals.md, with a null-baseline pass of the same held-out legitimate tasks
 # when NULL_BASELINE names one. A pass of part of the suite gets its report alone, under evals/out/reports.
-.PHONY: evals-gate evals-latency evals-report
+.PHONY: evals-gate evals-latency evals-report evals-waiver-review
+
+evals-waiver-review:
+	@test -n "$(PASS)" || { echo "evals-waiver-review: name the pass: make evals-waiver-review PASS=<id>" >&2; exit 2; }
+	$(EVALS) python -m evals.run waiver-review --pass $(PASS)
 TURNS ?= 20
 LATENCY_MAX_USD ?= 3
 LATENCY_FLAGS = $(if $(BASE_URL), --base-url $(BASE_URL))$(if $(PASS), --pass $(PASS))$(if $(DRY_RUN), --dry-run)

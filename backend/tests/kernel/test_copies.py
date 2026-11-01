@@ -160,7 +160,7 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
         ("native.charge_mandate", "auto", "anyone", 2_000)]
     assert {card.applies_to for card in ask_first} == {
         "native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
-        "native.fetch_website", "native.read_memory"}
+        "native.fetch_website", "native.read_memory", "native.web_search"}
     assert seed.PRESETS is presets.PRESETS and seed.PRESETS["auto"][:len(ask_first)] == ask_first
     assert [(c.card_id, c.applies_to, c.mode, c.who) for c in seed.PRESETS["auto"][len(ask_first):]] == [
         ("preset-quote", "native.quote", "auto", "anyone"), ("preset-book-weekday", "native.book", "auto", "anyone"),

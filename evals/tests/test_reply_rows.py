@@ -27,8 +27,8 @@ def test_timeout_reply_waits_past_the_production_soft_check_deadline():
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 54
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 53, ("01b",): 1}
+    assert len(rows) == len({row.id for row in rows}) == 56
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 55, ("01b",): 1}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 

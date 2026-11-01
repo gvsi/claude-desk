@@ -68,6 +68,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DUMMY_KEY = "tier1-dummy"   # the only model key tier 1 holds
 SYMCC_REQUIRED = "tier 1 needs symcc mode (cvc5 not found)"
 SOFT_PROMISE_MODEL = "claude-sonnet-5-5"
+API_HAIKU_MODEL = "claude-haiku-5-5"   # owner translations and triage, in the API
 # A passing soft-promise check (Plan 01a's `SoftPromiseVerdict`), the fake's default for its model.
 SOFT_PROMISE_PASS = {"promises_beyond_cards": False, "denies_being_ai": False}
 CALL_TIMEOUT_S = 30.0
@@ -99,7 +100,8 @@ def empty_database() -> list[str]:
     ledger), and return their names, so a case finds only what it makes. A kernel's startup looks at
     every copy in the database (`rebuild_at_startup`), so copies left by earlier cases made each
     start slower than the last, and an API target's worker could take a job an earlier case queued.
-    It empties the database `.env` names, as the backend's tests do: give a run a database of its own."""
+    It empties the database the `*_DATABASE_URL` variables name, as the backend's tests do: give a run a
+    database of its own."""
     with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
         tables = [name for (name,) in admin.execute(
             "SELECT format('%%I.%%I', schemaname, tablename) FROM pg_tables WHERE schemaname = ANY(%s) ORDER BY 1",
@@ -314,6 +316,9 @@ class KernelTarget:
     def _fake_models(self) -> None:
         self.fake = FakeAnthropic().start()
         self.fake.default(SOFT_PROMISE_MODEL, Json(SOFT_PROMISE_PASS), schema="SoftPromiseVerdict")
+        # The API's own Haiku calls (owner translations, triage) keep the answer they had while the soft
+        # check ran on Haiku: an object they can't use, so each fails and the owner reads the message as sent.
+        self.fake.default(API_HAIKU_MODEL, Json(SOFT_PROMISE_PASS))
         self._env.set("ANTHROPIC_BASE_URL", self.fake.url)
         self._env.set("ANTHROPIC_API_KEY", DUMMY_KEY)
         self._env.unset("ANTHROPIC_AUTH_TOKEN")

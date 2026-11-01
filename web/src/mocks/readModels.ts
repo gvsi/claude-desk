@@ -582,11 +582,18 @@ export function visitorTranscript(session: SessionRecord): VisitorTranscript {
 }
 
 /** The owner's view of a chat: every item after `after`, whispers included, and whether the visitor is typing at `now`. */
-export function ownerTranscript(session: SessionRecord, after: number, now: number): OwnerTranscript {
+export function ownerTranscript(session: SessionRecord, after: number, now: number, world: MockWorld): OwnerTranscript {
   const typing = session.typingUntil;
   return {
     state: session.state,
-    items: session.items.filter((item) => item.n > after).map((item) => ({ ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null })),
+    items: session.items.filter((item) => item.n > after).map((item) => {
+      const event = item.event;
+      const status = item.kind === 'status' && event != null && (event.type === 'receipt' || event.type === 'resolved' || event.type === 'held') ? event : null;
+      const decision = status == null ? undefined : world.decisions.get(status.decision_id)?.decision;
+      const ownerPlain = status?.state === 'refused_at_execution' && decision?.state === status.state &&
+        decision.session_id === session.state.session_id && decision.ledger_seq === status.ledger_seq ? decision.owner_plain ?? null : null;
+      return { ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null, owner_plain: ownerPlain };
+    }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
   };
 }

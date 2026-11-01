@@ -2,6 +2,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode, 
 import { flushSync } from 'react-dom';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
+import { afterName } from '../../../lib/names.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -64,8 +65,9 @@ export interface PublicShellProps {
    *
    * Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens
    * or reloads, kept current by the stream's `owner_joined` and `owner_left`. The line tells the
-   * visitor a person is in the chat, so it is never set from anything else. The web app is to set
-   * it this way; it doesn't yet.
+   * visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes
+   * `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag
+   * is false while the stream is disconnected or catching up, or the session mode is not confirmed.
    */
   ownerInChat?: boolean;
   /**
@@ -106,9 +108,10 @@ export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as c
 const COPY = {
   en: {
     chatWith: (name: ReactNode) => <>Chat with {name}</>,
-    disclosure: (name: ReactNode, owner: ReactNode) => (
+    /** @param nameText The name's plain text, used only to decide the period. */
+    disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
       <>
-        You&apos;re chatting with Claude, an AI answering for {name}. Ask for {owner} anytime.
+        You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for ')}{owner} anytime.
       </>
     ),
     /** In the disclosure's place while the owner is in the chat: Claude is still named as an AI. */
@@ -123,9 +126,10 @@ const COPY = {
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
-    disclosure: (name: ReactNode, owner: ReactNode) => (
+    /** @param nameText The name's plain text, used only to decide the period. */
+    disclosure: (name: ReactNode, owner: ReactNode, nameText: string) => (
       <>
-        Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {owner} cuando quieras.
+        Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con ')}{owner} cuando quieras.
       </>
     ),
     ownerInChat: (owner: ReactNode) => (
@@ -630,7 +634,7 @@ export function PublicShell({
               {/* The AI disclosure, or while the owner is in the chat, the line that says so and that
                   Claude, an AI, is paused: either way Claude is named as an AI. */}
               <p className="cd-public-shell__disclosure cd-type-meta">
-                {ownerInChat ? copy.ownerInChat(owner) : copy.disclosure(name, owner)}
+                {ownerInChat ? copy.ownerInChat(owner) : copy.disclosure(name, owner, brand.name)}
               </p>
             </div>
             {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.

@@ -100,9 +100,9 @@ def throwaway(tmp_path: Path, ci: str | None) -> subprocess.CompletedProcess:
                           env=env, capture_output=True, text=True)
 
 
-@pytest.mark.parametrize("ci", [None, ""])
+@pytest.mark.parametrize("ci", [None, "", "false", "0"])
 def test_db_throwaway_refuses_to_run_outside_ci(tmp_path: Path, ci: str | None):
-    """A developer's database is persistent and shared, so without CI set the target changes nothing."""
+    """A developer's database is persistent and shared, so unless CI is true the target changes nothing."""
     result = throwaway(tmp_path, ci)
     assert result.returncode != 0
     assert "CI" in result.stderr
@@ -116,3 +116,8 @@ def test_db_throwaway_turns_off_durable_commits_in_ci(tmp_path: Path):
     for setting in ("fsync", "synchronous_commit", "full_page_writes"):
         assert f"ALTER SYSTEM SET {setting} = off" in args
     assert "SELECT pg_reload_conf()" in args
+
+
+def test_waiver_review_target_is_local_and_names_its_pass(tmp_path):
+    command = planned("evals-waiver-review", tmp_path, "PASS=fixture-pass")
+    assert "python -m evals.run waiver-review --pass fixture-pass" in command

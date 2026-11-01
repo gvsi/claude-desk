@@ -20,6 +20,8 @@ from desk.contracts import HoursWindow, RuleCard
 PresetName = Literal["ask_first", "auto"]
 
 _UTILITY_CARDS: list[RuleCard] = [
+    RuleCard(card_id="preset-web-search", applies_to="native.web_search", mode="auto", who="anyone",
+             reason="Claude can search the web to learn how businesses like yours work."),
     RuleCard(card_id="preset-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
              reason="Anyone can see the times you have open."),
     RuleCard(card_id="preset-capture-lead", applies_to="native.capture_lead", mode="auto", who="anyone",

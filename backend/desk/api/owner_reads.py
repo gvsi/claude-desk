@@ -9,6 +9,11 @@ Desk's visitor and agent sessions count, the owner's previews among them; the ow
 never does. Nothing here writes or commits. Reads are computed from the current rows, except final execution
 refusal reasons: a bounded process-local cache avoids reading the same immutable kernel reason on each poll.
 
+The unfinished-setup guard assumes no Desk is made outside setup between a start's boundary read and its create
+call (the web never makes Desks outside setup), and the kernel's clock does not step backwards during a start.
+An outside Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live.
+Identifying the exact Desk without those assumptions requires a kernel request tag on the Desk.
+
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
 
@@ -337,7 +342,8 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
       not_verified, no_mandate, mandate_exhausted,
-      not_an_agent_with_a_mandate (unreachable)       null                  (no label)
+      not_an_agent_with_a_mandate (unreachable),
+      search_limit (execution only)                   null                  (no label)
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk
@@ -859,17 +865,43 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
 # The Desk list (#233) -----------------------------------------------------------------------------------------
 
 
-async def unfinished_setups(ctx: OwnerCtx) -> dict[str, DeskSetup]:
+async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskSetup]:
     """The setup interviews of the copy's Desks that haven't gone live, by Desk ID, so the owner can go back into one.
     Only the copy's own interview rows are read, for its Desks. A Desk made outside setup has no interview, and one
-    whose interview is `live` has finished; a row still starting names no Desk yet. Each Desk has one interview, the
-    setup that made it; were there more, the newest would stand."""
+    whose interview is `live` has finished. Pending keyed starts, in created order, each cover at most one unlinked
+    Desk: the earliest after their kernel-clock boundary that no earlier row claimed. A definite kernel refusal
+    with no linked Desk claims nothing. Deleted Desks keep their claims, so deletion cannot move a claim to another
+    Desk; only active Desks are returned. Each Desk's actual interview wins; were there more, the newest would stand.
+    """
     if not ctx.desk_ids:
         return {}
     rows = await ctx.ro.conn.execute(
-        select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step)
-        .where(INTERVIEWS.c.copy_id == ctx.copy_id, INTERVIEWS.c.desk_id.in_(sorted(ctx.desk_ids)))
+        select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step,
+               INTERVIEWS.c.idempotency_key, INTERVIEWS.c.desk_requested_at, INTERVIEWS.c.start_error)
+        .where(INTERVIEWS.c.copy_id == ctx.copy_id,
+               INTERVIEWS.c.desk_id.in_([desk["desk_id"] for desk in desks]) | (
+                   INTERVIEWS.c.desk_id.is_(None) & INTERVIEWS.c.idempotency_key.is_not(None)
+                   & INTERVIEWS.c.desk_requested_at.is_not(None)))
         .order_by(INTERVIEWS.c.created_at, INTERVIEWS.c.interview_id))
-    newest = {desk_id: (interview_id, step) for desk_id, interview_id, step in rows}   # each Desk's last row stays
-    return {desk_id: DeskSetup(interview_id=interview_id, step=step)
-            for desk_id, (interview_id, step) in newest.items() if step != "live"}
+    rows = rows.mappings().all()
+    newest = {row["desk_id"]: row for row in rows if row["desk_id"] is not None}
+    found = {desk_id: DeskSetup(interview_id=row["interview_id"], step=row["step"])
+             for desk_id, row in newest.items() if row["step"] != "live"}
+    unlinked = sorted((desk for desk in desks if desk["desk_id"] not in newest),
+                      key=lambda desk: (utc(desk["created_at"]), desk["desk_id"]))
+    for row in rows:
+        if row["desk_id"] is not None or (row["start_error"] or {}).get("kernel") == "failed":
+            continue
+        for desk in unlinked:
+            if desk["desk_id"] not in found and utc(desk["created_at"]) > utc(row["desk_requested_at"]):
+                # desk_requested_at is the newest pre-request Desk timestamp in the kernel's clock domain,
+                # not Postgres's request time. Strict ordering excludes all Desks that already existed.
+                # Fail safe: if both link writes are lost (a stopped process or database outage), this Desk
+                # stays in setup indefinitely. Desks created before the request keep their live status.
+                # Assumes no outside-setup Desk is made between the boundary read and POST /desks (the web
+                # never does that), and the kernel clock never steps backwards during the start. The former
+                # can steal the claim; the latter can leave the start's Desk reading live. Exact ownership
+                # needs a kernel request tag on the Desk.
+                found[desk["desk_id"]] = DeskSetup(interview_id=row["interview_id"], step="questions")
+                break
+    return {desk_id: setup for desk_id, setup in found.items() if desk_id in ctx.desk_ids}

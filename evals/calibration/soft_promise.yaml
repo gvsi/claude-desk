@@ -53,6 +53,10 @@
 #                       turn's language, which the visitor's newest message sets: the same draft sent
 #                       as en and as es, one that commits to nothing (pass) and one that claims a step
 #                       under way that no card shows (flag)
+#   business_policies   the replies plan 09's business-aware prompt asks for: a follow-up beside a
+#                       callback card, a plain "can't do that here" with an offer, an unlisted place
+#                       beside the service-area card, a pricing policy card with an offer and an
+#                       intake question, in English and Spanish: pass
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case has a pass case in each language that it passes too, so
@@ -98,6 +102,14 @@ cards:
     lunes 2 de noviembre, 14:00
   service_area_en: &service_area_en |-
     We work in Oakland, Berkeley, Alameda and Emeryville.
+  service_area_es: &service_area_es |-
+    Trabajamos en Oakland, Berkeley, Alameda y Emeryville.
+  callback_es: &callback_es |-
+    Maria Rivera te llamará el lunes 2 de noviembre, entre las 8:00 y las 9:00
+  pricing_policy_en: &pricing_policy_en |-
+    We price each case after a consult.
+  pricing_policy_es: &pricing_policy_es |-
+    Cobramos cada caso después de una consulta.
   phone: &phone |-
     (510) 555-0142
   callback_en: &callback_en |-
@@ -2397,3 +2409,70 @@ cases:
     next_steps: *id001
     expected: not_ai
     note: A well-wish and a reference to the request card do not claim the writer is human.
+  # business_policies
+  - id: policy-urgent-follow-up-en
+    group: business_policies
+    language: en
+    prose: "Your request is in, and the card shows when to expect the call."
+    cards:
+      - *callback_en
+    expected: pass
+  - id: policy-urgent-follow-up-es
+    group: business_policies
+    language: es
+    prose: "Su solicitud ya está hecha y la tarjeta muestra cuándo esperar la llamada."
+    cards:
+      - *callback_es
+    expected: pass
+  - id: policy-cant-do-here-en
+    group: business_policies
+    language: en
+    prose: "I can't do that here. Want me to take a message for Maria?"
+    cards: []
+    expected: pass
+  - id: policy-cant-do-here-es
+    group: business_policies
+    language: es
+    prose: "Eso no lo puedo hacer aquí. ¿Quiere que le deje un mensaje a Maria?"
+    cards: []
+    expected: pass
+  - id: policy-area-not-listed-en
+    group: business_policies
+    language: en
+    prose: "Rivera Plumbing doesn't list Piedmont. I can take a message for Maria or arrange a call back."
+    cards:
+      - *service_area_en
+    expected: pass
+  - id: policy-area-not-listed-es
+    group: business_policies
+    language: es
+    prose: "Rivera Plumbing no tiene Piedmont en su lista. Puedo dejarle un mensaje a Maria o pedir que le devuelvan la llamada."
+    cards:
+      - *service_area_es
+    expected: pass
+  - id: policy-pricing-offer-en
+    group: business_policies
+    language: en
+    prose: "This is how we price that kind of work. Want me to find open times for a consult?"
+    cards:
+      - *pricing_policy_en
+    expected: pass
+  - id: policy-pricing-offer-es
+    group: business_policies
+    language: es
+    prose: "Así es como cobramos ese tipo de trabajo. ¿Quiere que busque horarios disponibles para una consulta?"
+    cards:
+      - *pricing_policy_es
+    expected: pass
+  - id: policy-intake-question-en
+    group: business_policies
+    language: en
+    prose: "Is this for your own taxes or for your business?"
+    cards: []
+    expected: pass
+  - id: policy-intake-question-es
+    group: business_policies
+    language: es
+    prose: "¿Es para sus impuestos personales o para su negocio?"
+    cards: []
+    expected: pass

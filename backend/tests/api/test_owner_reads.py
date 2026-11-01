@@ -1374,7 +1374,7 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
         await conn.commit()
         await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
         await deliver(conn, ids, Status(held, "held"), ro_schema=ro_schema)
-        pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+        pushed = Triage(summary="Pushed for a discount.", category="prices")
         await append_message(conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
         await append_message(conn, ids, "whisper", text="Offer a callback instead.")
         await append_message(conn, ids, "note", text="The visitor verified.")

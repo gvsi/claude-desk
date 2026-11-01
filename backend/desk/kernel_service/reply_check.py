@@ -18,7 +18,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
-   as "you're booked" among them, unless the reply carries a booking card that step 4 passed), and
+   as "you're booked" among them, unless the reply carries a booking card that step 4 passed;
+   call claims instead need a callback card that passed those same clause checks), and
    the copy's document canaries, even split by spaces or accented letters, in another case or
    width, accented, or with letters or digits of other scripts drawn like its own, or all of these
    at once (`labels.canary_spans`, which reads the same lookalike table, its letters and its
@@ -114,16 +115,18 @@ HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's c
 
 LEXICON_DIR = Path(__file__).resolve().parent / "lexicon"
 CATEGORIES = {"number": "number_in_prose", "money": "number_in_prose", "percent": "number_in_prose",
-              "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word"}
+              "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word",
+              "callback": "promise_word"}
 # A condition straight before a booking claim, on folded text in either language: "once you're
 # booked", "cuando tu cita está confirmada" say what happens once a booking exists and claim none.
 # Each i may be an l, as the capital-I reading writes it ("IF" is read as "lF" too). The folded
 # text has no accents, so "si" (if) counts only where the prose writes no mark on it (`_conditioned`).
 BOOKING_CONDITION = re.compile(
     r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
-    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
+    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) "
+    r"(?:(?:ya|me|te|le|lo|la|nos|os|les|los|las|se) ){0,3}\Z",
     re.IGNORECASE)
-CONDITION_REACH = 32               # more characters than the longest condition and its space ("tan pronto como ")
+CONDITION_REACH = 48               # longest condition plus bounded Spanish clitics and ya before he/hemos
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -270,6 +273,8 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 BOOKING_LINES = [(f"lex.{language}.booking", pattern) for language, entries in LEXICONS.items()
                  for category, pattern in entries if category == "booking"]
+CALLBACK_LINES = [(f"lex.{language}.callback", pattern) for language, entries in LEXICONS.items()
+                  for category, pattern in entries if category == "callback"]
 
 
 def _named_reach(text: str, names: Iterable[str]) -> list[int]:
@@ -330,27 +335,43 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
+def _claim_spans(pattern: re.Pattern[str], reading: str) -> Iterable[tuple[int, int]]:
+    """A lexicon's claim spans. An optional `claim` group distinguishes a claim from lexical
+    context consumed by another alternative, such as a Spanish call's subject and verb."""
+    group = "claim" if "claim" in pattern.groupindex else 0
+    for match in pattern.finditer(reading):
+        start, end = match.span(group)
+        if end > start:
+            yield start, end
+
+
 def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
-    """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
+    """A `promise_word` (`lex.<lang>.booking` or `lex.<lang>.callback`) for each claim in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
-    such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
-    claim inside a longer one found is that claim, so one claim is one violation."""
+    such a claim in the same category and reading ("cuando tu cita está confirmada" holds
+    "está confirmada"). Containment is reduced within each category; booking and callback
+    matches never suppress each other."""
     found: set[tuple[int, int, str]] = set()
     for reading, origin in readings.items():
-        reach = -1       # the furthest end of a conditioned claim starting at or before this one
-        for start, end, rule_id in sorted((match.start(), match.end(), rule_id) for rule_id, pattern in BOOKING_LINES
-                                          for match in pattern.finditer(reading) if match.end() > match.start()):
-            if _conditioned(text, reading, origin, start):     # the same for every claim starting here
-                reach = max(reach, end)
-            if reach < end:
+        reach: dict[str, int] = {}  # conditioned reach within each category
+        for start, end, rule_id in sorted((start, end, rule_id)
+                                          for rule_id, pattern in (*BOOKING_LINES, *CALLBACK_LINES)
+                                          for start, end in _claim_spans(pattern, reading)):
+            category = rule_id.rsplit(".", 1)[1]
+            if _conditioned(text, reading, origin, start):
+                reach[category] = max(reach.get(category, -1), end)
+            if reach.get(category, -1) < end:
                 found.add((origin[start], origin[end - 1] + 1, rule_id))
     hits: list[tuple[int, str, Violation]] = []
-    reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
+    reaches: dict[str, int] = {}
+    previous: dict[str, tuple[int, int]] = {}
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
-        if previous is not None and previous != (start, end):
-            reach = max(reach, previous[1])
-        previous = (start, end)
-        if reach < end:
+        category = rule_id.rsplit(".", 1)[1]
+        prior = previous.get(category)
+        if prior is not None and prior != (start, end):
+            reaches[category] = max(reaches.get(category, -1), prior[1])
+        previous[category] = (start, end)
+        if reaches.get(category, -1) < end:
             hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
     return hits
 
@@ -363,17 +384,20 @@ def canary_violation(document_ids: Sequence[str]) -> Violation:
 
 
 def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
-               booking_card: bool = False) -> list[Violation]:
+               booking_card: bool = False, callback_card: bool = False) -> list[Violation]:
     """Every number, currency sign, lexicon word and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
     one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
     of such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
     (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
-    `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
+    `number_in_prose`, or `promise_word` for the promise, booking and callback categories, but for a
     claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
     not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`), and
     for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
-    clause checks passed, which says the same: the owner's decision of 2026-10-30); a word mixing
+    clause checks passed, which says the same: the owner's decision of 2026-10-30). Call claims
+    instead pass with `callback_card`, a `callback_confirmed` card those checks passed. Neither
+    card exempts the other category. Overlapping claims are reduced only within their own
+    category before either exemption. A word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
     inside one of `names` (the Desk's own names) as it is written there; the canaries of
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
@@ -405,13 +429,14 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
-    if not booking_card:
-        hits += _booking_claims(text, readings)
+    hits += [hit for hit in _booking_claims(text, readings)
+             if not (booking_card and hit[1].endswith(".booking")
+                     or callback_card and hit[1].endswith(".callback"))]
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
-            if category == "booking":
+            if category in ("booking", "callback"):
                 continue
             for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
                                            for match in pattern.finditer(reading)):
@@ -581,10 +606,11 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations: list[Violation] = []
     if detected == "other":
         violations.append(Violation(kind="unsupported_language", span=_span(language_prose), rule_id="language"))
-    # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
+    # Clauses first: the scan exempts only booking or callback cards that passed; refusals follow the prose's.
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
-                             booking_card=any(card.template == "booking_confirmed" for card in cards))
+                             booking_card=any(card.template == "booking_confirmed" for card in cards),
+                             callback_card=any(card.template == "callback_confirmed" for card in cards))
     violations += refused
     usage = None
     soft_checks = None

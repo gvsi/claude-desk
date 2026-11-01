@@ -18,7 +18,7 @@ from .test_reply_check import checked
 
 def test_every_registered_tool_has_an_explicit_next_step_decision():
     assert set(adapters.ADAPTERS) == set(NEXT_STEPS) | {
-        "native.fetch_website", "native.read_memory", "native.charge_mandate"}
+        "native.fetch_website", "native.web_search", "native.read_memory", "native.charge_mandate"}
     assert len(NEXT_STEPS) == 10
     assert BUSINESS_BLOCK_STEPS == {
         "typed_booking": "booking a time a card shows",

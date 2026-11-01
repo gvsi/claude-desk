@@ -3,7 +3,7 @@
 MAX_USD is the remaining allowance for this invocation. One stable experiment ledger
 retains cumulative spend regardless of --output and enforces the experiment's $3.20 cap.
 --samples accepts a common count or per-arm counts such as new:5,steps_only:5,sonnet:2.
-The Sonnet estimate scales Haiku's $0.0005 allowance by list prices ($0.0100 per check).
+Sonnet arms are estimated at SONNET_PER_CALL_USD ($0.0026 per check, 1.5 times the measured mean).
 Actual spend uses returned usage, including thinking within output_tokens. Timeouts block.
 Rescore each arm's saved results with soft_promise --rescore; no model is called there.
 """

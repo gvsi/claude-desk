@@ -143,8 +143,8 @@ export interface Attempt {
     | null;
 }
 /**
- * A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a
- * category for the Safety page's filters. AI-written, for the owner alone.
+ * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk
+ * did, and a category for the Safety page's filters. AI-written, for the owner alone.
  */
 export interface Triage {
   /**
@@ -152,9 +152,9 @@ export interface Triage {
    */
   summary: string;
   /**
-   * What kind of attempt it was.
+   * The subject of the checkpoint event.
    */
-  category: "impersonation" | "discount_push" | "private_data" | "code_redirect" | "injection" | "over_limit" | "other";
+  category: "prices" | "records" | "codes" | "instructions" | "limits" | "wording" | "other";
 }
 /**
  * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
@@ -509,7 +509,7 @@ export interface KnowledgeRow {
   title: string | null;
   text: string | null;
   readers: string[];
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   created_at: string | null;
 }
 /**
@@ -907,6 +907,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -1028,7 +1029,7 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -1044,6 +1045,22 @@ export interface ToolsConfirmIn {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,

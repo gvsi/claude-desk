@@ -2173,6 +2173,7 @@ function holdNextReadAsItIs(path: string, deskId: string): { asked: () => boolea
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   worker.use(
     http.get(path, async () => {
       if (used) return undefined;
