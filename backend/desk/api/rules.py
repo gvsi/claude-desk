@@ -129,9 +129,17 @@ def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow]) -> PresetName
 
 
 async def desk_hours(owner: OwnerCtx, desk_id: str) -> list[HoursWindow]:
-    """The Desk's opening hours, as its `kernel_ro.desks` row keeps them; none without a row."""
+    """The Desk's opening hours, as its `kernel_ro.desks` row keeps them. None without a row, and none when the row's
+    hours aren't a list of windows that each read as one, so the Rules page still loads and a preset's draft takes
+    the shipped cards (`preset_cards`); a failed read still raises."""
     desk = await owner.ro.one("desks", desk_id=desk_id)
-    return [] if desk is None else [HoursWindow.model_validate(window) for window in desk["hours"] or []]
+    stored = None if desk is None else desk.get("hours")
+    if not isinstance(stored, list):
+        return []
+    try:
+        return [HoursWindow.model_validate(window) for window in stored]
+    except ValidationError:
+        return []
 
 
 async def rules_view(owner: OwnerCtx, desk_id: str) -> RulesView:

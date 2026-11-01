@@ -18,6 +18,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 from datetime import time, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -40,7 +41,7 @@ from desk.api.prompts import (
     RuleChat,
 )
 from desk.api.ratelimit import LIMITS, Limit
-from desk.api.rules import card_diff, chat_view, preset_of, rule_card
+from desk.api.rules import card_diff, chat_view, desk_hours, preset_of, rule_card
 from desk.api.schemas import (
     CardDiff,
     CoveringCard,
@@ -892,6 +893,56 @@ def test_preset_of_reads_the_desks_own_recommended_rules():
     assert preset_of(PRESETS["auto"], hours) is None
     assert preset_of(cards, []) is None
     assert preset_of(PRESETS["auto"], []) == "auto"
+
+
+# Hours a Desk's row could hold that don't read as its windows: none at all, JSON that isn't a list, a window with no
+# days, a window with a time that isn't one, and a good window beside a bad one.
+MALFORMED_HOURS = [None, {"days": ["mon"], "start": "08:00:00", "end": "18:00:00"}, "8 to 6",
+                   [{"days": [], "start": "08:00:00", "end": "18:00:00"}],
+                   [{"days": ["mon"], "start": "25:00:00", "end": "18:00:00"}],
+                   [EIGHT_TO_SIX.model_dump(mode="json"), {"days": ["tue"], "start": "8am", "end": "18:00:00"}]]
+
+
+async def test_desk_hours_that_dont_read_are_none():
+    # The Desk's row is the kernel's, so its hours are its windows; any that don't read are none, never an error, so
+    # the Rules page and a preset's draft still work (a draft then takes the shipped cards).
+    async def owner_of(row: dict | None) -> list[HoursWindow]:
+        async def one(view: str, **equals: object) -> dict | None:
+            assert (view, equals) == ("desks", {"desk_id": "desk-1"})
+            return row
+
+        return await desk_hours(SimpleNamespace(ro=SimpleNamespace(one=one)), "desk-1")
+
+    assert await owner_of({"desk_id": "desk-1", "hours": [EIGHT_TO_SIX.model_dump(mode="json")]}) == [EIGHT_TO_SIX]
+    assert await owner_of(None) == []
+    assert await owner_of({"desk_id": "desk-1"}) == []                      # no hours key
+    for hours in MALFORMED_HOURS:
+        assert await owner_of({"desk_id": "desk-1", "hours": hours}) == [], hours
+
+    # A read that fails still fails.
+    async def failing(view: str, **equals: object) -> dict | None:
+        raise ConnectionError("the database is down")
+
+    with pytest.raises(ConnectionError):
+        await desk_hours(SimpleNamespace(ro=SimpleNamespace(one=failing)), "desk-1")
+
+
+async def test_preset_drafts_the_shipped_cards_when_a_desks_hours_dont_read(app, browser, fake, kernel_http):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    shipped = [each.model_dump_json() for each in PRESETS["auto"]]
+    for hours in MALFORMED_HOURS:
+        fake._put("desks", (desk.desk_id,), {
+            "desk_id": desk.desk_id, "copy_id": desk.copy_id, "business_id": desk.business_id, "name": desk.name,
+            "slug": desk.slug, "hours": hours, "answering": desk.answering, "created_at": desk.created_at})
+        fake.flush()
+        reply = await owner.browser.get(rules_url(owner))
+        assert reply.status_code == 200, (hours, reply.text)
+        assert RulesView.model_validate(reply.json()).preset is None
+        draft = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+        posted = fake.called("POST /policy/draft")[-1]
+        assert [each.model_dump_json() for each in PolicyDraftRequest.model_validate(posted.body).cards] == shipped
+        assert [each.model_dump_json() for each in draft.cards] == shipped, hours
 
 
 async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, browser, fake, kernel_http):
