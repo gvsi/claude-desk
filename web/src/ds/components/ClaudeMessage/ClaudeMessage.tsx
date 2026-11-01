@@ -47,6 +47,8 @@ export function ClaudeMessage({ blocks, language, ownerName, inertDownload = fal
   const ref = useRef<HTMLDivElement>(null);
   // Each prose block's place among the prose blocks, by its index in `blocks`.
   const prose = blocks.flatMap((block, index) => (hasWords(block) ? [index] : []));
+  // Revealed one after another, the prose blocks share one pace, set by all their words.
+  const words = prose.reduce((sum, index) => sum + (blocks[index]?.text.length ?? 0), 0);
   const shown = useMessageReveal(ref, prose.length, blocks.filter((block) => block.kind !== 'prose').length, reveal);
   return (
     <div ref={ref} className={`cd-claude-message${shown.root.className}`} lang={language} aria-busy={shown.root['aria-busy']} style={shown.root.style}>
@@ -68,6 +70,7 @@ export function ClaudeMessage({ blocks, language, ownerName, inertDownload = fal
                 text={block.text}
                 links={PROSE_LINKS}
                 reveal={shown.revealing}
+                revealLength={words}
                 onRevealed={shown.revealing ? () => shown.revealed(nth) : undefined}
               />
             </div>

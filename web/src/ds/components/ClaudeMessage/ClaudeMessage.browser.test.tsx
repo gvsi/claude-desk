@@ -200,3 +200,23 @@ it('the_cards_fade_in_once', async () => {
     { visibility: 'visible', name: 'none' },
   ]);
 });
+
+/** About 1,110 characters: alone, the 3 s ceiling sets its pace. */
+const BLOCK = Array.from({ length: 34 }, (_, index) => `Point ${String(index + 1).padStart(2, '0')} about the tank is here.`).join(' ');
+
+it('a_reply_of_several_prose_blocks_takes_at_most_about_3_s_in_all', async () => {
+  await motion();
+  vi.useFakeTimers();
+  expect(BLOCK.length).toBeGreaterThan(1050);
+  const message = mount(<ClaudeMessage blocks={[proseBlock(BLOCK), proseBlock(BLOCK)]} language="en" ownerName={OWNER} reveal />);
+  // The blocks share one pace, set by the whole reply: the first is done at about 1.5 s, and the
+  // second at about 3 s. The clock moves a few frames at a time, so the page draws as it goes.
+  const run = async (ms: number) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 50) await pass(50);
+  };
+  await run(1400);
+  expect(words(message)).toHaveLength(1);
+  await run(1800);
+  expect(words(message).map((block) => block.length)).toEqual([BLOCK.length, BLOCK.length]);
+  expect(words(message)).toEqual([BLOCK, BLOCK]);
+});

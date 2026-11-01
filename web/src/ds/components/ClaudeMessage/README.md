@@ -19,7 +19,7 @@
 
 The kernel checks the whole reply before the browser has any of it, and the screen shows Claude's writing dots until then. With `reveal`, the delivered message then comes in as the signed visitor reveal boards draw it (N-MD-02, N-MD-03, N-MD-06):
 
-- Its words show word by word, from the first, with `ChatMarkdown`'s reveal: about 200 characters a second, never more than about 3 s. Prose blocks come one after another. The reveal only shows more of words the browser already holds whole, in order.
+- Its words show word by word, from the first, with `ChatMarkdown`'s reveal: about 200 characters a second, never more than about 3 s. Prose blocks come one after another, at one pace set by all their words, so the whole reply still takes at most about 3 s. The reveal only shows more of words the browser already holds whole, in order.
 - Its cards wait unseen in their places, so nothing below them moves when they come. Once the words are whole, they fade and rise `space-4` in, one by one, `motion-follow` apart, each over `motion-base`: the first a beat after the words, or at once with no words before them. From the third on they share a beat.
 - In a `TranscriptRow` drawn `live`, what the row attaches waits for the words too, then follows the cards, one beat after another (`TranscriptRow`, "Arriving live").
 - While its words come in, the message is `aria-busy`, so assistive technology may wait for the whole reply rather than read it out word by word.
