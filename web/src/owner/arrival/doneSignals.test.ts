@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DecisionState, EvMessage, LedgerEntry, LedgerEvent } from '../../api/contracts.ts';
 import type { Attempt, BusinessOut, ConversationSummary, DeskSummary, OwnerTranscript, TranscriptItem } from '../../api/views.ts';
+import { isLive } from '../useDesks.ts';
 import {
   NOTHING_DONE,
   answeredInView,
@@ -276,6 +277,9 @@ describe('the Desk the copy started with', () => {
 describe('create your own Desk', () => {
   it('a Desk besides the one the copy started with counts', () => {
     expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [desk('desk-new')])], 'desk-main')).toBe(true);
+    expect(
+      madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [{ ...desk('desk-new'), answering: false }])], 'desk-main'),
+    ).toBe(true);
     expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')])], 'desk-main')).toBe(false);
   });
 
@@ -291,10 +295,11 @@ describe('create your own Desk', () => {
     expect(madeAnotherDesk([main, business('biz-new', [{ ...inSetup, setup: null }])], 'desk-main')).toBe(true);
   });
 
-  it("a Desk listed without its setup isn't one: only a setup of null is live", () => {
+  it('a Desk listed without its setup counts as live, as Today reads it', () => {
     const { setup: _setup, ...withoutSetup } = desk('desk-new');
-    const malformed = withoutSetup as DeskSummary;
-    expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [malformed])], 'desk-main')).toBe(false);
+    const live = withoutSetup as DeskSummary;
+    expect(isLive(live)).toBe(true);
+    expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [live])], 'desk-main')).toBe(true);
   });
 });
 

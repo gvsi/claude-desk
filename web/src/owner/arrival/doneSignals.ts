@@ -5,6 +5,7 @@
  */
 import type { Decision, DecisionState, LedgerEntry, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt, BusinessOut, ConversationSummary, OwnerTranscript } from '../../api/views.ts';
+import { isLive } from '../useDesks.ts';
 
 /** The four things, in the intro dialog's order. */
 export const THINGS = ['chat', 'break', 'answer', 'create'] as const;
@@ -227,10 +228,11 @@ export function restoreKept(kept: Kept | undefined, listed: readonly string[]): 
 
 /**
  * "Create your own Desk": the copy lists a live Desk besides the one it started with. A Desk counts
- * once its setup has gone live (`setup` null), never while it still names its setup, even with
- * Answering on. While the first Desk is listed this is two or more Desks; once it has been deleted,
- * any live Desk still listed is another.
+ * once its setup has gone live (`setup` null, or absent from an API from before setup), never while
+ * it still names its setup, even with Answering on. While the first Desk is listed this is the
+ * first Desk plus at least one live Desk; once it has been deleted, any live Desk still listed is
+ * another.
  */
 export function madeAnotherDesk(businesses: readonly BusinessOut[], startedWith: string): boolean {
-  return businesses.some((b) => b.desks.some((d) => d.desk_id !== startedWith && d.setup === null));
+  return businesses.some((b) => b.desks.some((d) => d.desk_id !== startedWith && isLive(d)));
 }

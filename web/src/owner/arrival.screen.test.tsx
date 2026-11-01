@@ -2018,7 +2018,8 @@ describe('Things to try ticks off', () => {
     await step('setupConsent', { allow: false });
     for (const question of SETUP_QUESTIONS) await step('setupAnswer', { question: question.key, text: 'Yes, that works.' });
     for (const key of ['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm'] as const) await step(key);
-    await mockStore.dispatch('setAnswering', { params: { desk_id: made }, body: { on: true } });
+    const answering = await mockStore.dispatch('setAnswering', { params: { desk_id: made }, body: { on: true } });
+    if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
 
     // Its Today says it isn't live yet, so "Create your own Desk" waits: no done line, no tick.
     const inSetup = await renderRoute(`/app/${made}/today`);

@@ -2258,8 +2258,9 @@ describe("Today's unfinished setup", () => {
     expect(screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
   });
 
-  it('a_desk_listed_without_its_setup_has_no_card', async () => {
-    // An API from before `setup` lists the Desk without it: Today opens as for a live Desk.
+  it('desks_listed_without_setup_are_live_for_the_card_and_create_tick', async () => {
+    // An API from before `setup` lists both Desks without it: Today and the create tick agree they are live.
+    mockStore.reset('rivera_two_desks');
     const read = await mockStore.dispatch('desks');
     if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
     const without = (read.body as BusinessOut[]).map((business) => ({
@@ -2271,6 +2272,7 @@ describe("Today's unfinished setup", () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Things to try')).toBeVisible();
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+    await expect.element(screen.getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
   });
 
   it('the_line_names_the_step_setup_stopped_at', async () => {
