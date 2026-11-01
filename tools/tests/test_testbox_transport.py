@@ -371,3 +371,35 @@ def test_a_lanes_first_call_on_a_machine_says_it_is_setting_up_so_it_is_not_read
     assert 'setting up this lane' in new_lane_notice({'git': '', 'sources': {}})
     assert '5 minutes' in new_lane_notice({'git': '', 'sources': {}})
     assert new_lane_notice({'git': 'a' * 40 + ':' + 'b' * 40, 'sources': {'README.md': 'x'}}) is None
+
+
+
+@pytest.mark.parametrize('remember', [False, True])
+def test_a_new_connection_is_authorized_over_ssm_and_recorded_only_when_asked(tmp_path, monkeypatch, remember):
+    """Provisioning reuses this with an AWS helper that raises RuntimeError while SSM has no invocation yet."""
+    import json
+    from types import SimpleNamespace
+    from desk_tools import testbox_client as client
+
+    (tmp_path / 'connection-us-east-1.json').write_text(json.dumps({'instance': 'i-0aaaaaaaaaaaaaaaa'}))
+    (tmp_path / 'id_ed25519.pub').write_text('ssh-ed25519 CLIENT desk-testbox-client')
+    (tmp_path / 'id_ed25519').write_text('private')
+    ssh = []
+    def run(command, **kwargs):
+        ssh.append(command)
+        return SimpleNamespace(returncode=255 if '-O' in command else 0)   # no live master yet
+    monkeypatch.setattr(subprocess, 'run', run)
+    monkeypatch.setattr(client.time, 'sleep', lambda _: None)
+    answers = [RuntimeError('InvocationDoesNotExist'), {'Status': 'Success', 'StandardOutputContent': 'ssh-ed25519 HOSTKEY'}]
+    def api(service, operation, **params):
+        if operation == 'send-command':
+            return {'Command': {'CommandId': 'test'}}
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    client.open_connection(tmp_path, 'us-east-1', 'i-0bbbbbbbbbbbbbbbb', api, remember=remember)
+    assert any('-MNf' in command for command in ssh)
+    assert 'i-0bbbbbbbbbbbbbbbb ssh-ed25519 HOSTKEY' in (tmp_path / 'known_hosts').read_text()
+    recorded = json.loads((tmp_path / 'connection-us-east-1.json').read_text())['instance']
+    assert recorded == ('i-0bbbbbbbbbbbbbbbb' if remember else 'i-0aaaaaaaaaaaaaaaa')

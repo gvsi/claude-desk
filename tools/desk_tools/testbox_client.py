@@ -277,6 +277,12 @@ def read_remote_state(holder):
     raise RuntimeError("Could not lock the remote lane")
 
 
+def use_local_bin():
+    local = str(Path.home() / ".local/bin")
+    if local not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = local + os.pathsep + os.environ.get("PATH", "")
+
+
 def cache_directory() -> Path:
     """This laptop's SSH key, host keys and shared connections; never in the repository."""
     return Path.home() / ".cache/desk-testbox"
@@ -315,6 +321,7 @@ def open_connection(cache: Path, region: str, instance: str, api, remember: bool
     """This laptop's shared SSH connection to the instance, opened over SSM unless one is alive; its options for ssh.
     With `remember`, every lane's next call reuses it (the active machine only, never a standby)."""
     aws = ["aws", "--region", region, "--no-cli-pager"]
+    use_local_bin()   # the Session Manager plugin may live there
     # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
     with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
         fcntl.flock(connection_lock, fcntl.LOCK_EX)
@@ -396,7 +403,7 @@ def main():
     words = re.findall(r"[A-Za-z0-9_-]+", " ".join(args.command))
     if forbidden.intersection(words) or "make dev" in " ".join(args.command):
         parser.error("model/secret-dependent jobs and make dev stay on the laptop")
-    os.environ["PATH"] = str(Path.home() / ".local/bin") + os.pathsep + os.environ["PATH"]
+    use_local_bin()
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     lane = lane_name(args.lane or str(root))
     cache = cache_directory()

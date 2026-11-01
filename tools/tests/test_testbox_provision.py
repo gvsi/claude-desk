@@ -416,7 +416,8 @@ def test_promote_retires_the_active_machine_before_activating_the_proven_standby
     invoke(monkeypatch, fixture, '--promote')
     assert fixture.tagged == [(['i-0123456789abcdef0', 'vol-old', 'eni-old'], 'agent-test-box-retired'),
                               (['i-0fedcba9876543210', 'vol-new', 'eni-new'], 'agent-test-box')]
-    assert handed == [('us-east-1', 'i-0fedcba9876543210', [])]   # the fixture keeps no tags; see the re-run tests
+    # The old machine is known before its retag: a tag query right after it may not see the change yet.
+    assert handed == [('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'])]
 
 
 @pytest.mark.parametrize('interrupted', ['after-retiring', 'after-activating'])
@@ -459,6 +460,19 @@ class Masters:
         return SimpleNamespace(returncode=0 if socket.exists() else 255)
 
 
+class SSM:
+    """Scripts run on instances over SSM, each answered with `status`."""
+
+    def __init__(self, status='Success'):
+        self.status, self.scripts = status, []
+
+    def __call__(self, service, operation, **params):
+        if operation == 'send-command':
+            self.scripts.append((params['instance_ids'][0], params['parameters']['commands'][0]))
+            return {'Command': {'CommandId': 'test'}}
+        return {'Status': self.status}
+
+
 def handing_over(monkeypatch, tmp_path, masters, late_client=None):
     monkeypatch.setenv('HOME', str(tmp_path))
     cache = provision.cache_directory()
@@ -486,18 +500,31 @@ def test_handover_records_the_active_machine_and_keeps_closing_a_reopened_old_co
     def late_client(shared, old):
         old.touch()
         shared.write_text(json.dumps({'instance': 'i-0123456789abcdef0'}))
-    masters = Masters()
+    masters, ssm = Masters(), SSM()
     shared, old, opened = handing_over(monkeypatch, tmp_path, masters, late_client)
-    provision.handover('us-east-1', 'i-0fedcba9876543210', [], None)
+    provision.handover('us-east-1', 'i-0fedcba9876543210', [], ssm)
     assert opened == [('i-0fedcba9876543210', False)]
     assert json.loads(shared.read_text()) == {'instance': 'i-0fedcba9876543210'}
     assert not old.exists() and masters.stops == 2
+    # A caller still queued behind the old connection can't reopen it later: the old machine takes no new ones.
+    assert ssm.scripts == [('i-0123456789abcdef0', provision.REFUSE_NEW_CONNECTIONS)]
+
+
+def test_a_retired_machine_stops_only_its_ssh_listener_so_running_calls_continue():
+    assert 'KillMode=process' in provision.REFUSE_NEW_CONNECTIONS
+    assert provision.REFUSE_NEW_CONNECTIONS.index('KillMode=process') < provision.REFUSE_NEW_CONNECTIONS.index('systemctl stop')
+
+
+def test_handover_reports_a_retired_machine_that_still_takes_new_connections(monkeypatch, tmp_path):
+    handing_over(monkeypatch, tmp_path, Masters())
+    with pytest.raises(RuntimeError, match='still takes new SSH connections'):
+        provision.handover('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'], SSM('Failed'))
 
 
 def test_handover_reports_an_old_connection_that_will_not_stop(monkeypatch, tmp_path):
     shared, old, opened = handing_over(monkeypatch, tmp_path, Masters(stuck=True))
     with pytest.raises(RuntimeError, match='still takes calls'):
-        provision.handover('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'], None)
+        provision.handover('us-east-1', 'i-0fedcba9876543210', ['i-0123456789abcdef0'], SSM())
 
 
 @pytest.mark.parametrize('standby', [None, 'stopped', 'c8g.24xlarge', 'metadata'])

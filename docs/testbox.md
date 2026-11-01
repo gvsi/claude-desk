@@ -147,8 +147,11 @@ Every lane's client, from any branch, reuses the laptop's shared connection whil
 the machine recorded in `~/.cache/desk-testbox/connection-<region>.json`. Promotion opens a
 connection to the new machine, records it, and stops the shared connection to the old one taking
 new calls. For four minutes it keeps closing old connections and restoring the record, since a
-call that chose the old machine just before the switch can reopen or record it. Calls already
-running there finish. Each lane's next call runs on the new machine and sets the lane up again
+call that chose the old machine just before the switch can reopen or record it. Then the old
+machine's SSH server stops taking new connections (only its listener stops, so open sessions
+continue; `systemctl start ssh.socket` there undoes it), so a later caller can't reopen one:
+such a call, or one still queued behind another call in its lane there, fails once, and its
+retry runs on the new machine. Calls already running there finish. Each lane's next call runs on the new machine and sets the lane up again
 there (about 5 minutes the first time, as for any new lane). This moves the lanes of the laptop
 that promotes; another laptop's lanes move once its connection to the old machine closes.
 

@@ -33,8 +33,9 @@ SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManager
     "ec2messages:GetMessages", "ec2messages:SendReply"], "Resource": "*"}]}
 
 
-# How long promotion keeps closing reopened connections to retired machines. A call that chose the old machine just
-# before promotion can still open one: its connection setup waits at most three minutes for SSM.
+# How long promotion keeps closing reopened connections to retired machines and restoring the record, for calls that
+# chose the old machine just before promotion (their connection setup polls SSM for up to three minutes). Callers
+# slower than that find the retired machine refusing new connections.
 HANDOVER_SECONDS = 240
 
 
@@ -49,6 +50,28 @@ def stop_connection(cache, region, instance) -> bool:
     return subprocess.run(["ssh", "-S", str(socket), "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
 
 
+def ssm_run(api, instance, script):
+    """Run a short root shell script on an instance over SSM; its final status."""
+    command = api("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", timeout_seconds=60,
+                  parameters={"commands": [script]})["Command"]["CommandId"]
+    for _ in range(60):
+        try:
+            result = api("ssm", "get-command-invocation", command_id=command, instance_id=instance)
+        except RuntimeError as exc:
+            if "InvocationDoesNotExist" not in str(exc):
+                raise
+            result = {}
+        if result.get("Status") in ("Success", "Failed", "TimedOut", "Cancelled"):
+            return result["Status"]
+        time.sleep(2)
+    return "Unknown"
+
+
+# Stops a retired machine's SSH server taking new connections. Its unit stops only the listener (KillMode=process), so
+# sessions already open, including calls still running, continue. Undo with `systemctl start ssh.socket`.
+REFUSE_NEW_CONNECTIONS = "systemctl show ssh.service -p KillMode | grep -qx KillMode=process && systemctl stop ssh.socket ssh.service"
+
+
 def record_connection(shared, instance):
     temporary = shared.with_suffix(".tmp")
     temporary.write_text(json.dumps({"instance": instance}))
@@ -59,7 +82,8 @@ def handover(region, active, retired, api):
     """Move this laptop's lanes to the active machine. Every lane's client, from any branch, reuses the connection the
     shared record names while it is alive, so promotion opens one to the active machine and records it, then keeps
     closing connections to retired machines and restoring the record for the handover window, which covers calls
-    that chose the old machine just before the switch and reopen its connection or record it."""
+    that chose the old machine just before the switch and reopen its connection or record it. A caller still queued
+    behind one of those then can't reopen it at all: the retired machines stop taking new SSH connections."""
     cache = cache_directory()
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     shared = cache / f"connection-{region}.json"
@@ -74,10 +98,15 @@ def handover(region, active, retired, api):
             if recorded:
                 retired.add(recorded)   # whatever lanes used before, retired or not, stops taking calls
             record_connection(shared, active)
-        stopped = [stop_connection(cache, region, instance) for instance in sorted(retired)]
+        for instance in sorted(retired):
+            stop_connection(cache, region, instance)
         if second < HANDOVER_SECONDS:
             time.sleep(1)
-    if not all(stopped):
+    for instance in sorted(retired):
+        if ssm_run(api, instance, REFUSE_NEW_CONNECTIONS) != "Success":
+            raise RuntimeError(f"The retired test box {instance} still takes new SSH connections; re-run --promote")
+    record_connection(shared, active)
+    if not all([stop_connection(cache, region, instance) for instance in sorted(retired)]):
         raise RuntimeError("This laptop's connection to a retired test box still takes calls; re-run --promote")
 
 
@@ -246,25 +275,13 @@ def main():
 
         def require_ready(instance):
             # Every lane's next call lands here: refuse a standby whose setup is still running or failed.
-            command = aws("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", timeout_seconds=60,
-                          parameters={"commands": ["test -f /opt/testbox/ready && ! test -f /opt/testbox/bootstrap-failed"]})["Command"]["CommandId"]
-            for _ in range(60):
-                try:
-                    result = aws("ssm", "get-command-invocation", command_id=command, instance_id=instance)
-                except RuntimeError as exc:
-                    if "InvocationDoesNotExist" not in str(exc):
-                        raise
-                    result = {}
-                if result.get("Status") == "Success":
-                    return
-                if result.get("Status") in ("Failed", "TimedOut", "Cancelled"):
-                    raise RuntimeError("The standby isn't ready (its setup is running or failed); re-run --standby")
-                time.sleep(2)
-            raise RuntimeError("Could not confirm the standby is ready; re-run --promote")
+            if ssm_run(aws, instance, "test -f /opt/testbox/ready && ! test -f /opt/testbox/bootstrap-failed") != "Success":
+                raise RuntimeError("The standby isn't ready (its setup is running or failed); re-run --standby")
 
         if args.promote:
             # The tags record the handover, so a re-run after any interruption finishes it.
             standby, active = tagged(STANDBY), tagged(ACTIVE)
+            old_ids = [i["InstanceId"] for i in active] if standby else []
             if standby:
                 if standby[0]["State"]["Name"] != "running":
                     raise RuntimeError("The standby isn't running; start it with --standby and prove it with tools/testbox/run --standby")
@@ -280,7 +297,8 @@ def main():
                     retag(old, RETIRED)
                 retag(standby[0], ACTIVE)
                 active = standby
-            retired = [i["InstanceId"] for i in tagged(RETIRED, many=True)]
+            # Known before the retag too: a tag query right after it may not see the change yet.
+            retired = sorted(set(old_ids) | {i["InstanceId"] for i in tagged(RETIRED, many=True)})
             if not standby and not retired:
                 raise RuntimeError("No standby to promote: provision one with --standby and prove it with tools/testbox/run --standby")
             if not active or active[0]["State"]["Name"] != "running":
