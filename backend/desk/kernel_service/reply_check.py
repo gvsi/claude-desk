@@ -27,7 +27,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    digits). Since the owner's decisions of 2026-10-30, a booking claim passes beside the booking's
    card, which says the same, a policy's words are left to the soft-promise check, which reads the
    prose with the cards, and Claude may write links and email addresses, which its prompt keeps to
-   the business's own.
+   the business's own. A free word passes inside a repeat of the title or appointment type of one
+   of the Desk's enabled business tools that resolve (`context.business_free_names`; the owner's
+   decision of 2026-10-31).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
@@ -593,7 +595,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (free_reach is not None and free_reach[start] >= end
-                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=True)
+                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=False)
                         and ("(?=" not in pattern.pattern or _Lookahead(
                             reading, origin, pattern, match.start(), match.end()).holds_at(free_reach[start]))):
                     continue
@@ -617,7 +619,8 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     free-price phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
     "Consultations are complimentary." don't. `text` is the key's own text. `amenities` has no default, so
     every caller states it: charter policy text keeps the amenity exception, while business tool card
-    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit."""
+    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit, as
+    does a business tool's name in Claude's prose, which lends its free words alone."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
     promise = rule.startswith("lex.") and rule.endswith(".promise")
@@ -1056,7 +1059,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards),
-                             callback_card=any(card.template == "callback_confirmed" for card in cards))
+                             callback_card=any(card.template == "callback_confirmed" for card in cards),
+                             approved_free_names=await context.business_free_names(ctx, desk_id))
     violations += refused
     violations += policy_card_violations(prose, cards)
     detected_language = detected if detected in ("en", "es") else None

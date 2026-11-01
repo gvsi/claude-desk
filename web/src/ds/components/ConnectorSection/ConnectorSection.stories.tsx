@@ -172,7 +172,7 @@ const addedPayments: ConnectorSectionProps = {
     {
       key: 'native.payment_link',
       name: 'Payment link',
-      description: 'Makes a one-time link for an invoice. Charges money. Can be undone.',
+      description: "Makes a one-time link for an invoice. Charges money. Can't be undone.",
       summary: 'No rule yet',
       mode: 'ask',
       status: 'enabled',
@@ -181,7 +181,7 @@ const addedPayments: ConnectorSectionProps = {
     {
       key: 'native.charge_mandate',
       name: 'Charge within a signed limit',
-      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
       summary: 'No rule yet',
       mode: 'ask',
       status: 'disabled',

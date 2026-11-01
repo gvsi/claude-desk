@@ -411,7 +411,9 @@ INPUT_SCHEMAS = {
                              "note": {"type": ["string", "null"], "maxLength": 200}}, ("items",)),
     "native.find_slots": _closed({"from_date": {"type": ["string", "null"], "format": "date"},
                                   "days": {"type": "integer", "minimum": 1, "maximum": 14}}),
-    "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN}}, ("slot_id",)),
+    "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN},
+                             "note": {"type": ["string", "null"], "maxLength": 200,
+                                      "description": "Optional details for the owner only."}}, ("slot_id",)),
     "native.release_document": _closed({"document_id": {**TEXT, "maxLength": 64}}, ("document_id",)),
     "native.payment_link": _closed({"quote_id": TEXT}, ("quote_id",)),
     "native.charge_mandate": _closed({"quote_id": TEXT}, ("quote_id",)),
@@ -800,6 +802,8 @@ def storable(text: str) -> bool:
 def matches(schema: dict, value: Any) -> bool:
     """Whether `value` fits one of the closed input schemas above (the subset of JSON Schema they use).
     Integers are strict: `"1"`, `1.0` and `true` are not integers."""
+    if "anyOf" in schema:
+        return any(matches(option, value) for option in schema["anyOf"])
     kinds = schema.get("type", [])
     kinds = [kinds] if isinstance(kinds, str) else kinds
     if not any(type(value) is int if kind == "integer" else isinstance(value, _JSON_TYPES[kind]) for kind in kinds):
@@ -2596,6 +2600,8 @@ class FakeKernelState:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
         args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
+        profile = desk.tools[tool]
+        block = profile.business.config.block if profile.business is not None else None
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
@@ -2606,7 +2612,16 @@ class FakeKernelState:
                 raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
-        elif tool == "native.book":
+        elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
+            from desk.kernel_service.labels import find_canaries
+            try:
+                note = BookArgs.model_validate(args).note
+            except ValidationError:
+                raise AdapterCheckRefused('invalid_args') from None
+            if note and find_canaries(note, {document.document_id: document.canary
+                    for each in self.desks.values() if each.copy_id == desk.copy_id for document in each.documents.values()}):
+                raise AdapterCheckRefused('note_canary')
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
                 raise AdapterCheckRefused("no_such_slot")
@@ -2635,8 +2650,7 @@ class FakeKernelState:
         elif tool == "payments.create_refund":
             # The fake has no provider charge records to resolve during refund normalization.
             raise AdapterCheckRefused("no_such_charge")
-        profile = desk.tools[tool]
-        if profile.source == 'business' and profile.business.config.block == 'intake':
+        if block == 'intake':
             if len(args['answers']) != len(profile.business.config.questions):
                 raise AdapterCheckRefused('answer_count')
         elif profile.source == 'business' and profile.business.config.block == 'purpose_payment':
@@ -2670,7 +2684,8 @@ class FakeKernelState:
                 return 'refuse', [card.card_id for card in never], None
             asks = [card for card in covering if card.mode == 'ask' and not card.is_default]
             autos = [card for card in covering if card.mode == 'auto' and card.max_amount_cents is None
-                     and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+                     and (card.hours is None or in_hours(action.starts_at or self.now, [card.hours],
+                                                        ZoneInfo(desk.timezone)) is not None)]
             if autos and not asks and not any(card.review for card in autos):
                 return 'allow', [card.card_id for card in autos], None
             holds = asks or autos or [card for card in covering if card.mode == 'ask']
@@ -2828,7 +2843,7 @@ class FakeKernelState:
         if cards:
             reason += " " + cards[0]
         note = call.args.get("note") if action is not None else None
-        if isinstance(note, str) and note:
+        if isinstance(note, str) and note.strip():
             reason += f" Claude's note: “{note[:200]}”"
         return reason
 
@@ -3017,6 +3032,8 @@ class FakeKernelState:
         args = self._args[action.action_id]
         ids, label = {"copy_id": desk.copy_id, "desk_id": desk.desk_id}, self._label(session)
         tool, facts, view, inbox = action.tool, [], {}, []
+        profile = desk.tools[tool]
+        block = profile.business.config.block if profile.business is not None else None
         if tool == "native.quote":
             quote_id = new_id("quote")
             items = [{"item_id": item["item_id"], "title": desk.prices[item["item_id"]].title, "qty": item["qty"]}
@@ -3037,7 +3054,10 @@ class FakeKernelState:
                                   Claim(key="discount", kind="percent_bp", value=action.discount_bp),
                                   Claim(key="expires", kind="datetime", value=expires_at.isoformat())]))
             view = {"fact_id": facts[0].fact_id, "quote_id": quote_id, "items": items, "status": "available"}
-        elif tool == "native.book":
+        elif tool == "native.book" or block == 'typed_booking':
+            from desk.kernel_service.adapters.book import BookArgs
+
+            note = BookArgs.model_validate(args).note
             slot = desk.slots[action.resource.id]
             if slot.slot_id in desk.booked:
                 return [], None, []
@@ -3051,6 +3071,14 @@ class FakeKernelState:
                                   Claim(key="starts_at", kind="datetime", value=slot.starts_at.isoformat()),
                                   Claim(key="minutes", kind="text", value=str(slot.minutes)),
                                   Claim(key="booking", kind="ref", value=booking_id)]))
+            if block == 'typed_booking':
+                config = profile.business.config
+                facts[0].claims.extend([Claim(key='appointment_type', kind='text', value=config.appointment_type),
+                                        Claim(key='appointment_minutes', kind='text', value=str(config.minutes))])
+            if note:
+                self._put_fact(desk, Fact(fact_id=f'booking_note:{booking_id}', kind='knowledge', status='committed',
+                    source='kernel', label=Label(readers=['owner']), claims=[
+                        Claim(key='booking', kind='ref', value=booking_id), Claim(key='note', kind='text', value=note)]))
             view = {"fact_id": facts[0].fact_id, "booking_id": booking_id, "status": "confirmed"}
         elif tool == "native.find_slots":
             open_slots = sorted((slot for slot in desk.slots.values()
@@ -3109,8 +3137,7 @@ class FakeKernelState:
                                  Claim(key='ref', kind='ref', value=link.link_id)])
             facts.append(link_fact)
             view = {'fact_id': link_fact.fact_id, 'title': config.purpose, 'amount_cents': action.amount_cents}
-        elif tool == "native.capture_lead" or (
-                self._business_profile(desk, tool) is not None and desk.tools[tool].business.config.block == 'intake'):
+        elif tool == "native.capture_lead" or (block == 'intake' and self._business_profile(desk, tool) is not None):
             lead_id = new_id("lead")
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
@@ -3450,6 +3477,10 @@ class FakeKernelState:
             title = "Open times" if language == "en" else "Horas libres"
         elif template == "booking_confirmed":
             title = datetime.fromisoformat(claims["starts_at"]).strftime("%a %d %b %H:%M")
+            if 'appointment_type' in claims:
+                from desk.kernel_service import render
+                return render.render_clause(Clause(template=template, fact_id=fact.fact_id), fact, language,
+                    render.DeskInfo(owner_display_name=desk.owner_display_name, timezone=desk.timezone))
         elif template == "hours":
             title = REPLY_TEXT[language]["hours"]
             lines = [f"{', '.join(window.days)} {window.start:%H:%M}-{window.end:%H:%M}" for window in desk.hours]

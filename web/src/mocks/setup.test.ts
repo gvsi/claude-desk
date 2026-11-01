@@ -16,7 +16,10 @@ import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
-import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet, thanksTo } from './setup.ts';
+import {
+  holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
+  thanksTo, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
+} from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -530,6 +533,78 @@ describe('setup consultant run and decisions', () => {
     expect(new Set(ids).size).toBe(6);
     expect(state.messages.at(-1)?.choices.map(({ text }) => text)).toEqual(['Ask me before every payment', 'Set an amount now']);
     expect(await setupState('setup', state.interview_id)).toEqual(state);
+  });
+});
+
+describe('the test-client offer, as the API asks it', () => {
+  const LAKEVIEW = 'Lakeview Accounts. I’m Lee. We help local businesses.';
+  const CONTACT = 'Email me at lee@example.com. After hours, take a message.';
+  const OFFER = {
+    role: 'claude', text: TEST_CLIENT_OFFER, card: null,
+    choices: [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }],
+  };
+
+  /** A scripted run to its end, typing `contact` on the contact question; or, with `suggestions`, using the suggestions once it's typed. */
+  async function finished(contact: string, suggestions = false): Promise<SetupState> {
+    let state = await startState(LAKEVIEW);
+    const id = state.interview_id;
+    state = await setupState('setupConsent', id, { allow: false });
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', id, { question, text: 'Yes' });
+    if (!suggestions) return setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: contact });
+    // An answer that leaves the contact question open keeps it waiting, as a follow-up does.
+    state = await setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: `Not sure yet. ${contact}` });
+    expect(state.question).toBe('contact_and_after_hours');
+    return setupState('setupSuggestions', id, {});
+  }
+
+  it('asks_once_after_the_closing_plan_when_the_owner_typed_their_contact', async () => {
+    const state = await finished(CONTACT);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.slice(-2)).toEqual([{ role: 'claude', text: QUESTIONS_DONE, choices: [], card: null }, OFFER]);
+    // With no contact of the owner's own, as the API reads it: none typed, hours only, another person's or a rejected one.
+    for (const contact of [
+      'Yes', 'The same as on my website.', 'We are open 8.00-17.00', 'Ana: ana@example.test',
+      'Call my assistant Ana at (510) 555-0142 or email ana@example.test.', 'Do not use old@example.test or 510-555-0142.',
+      'Ana’s email is ana@example.test',
+    ]) {
+      const without = await finished(contact);
+      expect([without.step, without.question, without.messages.at(-1)?.text], contact).toEqual(['tools', null, QUESTIONS_DONE]);
+    }
+    for (const contact of ['Ana handles bookings. My own email is lee@example.com.', 'Ana: ana@example.test, Lee: lee@example.com']) {
+      expect((await finished(contact)).question, contact).toBe('test_client');
+    }
+  });
+
+  it('a_yes_says_done_and_not_now_says_nothing_and_both_move_to_tools', async () => {
+    for (const [text, said] of [[TEST_CLIENT_YES, [TEST_CLIENT_ADDED]], [TEST_CLIENT_NO, []], ['Sure, go ahead', [TEST_CLIENT_ADDED]], ["don't add me", []]] as const) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['tools', null]);
+      expect(state.messages.slice(-1 - said.length), text).toEqual([
+        { role: 'owner', text, choices: [], card: null }, ...said.map((line) => ({ role: 'claude', text: line, choices: [], card: null })),
+      ]);
+      expect(await mockStore.dispatch('setupAnswer', { params: { id: offered.interview_id }, body: { question: 'test_client', text } }), text).toMatchObject({ status: 409 });
+    }
+  });
+
+  it('an_answer_that_is_neither_yes_nor_no_gets_the_same_offer_again', async () => {
+    // A question or a conditional yes is no yes, whatever words it holds.
+    for (const text of ['What does that mean?', 'What does add me as a test client mean?', 'What happens if I say yes?', "If it's free, yes"]) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['questions', 'test_client']);
+      expect(state.messages.slice(-2), text).toEqual([{ role: 'owner', text, choices: [], card: null }, OFFER]);
+    }
+  });
+
+  it('use_your_suggestions_reaches_the_same_offer_and_using_them_again_moves_on', async () => {
+    const state = await finished(CONTACT, true);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.at(-2)?.text).toContain('Your plan for Lakeview Accounts:');
+    expect(state.messages.at(-1)).toEqual(OFFER);
+    const moved = await setupState('setupSuggestions', state.interview_id, {});
+    expect([moved.step, moved.question]).toEqual(['tools', null]);
+    expect(moved.messages.slice(-2)).toEqual([OFFER, { role: 'owner', text: 'Use your suggestions', choices: [], card: null }]);
   });
 });
 

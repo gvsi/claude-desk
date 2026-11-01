@@ -297,6 +297,11 @@ async function atRules(answers: Partial<Record<QuestionKey, string>> = {}, descr
   for (const question of SETUP_QUESTIONS) {
     await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text: answers[question.key] ?? 'Ask me first.' } });
   }
+  // An owner who typed their own contact is offered a test client first: not now.
+  const read = await mockStore.dispatch('setup', { params });
+  if (!('network' in read) && (read.body as SetupState).question === 'test_client') {
+    await mockStore.dispatch('setupAnswer', { params, body: { question: 'test_client', text: 'Not now' } });
+  }
   await mockStore.dispatch('setupRules', { params });
   return params;
 }

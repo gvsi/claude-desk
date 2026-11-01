@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 
-import { PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
+import { chainLine, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, originCopy, turnedDownHeadline } from './copy.ts';
 
@@ -72,7 +72,7 @@ function Bar() {
               height="1lh"
               radius="full"
               measure={{
-                label: 'Every entry checks out',
+                label: chainLine(true, null).line,
                 className: 'cd-type-body',
                 tagName: 'span',
               }}

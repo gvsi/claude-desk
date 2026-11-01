@@ -7,6 +7,8 @@ export interface PageHeaderProps {
   title: ReactNode;
   /** One quiet line under the title that says what the page is for. */
   subtitle?: ReactNode;
+  /** A quieter line under the subtitle, in meta type: what a term met on the page means. */
+  note?: ReactNode;
   /** The page's controls, at the right of the title's line: usually one `Button`. */
   actions?: ReactNode;
   /**
@@ -26,7 +28,7 @@ export interface PageHeaderProps {
  * and the page's actions at the right. On a narrow line the actions drop under the title; on a
  * phone they stay beside it unless `actionsBelowOnPhone` gives them a line of their own.
  */
-export function PageHeader({ title, subtitle, actions, actionsBelowOnPhone = false, hideSubtitleOnPhone = false, titleRef }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, note, actions, actionsBelowOnPhone = false, hideSubtitleOnPhone = false, titleRef }: PageHeaderProps) {
   const modifiers = [actionsBelowOnPhone ? ' cd-page-header--actions-below' : '', hideSubtitleOnPhone ? ' cd-page-header--no-phone-subtitle' : ''].join('');
   return (
     <header className={`cd-page-header${modifiers}`}>
@@ -35,6 +37,7 @@ export function PageHeader({ title, subtitle, actions, actionsBelowOnPhone = fal
           {title}
         </h1>
         {subtitle ? <p className="cd-page-header__subtitle cd-type-body">{subtitle}</p> : null}
+        {note ? <p className="cd-page-header__note cd-type-meta">{note}</p> : null}
       </div>
       {actions ? <div className="cd-page-header__actions">{actions}</div> : null}
     </header>

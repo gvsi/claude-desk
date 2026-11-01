@@ -2699,7 +2699,8 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
     # The last question reads them again, and can't change a limit either.
     reply = await answer(owner, model, interview_id, "Call (510) 555-0142.",
                          carrying(quote_auto_max_cents=1, documents="none"), turn())
-    assert reply.status_code == 200 and reply.json()["step"] == "tools"
+    # Every topic is done: only the test-client offer waits, since the owner typed their own phone.
+    assert reply.status_code == 200 and reply.json()["question"] == "test_client"
     assert "<website" in turn_text(model, -2)
     answers = (await stored(engine, interview_id))["answers"]
     assert limits() == LIMITS
@@ -3058,7 +3059,8 @@ async def test_contact_asks_for_a_missing_owner_name_or_accepts_declining(
     second = await answer(owner, model, interview_id, name or "I'd rather not give a name.",
                           turn(owner_display_name=name or ""))
     assert second.status_code == 200, second.text
-    assert second.json()["step"] == "tools"
+    # Every topic is done: only the test-client offer waits, for the email the owner typed on the first answer.
+    assert second.json()["question"] == "test_client"
     assert f"you: {follow_up}" in turn_text(model)
     assert (await stored(engine, interview_id))["answers"]["owner_display_name"] == name
     assert fake.desks[state["desk_id"]].owner_display_name == (name or "Owner")

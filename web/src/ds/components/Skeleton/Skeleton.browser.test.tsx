@@ -7,9 +7,10 @@
  * checks in WebKit).
  */
 import { composeStory } from '@storybook/react-vite';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { expect, it, onTestFinished } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { page } from 'vitest/browser';
 
 import { motion } from '../../test/reducedMotion.ts';
@@ -173,6 +174,92 @@ it('skeleton_waits_again_when_loading_returns', async () => {
   } finally {
     watch.stop();
   }
+});
+
+it('skeleton_stays_gone_when_its_wait_comes_due_as_the_part_lands', async () => {
+  // A read can land just as the wait comes due. React cleans up the wait's effect after the commit
+  // the part lands in, so the wait's timer can still fire in between: it must not bring the shapes
+  // back over the part, where they would stay, in flow, above it.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+  const root = container();
+  const react = createRoot(root);
+  onTestFinished(() => react.unmount());
+  /** The part, which brings the wait's timer due in the commit it lands in, before effects clean up. */
+  function DueAsItLands() {
+    useLayoutEffect(() => {
+      vi.advanceTimersByTime(SKELETON_DELAY_MS + 50);
+    }, []);
+    return <p>Contacts on record</p>;
+  }
+  const draw = (loading: boolean) =>
+    react.render(
+      <SkeletonScreen loading={loading} status="Loading your customers" skeleton={<Skeleton shape="line" text="section" width={150} />}>
+        <DueAsItLands />
+      </SkeletonScreen>,
+    );
+  flushSync(() => draw(true));
+  // The wait sets its timer a microtask after its effect runs.
+  for (let i = 0; i < 20 && vi.getTimerCount() === 0; i += 1) await frame();
+  expect(vi.getTimerCount()).toBe(1);
+  expect(regionIn(root)?.querySelector<HTMLElement>('.cd-skeleton-screen__layer')?.dataset.state).toBe('waiting');
+
+  // The part lands in an ordinary update, as a read landing makes, whose effects run after its commit.
+  draw(false);
+  for (let i = 0; i < 20 && root.textContent !== 'Contacts on record'; i += 1) await frame();
+  await frame();
+  await frame();
+  expect(root.textContent).toBe('Contacts on record');
+  expect(root.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+});
+
+it('skeleton_stays_gone_when_its_wait_came_due_just_before_the_part_landed', async () => {
+  // The wait comes due while loading, and the part lands right after, from a store read through
+  // useSyncExternalStore (as React Query's reads are), whose render goes ahead of the wait's.
+  // React then replays the wait's update after the render that ended the load: the shapes must
+  // stay gone, not come back over the part.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+  let loading = true;
+  const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+  function Region() {
+    const reading = useSyncExternalStore(subscribe, () => loading);
+    return (
+      <SkeletonScreen loading={reading} status="Loading your customers" skeleton={<Skeleton shape="line" text="section" width={150} />}>
+        <p>Contacts on record</p>
+      </SkeletonScreen>
+    );
+  }
+  const root = container();
+  const react = createRoot(root);
+  onTestFinished(() => react.unmount());
+  flushSync(() => react.render(<Region />));
+  for (let i = 0; i < 20 && vi.getTimerCount() === 0; i += 1) await frame();
+  expect(vi.getTimerCount()).toBe(1);
+
+  // The wait comes due, then, before React renders it, the part lands.
+  vi.advanceTimersByTime(SKELETON_DELAY_MS + 50);
+  loading = false;
+  for (const listener of listeners) listener();
+  for (let i = 0; i < 20 && root.textContent !== 'Contacts on record'; i += 1) await frame();
+  for (let i = 0; i < 5; i += 1) await frame();
+  vi.advanceTimersByTime(SKELETON_DELAY_MS + 50);
+  await frame();
+  await frame();
+  expect(root.textContent).toBe('Contacts on record');
+  expect(root.querySelector('.cd-skeleton-screen__layer')).toBeNull();
 });
 
 it('band_lines_up_across_shapes_in_chromium', async () => {

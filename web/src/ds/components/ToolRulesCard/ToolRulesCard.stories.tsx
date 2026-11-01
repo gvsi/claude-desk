@@ -35,7 +35,7 @@ const meta = {
     label: 'Payment link',
     tool: {
       name: 'Payment link',
-      description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+      description: "Makes a one-time link for a quote. Charges money. Can't be undone.",
       href: '/connectors/payments/payment-link',
     },
     // The rules that govern the tool, most specific first: the agent's shared rule, then the tool's own.
@@ -67,7 +67,7 @@ export const PaymentLinkOnPayments: Story = {
     // The tool's name and line are one link to its page, with a chevron.
     const link = canvas.getByRole('link', { name: /^Payment link/ });
     await expect(link).toHaveAttribute('href', '/connectors/payments/payment-link');
-    await expect(link).toHaveTextContent('Makes a one-time link for a quote. Charges money. Can be undone.');
+    await expect(link).toHaveTextContent("Makes a one-time link for a quote. Charges money. Can't be undone.");
     await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // A row per rule, the shared one first.
     const rows = canvas.getAllByRole('listitem');
@@ -87,7 +87,7 @@ export const PaymentLinkOnPayments: Story = {
 export const WithoutLink: Story = {
   name: 'Without a link',
   args: {
-    tool: { name: 'Payment link', description: 'Makes a one-time link for a quote. Charges money. Can be undone.' },
+    tool: { name: 'Payment link', description: "Makes a one-time link for a quote. Charges money. Can't be undone." },
   },
   parameters: {
     canvasNote:
@@ -99,7 +99,7 @@ export const WithoutLink: Story = {
     await expect(card.querySelectorAll('.cd-tool-rules__chevron')).toHaveLength(0);
     const name = within(card).getByText('Payment link', { selector: '.cd-tool-rules__tool-name' });
     expectComputed(name, { color: 'rgba(250, 249, 245, 0.92)', display: 'block' });
-    await expect(within(card).getByText('Makes a one-time link for a quote. Charges money. Can be undone.')).toBeVisible();
+    await expect(within(card).getByText("Makes a one-time link for a quote. Charges money. Can't be undone.")).toBeVisible();
     // The rules and the fallback as with a link.
     await expect(within(card).getAllByRole('listitem')).toHaveLength(2);
     await expect(within(card).getByText('Anything else here: ask me.')).toBeVisible();
