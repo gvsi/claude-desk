@@ -15,6 +15,7 @@ import type {
   CopyOut,
   DeskSummary,
   HealthOut,
+  KnowledgeRow,
   NeedsYouItem,
   NeedsYouSession,
   OwnerTranscript,
@@ -654,6 +655,31 @@ export function rulesView(desk: DeskRecord): RulesView {
     };
   });
   return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards) };
+}
+
+/**
+ * What the owner told a Desk, oldest first, as the knowledge list returns it: an item the kernel
+ * forces owner-only with its title and text withheld.
+ */
+export function knowledgeList(world: MockWorld, deskId: string): KnowledgeRow[] {
+  return [...world.knowledge.values()]
+    .filter((stored) => stored.deskId === deskId)
+    .sort((a, b) => {
+      if (a.createdAt !== b.createdAt) {
+        if (a.createdAt === null) return -1;
+        if (b.createdAt === null) return 1;
+        return a.createdAt - b.createdAt;
+      }
+      return a.item.item_id < b.item.item_id ? -1 : a.item.item_id > b.item.item_id ? 1 : 0;
+    })
+    .map(({ item, createdAt, forced }) => ({
+      item_id: item.item_id,
+      title: forced ? null : item.title,
+      text: forced ? null : item.text,
+      readers: [...(item.label.readers ?? ['owner'])],
+      source: item.source,
+      created_at: createdAt === null ? null : isoTime(createdAt),
+    }));
 }
 
 /** The business's people on record (Dana and Bob, as the seed has them) and the Desk's leads, oldest first. */

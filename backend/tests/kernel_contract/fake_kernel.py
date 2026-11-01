@@ -126,7 +126,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -197,6 +197,7 @@ from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
+    ContextClock,
     CreateCopyRequest,
     CreateDeskRequest,
     CreateSessionRequest,
@@ -2162,7 +2163,15 @@ class FakeKernelState:
                                           request.query_params.get("desk_id"))
         declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
+        try:
+            local = self.now.astimezone(ZoneInfo(desk.timezone))
+        except ZoneInfoNotFoundError:
+            raise Refusal(500, "internal") from None
         return SessionContext(
+            clock=ContextClock(as_of_utc=signed_time(self.now), local_now=local.isoformat(timespec="minutes"),
+                               local_date=local.date().isoformat(),
+                               weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                               timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
             facts=[fact for fact in facts if self._readable(session, fact)],
@@ -2743,13 +2752,14 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
+        approved = None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
             # the re-check at execution (step 6): the rules in force no longer let the owner approve it
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
                              approval_id=approval_id, reason="rules changed")
         elif body.answer in ("allow_once", "allow_person"):
-            self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
+            approved = self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
             if body.answer == "allow_person":
                 name = next(person.display_name for person in desk.people.values()
@@ -2764,7 +2774,7 @@ class FakeKernelState:
                 who = {"who": "person", "person_id": session.person_id} if session.person_id else {"who": "anyone"}
                 card_diff = [RuleCard(card_id=f"never-{session.person_id or 'anyone'}-{action.tool}",
                                       applies_to=action.tool, mode="never", reason="You said never for this.", **who)]
-        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
+        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff, approved=approved)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
         """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's

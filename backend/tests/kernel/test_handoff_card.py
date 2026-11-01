@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 from desk.contracts import DemoInboxEntry, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
-from desk.db.models import Fact, Handoff, LedgerEntry
+from desk.db.models import Document, Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
@@ -627,3 +627,79 @@ async def test_a_first_attempt_no_rewrite_can_fix_shows_the_handoff_where_none_o
     assert "unsupported_language" in {violation.kind for violation in verdict.violations}
     assert_handed_off(verdict)
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == before   # no second one
+
+
+# ---- The owner handling the conversation closes the card's handoff (the owner's decision of 2026-10-31) --
+
+def closing_summaries(entries: list[LedgerEntry]) -> list[dict]:
+    """The `desk_data` entries that close a handoff, in order, as ledgered."""
+    return [entry.event.summary for entry in entries if entry.event.kind == "desk_data"
+            and entry.event.summary.get("part") == "handoffs" and "kind" not in entry.event.summary]
+
+
+async def card_handoff(app: FastAPI, client, copy: Rivera, visitor: Visitor) -> Handoff:
+    """The session's card handoff, opened by a blocked final check."""
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    [handoff] = await handoffs_of(app, copy)
+    assert (handoff.kind, handoff.status) == ("card", "open")
+    return handoff
+
+
+async def test_taking_the_conversation_over_closes_the_cards_handoff(app, client):
+    """The owner taking the conversation over is the owner handling it: the card's handoff closes
+    with the take-over, ledgered as closed by it, so Needs you stops listing it. Handing back
+    closes nothing more."""
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    await set_mode(client, copy, visitor.session_id, "owner", 0)
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "done")]
+    assert api_rows(copy.copy_id, "SELECT handoff_id, status FROM kernel_ro.handoffs") == [(card.handoff_id, "done")]
+    entries = await ledger_rows(app, copy)
+    assert closing_summaries(entries) == [{"part": "handoffs", "refs": [card.handoff_id], "closed_by": "takeover"}]
+    await set_mode(client, copy, visitor.session_id, "ai", 1)
+    assert closing_summaries(await ledger_rows(app, copy)) == closing_summaries(entries)
+
+
+async def test_the_owners_first_message_closes_the_cards_handoff(app, client):
+    """The owner saying something in the conversation is the owner handling it: the card's handoff
+    closes with the message, ledgered as closed by it. A whisper to Claude, which the visitor
+    never sees, closes nothing."""
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    await sent(client, copy, visitor.session_id, "Let me look at that for you.", kind="whisper")
+    assert [row.status for row in await handoffs_of(app, copy)] == ["open"]
+    said = await sent(client, copy, visitor.session_id, "Hi, this is Maria. I can help with that.")
+    assert said.verdict is not None and said.verdict.ok
+    assert [row.status for row in await handoffs_of(app, copy)] == ["done"]
+    assert closing_summaries(await ledger_rows(app, copy)) == [
+        {"part": "handoffs", "refs": [card.handoff_id], "closed_by": "owner_message"}]
+    # the next message closes nothing more
+    await sent(client, copy, visitor.session_id, "What day suits you?")
+    assert len(closing_summaries(await ledger_rows(app, copy))) == 1
+
+
+async def test_an_owner_message_the_check_blocks_closes_nothing(app, client):
+    """A message the check blocks for a document canary never reaches the visitor, so the owner
+    hasn't handled the conversation yet: the card's handoff stays open."""
+    copy, visitor = await visitor_of(app, client)
+    await card_handoff(app, client, copy, visitor)
+    [canary, *_] = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
+    blocked = await sent(client, copy, visitor.session_id, f"Your invoice reference is {canary}.")
+    assert blocked.verdict is not None and not blocked.verdict.ok
+    assert [row.status for row in await handoffs_of(app, copy)] == ["open"]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+@pytest.mark.parametrize("how", ["takeover", "owner_message"])
+async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, client, how):
+    """A call-back promises the visitor a call, which taking over or replying in the chat doesn't
+    keep, so it stays open until the owner marks it done."""
+    copy, visitor = await visitor_of(app, client)
+    requested = (await callback(client, visitor)).model_view["handoff_id"]
+    if how == "takeover":
+        await set_mode(client, copy, visitor.session_id, "owner", 0)
+    else:
+        await sent(client, copy, visitor.session_id, "Hi, this is Maria.")
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
+        (requested, "callback", "open")]
+    assert closing_summaries(await ledger_rows(app, copy)) == []

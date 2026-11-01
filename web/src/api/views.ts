@@ -631,6 +631,8 @@ export interface KnowledgeBody {
   item: KnowledgeItem;
 }
 
+export type { KnowledgeRow } from './openapi.gen.ts';
+
 export interface TextBody {
   text: string;
 }
