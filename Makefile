@@ -293,7 +293,7 @@ evals-soft-promise:
 
 # Select candidate arms new and sonnet, or diagnostic steps_only; unchanged old evidence is reused.
 # SAMPLES accepts a common count or per-arm counts, e.g. new:5,steps_only:5,sonnet:2.
-# All measured arms share MAX_USD and the durable $1.70 cap in the ledger named by baseline SHA.
+# All measured arms share MAX_USD and the durable $3.20 cap in the ledger named by baseline SHA.
 .PHONY: evals-soft-promise-experiment
 CASES ?= evals/calibration/soft_promise.yaml
 ARMS ?= new,steps_only

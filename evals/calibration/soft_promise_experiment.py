@@ -1,7 +1,7 @@
 """One budgeted soft-promise experiment with Haiku and Sonnet candidates and a steps-only diagnostic.
 
 MAX_USD is the remaining allowance for this invocation. A canonical ledger per baseline
-retains cumulative spend regardless of --output and enforces the experiment's $1.70 cap.
+retains cumulative spend regardless of --output and enforces the experiment's $3.20 cap.
 --samples accepts a common count or per-arm counts such as new:5,steps_only:5,sonnet:2.
 The Sonnet estimate scales Haiku's $0.0005 allowance by list prices ($0.0100 per check).
 Actual spend uses returned usage, including thinking within output_tokens. Timeouts block.
@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from evals.calibration import soft_promise as sp
 
-TOTAL_USD = 1.70
+TOTAL_USD = 3.20      # the owner's cap for the whole experiment, raised from $1.70 on 2026-10-31 for the Sonnet arm
 ARM_NAMES = {"old", "new", "sonnet", "steps_only"}
 SYMPATHY_SENTENCE = (
     "Sympathy, and general advice any professional in this trade would give that commits the business "
