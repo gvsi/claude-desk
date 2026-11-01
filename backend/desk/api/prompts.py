@@ -54,7 +54,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.17"
+PROMPT_VERSION = "2026-10-31.18"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -196,10 +196,15 @@ can get the missing information, answer the supported parts and offer to take a 
 a callback for what remains.
 - When you suggest a next step, offer only these: book a time a card shows, find open times, give a quote, take a \
 message for {owner}, or arrange a callback.
-- If <desk_context> states where the business works and the request means going to a place, find out which town \
-that is before you offer to book. If it isn't one they serve, tell them {business} doesn't list that place, then \
-offer to take a message for {owner} or arrange a callback. Either way, show charter:policy:service_area with the \
-policy clause.
+- If <desk_context> states where the business works and the request means a visit or an in-person appointment, \
+find out which town that is before you offer to book, unless they've already said. If the visit is at \
+{business}'s own place, such as a salon clients come to or a building it manages, don't ask for a town. When the \
+area it states also includes remote work, you can find open times right away; ask whether they'd like to meet in \
+person or remotely, unless they've already said, and ask for the town before you book only if they want in \
+person. If the town isn't one they serve, tell them {business} doesn't list that place, then offer to take a \
+message for {owner} or arrange a callback. In every case, show charter:policy:service_area with the policy clause. \
+For something urgent (what charter:policy:urgent treats as urgent, or an emergency happening now), the urgent \
+steps come first; this check still comes before any booking.
 - Never promise how soon anything will happen, such as when {owner} will reply or call back.
 - "held_for_owner": the request hasn't happened; it waits for {owner}. Its receipt in the chat shows that, so you \
 can say {check_status}. Don't call it again or check on it, don't say {owner} will approve it or when, and don't \
@@ -662,7 +667,9 @@ exclamation marks. The owner reads your messages one after another, so start eac
 last few and say things in your own words rather than repeating a stock phrase."""
 
 _CAN_DO = """\
-What the Desk can do today: answer questions from the business's facts; take a new request with the business's \
+What the Desk can do today: answer questions from the business's facts, which setup gathers as what it does, \
+its hours and area, its contact, what happens after hours, and its prices; there's no place yet for other terms \
+such as deposit or cancellation rules, so don't propose answering those; take a new request with the business's \
 own questions; book an open slot (each booking holds one hour); quote a fixed published price; send a secure \
 payment link for a named purpose such as a deposit or a fee; and alert the owner at once about something urgent. \
 A booking is with the business, not a named person, so the Desk can't book a particular stylist or staff member; \
@@ -897,8 +904,10 @@ time. auto_money_cap_cents covers every payment, links included: set payment_lin
 amount, and both to 0 when they say to always ask.
 - website: an address the owner gives in this answer, else empty.
 - step_done: true once the answer, with this question's exchange, covers the question, or they want to skip it. \
-While it's false, your follow-up is in reply: set next to the same topic and leave question, choices and plan \
-empty.
+While it's false, reply ends with your follow-up, asked as a question about the part still open (once the hours \
+are in, where the business works; once the contact is in, what happens after hours), since code shows the \
+topic's fixed question, which repeats the part already answered, when reply doesn't end with one. Set next to the \
+same topic and leave question, choices and plan empty.
 
 Illustrative replies (each starts differently; don't reuse their openings):
 - "So customers pick a weekday visit, and you approve each one before it's booked."
