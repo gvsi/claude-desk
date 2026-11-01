@@ -43,7 +43,8 @@ What the model sees (Plan 02a, "Transcript contract"):
 Model-visible kinds and their wrappers (prompts.py's `ROW_TAGS`): `visitor_text` <visitor_message>, `agent_text`
 <agent_message>, `owner_say` <owner_said_to_visitor>, `whisper` <owner_whisper> (an untrusted owner note in the user
 turn, never system text), `action_update` <action_update decision_id state>, `desk_context` <desk_context>, `note`
-<note>, and a `delivered` row whose author is the Desk <shown_to_visitor>. Claude's own delivered replies are replayed
+<note> (its `ref_id` may be `business_local_time:{timezone}|{local_now}`), and a `delivered` row whose author is the
+Desk <shown_to_visitor>. Claude's own delivered replies are replayed
 through its `send_reply` calls; an owner's say reaches the model through its `owner_say` row. `status`, `triage` and
 `annotation` rows are never model-visible, and neither are `owner_joined` and `owner_left` (Plan 02b): each keeps a
 take-over or a hand-back in the transcript, holding the event the visitor's stream got (`event_seq`), while Claude
@@ -59,7 +60,7 @@ import json
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import ConfigDict, ValidationError
@@ -73,6 +74,8 @@ from desk.api.prompts import (
     SEND_REPLY_TOOL,
     SHOWN_LABELS,
     SUMMARY_LABELS,
+    TIME_NOTE,
+    WEEKDAYS,
     Triage,
     conversation_so_far,
     result_line,
@@ -83,6 +86,7 @@ from desk.api.prompts import (
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
 from desk.db.models import Message, RunEvent
+from desk.kernel_api import ContextClock
 
 MESSAGES = Message.__table__
 RUN_EVENTS = RunEvent.__table__
@@ -386,6 +390,34 @@ async def append_note_once(conn: AsyncConnection, ids: Ids, text: str, *, wake: 
     return await append_message(conn, ids, "note", text=text, wake=wake)
 
 
+TIME_NOTE_REF = "business_local_time:"
+
+
+async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock) -> int | None:
+    """Keep the kernel's business time in a model-only note; its ref_id retains the zone and offset-aware local_now.
+
+    Read and write under the events lock, so a concurrent refresh can't append the same note twice."""
+    local = datetime.fromisoformat(clock.local_now)
+    await lock_events(conn, ids.session_id)
+    previous = (await conn.execute(select(MESSAGES.c.ref_id).where(
+        MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "note",
+        MESSAGES.c.ref_id.startswith(TIME_NOTE_REF, autoescape=True)).order_by(MESSAGES.c.n.desc()).limit(1)
+    )).scalar_one_or_none()
+    if previous is not None:
+        zone, separator, timestamp = previous.removeprefix(TIME_NOTE_REF).partition("|")
+        # Older markers have no zone: replace them on the next turn.
+        if separator and zone == clock.timezone:
+            last = datetime.fromisoformat(timestamp)
+            elapsed = local.astimezone(UTC) - last.astimezone(UTC)
+            if local.date() == last.date() and timedelta(0) <= elapsed < timedelta(minutes=10):
+                return None
+    offset = local.strftime("%z")
+    return await append_message(conn, ids, "note", ref_id=f"{TIME_NOTE_REF}{clock.timezone}|{clock.local_now}",
+                                text=TIME_NOTE.format(weekday=WEEKDAYS[clock.weekday], date=local.date().isoformat(),
+                                                      time=local.strftime("%H:%M"), timezone=clock.timezone,
+                                                      offset=f"UTC{offset[:3]}:{offset[3:5]}"))
+
+
 async def append_tool_change(conn: AsyncConnection, ids: Ids, change: str, tool_name: str) -> int:
     """A change to the session's tools (`tool_addition` or `tool_removal` of a declared tool, by its API name),
     sent at the next model call in a `role: "system"` message after the user turn. The context's declared
@@ -494,20 +526,22 @@ def _result_text(block: dict) -> str:
 
 
 async def _state_notes(conn: AsyncConnection, session_id: str) -> list[Any]:
-    """The latest note of each `STATE_NOTES` group, when the model has been sent it; one still waiting follows the
-    summary in full, and an older one is overtaken by it."""
+    """The latest note of each `STATE_NOTES` group and the latest business time, when the model has been sent it;
+    one still waiting follows the summary in full, and an older one is overtaken by it."""
     rows = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
-                                      MESSAGES.c.blocks, MESSAGES.c.model_seq).where(
+                                      MESSAGES.c.blocks, MESSAGES.c.model_seq, MESSAGES.c.ref_id).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note",
-        MESSAGES.c.text.in_([text for group in STATE_NOTES for text in group])).order_by(MESSAGES.c.n))).all()
+        or_(MESSAGES.c.text.in_([text for group in STATE_NOTES for text in group]),
+            MESSAGES.c.ref_id.startswith(TIME_NOTE_REF, autoescape=True))).order_by(MESSAGES.c.n))).all()
     latest = [next((row for row in reversed(rows) if row.text in group), None) for group in STATE_NOTES]
+    latest.append(next((row for row in reversed(rows) if (row.ref_id or "").startswith(TIME_NOTE_REF)), None))
     return [row for row in latest if row is not None and row.model_seq is not None]
 
 
 async def _summary(conn: AsyncConnection, session_id: str, unread: UnreadResults | None) -> str:
     """The conversation so far, by code: texts, delivered blocks (says included), action updates and the latest
-    state notes (`STATE_NOTES`; whispers never), each on one labelled, escaped line, and, where they were written,
-    the results Claude hadn't read (`unread`), one line each, labelled by tool: the context they were written in is
+    state notes (including business time; whispers never), each on one labelled, escaped line, and, where they were
+    written, the results Claude hadn't read (`unread`), one line each, labelled by tool: the context they were written in is
     closing, and Claude must not lose what its calls did. Rows still waiting for the model are left out; they follow
     it in full. Recorded history is never in it."""
     rows = await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
