@@ -45,7 +45,7 @@ function FailedDecision({ disabled, onRetry }: Pick<ProposalCardProps, 'disabled
 
 function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, onDecision }: ProposalCardProps) {
   const connector = proposal.connector!;
-  const connected = connector.connected === true;
+  const connected = proposal.state === 'accepted' && connector.connected === true;
   const view = { id: connector.app, name: connector.label, icon: connector.app as ConnectorIconName, description: '', source: { kind: 'external' as const, mock: true as const } };
   const decide = (action: CardAction) => {
     if (disabled || !live || !connector.connectable || proposal.state !== 'proposed') return;
@@ -56,7 +56,7 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
       <div className="cd-setup-c3__head">
         <ConnectorIcon icon={view.icon} size="section" {...(connector.app === 'stripe' || connector.app === 'google_calendar' ? {} : { glyph: 'connectors' as const })} />
         <div className="cd-setup-c3__titles">
-          <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable && proposal.state === 'proposed' ? <Pill>{copy.later}</Pill> : null}</h3>
+          <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable ? <Pill>{copy.later}</Pill> : null}</h3>
           {!connector.connectable || proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
         </div>
         {connected || proposal.state === 'declined' ? <DecisionLine accepted={connected} connector /> : null}

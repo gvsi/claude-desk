@@ -3039,6 +3039,17 @@ describe('consultant setup', () => {
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
   });
 
+  it.each(['proposed', 'declined'] as const)('does_not_show_a_connected_status_on_a_%s_connector', async (decision) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.state = decision;
+    proposal.connector!.connected = true;
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => {}} />);
+    expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-setup-c3__decision--accepted')).toBeNull();
+    if (decision === 'declined') await expect.element(screen.getByText('Not now', { exact: true })).toBeVisible();
+  });
+
   it.each([false, undefined] as const)('collapses_an_accepted_app_without_a_connected_status_when_connected_is_%s', async (connected) => {
     const state = await consultantAt('google_calendar');
     const proposal = structuredClone(state.messages.at(-1)!.card!);
@@ -3093,8 +3104,7 @@ describe('consultant setup', () => {
     proposal.connector!.connectable = false;
     proposal.state = decision;
     const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('unavailable app must not decide'); }} />);
-    if (decision === 'proposed') await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
-    else expect(screen.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(proposal.connector!.why, { exact: true })).toBeVisible();
     expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
