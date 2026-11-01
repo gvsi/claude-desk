@@ -3,6 +3,7 @@
  * stranger sees it, with the kernel's checked replies, the receipts under each message, a held
  * request they can cancel, the open status in the header and what happens when things fail.
  */
+import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -2644,6 +2645,110 @@ describe('public chat page', () => {
     // Each load reads the chat first; only the first, which had none, asked for a preview.
     const opening = mockStore.requests.filter((r) => ['visitorSession', 'openPreview', 'openSession'].includes(r.key)).map((r) => r.key);
     expect(opening).toEqual(['visitorSession', 'openPreview', 'visitorSession', 'visitorSession']);
+  });
+
+  it.each(['desktop', 'phone'] as const)('preview_bar_takes_the_owner_back_on_%s', async (viewport) => {
+    // The owner's own preview, from "Chat as a customer": a slim bar over the brand header says what
+    // the page is, the short line on a phone, and takes them back to the Desk's Today.
+    const { screen, router } = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`, { viewport });
+    await ready(screen);
+    const bar = screen.getByRole('region', { name: 'Owner preview', exact: true });
+    await expect.element(bar).toBeVisible();
+    const line = viewport === 'desktop' ? 'Your public page, as customers see it' : 'Your public page';
+    expect(bar.element().querySelector('p')?.innerText).toBe(line);
+    const back = bar.getByRole('link', { name: 'Back to your Desk', exact: true });
+    await expect.element(back).toHaveAttribute('href', `/app/${RIVERA.deskId}/today`);
+    // Above the brand header, inside the window's height: the page still doesn't scroll.
+    const header = document.querySelector('.cd-public-shell__brand') as HTMLElement;
+    expect(bar.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().top);
+    await expectScreenBasics(screen.container, { owner: false });
+    expectNoHorizontalScroll();
+    expectNoWindowScroll();
+
+    await back.click();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/today`));
+  });
+
+  it('preview_bar_never_shows_to_a_visitor', async () => {
+    const bar = () => document.querySelector('[aria-label="Owner preview"]');
+    // The public page without `?preview=`, even in the owner's own browser: no bar, and the page
+    // never asks for the owner's reads.
+    const plain = await renderRoute(PAGE);
+    await ready(plain.screen);
+    expect(bar()).toBeNull();
+    expect(requests('me')).toEqual([]);
+
+    // `?preview=` naming no Desk of the owner's: no bar.
+    const other = await renderRoute(`${PAGE}?preview=desk-of-someone-else`);
+    await ready(other.screen);
+    await vi.waitFor(() => expect(requests('me')).toHaveLength(1));
+    expect(bar()).toBeNull();
+
+    // Anyone can add `?preview=`: without the owner's session the read fails, and there's no bar.
+    mockStore.reset('rivera', { signedIn: false });
+    const stranger = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`);
+    await ready(stranger.screen);
+    await vi.waitFor(() => expect(requests('me')).toHaveLength(1));
+    await sleep(100);
+    expect(bar()).toBeNull();
+  });
+
+  it('preview_bar_needs_this_pages_own_read', async () => {
+    // The bar showed, and the owner's session has since ended: the read kept from before doesn't
+    // count, so the next preview this app opens has no bar.
+    const preview = `${PAGE}?preview=${RIVERA.deskId}`;
+    const { screen, router } = await renderRoute(preview);
+    await ready(screen);
+    await expect.element(screen.getByRole('region', { name: 'Owner preview', exact: true })).toBeVisible();
+    let refused = 0;
+    worker.use(
+      http.get('/api/owner/me', () => {
+        refused += 1;
+        return HttpResponse.json({ error: 'unauthorized' }, { status: 401 });
+      }),
+    );
+    await router.navigate(`${PAGE}/agents`);
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Owner preview"]')).toBeNull());
+    await router.navigate(preview);
+    await ready(screen);
+    await vi.waitFor(() => expect(refused).toBe(1));
+    await sleep(100);
+    expect(document.querySelector('[aria-label="Owner preview"]')).toBeNull();
+  });
+
+  it('preview_try_link_keeps_its_idea_while_the_bar_is_read', async () => {
+    // Today's "Try to break it" opens the owner's preview with an idea. The owner's read answers
+    // only after the chat is ready: the page waits for it, and the idea is still typed in.
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    let held = false;
+    worker.use(
+      http.get('/api/owner/me', async () => {
+        held = true;
+        await gate;
+        return undefined;
+      }),
+    );
+    const { screen } = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}&try=${handOff()}`);
+    await vi.waitFor(() => expect(held).toBe(true));
+    await vi.waitFor(() => expect(requests('openPreview')).toHaveLength(1));
+    await sleep(300);
+    release();
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    await expect.element(screen.getByRole('region', { name: 'Owner preview', exact: true })).toBeVisible();
+  });
+
+  it('preview_bar_read_goes_out_offline', async () => {
+    // The browser says it's offline: the owner's read still goes out, and its answer, or its
+    // failure, settles it, so the page never waits on a read that was never sent.
+    onlineManager.setOnline(false);
+    onTestFinished(() => onlineManager.setOnline(true));
+    const { screen } = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`);
+    await ready(screen);
+    await expect.element(screen.getByRole('region', { name: 'Owner preview', exact: true })).toBeVisible();
   });
 
   it('break_it_link_types_its_idea', async () => {
