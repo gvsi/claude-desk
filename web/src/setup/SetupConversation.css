@@ -50,8 +50,11 @@
   line-height: 25px;
 }
 
-.cd-setup-q3__question > p { margin: 0; }
-.cd-setup-q3__question > p + p { margin-top: var(--space-12); }
+/* Claude's question as Markdown keeps the dock's own type, its paragraphs 12 px apart and its line
+   breaks folded, as before it was Markdown. */
+.cd-setup-q3__question > .cd-md { font-size: inherit; line-height: inherit; }
+.cd-setup-q3__question > .cd-md > p { white-space: normal; }
+.cd-setup-q3__question > .cd-md > p + p { margin-top: var(--space-12); }
 
 .cd-setup-q3__list {
   display: flex;

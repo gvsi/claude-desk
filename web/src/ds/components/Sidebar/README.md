@@ -1,6 +1,6 @@
 # Sidebar
 
-`Sidebar` is the owner app's navigation: the Claude Desk lockup, the business and Desk switchers, the pages in a fixed order, an optional "About this prototype" group, the Answering switch and the owner.
+`Sidebar` is the owner app's navigation: the Claude Desk lockup, the business and Desk switchers, the pages in a fixed order, an optional "About this prototype" group, the Claude acts for you switch and the owner.
 
 ## When to use
 
@@ -15,14 +15,14 @@
 - The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Connectors, Safety, Share, Settings. Each row is `size-nav-row` tall, `space-2` apart, with a 20 px line icon named for its page (Connectors' is a plug). The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
 - Connectors only when the app has that page: without `hrefs.connectors` there is no Connectors row, and Safety follows Rules one row down, with no gap; nothing else moves. With it, there are eight rows.
 - Counts only on Conversations and Safety, as `CountPill`s read by their `label` ("2 need you", "2 blocked"). Safety's `attention` adds a held dot beside its count.
-- With `about`, the "About this prototype" group, just above the Answering block behind its own hairline (14 px above its title):
+- With `about`, the "About this prototype" group, just above the Claude acts for you block behind its own hairline (14 px above its title):
   - the title in `caption` type and `text-secondary`, which also names the group's navigation ("About this prototype");
   - one row per link, laid out like the nav's rows, with the 20 px `document` icon;
   - the link marked `current` is `aria-current="page"` on `bg-selected`, and then the main nav marks no row, so one page is current;
-  - in the keyboard order, after the main nav and before Answering. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
+  - in the keyboard order, after the main nav and before Claude acts for you. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
   Without `about`, nothing is drawn and nothing else moves: the foot stays at the bottom.
-- When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the lockup, the business row and the Desk picker) and the pinned foot, so the Answering switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
-- At the foot, above a hairline: the "Answering" `Switch` with its line, "Claude answers under your rules" unless the Desk passes its own (`answeringDescription`), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
+- When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the lockup, the business row and the Desk picker) and the pinned foot, so the Claude acts for you switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
+- At the foot, above a hairline: the "Claude acts for you" `Switch` with "Within your rules" while on and "Taking messages only" while off, then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
 ## What the consumer provides
 
@@ -30,8 +30,8 @@
 - `current` and `hrefs`, one per `NavKey`, where `connectors` may be left out until the app has a Connectors page; `linkComponent` when the app has a router link (it gets `href`, `className`, `aria-current` and `children`, like `<a>`).
 - `peopleLabel`, the business's word for the people it serves ("Customers", "Clients").
 - `counts`, each `{ n, label }`, with the number in the label's words.
-- `answering` and `onAnsweringChange`. The switch shows whatever `answering` the screen passes back, so a failed change can revert it.
-- `answeringDescription`, only where a Desk answers someone other than the public or under someone else's rules, as the vision boards draw it: "Claude answers your team under your rules" on a team Desk (N-R2-Vision-TeamDesk). Left out, the owner app's line.
+- `answering` and `onAnsweringChange`. The owner layout asks for confirmation in a `Dialog` before sending the save, for this switch and Settings' switch. Cancelling leaves the setting alone. The switch shows whatever `answering` the screen passes back, so a failed change can revert it.
+- `answeringDescription`, an optional replacement for the line while on. All current Desks use "Within your rules". Off always says "Taking messages only".
 - `about`, for the prototype's own documents: the group's `title` and its `links`, each `{ id, label, href, current? }`. The words are the screen's.
 
 ## Props
@@ -49,7 +49,7 @@
 | `counts` | `{ conversations?: NavCount; safety?: NavCount & { attention?: boolean } }` | `NavCount` is `{ n: number; label: string }`. |
 | `answering` | `boolean` | Required. |
 | `onAnsweringChange` | `(answering: boolean) => void` | Required. |
-| `answeringDescription` | `string` | The switch's line. "Claude answers under your rules" by default. |
+| `answeringDescription` | `string` | The line while on. "Within your rules" by default. |
 | `owner` | `{ name: string; status: string }` | Required. |
 | `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. The about links use it too. |
 | `about` | `SidebarAbout` | `{ title: string; links: { id: string; label: string; href: string; current?: boolean }[] }`. Left out, no group. |

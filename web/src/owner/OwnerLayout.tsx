@@ -39,6 +39,7 @@ import {
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
+import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
@@ -63,8 +64,8 @@ export interface OwnerDeskContext {
   business: BusinessOut;
   desk: DeskSummary;
   /**
-   * Turns Answering on or off for this Desk: the sidebar's switch, which any other Answering switch
-   * calls too, so they always agree, with its quick change and its lines when a change didn't save.
+   * Asks before changing whether Claude acts for this Desk. The Sidebar and Settings call the
+   * same confirmation, save and notices, so their switches always agree.
    */
   setAnswering: (on: boolean) => void;
   /**
@@ -157,8 +158,6 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
     </Link>
   );
 }
-
-const onOff = (on: boolean) => (on ? 'on' : 'off');
 
 /**
  * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
@@ -310,6 +309,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const reachPlace = useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [answeringChange, setAnsweringChange] = useState<boolean | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The Desk the owner is on is the one to come back to.
@@ -336,20 +336,20 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       }
       if (!isUncertain(err)) {
         putBack();
-        setNotice(`That didn't save, so Answering is still ${onOff(was)}.`);
+        setNotice(answeringSaveFailed(was));
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
       const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
       if (read === null) {
         // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
-        setNotice(`We couldn't confirm that Answering is now ${onOff(on)}. Reload to see where it stands.`);
+        setNotice(answeringSaveUnconfirmed(on));
         void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
         return;
       }
       // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
       const now = findDesk(read, deskId)?.desk.answering;
-      if (now !== undefined && now !== on) setNotice(`That didn't save, so Answering is still ${onOff(now)}.`);
+      if (now !== undefined && now !== on) setNotice(answeringSaveFailed(now));
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DESKS_KEY }),
   });
@@ -403,7 +403,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   // What every page under this Desk gets (`useOwnerDesk`), built here only. It stays the same object
   // until the business or the Desk changes, so the pages don't draw again on each of the frame's reads.
   const { mutate: answer } = answering;
-  const setAnswering = useCallback((on: boolean) => answer(on), [answer]);
+  const setAnswering = useCallback((on: boolean) => setAnsweringChange(on), []);
   const holdDesk = useCallback((on: boolean) => onHold(on ? { business, desk } : null), [onHold, business, desk]);
   const deskContext = useMemo<OwnerDeskContext>(
     () => ({ business, desk, setAnswering, holdDesk, reachPlace }),
@@ -451,6 +451,16 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </footer>
         )}
       </div>
+      {answeringChange !== null ? (
+        <Dialog
+          {...ANSWERING_CONFIRM_COPY[answeringChange ? 'on' : 'off']}
+          onConfirm={() => {
+            setAnsweringChange(null);
+            answer(answeringChange);
+          }}
+          onCancel={() => setAnsweringChange(null)}
+        />
+      ) : null}
       {confirming ? (
         <Dialog
           title="Start over with a fresh copy?"

@@ -685,6 +685,34 @@ describe('design system source guards', () => {
     ]);
   });
 
+  it('plain_prose_only_on_the_vision_pages', () => {
+    // Claude's prose renders as Markdown on every chat. The Vision pages aren't chats and show their
+    // words as written, so only ClaudeMessage, the vision boards' page parts and the vision pages may
+    // name `plainProse`.
+    const named = (text: string) => matches(/\bplainProse\b/)(withoutComments(text));
+    expect(named('<ClaudeMessage plainProse blocks={blocks} />')).toEqual(['plainProse']);
+    expect(named('// plainProse in a comment\nconst plainProsey = 1;')).toEqual([]);
+    const allowed = (file: string) => file.startsWith('ds/components/ClaudeMessage/') || file === 'ds/boards/vision.tsx' || file.startsWith('vision/');
+    const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    // Every vision page with Claude's words passes it, so the check can't pass by finding nothing.
+    expect(files.filter(({ file, text }) => file.startsWith('vision/') && named(text).length > 0).map(({ file }) => file)).toEqual([
+      'vision/CityOfficePage.tsx',
+      'vision/ClaudeAccountPage.tsx',
+      'vision/PhonePage.tsx',
+      'vision/VisionFrame.tsx',
+    ]);
+    // And every ClaudeMessage they draw passes it, however its props are laid out across lines.
+    const withoutPlainProse = (text: string) =>
+      matches(/<ClaudeMessage\b[\s\S]*?\/>/)(withoutComments(text)).filter((tag) => !/\bplainProse\b/.test(tag));
+    expect(withoutPlainProse('<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>\n<ClaudeMessage\n  plainProse\n  blocks={blocks}\n/>')).toEqual([
+      '<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>',
+    ]);
+    const visionTags = files.filter(({ file }) => file.startsWith('vision/') || file === 'ds/boards/vision.tsx');
+    expect(visionTags.flatMap(({ file, text }) => withoutPlainProse(text).map((tag) => `${file}: ${tag}`))).toEqual([]);
+    expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
+  });
+
   // Importing the index transforms every component on first use. When the whole suite runs, the
   // browser projects compete for the same CPU, so this import gets more than the default 5 s.
   it('index_exports_every_component', { timeout: 60_000 }, async () => {

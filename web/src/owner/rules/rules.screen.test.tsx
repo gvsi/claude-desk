@@ -641,6 +641,26 @@ describe('rules page', () => {
     expect(log.getByText("I couldn't draft that just now. Try again.", { exact: true }).elements()).toHaveLength(0);
   });
 
+  it('an_answer_in_markdown_shows_bold_and_a_list', async () => {
+    // Claude's answer in Ask Claude, in Markdown: bold as bold and the list as a list.
+    const items = ['Quotes wait until Monday morning', 'Bookings for the weekend still go through'];
+    const answer = `Here is how that would work. **Two things** change:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    mockStore.inject({ route: 'ruleChat', status: 200, body: { answer, draft: null } });
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('What if I stop quoting on weekends?');
+    await userEvent.keyboard('{Enter}');
+    const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
+    // The answer streams in as Markdown; its final form is checked once it has replaced the growing one.
+    await expect.element(log.getByText(items[1] ?? '', { exact: true })).toBeVisible();
+    await expect.poll(() => log.element().querySelector('.cd-rule-chat__growing')).toBeNull();
+    const bold = log.getByText('Two things', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect([...message.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
   it('rules_cannot_be_checked_on_rule_chat', async () => {
     mockStore.inject({ route: 'ruleChat', status: 409, body: { error: 'rules_cannot_be_checked' } });
     const { screen } = await renderRoute(`${DESK}/rules`);

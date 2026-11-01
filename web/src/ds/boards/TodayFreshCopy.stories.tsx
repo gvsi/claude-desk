@@ -83,7 +83,7 @@ export const Board: Story = {
       canvas.getByRole('button', { name: 'Start over' }),
       within(sidebar).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
-      within(sidebar).getByRole('switch', { name: 'Answering' }),
+      within(sidebar).getByRole('switch', { name: 'Claude acts for you' }),
       canvas.getByRole('button', { name: 'Copy your Desk link' }),
       canvas.getByRole('button', { name: 'Hide this list' }),
       canvas.getByRole('button', { name: 'Start a Desk' }),

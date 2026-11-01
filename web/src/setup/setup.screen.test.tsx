@@ -2446,8 +2446,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
-    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Acting for you now" shows.
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -2473,7 +2473,7 @@ describe('setup', () => {
     await screen.getByRole('link', { name: 'Go to Today' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     // Today's Answering reads on at once: going live refreshed the Desks the page had read.
-    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
     // And the Desk is live, so Today no longer leads back into setup.
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
@@ -2579,7 +2579,7 @@ describe('setup', () => {
     await expect.element(live).toHaveAttribute('aria-current', 'step');
     await expect.element(live).not.toHaveTextContent('done');
     expect(stepCircle(live.element()).textContent).toBe('5');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
@@ -2600,11 +2600,11 @@ describe('setup', () => {
     });
     await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
 
-    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
-    const answering = screen.getByText('Answering now', { exact: true });
+    // Under the title and its line, "Acting for you now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Acting for you now', { exact: true });
     await expect.element(answering).toBeVisible();
     const dot = answering.element().querySelector('.cd-status-dot--handled');
-    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    if (!dot) throw new Error('No handled dot beside "Acting for you now"');
     expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
     expect(getComputedStyle(dot).animationName).not.toBe('none');
     // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
@@ -2631,14 +2631,14 @@ describe('setup', () => {
 
     // "Go live" in the stale preview: the API says it is live already (409), the interview read again
     // says so, and the step shows live, its check drawn, but with Answering off it never says
-    // "Answering now", before or after the Desks are read again.
+    // "Acting for you now", before or after the Desks are read again.
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(requests('goLive', mark)).toHaveLength(1);
     await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     expect(deskOf(state).summary.answering).toBe(false);
   });
 
@@ -2659,7 +2659,7 @@ describe('setup', () => {
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
 
     // While they are read, the step waits whole, on setup's loading line: no title without its
-    // business, and no link that "Answering now" would push down when it lands.
+    // business, and no link that "Acting for you now" would push down when it lands.
     await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
     expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
@@ -2667,7 +2667,7 @@ describe('setup', () => {
     // Once they land, the title, its line and the link draw together, and the link stays put.
     release();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
     const link = screen.getByRole('button', { name: 'Copy link' });
     await expect.element(link).toBeVisible();
     const top = link.element().getBoundingClientRect().top;
@@ -2676,7 +2676,7 @@ describe('setup', () => {
     expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
 
     // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
-    // on the preview until they land, then turns live with "Answering now" already under the title.
+    // on the preview until they land, then turns live with "Acting for you now" already under the title.
     const second = await interviewAtPreview();
     const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
     await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
@@ -2702,7 +2702,7 @@ describe('setup', () => {
     expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
     land();
     await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
+    expect(page2.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(1);
   });
 
   it('going_live_under_reduced_motion_is_drawn_still', async () => {
@@ -2721,10 +2721,10 @@ describe('setup', () => {
       expect(getComputedStyle(check).animationName).toBe('none');
       expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
       expect(check.getAnimations()).toHaveLength(0);
-      const answering = screen.getByText('Answering now', { exact: true });
+      const answering = screen.getByText('Acting for you now', { exact: true });
       await expect.element(answering).toBeVisible();
       const dot = answering.element().querySelector('.cd-status-dot--handled');
-      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      if (!dot) throw new Error('No handled dot beside "Acting for you now"');
       expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
       expect(dot.getAnimations()).toHaveLength(0);
     } finally {
@@ -2745,7 +2745,7 @@ describe('setup', () => {
     expect(getComputedStyle(check).animationName).toBe('none');
     expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
     // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
     const off = await interviewAtPreview();
@@ -2754,7 +2754,7 @@ describe('setup', () => {
     const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
     // The title names the business from the Desks, so once it does, the line has had its answer.
     await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(reopened.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
@@ -3377,7 +3377,7 @@ describe('setup', () => {
     await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     expect(title.closest('.cd-page-header')?.querySelector('.cd-page-header__subtitle')).toBeNull();
-    const lines = [SETUP_COPY.live.previewAnsweringOff, SETUP_COPY.live.previewOnlyYou];
+    const lines = ['Claude takes messages only until you go live.', SETUP_COPY.live.previewOnlyYou];
     for (const words of lines) expect(ownerParts(screen.container).textContent?.split(words).length, words).toBe(2);
     const { bar, line, note, goLive } = launchParts(screen);
     expect(line.textContent).toBe(lines[0]);
@@ -3815,6 +3815,71 @@ describe('consultant setup', () => {
     await userEvent.keyboard('4');
     await expect.poll(() => insideList(rows[3]!)).toBe(true);
     expectNoHorizontalScroll();
+  });
+
+  it('shows_claudes_markdown_in_the_conversation_as_one_reply', async () => {
+    // A reply whose list has blank lines between its items is one list, with its bold.
+    const state = await consultantAt();
+    const reply = 'Thanks. Here is what I took from that:\n\n- **Individuals** come to you for their returns\n\n- **Small businesses** come for their books';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: reply, choices: [], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const bold = screen.getByRole('log').getByText('Individuals', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect(message.querySelectorAll('ul')).toHaveLength(1);
+    expect([...message.querySelectorAll('li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Individuals come to you for their returns',
+      'Small businesses come for their books',
+    ]);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
+  it('shows_a_docked_question_in_markdown_named_without_its_marks', async () => {
+    const state = await consultantAt();
+    const question = 'Got it.\n\n**Which work comes in most** during tax season?\n\n- Returns for individuals\n- Books for small businesses';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Returns', recommended: true }, { text: 'Books', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Returns', exact: true })).toBeVisible();
+    const dock = screen.container.querySelector('.cd-setup-question-panel section') as HTMLElement;
+    const shown = dock.querySelector('.cd-setup-q3__question') as HTMLElement;
+
+    // The question's bold and list, in the dock's own type, its paragraphs as far apart as before.
+    expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
+    expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
+    const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+
+    // The dock is named by the question as it reads, with none of the Markdown's marks.
+    await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
+  });
+
+  it('enter_on_a_link_in_a_docked_question_is_the_links_own', async () => {
+    const state = await consultantAt();
+    const question = 'Which payments do you take? [Stripe’s guide](https://stripe.com/docs) lists the usual ones.';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Cards', recommended: true }, { text: 'Bank transfers', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const link = screen.getByRole('link', { name: 'Stripe’s guide', exact: true });
+    await expect.element(link).toHaveAttribute('href', 'https://stripe.com/docs');
+    link.element().focus();
+    // The dock's keys leave a focused link alone: Enter opens it and sends no choice.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    link.element().dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requests('setupAnswer')).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {

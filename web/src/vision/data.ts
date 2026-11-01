@@ -164,7 +164,7 @@ export const TEAM_OWNER: VisionOwner = {
   current: 'conversations',
   peopleLabel: 'Teammates',
   counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
-  answeringDescription: 'Claude answers your team under your rules',
+  answeringDescription: 'Within your rules',
 };
 
 export const TEAM_HEADER = {

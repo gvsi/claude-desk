@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Choice } from '../api/views.ts';
-import { Card, IconButton } from '../ds/index.ts';
+import { Card, ChatMarkdown, IconButton } from '../ds/index.ts';
 import { Icon } from '../ds/icons/index.tsx';
 import { SETUP_COPY } from './copy.ts';
 
@@ -27,6 +27,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   /** The rows the keys move between: the choices, and "Something else…" where it is offered. */
   const rows = choices.length + (offersOther ? 1 : 0);
   const root = useRef<HTMLDivElement>(null);
+  const questionId = useId();
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -38,7 +39,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       }
       // The composer's words and controls elsewhere keep their normal keys.
       if (!inside && target !== document.body) return;
-      if (target.closest('.cd-icon-button')) return;
+      // So do Dismiss and a link in Claude's question: Enter opens the link.
+      if (target.closest('.cd-icon-button, a[href]')) return;
       const otherInput = target instanceof HTMLInputElement;
       const move = (index: number) => {
         setActive(index);
@@ -70,11 +72,11 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
     return () => document.removeEventListener('keydown', keydown);
   }, [active, choices, disabled, onChoose, onDismiss, other, offersOther, rows]);
   return (
-    <div className="cd-setup-question-panel"><Card as="section" label={question} padding={16}>
+    <div className="cd-setup-question-panel"><Card as="section" labelledBy={questionId} padding={16}>
       <div className="cd-setup-q3" ref={root}>
         <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
-          <div className="cd-setup-q3__question cd-type-reply">{question.split(/\n\s*\n/).map((text, index) => <p key={index}>{text}</p>)}</div>
+          <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} links="open" /></div>
           {offersOther ? <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} /> : null}
         </div>
         <ol className="cd-setup-q3__list" role="list">
