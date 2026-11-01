@@ -27,7 +27,16 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    digits). Since the owner's decisions of 2026-10-30, a booking claim passes beside the booking's
    card, which says the same, a policy's words are left to the soft-promise check, which reads the
    prose with the cards, and Claude may write links and email addresses, which its prompt keeps to
-   the business's own.
+   the business's own. The chats render the prose as Markdown (the owner's decision of 2026-11-01),
+   so the scan reads two texts and reports the union, the raw text's violations first: the prose as
+   written, and what it shows once rendered (`desk.markdown_text`), where emphasis inside a word,
+   an entity or a table can hide nothing; prose the parser can't read whole is refused
+   (`markdown.parse`). A numbered list's markers pass: those of an ordered list that starts at 1
+   and has at most nine items are blanked from the raw text and left out of the rendered one, and
+   every other number stays a violation (the owner's decision of 2026-11-01). A Markdown link whose
+   text isn't its own target must go to the business's public contact (`https` to a host, or
+   `mailto:` an email, that `charter:contact` names), else `markdown.link`; any image is
+   `markdown.image` (`markdown_violations`).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
@@ -543,10 +552,13 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
     their documents, and blanked out before the rest is scanned. Links and email addresses are
     none of these (the owner's decision of 2026-10-30: Claude may write them, and its prompt keeps
-    them to the business's own). The lexicons read lookalike letters as the Latin ones, a bare
-    stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
-    apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
-    space and as "’". The canary comes first, then the rest in the order they appear."""
+    them to the business's own); a Markdown link that hides its target is `markdown_violations`'
+    to judge. This scan reads every digit: `check_draft` blanks the markers of a numbered list of
+    up to nine steps from 1 before it (`markdown_text.list_markers`, the owner's decision of
+    2026-11-01), and scans the rendered text too. The lexicons read lookalike letters as the Latin
+    ones, a bare stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-"
+    and every apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as
+    that space and as "’". The canary comes first, then the rest in the order they appear."""
     return [violation for _, _, _, violation in _prose_hits(text, canaries, names, booking_card=booking_card,
                                                             callback_card=callback_card,
                                                             approved_free_names=approved_free_names)]

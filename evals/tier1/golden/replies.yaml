@@ -27,7 +27,8 @@
 #                  carrying its clause's fact and card data.
 #
 # On the real kernel every verdict also has its signature verified, its visible free text scanned by
-# the evals' own scanner (evals/oracles/visible_text.py), and a quote card compared with its record:
+# the evals' own scanner (evals/oracles/visible_text.py; a numbered list's markers read as the reply
+# check reads them, desk/markdown_text.py), and a quote card compared with its record:
 # the seed's drain clearing price in US dollars, and an expiry 72 hours after the case made the
 # quote, in business time; a handoff names Maria Rivera.
 
