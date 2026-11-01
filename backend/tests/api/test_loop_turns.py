@@ -851,6 +851,46 @@ async def test_optional_callback_offer_records_work_only_when_accepted(api_conn,
     assert len(fake.handoffs) == int(accepted)
 
 
+async def test_an_emergency_offer_makes_no_call_and_the_yes_makes_one(api_conn, caller, fake):
+    """A burst pipe with the visitor's name and number already given (#519): the turn whose scripted model gives a
+    safety step and offers a call back runs no tool, so nothing in the API calls back or alerts on its own, and the
+    model read the ask-first rule for urgent requests. The visitor's yes then gets one call back, with the details
+    they gave. Scripted choices prove orchestration, not that a live model chooses these words or tools."""
+    await said(api_conn, caller, "My pipes have burst.")
+    first = ScriptedModel([response(reply("That's awful, I'm sorry. If you can, turn off the main water valve. "
+                                          "Which town are you in?"))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    await said(api_conn, caller, "It's under the kitchen sink, water is spraying everywhere. I'm Dana Park, "
+                                 "1420 Grove St in Berkeley, 510-555-0177.")
+    offer = ScriptedModel([response(reply("If you can, close the valve under the sink. "
+                                          + prompts.STATUS_LINES["offer_callback"]["en"]))])
+    assert await run_turn(api_conn, caller, offer) == "done"
+    assert fake.called("/decide") == [] and fake.handoffs == {}
+    system = offer.requests[0].system[0]["text"]
+    assert "Ask before you bring Maria Rivera in: if one of your tools is a business tool for urgent requests" in system
+    assert "Only on their yes, ask for what's missing of their name, a phone number or email and the reason" in system
+
+    await said(api_conn, caller, "Yes please")
+    args = {"name": "Dana Park", "contact": "510-555-0177",
+            "reason": "Burst pipe under the kitchen sink, water spraying, at 1420 Grove St in Berkeley"}
+
+    def confirm(request):
+        (result,) = tool_results(request)
+        assert result["content"]["outcome"] == "done" and not result["is_error"]
+        return response(reply("Your callback request is in, and the card shows when to expect the call.", {
+            "template": "callback_confirmed", "fact_id": result["content"]["result"]["fact_id"]}))
+
+    choice = ScriptedModel([response(tool_use("native__request_callback", args)), confirm])
+    assert await run_turn(api_conn, caller, choice) == "done"
+    (decision,) = fake.called("/decide")
+    assert decision.body["call"]["tool"] == "native.request_callback" and decision.body["call"]["args"] == args
+    assert len(fake.called("/execute")) == len(fake.handoffs) == 1
+    (work,) = fake.handoffs.values()
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"][-1]
+    (card,) = [block for block in shown.blocks if block.template == "callback_confirmed"]
+    assert card.fact_id == "handoff:" + work["handoff_id"]
+
+
 @pytest.mark.parametrize("callback", [False, True], ids=["reply-without-handoff", "all-set-with-callback"])
 async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, callback):
     """The staged soft verdict proves fail-closed orchestration, not soft-check classification."""
