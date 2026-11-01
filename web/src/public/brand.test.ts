@@ -2,11 +2,18 @@
  * The business's look on its public page, from the Desk the kernel serves: only plain colors pass,
  * and only when the shell's text stays readable over them.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk } from '../api/contracts.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { brandFrom } from './brand.ts';
+import { OWNER_NAME_FALLBACK, brandFrom } from './brand.ts';
+
+/** The API's setup, which names the owner (`owner_name`) and falls back to `OWNER_NAME_FALLBACK`. */
+const SETUP_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'api', 'setup.py');
 
 // The design system's contrast check, which a test can make throw, as it does on a color it can't read.
 const contrast = vi.hoisted(() => ({ throws: false }));
@@ -74,5 +81,23 @@ describe('brandFrom', () => {
       ownerName: 'Linda Chen',
       brand: { name: 'Chen & Co. CPA', monogram: 'C' },
     });
+  });
+
+  it('no_owner_name_when_setup_gave_its_fallback', () => {
+    // Exactly setup's fallback is no name: the page asks for "a person", never for "Owner".
+    expect(brandFrom({ ...desk, owner_display_name: OWNER_NAME_FALLBACK }).ownerName).toBeNull();
+    // Anything else is a name the owner gave, shown as written.
+    for (const name of ['owner', 'OWNER', 'Owner ', ' Owner', 'Owners', 'Maria Owner', 'Owner Rivera']) {
+      expect(brandFrom({ ...desk, owner_display_name: name }).ownerName, name).toBe(name);
+    }
+  });
+
+  it('the_no_name_value_is_setups_fallback', () => {
+    // Setup gives a Desk whose owner gave no name this one value (`OWNER_NAME_FALLBACK` in setup.py),
+    // and the page reads exactly that value as "no name": the two have to stay the same.
+    const setup = readFileSync(SETUP_PATH, 'utf8');
+    const fallback = /^OWNER_NAME_FALLBACK = "([^"]*)"$/m.exec(setup)?.[1];
+    expect(fallback, 'setup.py sets OWNER_NAME_FALLBACK to a plain string').toBeDefined();
+    expect(OWNER_NAME_FALLBACK).toBe(fallback);
   });
 });
