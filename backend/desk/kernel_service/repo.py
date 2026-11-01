@@ -57,7 +57,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
 any of these, and a write to the business its row after the Desk's. The calendar write then takes
 the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
-of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
+of a slot it drops or moves either commits first or waits for it. The kernel's daily calendar
+refresh takes the same rows in the same order, one Desk to a transaction (`desks.extend_calendar`):
+the Desk row, its slots, then the ledger head. Closing a handoff holds a Desk row too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.

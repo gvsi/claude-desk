@@ -30,13 +30,14 @@ from desk.contracts import Decision, ExecResult, NormalizedAction
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PaymentLink, PolicyVersion
 from desk.db.session import database_url, libpq_url
-from desk.kernel_service import demo_inbox, execute
+from desk.kernel_service import demo_inbox, desks, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
 from .test_adapters import book, rivera, visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
+from .test_calendar_refresh import setup_calendar, setup_desk
 from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
@@ -599,6 +600,14 @@ async def test_a_calendar_write_runs_in_the_lock_order(app, client):
     with lock_log(app, ("desks", *LOCK_ORDER)) as log:
         await updated(client, copy, "calendar", {"calendar_slots": slots[1:]})
     # an owner's write to the Desk's data: the Desk row first, then the Desk's slots, then the entry
+    assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
+
+
+async def test_a_calendar_refresh_runs_in_the_lock_order(app, client):
+    desk = await setup_desk(app, client, await rivera(app, client), setup_calendar(days_ago=11))
+    with lock_log(app, ("desks", *LOCK_ORDER)) as log:
+        assert list(await desks.extend_calendars(app.state.kernel)) == [desk.desk_id]
+    # the rows an owner's calendar write takes, in the same order
     assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
 
 
