@@ -445,6 +445,37 @@ it('setup_reload_hands_off', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+it('setup_tools_first_read_failure_clears_the_skeleton', async () => {
+  const state = await interviewAt('tools');
+  const tools = holdReads(path('setupTools', state));
+  mockStore.inject({ route: 'setupTools', status: 503, times: 2 });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { retryScale: 0 });
+  await vi.waitFor(() => expect(tools.held()).toBe(1));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));
+
+  tools.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy]')).toBeNull();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupTools')).toHaveLength(2);
+});
+
+it('setup_interview_first_read_failure_clears_the_skeleton', async () => {
+  const state = await interviewAt('tools');
+  const interview = holdReads(path('setup', state));
+  const readsBefore = mockStore.requests.filter((r) => r.key === 'setup').length;
+  mockStore.inject({ route: 'setup', status: 503, times: 2 });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { retryScale: 0 });
+  await vi.waitFor(() => expect(interview.held()).toBe(1));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__column .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));
+
+  interview.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy]')).toBeNull();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setup')).toHaveLength(readsBefore + 2);
+});
+
 /** The safety check's count on the page, not its shape in a fading layer. */
 const landedCount = () => [...document.querySelectorAll('.cd-setup-safety__count')].find((count) => !count.closest('.cd-skeleton-screen__layer'));
 
