@@ -521,7 +521,8 @@ def _stepped_in(decisions: list[dict], ledger: list[dict]) -> list[Timed]:
 
 async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     """The Desk's activity in its visitor and agent sessions, their transcript rows from `start` on. Decisions are read
-    before the ledger, so every decision's entry is there."""
+    before the ledger, so every decision's entry is there. A business tool's run counts under its tool's current block
+    (wish #465 tracks recording the block each run used)."""
     who = await people(ctx, desk_id)
     leads = [row for row in await ctx.ro.rows("leads", desk_id=desk_id)
              if row["session_id"] is None or row["session_id"] in who.sessions]
@@ -530,7 +531,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
     tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
-    for row in await ctx.ro.rows("tools", desk_id=desk_id):
+    for row in await ctx.ro.rows("tools", desk_id=desk_id, source="business"):
         business = row["business"]
         config = business.get("config") if isinstance(business, dict) else None
         block = config.get("block") if isinstance(config, dict) else None

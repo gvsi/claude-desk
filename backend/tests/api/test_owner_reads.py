@@ -960,7 +960,8 @@ async def test_a_block_built_urgent_call_counts_as_a_callback_not_answered_alone
 
 async def test_an_urgent_business_tool_run_on_the_kernel_counts_as_a_callback(scene, clock, app):
     """The owner adds, reviews and allows an urgent business tool, and a visitor's call through it runs on the
-    kernel, which writes the tool's row, its decision and its ledger entries as it writes any business tool's."""
+    kernel, which writes the tool's row, its decision and its ledger entries as it writes any business tool's. The
+    owner then removes the tool, which the kernel keeps as a disabled row, so its past run still counts."""
     owner = scene.owner
     kernel = scene.kernel_http.owner(owner.token)
     tool = BusinessTool(tool="desk.urgent-help", title="Urgent help", description="Report an urgent problem.",
@@ -982,6 +983,9 @@ async def test_an_urgent_business_tool_run_on_the_kernel_counts_as_a_callback(sc
                                                     "reason": "A pipe burst under the sink"})
     assert result.state == "succeeded"
     await scene.reply(caller, when + timedelta(minutes=1))
+    scene.fake.now = when + timedelta(minutes=2)       # the owner then removes the tool: its past run still counts
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[]), path={"id": owner.desk_id})
+    assert scene.fake.desks[owner.desk_id].tools[tool.tool].status == "disabled"
     clock.now = local(2026, 10, 30, 9)
 
     read = await owner.get(f"desks/{owner.desk_id}/today")
