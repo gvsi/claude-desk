@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
-from desk.contracts import Clause, RuleCard
-from desk.db.models import Booking, CalendarSlot, DemoInboxEntry, Fact, NotificationPref, Tool
+from desk.contracts import Clause, ReplyDraft, RuleCard
+from desk.db.models import ActorSession, Booking, CalendarSlot, DemoInboxEntry, Fact, NotificationPref, Tool
 from desk.kernel_service import render
 from desk.kernel_service.render.cards import DeskInfo
 
@@ -20,6 +20,21 @@ from .test_execute import executed, read
 TOOL = 'desk.consult'
 SLOT = 'S-20261102-1000'
 DESK = DeskInfo(owner_display_name='Maria Rivera', timezone='America/Los_Angeles')
+
+
+@pytest.mark.parametrize('config', [None, {'block': 'intake', 'questions': ['What?']},
+    {'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000},
+    {'block': 'urgent', 'urgent_when': 'A burst pipe'}])
+def test_typed_booking_adapter_refuses_non_typed_profiles(config, monkeypatch):
+    from desk.contracts import BusinessToolDef
+    from desk.kernel_service.adapters import blocks
+    from desk.kernel_service.adapters.book import PROFILE
+
+    monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake', 'typed_booking', 'purpose_payment', 'urgent'}))
+    supplied = PROFILE if config is None else blocks.profile('desk.other', BusinessToolDef(
+        title='Other task', description='Take details.', config=config))
+    with pytest.raises(ValueError, match='unsupported_block'):
+        blocks.TypedBookingAdapter(supplied)
 
 
 def test_typed_booking_factory_consumes_one_code_built_profile(monkeypatch):
@@ -47,7 +62,7 @@ def test_typed_booking_factory_consumes_one_code_built_profile(monkeypatch):
     assert adapter.Args is BookArgs
     assert adapter.appointment() == ('Free consult', 20)
     assert adapter.profile.description_confirmed.startswith(
-        'Books one open time on your calendar for this kind of appointment.')
+        "Books one open time on the business's calendar for this kind of appointment.")
 
 
 def typed_booking(**config):
@@ -108,22 +123,45 @@ async def test_typed_booking_executes_from_config_and_renders_both_languages(app
     assert result.inbox == []
 
 
+@pytest.mark.parametrize('prose,language', [('Your consult is confirmed.', 'en'),
+                                          ('Tu consulta está confirmada.', 'es')])
+async def test_typed_booking_confirmation_requires_its_booking_card(app, client, prose, language):
+    from desk.kernel_service import reply_check
+    from .test_reply_check import checked, clause
+
+    copy, visitor = await configured(app, client)
+    decision = await decided(client, visitor, TOOL, {'slot_id': SLOT})
+    assert decision.outcome == 'allow'
+    [booking] = (await executed(client, visitor, decision)).facts
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
+            ActorSession.session_id == visitor.session_id)))).one()
+        verdict = await reply_check.check_draft(ctx, row, ReplyDraft(
+            session_id=visitor.session_id, generation=row.generation, prose=prose))
+    assert not verdict.ok
+    assert f'lex.{language}.booking' in {violation.rule_id for violation in verdict.violations}
+    backed = await checked(client, visitor, prose, [clause('booking_confirmed', booking.fact_id)])
+    assert backed.ok, backed.violations
+
+
 async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(app, client, monkeypatch):
     from desk.kernel_service import business_tools
 
     scans = []
     original = business_tools.refuse_public_promises
 
-    async def checked(ctx, **kwargs):
-        scans.append(kwargs)
-        await original(ctx, **kwargs)
+    async def checked(ctx, part, values, desk_id, **kwargs):
+        scans.append({'part': part, 'values': values, 'desk_id': desk_id, **kwargs})
+        await original(ctx, part, values, desk_id, **kwargs)
 
     monkeypatch.setattr(business_tools, 'refuse_public_promises', checked)
     copy, visitor = await configured(app, client, config={'appointment_type': 'Free consult'})
     assert len(scans) == 1
-    assert scans[0]['values'] == {f'{TOOL}.title': 'Book a consult', f'{TOOL}.appointment_type': 'Free consult'}
-    assert 'free' in scans[0]['allow_words'][f'{TOOL}.title']
-    assert 'free' in scans[0]['allow_words'][f'{TOOL}.appointment_type']
+    assert list(scans[0]['values'].items()) == [(f'{TOOL}.0-title', 'Book a consult'),
+                                               (f'{TOOL}.1-appointment_type', 'Free consult')]
+    assert 'free' in scans[0]['allow_words'][f'{TOOL}.0-title']
+    assert 'free' in scans[0]['allow_words'][f'{TOOL}.1-appointment_type']
     decision = await decided(client, visitor, TOOL, {'slot_id': SLOT})
     assert decision.outcome == 'allow'
     [fact] = (await executed(client, visitor, decision)).facts
@@ -252,14 +290,17 @@ async def test_put_refuses_unsafe_appointment_type_under_its_public_key(app, cli
     seen = []
     original = business_tools.refuse_public_promises
 
-    async def checked(ctx, **kwargs):
-        seen.append(kwargs['values'])
-        await original(ctx, **kwargs)
+    async def checked(ctx, part, values, desk_id, **kwargs):
+        seen.append(values)
+        await original(ctx, part, values, desk_id, **kwargs)
 
     monkeypatch.setattr(business_tools, 'refuse_public_promises', checked)
     response = await put(client, copy, [typed_booking(appointment_type=appointment_type)])
     assert response.status_code == 422, response.text
-    assert seen == [{f'{TOOL}.title': 'Book a consult', f'{TOOL}.appointment_type': appointment_type}]
+    assert [list(values.items()) for values in seen] == [[(f'{TOOL}.0-title', 'Book a consult'),
+                                                         (f'{TOOL}.1-appointment_type', appointment_type)]]
+    assert response.json()['detail'] == {f'{TOOL}.title': ['public_promise'],
+                                          f'{TOOL}.appointment_type': ['public_promise']}
     assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.source == 'business'))
 
 

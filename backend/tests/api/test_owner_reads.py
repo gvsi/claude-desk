@@ -912,7 +912,7 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     owner = scene.owner
     desk = scene.fake.desks[owner.desk_id]
     prefs = await KernelRO(api_conn, owner.copy_id, ro_schema).one('notification_prefs', desk_id=owner.desk_id)
-    assert prefs['now'] == ['approval', 'emergency', 'breaker', 'lockout']
+    assert prefs['now'] == ['approval', 'emergency', 'breaker', 'lockout', 'handoff']
     assert prefs['briefing'] == ['lead', 'callback', 'booking']
     kernel = scene.kernel_http.owner(owner.token)
     tool = BusinessTool(tool='desk.consult', title='Book a consult', description='Book an introduction.',
