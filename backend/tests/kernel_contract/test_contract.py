@@ -2539,6 +2539,9 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
     ("Está hablando con una persona.", "policy.ai_denial"),
     ("Consultations cost nothing.", "policy.free_price"),
     ("La consulta no le cuesta nada.", "policy.free_price"),
+    ("Las consultas no cuestan nada.", "policy.free_price"),
+    ("No cobramos nada por la visita.", "policy.free_price"),
+    ("Estás hablando con una persona.", "policy.ai_denial"),
 ])
 async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, text, rule):
     http, _, _ = kernel
@@ -2716,6 +2719,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
     ("Garage parking available", "Offering estimates by appointment"),
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
+    ("No cobramos por adelantado.", "No cobramos nada más que lo acordado."),
 ])
 async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
     http, schema, _ = kernel

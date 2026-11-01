@@ -1806,12 +1806,18 @@ POLICY_AI_DENIAL_CASES = [
     "No soy un bot.", "No soy un robot.", "No soy una IA.",
     "Está hablando con una persona.", "ESTA HABLANDO CON UNA PERSONA.",
     "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
+    # Informal and plural Spanish forms of the same claim.
+    "Estás hablando con una persona.", "Estas hablando con una persona.", "Estáis hablando con una persona.",
+    "Están hablando con una persona.", "Está hablando con un humano.", "Estás hablando con un humano.",
 ]
 POLICY_FREE_PRICE_CASES = [
     "Consultations cost nothing.", "It costs nothing.", "At no cost.", "No cost to you.",
     "Nothing to pay.", "It won't cost you anything.", "It WON’T cost you anything.",
     "No cuesta nada.", "No le cuesta nada.", "Nada que pagar.",
     "It costs nothing to ask a question about our services?",
+    # Plural subjects, other pronouns and "we charge nothing" in Spanish.
+    "Las consultas no cuestan nada.", "No les cuesta nada.", "No te cuesta nada.",
+    "No cobramos nada.", "No le cobramos nada por la visita.",
 ]
 
 
@@ -1830,6 +1836,9 @@ POLICY_FREE_PRICE_CASES = [
     ("Our mascot is not a botanical illustration", []),
     ("Our sculpture costs nothingness", []),
     ("Dinner is on the house", ["lex.en.promise"]),
+    ("No cobramos por adelantado.", []),
+    ("No cobramos nada más que lo acordado.", []),
+    ("Hablamos con cada persona antes de empezar.", []),
 ])
 def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
     assert reply_check.scan_public_text(text) == rules

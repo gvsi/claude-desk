@@ -27,6 +27,9 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     ("Está hablando con una persona.", "policy.ai_denial"),
     ("Consultations cost nothing.", "policy.free_price"),
     ("La consulta no le cuesta nada.", "policy.free_price"),
+    ("Las consultas no cuestan nada.", "policy.free_price"),
+    ("No cobramos nada por la visita.", "policy.free_price"),
+    ("Estás hablando con una persona.", "policy.ai_denial"),
 ])
 async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_reads(app, client, text, rule):
     copy = await rivera(app, client)
@@ -252,6 +255,8 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Complimentary parking",
     "Our receptionist will greet you",
     "Atención personalizada",
+    "No cobramos por adelantado.",
+    "No cobramos nada más que lo acordado.",
     "We work with small businesses and families.",
     "Tell us what you need and we'll suggest next steps.",
     "Ask about our services.",

@@ -4,5 +4,6 @@ folded	at\s+no\s+cost
 folded	no\s+cost\s+to\s+you
 folded	nothing\s+to\s+pay
 folded	won['’]t\s+cost\s+you\s+anything
-folded	no\s+(?:le\s+)?cuesta\s+nada
+folded	cuestan?\s+nada(?!\s+mas)
+folded	cobra(?:mos|n)?\s+nada(?!\s+mas)
 folded	nada\s+que\s+pagar

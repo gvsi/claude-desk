@@ -883,9 +883,9 @@ PUBLIC_POLICY_PATTERNS = (
      r"(?:a\s+human|a\s+(?:real|live)\s+person)|a\s+(?:human|real|live)\s+(?:receptionist|agent|assistant|person)|"
      r"not\s+(?:a\s+(?:bot|robot)|(?:an?\s+)?AI)|I(?:\s+am|['’]m)\s+(?:a\s+human|a\s+real\s+person)|"
      r"persona\s+real|(?:recepcionista|agente|asistente)\s+human[oa]|"
-     r"no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)|esta\s+hablando\s+con\s+una\s+persona)\b"),
+     r"no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)|esta(?:s|is|n)?\s+hablando\s+con\s+(?:una\s+persona|un\s+humano))\b"),
     ("policy.free_price", r"\b(?:costs?\s+nothing|at\s+no\s+cost|no\s+cost\s+to\s+you|nothing\s+to\s+pay|"
-     r"won['’]t\s+cost\s+you\s+anything|no\s+(?:le\s+)?cuesta\s+nada|nada\s+que\s+pagar)\b"),
+     r"won['’]t\s+cost\s+you\s+anything|(?:cuestan?|cobra(?:mos|n)?)\s+nada(?!\s+mas)|nada\s+que\s+pagar)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"

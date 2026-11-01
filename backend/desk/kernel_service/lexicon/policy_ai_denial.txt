@@ -6,4 +6,4 @@ folded	I(?:\s+am|['’]m)\s+(?:a\s+human|a\s+real\s+person)
 folded	persona\s+real
 folded	(?:recepcionista|agente|asistente)\s+human[oa]
 folded	no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)
-folded	está\s+hablando\s+con\s+una\s+persona
+folded	esta(?:s|is|n)?\s+hablando\s+con\s+(?:una\s+persona|un\s+humano)
