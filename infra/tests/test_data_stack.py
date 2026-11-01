@@ -160,6 +160,7 @@ SECRET_NAMES = {
     "desk/signing-seed",
     "desk/mockpay-key",
     "desk/anthropic-api-key",
+    "desk/typesafe-api-key",
     "desk/passcode-hash",
 }
 
@@ -200,6 +201,7 @@ GENERATORS = {
     "desk/signing-seed": _HEX_64,
     "desk/mockpay-key": _HEX_64,
     "desk/anthropic-api-key": _PLACEHOLDER,
+    "desk/typesafe-api-key": _PLACEHOLDER,
     "desk/passcode-hash": _PLACEHOLDER,
 }
 
