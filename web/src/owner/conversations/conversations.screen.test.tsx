@@ -225,6 +225,9 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    // The long chat overflows its region first: until it has, the region's end reads as its latest
+    // and a place 300 px down can't be set.
+    await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
     await expect.poll(() => region.scrollHeight - region.clientHeight - region.scrollTop).toBeLessThanOrEqual(1);
     if (place === 'scroll') {
       region.scrollTop = 300;
