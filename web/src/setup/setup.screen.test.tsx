@@ -544,6 +544,35 @@ describe('setup', () => {
     expect(mockStore.world.desks.length).toBe(desks + 1);
   });
 
+  it('the_lockup_leads_to_the_start_page_before_there_is_a_desk', async () => {
+    // Before there is a Desk, the bar's lockup leads where "Save and exit" does: the app's start
+    // page. It is a link named by the product's name, keeps the lockup's look, and takes the warm
+    // focus ring from the keyboard.
+    const firstVisit = holdFirstVisit();
+    const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
+    const bar = screen.getByRole('banner');
+    const lockup = bar.getByRole('link', { name: 'Claude Desk', exact: true });
+    await expect.element(lockup).toHaveAttribute('href', '/');
+    expect(lockup.element().getAttribute('href')).toBe(bar.getByRole('link', { name: 'Save and exit' }).element().getAttribute('href'));
+    const look = getComputedStyle(lockup.element());
+    expect(look.textDecorationLine).toBe('none');
+    expect(look.color).toBe(getComputedStyle(bar.element()).color);
+    await userEvent.keyboard('{Tab}');
+    (lockup.element() as HTMLElement).focus();
+    expect(lockup.element().matches(':focus-visible')).toBe(true);
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--ring-focus)';
+    document.body.append(probe);
+    try {
+      expect(getComputedStyle(lockup.element()).outlineColor).toBe(getComputedStyle(probe).color);
+    } finally {
+      probe.remove();
+    }
+    await lockup.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    firstVisit.draw();
+  });
+
   it('start_left_while_under_way_stays_left', async () => {
     // The owner leaves with "Save and exit" while a retry of a start under way is in flight, and the
     // retry's answer comes before the page they left for has drawn: the router has moved on, but a

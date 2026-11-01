@@ -149,6 +149,8 @@ export const SETUP_COPY = {
   /** Stands in for the business's name until the API names it. */
   yourBusiness: 'your business',
   saveAndExit: 'Save and exit',
+  /** The bar's lockup, a link that leaves as "Save and exit" does: the product's name, as its words begin. */
+  brandHome: 'Claude Desk',
 
   start: {
     title: 'Tell me about your business',

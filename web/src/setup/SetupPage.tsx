@@ -55,6 +55,7 @@ interface SetupShellProps {
    * live on this page (`draw`) or drawn already when the page opened on it (`drawn`).
    */
   live?: 'draw' | 'drawn';
+  /** Where "Save and exit" and the lockup go: the new Desk's Today once there is one, else the start. */
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
@@ -70,9 +71,9 @@ interface SetupShellProps {
 
 /**
  * Setup's frame, as the signed setup boards draw it: the bar with the bell (no tile, 20 px at every
- * width, as on a standalone page) and the wordmark, with its Preview badge from 1100 px up, the
- * business once known, the five steps and "Save and exit"; one column; the concept footer at the
- * window's foot.
+ * width, as on a standalone page) and the wordmark, with its Preview badge from 1100 px up, a link
+ * that leaves as "Save and exit" does; the business once known, the five steps and "Save and exit";
+ * one column; the concept footer at the window's foot.
  */
 function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, children }: SetupShellProps) {
   const navigate = useNavigate();
@@ -88,10 +89,13 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
     <div className={`cd-setup${chat ? ' cd-setup--chat' : ''}`} onClick={followInAppLinks(leave)}>
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
-          <span className="cd-setup__brand">
+          {/* The lockup leads home as "Save and exit" does: the same place, and the same way out
+              (the shell's in-app links wait for `beforeLeave`), so progress is kept. Named by the
+              product's name, which its words begin with at every width. */}
+          <a className="cd-setup__brand" href={exitTo} aria-label={SETUP_COPY.brandHome}>
             <Mark size={20} />
             <Wordmark preview={!compact} />
-          </span>
+          </a>
           {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}
           {business ? (
             <span className="cd-setup__business cd-type-control" data-copy="user" title={business}>
