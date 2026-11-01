@@ -1,4 +1,4 @@
-/** An example in the API's suggestion format, measured by the loading shapes. */
+/** An API-format example for tests of a Desk with repeated owner approvals. */
 export const SUGGESTION_EXAMPLE = 'You approved 3 refund requests. Let me handle these?';
 
 /** The Rules header and its loading shapes use the same signed subtitle. */

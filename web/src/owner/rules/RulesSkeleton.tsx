@@ -4,7 +4,7 @@ import { ALWAYS_ON, Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } f
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CONNECTOR_PAGES_BUILT } from '../connectors/pages.ts';
-import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, SUGGESTION_EXAMPLE, rulesVersionLine } from './copy.ts';
+import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
 import { moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
@@ -204,23 +204,10 @@ function Header() {
   );
 }
 
-/** The fresh copy's suggestion, connector groups and always-on rules, all measured before drawing. */
+/** A fresh copy has no suggestions: draw its connector groups and always-on rules. */
 function Body() {
   return (
     <>
-      <div className="cd-rules__suggestions">
-        <SkeletonCard anchor="rules-suggestion-0">
-          <div className="cd-rules__suggestion">
-            <Lines
-              words={SUGGESTION_EXAMPLE}
-              className="cd-rules__suggestion-text cd-type-body"
-            />
-            <div>
-              <Control label="Draft this rule" className="cd-button cd-button--secondary cd-button--inline cd-type-control" />
-            </div>
-          </div>
-        </SkeletonCard>
-      </div>
       <div className="cd-connector-list">
         <div className="cd-connector-list__body">
           <Lines words={rulesVersionLine(7)} className="cd-connector-list__summary cd-type-meta" text="meta" />
