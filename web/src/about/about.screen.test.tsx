@@ -251,6 +251,42 @@ describe('About pages', () => {
     }
   });
 
+  it.each(['desktop', 'phone'] as const)('the_three_pages_share_one_top_bar_on_%s', async (viewport) => {
+    // Going from one page of the set to another, the bar across the top doesn't move (owner, 2026-11-01): the same
+    // height, the app's lockup in the same place, each page of the switch and the way into the prototype in the
+    // same place, drawn in the same colors. Only which page the switch marks differs. Measured at the top of each
+    // page, against the capability prediction's.
+    const SET = [
+      { path: '/about/prediction', heading: 'Capability prediction' },
+      { path: '/about/proposal', heading: 'Product proposal' },
+      { path: '/about/vision', heading: 'A front desk that never closes' },
+    ] as const;
+    const bars: { path: string; bar: TopBar }[] = [];
+    for (const { path, heading } of SET) {
+      const { screen } = await renderRoute(path, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading, exact: true }), { message: path }).toBeVisible();
+      await document.fonts.ready;
+      bars.push({ path, bar: topBarOf(screen.container) });
+    }
+    const [first, ...rest] = bars;
+    if (!first) throw new Error('no pages');
+    for (const { path, bar } of rest) {
+      const where = `${path} against ${first.path} at ${viewport}`;
+      for (const [part, box] of Object.entries(bar.boxes)) {
+        const want = first.bar.boxes[part];
+        if (!want) throw new Error(`${where}: no ${part} on ${first.path}`);
+        const off = (['x', 'y', 'width', 'height'] as const).filter((side) => Math.abs(box[side] - want[side]) > 0.5);
+        expect(
+          off.map((side) => `${part}.${side}: ${box[side]} against ${want[side]}`),
+          where,
+        ).toEqual([]);
+      }
+      expect(bar.look, where).toEqual(first.bar.look);
+    }
+    // Focus and a section opened by its address stop clear of the bar on each page, whatever its height.
+    for (const { path, bar } of bars) expect(bar.clearance, `${path} at ${viewport}`).toBe((bar.boxes.bar as Box).height + 24);
+  });
+
   it('about_pages_make_no_requests', async () => {
     for (const [lastDesk, to] of [
       [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
@@ -350,6 +386,69 @@ async function untilAtRest(where: string): Promise<void> {
     await expect.poll(() => figure.dataset.play, { message: `${where}: the figure played in view` }).not.toBe('ready');
   }
   await expect.poll(() => document.getAnimations().length, { message: `${where}: nothing animates`, timeout: 5000 }).toBe(0);
+}
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What one page's top bar is: where each part sits, how it is drawn, and how far below the top focus stops. */
+interface TopBar {
+  boxes: Record<string, Box>;
+  look: Record<string, string[]>;
+  /** The scroll margin above a link in the page's main region, in px. */
+  clearance: number;
+}
+
+/**
+ * A page's top bar, found by what it shows rather than by its classes, so each page's own bar is read: the first
+ * header, its part that names the product, the About set's switch (in the bar, or under it on a phone) and the way
+ * into the prototype.
+ */
+function topBarOf(container: HTMLElement): TopBar {
+  const bar = container.querySelector('header');
+  if (!bar) throw new Error('no top bar');
+  const lockup = [...bar.children].find((el) => el.textContent?.includes('Claude Desk'));
+  const name = [...bar.querySelectorAll('*')].find((el) => [...el.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent === 'Claude Desk'));
+  const documents = container.querySelector('nav[aria-label="About this prototype"]');
+  const links = [...(documents?.querySelectorAll('a') ?? [])];
+  const current = links.find((link) => link.getAttribute('aria-current') === 'page');
+  const other = links.find((link) => link.getAttribute('aria-current') === null);
+  const tryIt = [...container.querySelectorAll('a')].find((link) => link.textContent === 'Try Desk prototype');
+  const inMain = container.querySelector('main a');
+  if (!lockup || !name || !documents || links.length !== 3 || !current || !other || !tryIt || !inMain) {
+    throw new Error('the top bar is missing a part');
+  }
+  const box = (el: Element): Box => {
+    const { x, y, width, height } = el.getBoundingClientRect();
+    return { x, y, width, height };
+  };
+  const style = (el: Element, ...names: string[]) => {
+    const computed = getComputedStyle(el);
+    return names.map((prop) => computed.getPropertyValue(prop));
+  };
+  const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing'];
+  return {
+    boxes: {
+      bar: box(bar),
+      lockup: box(lockup),
+      name: box(name),
+      switch: box(documents),
+      ...Object.fromEntries(links.map((link) => [`switch "${link.textContent}"`, box(link)])),
+      'Try Desk prototype': box(tryIt),
+    },
+    look: {
+      bar: style(bar, 'position', 'top', 'background-color', 'border-bottom-width', 'border-bottom-style', 'border-bottom-color', 'color'),
+      name: style(name, 'color', ...TYPE),
+      current: style(current, 'background-color', 'color', ...TYPE),
+      other: style(other, 'background-color', 'color', 'text-decoration-line', ...TYPE),
+      tryIt: style(tryIt, 'background-color', 'color', 'box-shadow', 'text-decoration-line', ...TYPE),
+    },
+    clearance: parseFloat(getComputedStyle(inMain).scrollMarginTop),
+  };
 }
 
 /** Waits a quarter of a second: a request sent while the page drew has reached the mock API by then. */

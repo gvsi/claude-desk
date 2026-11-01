@@ -1,0 +1,110 @@
+/* AboutBar: the bar across the top of each About this prototype page, one for all three, so going from one to
+   another moves nothing. The product's lockup, the set's switch and the link into the prototype
+   (PrototypeLink.css). It stays at the top of the window while the page scrolls, over the page: the paper, all but
+   opaque, over a hairline. Every color is the About set's paper (paper.css), through the app's tokens, which the
+   page's root points at it (.cd-about-paper--app); every space and size is a token, and the only raw length is the
+   hairline. */
+
+/* On the page's root: the bar's height, which what scrolls into view on the page stops below, and its sides. The
+   phone's top bar starts at AboutBar's ABOUT_NARROW, at the same width. */
+.cd-about-set {
+  --about-top: calc(var(--space-32) * 2);
+  --about-bar-gutter: calc(var(--space-40) * 2);
+}
+
+@media (max-width: 1335.98px) {
+  .cd-about-set {
+    --about-bar-gutter: var(--space-40);
+  }
+}
+
+@media (max-width: 1099.98px) {
+  .cd-about-set {
+    --about-top: calc(var(--space-28) * 2);
+    --about-bar-gutter: var(--space-16);
+  }
+}
+
+.cd-about-top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-24);
+  height: var(--about-top);
+  padding: 0 var(--about-bar-gutter);
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--va-bar);
+}
+
+/* The link into the prototype keeps a hairline edge in the bar. On a phone it has none. */
+.cd-about-top .cd-about-try:not(.cd-about-try--compact) {
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+}
+
+/* On paper the bar is the page's first line, not laid over what follows. */
+@media print {
+  .cd-about-top {
+    position: static;
+  }
+}
+
+.cd-about-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.cd-about-switch {
+  display: flex;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.cd-about-switch__link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-control);
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cd-about-switch__link:hover {
+  background: var(--fill-hover);
+  color: var(--text-primary);
+}
+
+.cd-about-switch__link[aria-current='page'] {
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+}
+
+/* The phone's top bar: the link into the prototype, then the lockup on the right; the switch on its own row
+   under the bar, which scrolls away with the page. */
+
+.cd-about-top--compact {
+  gap: var(--space-12);
+}
+
+.cd-about-top--compact .cd-about-brand {
+  gap: var(--space-8);
+  margin-left: auto;
+}
+
+.cd-about-switch--compact {
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin: 0;
+  padding: var(--space-12) var(--about-bar-gutter) 0;
+}
+
+/* 8 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone.
+   Brought into view by the keyboard, a name stops clear of the bar. */
+.cd-about-switch--compact .cd-about-switch__link {
+  padding: 0 var(--space-8);
+  scroll-margin-top: calc(var(--about-top) + var(--space-24));
+}

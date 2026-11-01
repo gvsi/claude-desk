@@ -7,17 +7,16 @@
  * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
  * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
  * picture cards that end the article, each a link to its idea's vision page. As one of the About set, it carries
- * the reading pages' switch and their way into the prototype in its own bar, and "Read next" at its end. The page
- * is static: its words come from `text.ts`, nothing on it moves, and it makes no request.
+ * the set's top bar (`AboutBar`), the same as the reading pages', and "Read next" at its end. The page is static:
+ * its words come from `text.ts`, nothing on it moves, and it makes no request.
  */
-import { Fragment, useId, useSyncExternalStore } from 'react';
+import { Fragment, useId } from 'react';
 import { Link } from 'react-router';
 
 import { ConceptFooter } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { AboutSwitch } from '../AboutSwitch.tsx';
+import { AboutBar } from '../AboutBar.tsx';
 import { readNext } from '../links.ts';
-import { PrototypeLink } from '../PrototypeLink.tsx';
 import { useNoIndex } from '../useNoIndex.ts';
 import { usePagePlace } from '../usePagePlace.ts';
 import {
@@ -36,19 +35,6 @@ import {
 
 import '../paper.css';
 import './VisionArticle.css';
-
-/** The article's phone layout (VisionArticle.css): the switch leaves the bar for a row under it. */
-const NARROW = '(max-width: 720px)';
-
-function subscribeNarrow(onChange: () => void): () => void {
-  const query = window.matchMedia(NARROW);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
-
-function isNarrow(): boolean {
-  return window.matchMedia(NARROW).matches;
-}
 
 /** What happened, under the message it belongs to, with a dot in its tone. */
 function Receipt({ tone, text }: { tone: 'done' | 'held' | 'declined'; text: string }) {
@@ -270,19 +256,12 @@ export function VisionArticle() {
   useDocumentTitle(inApp(ARTICLE.kicker));
   useNoIndex();
   usePagePlace('vision');
-  const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
-  // The About set's switch, the article marked as the page on show: in the bar, or under it on a phone, where it
-  // scrolls away with the page as the reading pages' does.
-  const about = <AboutSwitch current="vision" className="va-switch" linkClassName="va-switch__link" />;
 
+  // The About set's paper, with the app's tokens pointed at it for the set's top bar, which the reading pages share;
+  // the article's own rules draw in the palette itself.
   return (
-    <div className="vision-article cd-about-paper">
-      <header className="va-bar">
-        <span className="va-bar__brand">Claude Desk</span>
-        {compact ? null : about}
-        <PrototypeLink />
-      </header>
-      {compact ? about : null}
+    <div className="vision-article cd-about-paper cd-about-paper--app cd-about-set">
+      <AboutBar current="vision" />
       <main>
         <article>
           <header className="va-hero">

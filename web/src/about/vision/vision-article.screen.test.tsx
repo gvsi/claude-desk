@@ -439,7 +439,7 @@ describe('The Vision article', () => {
       if (viewport === 'desktop') {
         // In the bar, between the name and the way into the prototype, on one line.
         expect(bar.contains(documents.element()), viewport).toBe(true);
-        const [name, links, tryIt] = [bar.querySelector('.va-bar__brand'), documents.element(), bar.querySelector('a.cd-about-try')].map((el) =>
+        const [name, links, tryIt] = [bar.querySelector('.cd-about-brand'), documents.element(), bar.querySelector('a.cd-about-try')].map((el) =>
           (el as Element).getBoundingClientRect(),
         ) as [DOMRect, DOMRect, DOMRect];
         expect(links.left, viewport).toBeGreaterThan(name.right);
@@ -493,8 +493,8 @@ describe('The Vision article', () => {
       expect(links.map((link) => flat(link)), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
       const tops = links.map((link) => link.getBoundingClientRect().top);
       expect(new Set(tops).size, `${where}: tops ${tops.join(', ')}`).toBe(1);
-      // One row: the switch is as tall as its space above and one 30 px link.
-      expect(documents.getBoundingClientRect().height - parseFloat(getComputedStyle(documents).paddingTop), where).toBe(30);
+      // One row: the switch is as tall as its space above and one 32 px link, the reading pages' (AboutBar).
+      expect(documents.getBoundingClientRect().height - parseFloat(getComputedStyle(documents).paddingTop), where).toBe(32);
       expect(Math.max(...links.map((link) => link.getBoundingClientRect().right)), where).toBeLessThanOrEqual(size.width - 16);
       expectNoHorizontalScroll();
     }
