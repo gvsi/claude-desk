@@ -13,6 +13,13 @@ import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
 export const DESKS_KEY = ['desks'] as const;
+/**
+ * The sample's business name from `backend/desk/kernel_service/seed.py`'s `rivera_seed`.
+ * Any Desk whose business has this name gets the sample's example chips, including one set up
+ * from the plumber example.
+ * Desk ids and slugs vary per demo copy, and the API has no sample marker.
+ */
+export const RIVERA_SAMPLE_BUSINESS_NAME = 'Rivera Plumbing';
 export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
