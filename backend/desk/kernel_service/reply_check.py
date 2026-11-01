@@ -671,19 +671,26 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
-def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
-    """Refuse unsafe policy text in the order a reply would show it, before signing.
+def policy_card_rules(prose: str, cards: Sequence[RenderedBlock]) -> dict[str, list[str]]:
+    """The policy cards that fail the public-text scan in the order a reply would show them
+    after `prose`, by fact ID in that order, each with its rule IDs and never its text.
 
-    Only free-text charter policies join the prose; structured cards legitimately carry
-    numbers. Keep contributing fact IDs in reply order and never echo policy text.
+    Only free-text charter policies join the prose; structured cards legitimately carry numbers.
     """
     policies = [(card.fact_id, card.text) for card in cards
                 if card.template == "policy" and card.fact_id is not None
                 and card.fact_id.startswith("charter:policy:")]
     if not policies:
-        return []
+        return {}
     refused = _scan_public_parts([(None, prose), *policies])
-    fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+    return {fact_id: refused[fact_id] for fact_id in dict.fromkeys(fact_id for fact_id, _ in policies)
+            if fact_id in refused}
+
+
+def policy_card_violations(prose: str, cards: Sequence[RenderedBlock]) -> list[Violation]:
+    """Refuse unsafe policy text in the order a reply would show it, before signing: one
+    `policy_combined` violation naming the contributing fact IDs in reply order (`policy_card_rules`)."""
+    fact_ids = list(policy_card_rules(prose, cards))
     if not fact_ids:
         return []
     return [Violation(kind="unknown_fact", span="policy", rule_id="policy_combined", fact_ids=fact_ids)]
