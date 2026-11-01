@@ -80,7 +80,7 @@ const EVERY_KIND = [
 ].join('\n\n');
 
 it('each_markdown_kind_renders_as_its_element', () => {
-  const md = reply(mount(<ChatMarkdown text={EVERY_KIND} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={EVERY_KIND} />));
   expect(md).toHaveClass('cd-md', 'cd-type-reply');
   expect([...md.children].map((child) => child.tagName.toLowerCase())).toEqual([
     'h1', 'h2', 'h3', 'h4', 'p', 'ul', 'ol', 'div', 'blockquote', 'hr', 'p',
@@ -116,7 +116,7 @@ it('raw_html_renders_as_text_never_as_elements', () => {
 });
 
 it('an_https_link_shows_its_text_only_and_opens_in_a_new_tab', () => {
-  const md = reply(mount(<ChatMarkdown text={'The [Energy Saver guide](https://www.energy.gov/energysaver/water-heating) explains it. Or [write to Maria](mailto:maria@example.com).'} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={'The [Energy Saver guide](https://www.energy.gov/energysaver/water-heating) explains it. Or [write to Maria](mailto:maria@example.com).'} />));
   const links = [...md.querySelectorAll('a')];
   expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel])).toEqual([
     ['Energy Saver guide', 'https://www.energy.gov/energysaver/water-heating', '_blank', 'noopener noreferrer'],
@@ -128,7 +128,7 @@ it('an_https_link_shows_its_text_only_and_opens_in_a_new_tab', () => {
 it('a_link_to_any_other_scheme_or_place_renders_as_its_text', () => {
   const others = ['javascript:alert(1)', 'data:text/html,hi', 'tel:5105550142', 'irc://example.com/x', '/admin', '#top', 'http://'];
   const text = others.map((url, index) => `[link ${index}](${url})`).join(' ');
-  const md = reply(mount(<ChatMarkdown text={text} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={text} />));
   expect(md.querySelectorAll('a')).toHaveLength(0);
   expect(md.textContent).toBe(others.map((_, index) => `link ${index}`).join(' '));
 });
@@ -140,6 +140,13 @@ it('inert_links_show_their_text_then_their_url_and_link_nowhere', () => {
   expect(md.querySelectorAll('a')).toHaveLength(0);
   // Every target shows as written, one that could never be a link included: it is only text.
   expect(md.textContent).toBe('Pay at this page (https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not this (javascript:alert(1)).');
+});
+
+it('links_are_inert_unless_a_screen_asks_for_them_open', () => {
+  // Safe by default: a screen that forgets the prop shows where a link goes and opens nothing.
+  const md = reply(mount(<ChatMarkdown text="See [the guide](https://example.com/guide)." />));
+  expect(md.querySelectorAll('a')).toHaveLength(0);
+  expect(md.textContent).toBe('See the guide (https://example.com/guide).');
 });
 
 it('inert_links_show_their_address_as_written', () => {
@@ -176,7 +183,7 @@ it('footnote_syntax_stays_as_its_own_words_in_place', () => {
 });
 
 it('the_rest_of_github_markdown_still_renders', () => {
-  const md = reply(mount(<ChatMarkdown text={'The ~~old~~ new tank, see www.example.com or https://example.com/tank.'} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={'The ~~old~~ new tank, see www.example.com or https://example.com/tank.'} />));
   expect(md.querySelector('del')?.textContent).toBe('old');
   expect([...md.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['https://www.example.com', 'https://example.com/tank']);
 });
@@ -186,7 +193,7 @@ it('a_bare_www_address_opens_as_https', () => {
   // as https, so that is where it opens. A link that shows http, or whose text isn't its address,
   // keeps its target.
   const text = 'Visit www.example.com today, or www.example.com/hours?day=sat, [the old page](http://x.example) and http://y.example/a.';
-  const md = reply(mount(<ChatMarkdown text={text} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={text} />));
   expect([...md.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
     ['www.example.com', 'https://www.example.com'],
     ['www.example.com/hours?day=sat', 'https://www.example.com/hours?day=sat'],
@@ -209,7 +216,7 @@ it('a_hard_break_starts_one_new_line', () => {
 
 it('switching_links_redraws_the_same_reply', () => {
   const text = 'See [the guide](https://example.com/guide).';
-  const host = mount(<ChatMarkdown text={text} />);
+  const host = mount(<ChatMarkdown links="open" text={text} />);
   expect(reply(host).querySelectorAll('a')).toHaveLength(1);
   rerender(<ChatMarkdown text={text} links="inert" />);
   expect(reply(host).querySelectorAll('a')).toHaveLength(0);
@@ -224,14 +231,14 @@ function rows(md: HTMLElement): string[][] {
 }
 
 it('growing_text_that_stops_mid_bold_shows_no_raw_markers', () => {
-  const md = reply(mount(<ChatMarkdown text="Here is **the most impor" streaming />));
+  const md = reply(mount(<ChatMarkdown links="open" text="Here is **the most impor" streaming />));
   expect(md.querySelector('strong')?.textContent).toBe('the most');
   // The last word may be unfinished, so it waits for the next words.
   expect(md.textContent).toBe('Here is the most');
-  rerender(<ChatMarkdown text="Here is **the most important** part: a [guide](https://www.ener" streaming />);
+  rerender(<ChatMarkdown links="open" text="Here is **the most important** part: a [guide](https://www.ener" streaming />);
   expect(md.querySelector('strong')?.textContent).toBe('the most important');
   expect(md.textContent).toBe('Here is the most important part: a');
-  rerender(<ChatMarkdown text="Here is **the most important** part: a [guide](https://www.energy.gov/x) to read." />);
+  rerender(<ChatMarkdown links="open" text="Here is **the most important** part: a [guide](https://www.energy.gov/x) to read." />);
   expect(md.textContent).toBe('Here is the most important part: a guide to read.');
 });
 
@@ -283,7 +290,7 @@ it('a_reference_link_keeps_its_address_from_another_paragraph', () => {
   // Streamdown renders each block alone, so a definition in its own paragraph vanished and the
   // link showed as "[Book][1]". The reply renders as one block when it defines a reference.
   const text = 'You can [Book][1] here.\n\nAnything else?\n\n[1]: https://example.com/book';
-  const open = reply(mount(<ChatMarkdown text={text} />));
+  const open = reply(mount(<ChatMarkdown links="open" text={text} />));
   expect([...open.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Book', 'https://example.com/book']]);
   expect([...open.children].map((block) => block.textContent)).toEqual(['You can Book here.', 'Anything else?']);
   rerender(<ChatMarkdown text={text} links="inert" />);

@@ -37,7 +37,8 @@ function words(element: Element): string {
 const meta = {
   title: 'Conversation/ChatMarkdown',
   component: ChatMarkdown,
-  args: { text: REPLY },
+  // Links open, as the board draws them; ClaudeMessage's InertLink story shows them inert.
+  args: { text: REPLY, links: 'open' },
   decorators: [inReadingColumn],
   parameters: {
     layout: 'padded',

@@ -56,4 +56,4 @@ Under `prefers-reduced-motion: reduce` a revealed reply shows whole at once and 
 | `streaming` | `boolean` | `false` by default. The text is still growing. |
 | `reveal` | `boolean` | `false` by default. The text is whole; reveal it word by word. Only a message that arrives live passes it. |
 | `onRevealed` | `() => void` | Called once, when everything in `text` is shown: at once when not revealing or under reduced motion. |
-| `links` | `'open' \| 'inert'` | `open` by default: links are clickable and show their text only. `inert`: link text then the URL, nothing clickable. |
+| `links` | `'open' \| 'inert'` | `inert` by default, so a screen that leaves it out never opens an unchecked link: link text then its address as written, nothing clickable. `open`: links are clickable and show their text only. |

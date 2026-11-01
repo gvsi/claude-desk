@@ -65,7 +65,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       <div className="cd-setup-q3" ref={root}>
         <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
-          <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} /></div>
+          <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} links="open" /></div>
           <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} />
         </div>
         <ol className="cd-setup-q3__list" role="list">

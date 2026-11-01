@@ -73,7 +73,7 @@ export interface ChatMarkdownProps {
   reveal?: boolean;
   /** Called once when everything in `text` is shown (at once when not revealing, or with reduce-motion on). */
   onRevealed?: () => void;
-  /** 'open' (default): links clickable, text only. 'inert': for stopped drafts, link text then the URL in plain text, not clickable. */
+  /** 'inert' (default): for stopped drafts, link text then the URL in plain text, not clickable. 'open': links clickable, text only, where a screen asks for it. */
   links?: 'open' | 'inert';
 }
 
@@ -247,7 +247,7 @@ function useRevealedOnce(whole: boolean, onRevealed: (() => void) | undefined): 
  * HTML, links only to http, https and mailto. A growing text shows up to its last whole word, with
  * unfinished Markdown closed; a revealed one shows a growing start of itself, word by word.
  */
-export function ChatMarkdown({ text, streaming = false, reveal = false, onRevealed, links = 'open' }: ChatMarkdownProps) {
+export function ChatMarkdown({ text, streaming = false, reveal = false, onRevealed, links = 'inert' }: ChatMarkdownProps) {
   const reduced = useReducedMotion();
   const { shown, whole } = useReveal(text, streaming, reveal && !reduced);
   useRevealedOnce(whole, onRevealed);
