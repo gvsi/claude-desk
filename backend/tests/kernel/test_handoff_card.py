@@ -15,24 +15,24 @@ notification defaults alert the owner of a handoff at once.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 import sqlalchemy.exc
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, DemoInboxEntry, Label, ReplyVerdict, SessionCreated
+from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, Label, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
-from desk.db.models import Document, Fact, Handoff, LedgerEntry
-from desk.kernel_service import ledger, reply_check
+from desk.db.models import Booking, CalendarSlot, Document, Fact, Handoff, LedgerEntry
+from desk.kernel_service import adapters, execute, ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, quote_args, rivera, run, visitor_of
+from .test_adapters import Rivera, book, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
 from .test_context import context_of, fact_ids, owner_session_id
-from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
+from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
 from .test_execute import executed
 from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
 from .test_owner_messages import sent
@@ -971,3 +971,151 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
     assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
         (requested, "callback", "open")]
     assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+# ---- A booking closes the card's handoff (the owner's decision of 2026-11-01) --------------------------
+
+SLOT = "S-20261102-1000"                    # Monday 10:00 to 12:00, inside rv-book-wk's hours
+BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm."
+
+
+async def preview_of(client, copy: Rivera) -> Visitor:
+    """The owner's own preview of the Desk, as a visitor session."""
+    response = await client.post("/sessions", headers=copy.owner, json={
+        "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    return Visitor(session_id=created.state.session_id, token=created.session_token)
+
+
+async def held_card(app: FastAPI, copy: Rivera, visitor: Visitor) -> Handoff:
+    """An open card handoff the session holds from before, as `reply_check.open_card_handoff`
+    writes one (no fact). A preview's card opens none now, so its test writes it here."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(Handoff(handoff_id="handoff-earlier", copy_id=copy.copy_id, desk_id=copy.desk_id,
+                           session_id=visitor.session_id, reason=CARD_REASON, status="open", kind="card",
+                           action_id="handoff-earlier", created_at=ctx.clock.now()))
+    [handoff] = await handoffs_of(app, copy)
+    return handoff
+
+
+async def booked(client, reviewer, visitor: Visitor, slot_id: str = SLOT,
+                 call_id: str = "call-book") -> tuple[Decision, ExecResult]:
+    """A weekday booking the reviewer passes, allowed and executed."""
+    reviewer.answer = PASS
+    decision = await book(client, visitor, slot_id, call_id=call_id)
+    assert decision.outcome == "allow", decision.reason_plain
+    result = await executed(client, visitor, decision)
+    assert result.state == "succeeded"
+    return decision, result
+
+
+def closed_in_its_execution(entries: list[LedgerEntry], decision: Decision, handoff_id: str) -> bool:
+    """Whether the booking's closing of `handoff_id` is ledgered once, in the booking's execution:
+    after its decision's entry and before its outcome's, as a call-back's closing is."""
+    seqs = {(entry.event.kind, entry.event.ref_id): entry.seq for entry in entries}
+    closing = [entry.seq for entry in entries if entry.event.kind == "desk_data"
+               and entry.event.summary == {"part": "handoffs", "refs": [handoff_id], "closed_by": "booking"}]
+    return (len(closing) == 1
+            and seqs[("decide", decision.decision_id)] < closing[0] < seqs[("execute", decision.decision_id)])
+
+
+@pytest.mark.parametrize("session", ["visitor", "preview"])
+async def test_a_booking_closes_the_sessions_card_handoff(app, client, reviewer, session):
+    """A visitor who books has had what they asked for done, so the handoff the card opened closes
+    with the booking, in its transaction, as the owner's mark of done closes one, and is ledgered as
+    closed by it: Needs you stops listing the conversation. The owner's booking alert still goes
+    out. A card's handoff has no fact, so none is left committed. The owner's own preview, where a
+    card opens no handoff, closes one it holds the same way."""
+    copy, visitor = await visitor_of(app, client)
+    await alert_now(app, copy, "booking")
+    if session == "preview":
+        visitor = await preview_of(client, copy)
+        card = await held_card(app, copy, visitor)
+    else:
+        card = await card_handoff(app, client, copy, visitor)
+
+    decision, _ = await booked(client, reviewer, visitor)
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
+        (card.handoff_id, "card", "done")]
+    assert api_rows(copy.copy_id, "SELECT handoff_id, status FROM kernel_ro.handoffs") == [(card.handoff_id, "done")]
+    assert await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.fact_id == f"handoff:{card.handoff_id}", Fact.status != "expired")) == []
+    entries = await ledger_rows(app, copy)
+    assert closing_summaries(entries) == [{"part": "handoffs", "refs": [card.handoff_id], "closed_by": "booking"}]
+    assert closed_in_its_execution(entries, decision, card.handoff_id)
+    if session == "visitor":
+        assert BOOKED in [alert.body for alert in await owner_alerts(client, copy)]
+    # a later booking in the session closes nothing more
+    await booked(client, reviewer, visitor, "S-20261102-1200", call_id="call-book-2")
+    assert closing_summaries(await ledger_rows(app, copy)) == closing_summaries(entries)
+
+
+async def test_a_typed_booking_closes_the_sessions_card_handoff(app, client):
+    """A booking made through a typed booking tool runs the native booking's execution, so it
+    closes the card's handoff the same way."""
+    from .test_typed_booking import TOOL, configured
+
+    copy, visitor = await configured(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    decision = await decided(client, visitor, TOOL, {"slot_id": SLOT})
+    assert decision.outcome == "allow", decision.reason_plain
+    assert (await executed(client, visitor, decision)).state == "succeeded"
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "done")]
+    entries = await ledger_rows(app, copy)
+    assert closing_summaries(entries) == [{"part": "handoffs", "refs": [card.handoff_id], "closed_by": "booking"}]
+    assert closed_in_its_execution(entries, decision, card.handoff_id)
+    # both hold the session row FOR UPDATE in their execution, as the session's handoff rows need
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        assert (await adapters.resolve(ctx, copy.desk_id, TOOL)).locks_session is True
+    assert adapters.ADAPTERS["native.book"].locks_session is True
+
+
+async def test_a_booking_leaves_a_call_back_open(app, client, reviewer):
+    """A call-back promises the visitor a call, which a booking doesn't keep, so it stays open, its
+    fact committed, until the owner marks it done."""
+    copy, visitor = await visitor_of(app, client)
+    requested = await callback(client, visitor)
+    await booked(client, reviewer, visitor)
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
+        (requested.model_view["handoff_id"], "callback", "open")]
+    [fact] = requested.facts
+    assert [row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.fact_id == fact.fact_id))] == ["committed"]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+async def test_a_booking_closes_only_its_own_sessions_card_handoff(app, client, reviewer):
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    await booked(client, reviewer, await open_visitor(client, copy))
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+@pytest.mark.parametrize("failure", ["slot_changed", "slot_taken"])
+async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkeypatch, failure):
+    """A booking that fails in its execution (the slot moved since the re-check, or another
+    session took it) books nothing, so the card's handoff stays open."""
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    reviewer.answer = PASS
+    decision = await book(client, visitor, SLOT)
+    assert decision.outcome == "allow", decision.reason_plain
+    if failure == "slot_taken":
+        await booked(client, reviewer, await open_visitor(client, copy), call_id="call-other")
+    else:
+        async def slot_moves() -> None:
+            async with kernel_ctx(app) as ctx:
+                ctx.bind(copy.copy_id)
+                slot = (await ctx.db.scalars(ctx.repo.scoped(select(CalendarSlot).where(
+                    CalendarSlot.desk_id == copy.desk_id, CalendarSlot.slot_id == SLOT)))).one()
+                slot.starts_at += timedelta(hours=1)
+
+        monkeypatch.setattr(execute, "_after_intent", slot_moves)
+    assert (await executed(client, visitor, decision)).state == "failed"
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+    assert visitor.session_id not in {row.session_id for row in await rows_of(app, copy.copy_id, select(Booking))}

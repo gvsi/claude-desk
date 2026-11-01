@@ -204,8 +204,8 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> Sess
     either commits before T2 takes it, and T2 sees what it wrote, or waits until T2 commits. An
     adapter that writes the session's own rows
     (`locks_session`: a verification start, a call-back request, which keeps one open handoff
-    per session, or a purpose payment, which keeps one open link per tool in a session) holds it
-    `FOR UPDATE` instead, so two such executions
+    per session, a purpose payment, which keeps one open link per tool in a session, or a booking,
+    which closes the session's card handoffs) holds it `FOR UPDATE` instead, so two such executions
     in one session take turns: each holding it shared and then asking for it outright, they would
     wait on each other until Postgres ended one. Never None, since a missing row raises (and the
     action ends `unknown`, never fenced). The action's tool is read without a lock, which waits

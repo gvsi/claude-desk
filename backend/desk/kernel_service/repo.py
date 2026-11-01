@@ -17,8 +17,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
    route, in T2 by the execution of an adapter that writes the session's own rows
    (`locks_session`: a verification start, a call-back request, which keeps one open handoff
-   per session, and a purpose payment, which keeps one open link per tool in a session) on either
-   path, and by the owner's writes that close
+   per session, a purpose payment, which keeps one open link per tool in a session, and a booking,
+   which closes the session's card handoffs) on either path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
    Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
    nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
@@ -48,7 +48,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
    `POST /knowledge` upserts;
 10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
-    books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
+    books, which its T2 takes `FOR SHARE`, then the session's open card handoffs it closes, `FOR
+    UPDATE`; a handoff; Plan 01c's mandates), after whatever of steps
     4 to 9 the same transaction takes; and the handoffs of a session whose reply shows the
     handoff card, passed on an open one's card, or rechecks fact-backed cards: its open ones
     `FOR SHARE` before facts, including when losing the last checked card could require a handoff;

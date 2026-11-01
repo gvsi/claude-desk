@@ -9,6 +9,17 @@ fact labelled for the session (the booking confirmed card) and alerts the owner 
 notification defaults. The alert is read only from the owner's Demo inbox, so the result's `inbox`
 stays empty. An optional untrusted note is saved separately as an owner-only knowledge fact,
 quoted in the owner's alert, and never returned with the session's booking fact.
+
+A booking also closes the session's open handoffs the handoff card opened, in its own
+transaction, as the owner taking the conversation over does (`sessions.close_card_handoffs`, the
+owner's decision of 2026-11-01): the visitor has what they asked for done, so the owner's Needs you
+stops listing the conversation. Each closing is ledgered `desk_data` `{part: "handoffs", refs: [its
+id], closed_by: "booking"}` once the booking's rows are written, before the execution's outcome, as
+a call-back's closing is. A call-back stays open, since it promises the visitor a call. The owner's
+own preview closes them the same way. These are the session's own rows, so the execution holds the
+session row `FOR UPDATE` (`locks_session`), as a call-back's does: two bookings in one session take
+turns, and so do a booking and any other execution in it. A typed booking
+(`blocks.TypedBookingAdapter`) inherits all of it.
 """
 
 from datetime import datetime, timedelta
@@ -22,7 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from desk.contracts import SLOT_ID_PATTERN, Claim, Fact, Label, NormalizedAction, Principal, ResourceRef, ToolProfile
 from desk.db.models import Booking, CalendarSlot, Person
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import demo_inbox, labels, render
+from desk.kernel_service import demo_inbox, labels, render, sessions
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (QUOTED_CHARS, AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
                                                NormalizeCtx, business_timezone, claudes_note, quoted)
@@ -115,6 +126,7 @@ class BookAdapter:
     free_text_fields = frozenset({"note"})
     model_view_keys = frozenset({"fact_id", "booking_id", "status"})
     releases_private_data = False         # the booking the session made, labelled for the session too
+    locks_session = True                  # it closes the session's card handoffs: the session row FOR UPDATE in T2
 
     def appointment(self) -> tuple[str, int] | None:
         """Optional display metadata supplied by trusted adapter code, never visitor args."""
@@ -131,7 +143,9 @@ class BookAdapter:
 
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: BookArgs) -> AdapterResult:
         """Books the slot the action resolved; a slot that changed or started since the execution
-        re-check, or that another booking took, fails it before anything is written."""
+        re-check, or that another booking took, fails it before anything is written. Once booked,
+        the session's open card handoffs close, before the booking's own facts are written (the
+        handoffs, then the facts, as the lock order goes), and are ledgered last."""
         ctx = xctx.ctx
         now = ctx.clock.now()
         slot = await find_slot(ctx, action.desk_id, args.slot_id, lock=True)
@@ -139,6 +153,7 @@ class BookAdapter:
             raise AdapterFailure("slot_changed")
         label = labels.new_fact_label(xctx.session_row)
         booking = await commit_booking(ctx, action, slot, person_id=label.record_owner)
+        closed = await sessions.close_card_handoffs(ctx, xctx.session_row)
         tz = await business_timezone(ctx, xctx.desk_row)
         fact = Fact(fact_id=f"booking:{booking.booking_id}", kind="booking", status="committed", source="kernel",
                     claims=[Claim(key="starts_at", kind="datetime", value=slot.starts_at.astimezone(tz).isoformat()),
@@ -165,6 +180,7 @@ class BookAdapter:
         note_text = f" {claudes_note((args.note,))}" if args.note else ""
         await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
                                      f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.{note_text}")
+        await sessions.ledger_card_handoffs_closed(ctx, xctx.session_row, closed, "booking")
         return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
