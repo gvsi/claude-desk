@@ -103,6 +103,24 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     expect(growing()).toBeNull();
   });
 
+  it('keeps_the_writing_dots_through_a_turn_that_streams_no_words', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    // A reply the step hides (it read the owner's site, and a limit question follows) never streams.
+    const held = gate();
+    mockStore.planStream('setup', { quiet: true, pauseAfter: 0, until: held.until });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(log.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(growing()).toBeNull();
+    expect(log.element().querySelector('.cd-claude-message:empty, .cd-setup-growing')).toBeNull();
+    held.release();
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(log.element().querySelector('.cd-writing-indicator')).toBeNull();
+  });
+
   it('keeps_an_answer_refused_right_after_done_in_the_message_box', async () => {
     const state = await cpaInterview(null);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });

@@ -78,6 +78,29 @@ describe('playReply', () => {
     expect(out.ended()).toBe('done');
   });
 
+  it('sends_no_words_for_a_quiet_reply_and_can_hold_before_its_end', async () => {
+    const out = record();
+    let release: () => void = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    playReply({ text: 'one two', wordMs: 10, plan: { quiet: true, pauseAfter: 0, until } }, out.sink);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(out.played).toEqual([]);
+    expect(out.ended()).toBeNull();
+    release();
+    await vi.runAllTimersAsync();
+    expect(out.played).toEqual([]);
+    expect(out.ended()).toBe('done');
+  });
+
+  it('fails_with_the_whole_error_body_planned', async () => {
+    const out = record();
+    playReply({ text: 'one', wordMs: 10, plan: { fail: { status: 422, error: 'above_money_cap', cap_cents: 0 }, failAfter: 0 } }, out.sink);
+    await vi.runAllTimersAsync();
+    expect(out.played).toEqual([{ name: 'error', status: 422, error: 'above_money_cap', cap_cents: 0 }]);
+  });
+
   it('starts_again_after_a_reset', async () => {
     const out = record();
     playReply({ text: 'one two', wordMs: 10, plan: { resetAfter: 1 } }, out.sink);

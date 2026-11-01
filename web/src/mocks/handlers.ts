@@ -234,7 +234,11 @@ export function createHandlers(store: MockStore): HttpHandler[] {
           event(ev) {
             if (ev.name === 'delta') send('delta', { text: ev.text });
             else if (ev.name === 'reset') send('reset', {});
-            else if (ev.name === 'error') send('error', { status: ev.status, error: ev.error });
+            else if (ev.name === 'error') {
+              // The JSON route's error body, with its status.
+              const { name: _event, ...body } = ev;
+              send('error', body);
+            }
           },
           end(how) {
             if (how === 'done') send('final', out);

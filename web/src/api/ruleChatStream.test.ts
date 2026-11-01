@@ -139,6 +139,24 @@ describe('askRuleChat', () => {
     expect(err).toMatchObject({ kind: 'unprocessable', code: 'above_money_cap', capCents: 50_000 });
   });
 
+  it('reads_an_error_event_as_the_json_routes_own_error_body', async () => {
+    // The event is the JSON route's error body plus its status: a 422 with no limit set yet.
+    fetchMock.mockResolvedValueOnce(events([frame('error', { status: 422, error: 'above_money_cap', cap_cents: 0 })]).response);
+    expect(await askRuleChat(DESK, 'Refunds', { onText: () => {} }).catch((e: unknown) => e)).toMatchObject({
+      kind: 'unprocessable',
+      status: 422,
+      code: 'above_money_cap',
+      capCents: 0,
+    });
+    // An unexpected failure is the JSON route's 500.
+    fetchMock.mockResolvedValueOnce(events([frame('delta', { text: 'Let me' }), frame('error', { status: 500, error: 'internal' })]).response);
+    expect(await askRuleChat(DESK, 'Refunds', { onText: () => {} }).catch((e: unknown) => e)).toMatchObject({ kind: 'unavailable', status: 500, code: 'internal' });
+    // A kernel refusal names its code, as the JSON body does.
+    fetchMock.mockResolvedValueOnce(events([frame('error', { status: 503, error: 'kernel', code: 'kernel_unavailable' })]).response);
+    expect(await askRuleChat(DESK, 'Refunds', { onText: () => {} }).catch((e: unknown) => e)).toMatchObject({ kind: 'unavailable', code: 'kernel_unavailable', kernel: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('fails_with_a_json_refusal_before_any_stream_and_sends_nothing_again', async () => {
     fetchMock.mockResolvedValueOnce(json(429, { error: 'rate_limited', retry_after: 5 }));
     const err = await askRuleChat(DESK, 'Hi', { onText: () => {} }).catch((e: unknown) => e);

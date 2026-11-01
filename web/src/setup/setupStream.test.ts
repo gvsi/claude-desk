@@ -84,6 +84,21 @@ describe('stepSetupStream', () => {
     ).toEqual({ growing: { labels: [], text: 'Got it.' }, next: 'refetch' });
   });
 
+  it('clears_a_reply_reset_right_before_done_so_the_saved_turn_wins', () => {
+    // The model moved on to a limit question after its reply had streamed: that reply is never saved.
+    expect(
+      through([
+        { type: 'delta', run, text: 'Got it. Weekdays 8 to 6.' },
+        { type: 'reset', run },
+        { type: 'done', run },
+      ]),
+    ).toEqual({ growing: NOTHING_YET, next: 'refetch' });
+  });
+
+  it('keeps_the_writing_state_through_a_turn_that_streams_only_done', () => {
+    expect(through([{ type: 'done', run }])).toEqual({ growing: NOTHING_YET, next: 'refetch' });
+  });
+
   it('waits_for_the_request_still_out_on_done', () => {
     expect(
       through(

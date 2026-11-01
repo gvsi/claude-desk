@@ -9,6 +9,7 @@ import { userEvent } from 'vitest/browser';
 
 import type { RouteKey } from '../../api/routes.ts';
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { DRAFT_FAILED } from './RuleChat.tsx';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute, type Viewport } from '../../test/renderRoute.tsx';
@@ -99,6 +100,20 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(growing(panel)).toBeNull();
     expect(panel.getByText(ANSWER, { exact: true }).elements()).toHaveLength(0);
     expect(requests('ruleChat')).toHaveLength(1);
+  });
+
+  it('says_what_the_json_answer_would_for_a_limit_not_set_and_an_unexpected_failure', async () => {
+    mockStore.planStream('ruleChat', { fail: { status: 422, error: 'above_money_cap', cap_cents: 0 }, failAfter: 2 });
+    const { screen, panel } = await ask(viewport);
+    await expect.element(panel.getByText("You haven't set a limit for taking money without asking. Set one first.", { exact: true })).toBeVisible();
+    expect(growing(panel)).toBeNull();
+    mockStore.planStream('ruleChat', { fail: { status: 500, error: 'internal' }, failAfter: 1 });
+    await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(panel.getByText(DRAFT_FAILED, { exact: true })).toBeVisible();
+    expect(growing(panel)).toBeNull();
+    expect(requests('ruleChat')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
   });
 
   it('asks_again_as_json_when_the_stream_breaks_off', async () => {

@@ -32,11 +32,13 @@ export interface OwnerStreamPlan {
   until?: Promise<unknown>;
   /** Sends a reset after this many deltas, once, and writes the reply again from its start. */
   resetAfter?: number;
-  /** Ends with this error instead, after `failAfter` deltas (all of them when absent). */
-  fail?: { status: number; error: string };
+  /** Ends with this error instead, after `failAfter` deltas (all of them when absent): the route's error body and status. */
+  fail?: { status: number; error: string } & Record<string, unknown>;
   failAfter?: number;
   /** Breaks the connection off after this many deltas, with no last event. */
   dropAfter?: number;
+  /** Sends none of the reply's words, as a turn whose reply the API hides: only its end. */
+  quiet?: boolean;
 }
 
 /** A read the turn makes before it writes, and the label it ends with. */
@@ -51,7 +53,7 @@ export type PlayedEvent =
   | { name: 'reset' }
   | { name: 'reading'; read: PlayedRead['read']; host: string | null }
   | { name: 'label'; read: PlayedRead['read']; text: string }
-  | { name: 'error'; status: number; error: string };
+  | ({ name: 'error'; status: number; error: string } & Record<string, unknown>);
 
 export interface ReplySink {
   event(ev: PlayedEvent): void;
@@ -86,7 +88,7 @@ function stepsOf({ text, wordMs, reads = [], plan }: Reply): Step[] {
   const steps: Step[] = [];
   for (const { read, host } of reads) steps.push({ wait: wordMs, ev: { name: 'reading', read, host } });
   for (const { read, text: label } of reads) steps.push({ wait: wordMs * READ_WORDS, ev: { name: 'label', read, text: label } });
-  const words = growingWords(text);
+  const words = plan?.quiet ? [] : growingWords(text);
   const failAt = plan?.fail ? (plan.failAfter ?? words.length) : null;
   /** The end planned once `sent` deltas are out, if any. */
   const endingAt = (sent: number): Step[] | null => {
@@ -96,6 +98,7 @@ function stepsOf({ text, wordMs, reads = [], plan }: Reply): Step[] {
   };
   let sent = 0;
   let reset = false;
+  if (plan?.pauseAfter === 0 && plan.until) steps.push({ hold: plan.until });
   let ending = endingAt(0);
   for (let at = 0; ending === null && at < words.length; at += 1) {
     steps.push({ wait: wordMs, ev: { name: 'delta', text: words[at] ?? '' } });
