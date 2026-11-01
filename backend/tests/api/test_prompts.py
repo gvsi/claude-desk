@@ -43,6 +43,9 @@ from desk.api.prompts import (
     TRIAGE_SYSTEM,
     VISITING_AGENT_SYSTEM,
     AgentStep,
+    BusinessType,
+    DemoTask,
+    DemoTaskSet,
     DeskIdentity,
     HoursAnswer,
     PriceAnswer,
@@ -52,6 +55,7 @@ from desk.api.prompts import (
     Translation,
     Triage,
     TriageCategory,
+    agent_task,
     conversation_system,
 )
 from desk.api.model import strict_schema
@@ -333,7 +337,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.22"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.23"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -745,11 +749,60 @@ def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
     )
 
 
+# The built-in agent's task lines (plan 09, C2), as signed: Rivera's seed keeps its three, and every other Desk reads
+# the lines of its setup business type. Fixed words only: no business's, owner's or visitor's text.
+SIGNED_TASK_LINES = {
+    "rivera": {
+        "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
+        "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
+    },
+    "trade": {
+        "book_visit": "Book the earliest visit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
+    },
+    "office": {
+        "book_visit": "Book the earliest consult for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
+    },
+    "landlord": {
+        "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
+    },
+    "other": {
+        "book_visit": "Book the earliest appointment for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
+                             "spending limit.",
+        "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
+    },
+}
+
+
+def test_each_desk_set_has_its_own_fixed_task_lines():
+    # Every set has a line for each task, and the agent's first message is AGENT_TASK around exactly that line.
+    assert DEMO_TASKS == SIGNED_TASK_LINES
+    assert set(get_args(DemoTaskSet)) == set(DEMO_TASKS) == {"rivera", *get_args(BusinessType)}
+    for task_set, lines in DEMO_TASKS.items():
+        assert set(lines) == set(get_args(DemoTask))
+        for task, line in lines.items():
+            assert agent_task(task, task_set) == AGENT_TASK.format(task=line)
+    # No line names an amount, a date, a discount or a booking already made: each one asks.
+    for line in (line for lines in DEMO_TASKS.values() for line in lines.values()):
+        assert not re.search(r"[\d$%]|\b(free|discount|confirmed|booked)\b", line, re.IGNORECASE), line
+
+
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "TIME_NOTE", "WEEKDAYS",
                 "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES", "STATUS_LINES",
-                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "VISITING_AGENT_SYSTEM", "AGENT_TASK",
+                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "DemoTaskSet", "VISITING_AGENT_SYSTEM",
+                "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
                 # the setup interview's (Plan 02b)
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
@@ -792,7 +845,8 @@ def _fixed() -> set[str]:
     """The fixed strings a model reads, as prompts.py holds them: no other module may hold one."""
     from desk.api.prompts import INVALID_REPLY_DIAGNOSTIC, REPLY_DIAGNOSTICS
 
-    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(), *DEMO_TASKS.values(), SEND_REPLY_TOOL["description"],
+    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(),
+            *(line for lines in DEMO_TASKS.values() for line in lines.values()), SEND_REPLY_TOOL["description"],
             INVALID_REPLY_DIAGNOSTIC, *REPLY_DIAGNOSTICS.values(),
             *(line for line in conversation_system(RIVERA)[0]["text"].splitlines() if len(line) > 20),
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),

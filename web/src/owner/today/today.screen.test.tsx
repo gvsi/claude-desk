@@ -697,6 +697,37 @@ describe('Today', () => {
     await vi.waitFor(() => expect(document.querySelector('main')!.scrollTop).toBe(300));
   });
 
+  it('back_within_a_today_drawn_at_once_keeps_where_the_owner_scrolled_since', async () => {
+    // Back to Today with its reads still in memory: it is drawn at once, at the owner's place.
+    const { screen, router } = await renderRoute(TODAY, { viewport: { width: 1440, height: 600 } });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    const column = document.querySelector('main')!;
+    column.scrollTop = 300;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+    // Time for the place to be kept, as the owner's own scrolling is.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+
+    // The owner scrolls on, follows an address within Today, and comes back: Today stays where they
+    // scrolled to, not at the place Back first returned to.
+    column.scrollTop = 600;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(600));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await router.navigate(`${TODAY}#request-example`);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe('#request-example'));
+    // Time for Today to draw at that address, as it would before the owner can press Back.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(column.scrollTop).toBe(600);
+  });
+
   it('needs_you_failing_opens_today_at_once', async () => {
     // Today doesn't keep its skeleton for a read that has already failed: it opens on the failure,
     // with the line that says so where the requests would be.

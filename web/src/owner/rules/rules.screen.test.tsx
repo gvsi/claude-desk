@@ -961,8 +961,67 @@ describe('rules page', () => {
     await expect.poll(() => main.scrollTop).toBe(end);
   });
 
-  it('rules_page_matches_its_board', async () => {
+  it.each(['before', 'after'] as const)('going_back_keeps_the_place_when_the_hold_question_comes_in_above_it_%s_the_shapes_show', async (when) => {
+    // Acme's Rules waits for Needs you, whose held quote puts a question under Ask Claude, above the
+    // connectors. A short window, with Payments' limit in its middle: a place halfway down Rules,
+    // which its shapes can hold while it reads.
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const main = screen.getByRole('main').element();
+    const limit = () => screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true }).element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
+    limit().scrollIntoView({ block: 'center' });
+    await heard;
+    const place = main.scrollTop;
+    expect(place).toBeGreaterThan(0);
+    const shows = limit().getBoundingClientRect().top;
+    expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
+
+    // Back from All rules: the question comes in with the page, above the place, at once or once
+    // Needs you, held, comes after the shapes have shown. Rules reads Needs you as it opens, and a
+    // read already out when it opens is the one it waits for; tests poll often, so one may be. So
+    // every read is held from while Rules is still open: once one is held, none sent before it is
+    // still out (a query has one read out at a time), and the read Rules waits for on Back is held.
+    const reads = when === 'after' ? holdNeedsYou() : null;
+    if (reads !== null) await expect.poll(reads.held, { timeout: 2_000 }).toBeGreaterThan(0);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(-1);
+    if (reads !== null) {
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
+      reads.release();
+    }
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await settled(screen.container);
+    expect(main.scrollTop).toBe(place);
+    expect(limit().getBoundingClientRect().top, "Payments' limit where the owner left it").toBe(shows);
+  });
+
+  it.each(['at once', 'after its shapes show'] as const)('rules_page_matches_its_board_drawn_%s', async (when) => {
+    // Rules waits for its suggestions: held until its shapes have shown, they fade as the page draws,
+    // here for as long as a busy browser can keep them (the fade's one-second fallback).
+    let releaseSuggestions = () => {};
+    if (when === 'after its shapes show') {
+      const until = new Promise<void>((resolve) => {
+        releaseSuggestions = resolve;
+      });
+      onTestFinished(() => releaseSuggestions());
+      mockStore.inject({ route: 'suggestions', status: 200, body: desk().suggestions, until });
+      const slowFade = document.createElement('style');
+      slowFade.textContent = ".cd-skeleton-screen__layer[data-state='leaving'] { animation-duration: 10s !important; }";
+      document.head.append(slowFade);
+      onTestFinished(() => slowFade.remove());
+    }
     const { screen } = await renderRoute(`${DESK}/rules`);
+    if (when === 'after its shapes show') {
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
+      releaseSuggestions();
+    }
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;

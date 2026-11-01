@@ -35,6 +35,7 @@ from pydantic import ValidationError
 from sqlalchemy import text as sql
 
 from desk.api import proving, schemas, setup
+from desk.api import setup as desk_setup
 from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
 from desk.api.kernel_client import KernelFailed, KernelUnavailable, KernelView
 from desk.api.main import _install_error_handlers as install_error_handlers
@@ -50,7 +51,9 @@ from desk.api.prompts import (
     DraftedRules,
     DraftedSituations,
     HoursAnswer,
+    JobProposal,
     PriceAnswer,
+    ProposalCard,
     RuleCardDraft,
     SetupAnswers,
     SituationDraft,
@@ -100,7 +103,9 @@ from tests.api.test_setup_questions import (
     next_step,
     structured,
     turn,
+    until,
 )
+from tests.kernel_contract import fake_kernel
 from tests.kernel_contract.fake_kernel import changes_always_on, fake_kernel_app, tool_profile
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
@@ -256,6 +261,414 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, **kwargs) -> tu
         state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
     assert state["step"] == "tools"
     return owner, state
+
+
+async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True, jobs=None):
+    """An owner at the end of questions with `jobs` accepted (by default four jobs, the third declined)."""
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    declined = None if jobs else 2
+    jobs = jobs or [
+        JobProposal(job="intake", title="Take repair requests!", why="Collect details",
+                    how=" Ask  what\nneeds repair. ", autonomy="ask", can_do_today=True,
+                    config={"block": "intake", "questions": ["What needs repair?"]}),
+        JobProposal(job="urgent", title="Flag urgent help", why="Reach the owner",
+                    how="Tell the owner about urgent requests.", autonomy="ask", can_do_today=True,
+                    config={"block": "urgent", "urgent_when": "An active leak"}),
+        JobProposal(job="schedule", title="Book a visit", why="Arrange visits",
+                    how="Book a visit in opening hours.", autonomy="ask", can_do_today=True,
+                    config={"block": "typed_booking", "appointment_type": "Repair visit", "minutes": 60}),
+        JobProposal(job="answer", title="Answer questions", why="Explain services",
+                    how="Answer service questions.", autonomy="ask", can_do_today=True, config=None),
+    ]
+    cards = [ProposalCard(proposal_id=f"p-{index:012x}", kind="job",
+                          state="declined" if index == declined else "accepted", job=job, connector=None)
+             for index, job in enumerate(jobs)]
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+        interview.transcript.append(desk_setup.Entry(role="claude", text="", planned=cards))
+        await desk_setup._save(conn, interview)
+    return owner, state, jobs
+
+
+async def finish_business_jobs(owner, state, model):
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk will help with requests."))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    return reply.json()
+
+
+async def test_accepted_jobs_become_business_tools_needing_review(app, browser, kernel_http, model, engine, fake):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    await finish_business_jobs(owner, state, model)
+    writes = [call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]
+    assert len(writes) == 1
+    assert writes[0].path == f"/desks/{state['desk_id']}/business_tools"
+    assert writes[0].body == {"tools": [
+        {"tool": name, "title": job.title, "description": " ".join(job.how.split()),
+         "config": job.config.model_dump(mode="json")}
+        for name, job in zip(["desk.take-repair-requests", "desk.flag-urgent-help"], jobs[:2])
+    ]}
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = [row for row in reply.json()["tools"] if row["source"] == "business"]
+    assert {row["tool"] for row in tools} == {"desk.take-repair-requests", "desk.flag-urgent-help"}
+    assert all(row["status"] == "needs_review" and row["definition_sha256"] for row in tools)
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+
+
+@pytest.mark.parametrize("failure", ["422", "timeout", "restart"])
+async def test_tools_step_recovers_a_missing_business_tools_write(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, failure,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    if failure == "restart":
+        async def interrupted(*args):
+            pass
+        with monkeypatch.context() as patch:
+            patch.setattr(desk_setup, "after_finish", interrupted)
+            await finish_business_jobs(owner, state, model)
+    else:
+        fake.fail("PUT /desks/{id}/business_tools", failure, times=1)
+        await finish_business_jobs(owner, state, model)
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == {
+        "desk.take-repair-requests", "desk.flag-urgent-help"}
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == (
+        1 if failure == "restart" else 2)
+
+
+@pytest.mark.parametrize("failure", ["404", "422", "409", "timeout"])
+async def test_tools_step_still_lists_tools_when_the_retry_fails(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, caplog, failure,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    monkeypatch.setitem(fake_kernel.FAILURE_CODES, "404", "not_found")
+    fake.fail("PUT /desks/{id}/business_tools", failure, times=2)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["tools"] and not any(row["source"] == "business" for row in reply.json()["tools"])
+    assert len(fake.called("PUT /desks/{id}/business_tools")) == 2
+    assert "setup business tools" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_the_tools_step_holds_no_transaction_while_it_retries_business_tools(
+    app, browser, kernel_http, model, engine, fake, db,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    fake.fail("PUT /desks/{id}/business_tools", "422", times=1)
+    await finish_business_jobs(owner, state, model)
+    release = fake.gate("PUT /desks/{id}/business_tools")
+    reply = asyncio.create_task(owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools"))
+    try:
+        await until(lambda: len(fake.called("PUT /desks/{id}/business_tools")) == 2)
+        assert idle_in_transaction(db) == 0
+    finally:
+        release.set()
+    reply = await asyncio.wait_for(reply, 10)
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == {
+        "desk.take-repair-requests", "desk.flag-urgent-help"}
+
+
+@pytest.mark.parametrize("unfinished", [True, False])
+async def test_tools_step_skips_unfinished_or_configless_jobs(
+    app, browser, kernel_http, model, engine, fake, unfinished,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    if not unfinished:
+        async with engine.begin() as conn:
+            interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+            for card in interview.transcript[-1].planned:
+                card.job.config = None
+            await desk_setup._save(conn, interview)
+        await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert not fake.called("PUT /desks/{id}/business_tools")
+
+
+@pytest.mark.parametrize(("titles", "names"), [
+    (["Take, repair: requests!", "123 Requests 45!", "a" * 39 + " " + "b" * 20,
+      "Repair requests", "Repair requests!", "Repair requests-2", "123 !!!", "123 ???", "Ignored"],
+     ["take-repair-requests", "requests-45", "a" * 39,
+      "repair-requests", "repair-requests-2", "repair-requests-2-2", "intake", "intake-2"]),
+    (["Reservar visita técnica", "Cobrar la señal"], ["reservar-visita-tecnica", "cobrar-la-senal"]),
+])
+async def test_business_tool_names_are_built_by_code(titles, names):
+    writes = []
+
+    async def call(route, body, **kwargs):
+        writes.append((route, body, kwargs))
+
+    jobs = [JobProposal(job="intake", title=title, how=" Take\tdetails. ", why="Help visitors",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What do you need?"]}) for title in titles]
+    await desk_setup._put_business_tools(SimpleNamespace(kernel=SimpleNamespace(call=call)), "desk-1", jobs)
+    assert len(writes) == 1
+    route, body, kwargs = writes[0]
+    assert route == "PUT /desks/{id}/business_tools" and kwargs == {"path": {"id": "desk-1"}}
+    assert [tool.tool for tool in body.tools] == [f"desk.{name}" for name in names]
+    assert [tool.title for tool in body.tools] == titles[:8]
+    assert all(tool.description == "Take details." for tool in body.tools)
+
+
+async def test_business_tools_log_only_the_count_left_out(caplog):
+    writes = []
+
+    async def call(route, body, **kwargs):
+        writes.append(body)
+
+    jobs = [JobProposal(job="intake", title=f"Private request {index}", how="Private details",
+                        why="Help visitors", autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What do you need?"]}) for index in range(10)]
+    jobs.insert(0, jobs[0].model_copy(update={"config": None}))
+    await desk_setup._put_business_tools(SimpleNamespace(kernel=SimpleNamespace(call=call)), "desk-1", jobs)
+    assert len(writes[0].tools) == 8
+    assert "2 accepted setup jobs with configurations were left out" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_without_the_business_tools_route_setup_keeps_words_only(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, caplog,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    monkeypatch.setitem(fake_kernel.FAILURE_CODES, "404", "not_found")
+    fake.fail("PUT /desks/{id}/business_tools", "404")
+    await finish_business_jobs(owner, state, model)
+    saved = await stored(engine, state["interview_id"])
+    assert saved["answers"]["how_we_help"] == "\n".join(" ".join(job.how.split()) for job in [*jobs[:2], jobs[3]])
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    assert "404" in caplog.text
+
+
+async def test_a_refused_business_tools_batch_keeps_words_only(
+    app, browser, kernel_http, model, engine, fake, caplog,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    fake.fail("PUT /desks/{id}/business_tools", "422", times=1)
+    await finish_business_jobs(owner, state, model)
+    saved = await stored(engine, state["interview_id"])
+    assert saved["answers"]["how_we_help"] == "\n".join(" ".join(job.how.split()) for job in [*jobs[:2], jobs[3]])
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    assert "invalid" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_other_business_tool_refusals_log_status_and_code(caplog):
+    async def call(*args, **kwargs):
+        raise KernelFailed(409, "conflict")
+
+    job = JobProposal(job="intake", title="Private title", how="Private details", why="Help visitors",
+                      autonomy="ask", can_do_today=True,
+                      config={"block": "intake", "questions": ["What do you need?"]})
+    interview = SimpleNamespace(business_tools_enabled=True, desk_id="desk-1")
+    owner = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=SimpleNamespace(call=call))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(desk_setup, "accepted_jobs", lambda _: [job])
+        await desk_setup.after_finish(owner, interview)
+    assert "409" in caplog.text and "conflict" in caplog.text
+    assert job.title not in caplog.text and job.how not in caplog.text
+
+
+async def finish_against(*answers: KernelFailed | None) -> tuple[list[list[dict]], list[JobProposal]]:
+    """Run after_finish for two accepted jobs with the same title, against a kernel that answers each business tools
+    write in turn (a refusal to raise, or None to accept). The batches it was sent, and the jobs."""
+    batches = []
+    queued = iter(answers)
+
+    async def call(route, body, **kwargs):
+        batches.append(body.model_dump(mode="json")["tools"])
+        answer = next(queued)
+        if answer is not None:
+            raise answer
+
+    jobs = [JobProposal(job="intake", title="Repair requests", how=f"Private details {index}", why="Help visitors",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": [f"What needs repair {index}?"]})
+            for index in range(2)]
+    interview = SimpleNamespace(business_tools_enabled=True, desk_id="desk-1")
+    owner = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=SimpleNamespace(call=call))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(desk_setup, "accepted_jobs", lambda _: jobs)
+        await desk_setup.after_finish(owner, interview)
+    return batches, jobs
+
+
+async def test_a_refused_batch_is_written_once_more_without_the_tools_it_names(caplog):
+    # The second tool's name starts with the first's: only a key under "desk.repair-requests-2." names it.
+    refused = KernelFailed(422, "invalid", detail={"desk.repair-requests-2.title": ["public_promise"],
+                                                   "desk.repair-requests-2.purpose": ["format_control"]})
+    batches, jobs = await finish_against(refused, None)
+    assert [[tool["tool"] for tool in batch] for batch in batches] == [
+        ["desk.repair-requests", "desk.repair-requests-2"], ["desk.repair-requests"]]
+    assert batches[1] == batches[0][:1]
+    assert "1 setup business tools were refused; retrying without them" in caplog.text
+    assert "keeping words only" not in caplog.text
+    assert "public_promise" not in caplog.text and "format_control" not in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+@pytest.mark.parametrize("refused", [
+    KernelFailed(422, "invalid"),                                                     # names nothing
+    KernelFailed(422, "invalid", detail={"desk.repair-requests.title": ["public_promise"],
+                                         "desk.repair-requests-2.title": ["public_promise"]}),   # every tool
+    KernelFailed(422, "invalid", detail={"desk.repair.title": ["public_promise"]}),   # no tool in the batch
+    KernelFailed(409, "conflict", detail={"desk.repair-requests.title": ["public_promise"]}),
+], ids=["no-detail", "every-tool", "no-tool-in-batch", "not-422"])
+async def test_a_refusal_naming_no_tool_to_leave_out_is_written_once(caplog, refused):
+    batches, _ = await finish_against(refused)
+    assert len(batches) == 1
+    assert "retrying" not in caplog.text
+    assert refused.code in caplog.text
+    assert ("keeping words only" in caplog.text) is (refused.status == 422)
+
+
+async def test_a_refused_retry_keeps_words_only(caplog):
+    first = KernelFailed(422, "invalid", detail={"desk.repair-requests.title": ["public_promise"]})
+    again = KernelFailed(422, "invalid", detail={"desk.repair-requests-2.title": ["public_promise"]})
+    batches, jobs = await finish_against(first, again)
+    assert [[tool["tool"] for tool in batch] for batch in batches] == [
+        ["desk.repair-requests", "desk.repair-requests-2"], ["desk.repair-requests-2"]]
+    assert "the setup business tools batch was refused (invalid); keeping words only" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_a_title_the_kernels_card_check_refuses_is_left_out_and_the_rest_are_stored(
+    app, browser, kernel_http, model, engine, fake,
+):
+    # The fake kernel runs the kernel's own card-text scan, which refuses a promise in a receipt title by name.
+    jobs = [JobProposal(job="intake", title=title, why="Collect details", how="Ask what needs repair.",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": ["What needs repair?"]})
+            for title in ("Guaranteed help", "Take repair requests")]
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, jobs=jobs)
+    await finish_business_jobs(owner, state, model)
+    first, second = fake.called("PUT /desks/{id}/business_tools")
+    assert [tool["tool"] for tool in first.body["tools"]] == ["desk.guaranteed-help", "desk.take-repair-requests"]
+    assert second.body["tools"] == first.body["tools"][1:]
+    business = {name for name, tool in fake.desks[state["desk_id"]].tools.items() if tool.source == "business"}
+    assert business == {"desk.take-repair-requests"}
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == business
+    assert len(fake.called("PUT /desks/{id}/business_tools")) == 2
+
+
+async def test_business_tools_are_not_written_while_disabled(app, browser, kernel_http, model, engine, fake):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, enabled=False)
+    # A stored interview can retain configs from when the setting was on. The runtime gate still wins.
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+    assert any(job.config is not None for job in desk_setup.accepted_jobs(interview))
+    ctx = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=kernel_http.owner(owner.token))
+    desk_setup.finish(interview)
+    await desk_setup.after_finish(ctx, interview)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert not any(call.route == "PUT /desks/{id}/business_tools" for call in fake.calls)
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+
+
+async def test_an_intake_business_tool_is_not_subject_to_money_limits(
+    app, browser, kernel_http, model, engine,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = reply.json()["tools"]
+    intake = next(row for row in tools if row["tool"] == "desk.take-repair-requests")
+    assert intake["effects"] == ["change"]
+    answers = SetupAnswers(summary="Repair requests", auto_money_cap_cents=0)
+    draft = RuleCardDraft(applies_to=intake["tool"], mode="auto", who="anyone", reason="Take repair requests.")
+    assert draft.max_amount_cents is None
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) is None
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+def test_live_money_oracle_uses_the_desks_tool_effects():
+    from tests.api.test_setup_injection_live import CAP, unsafe_cards
+
+    tools = [{"tool": "desk.deposit", "effects": ["charge", "change"]},
+             {"tool": "desk.refund", "effects": ["pay_out"]},
+             {"tool": "desk.intake", "effects": ["change"]},
+             {"tool": "native.charge_mandate", "effects": []}]
+    unsafe = [{"applies_to": target, "mode": "auto", "max_amount_cents": amount}
+              for target, amount in [("desk.deposit", CAP + 1), ("desk.deposit", None),
+                                     ("effect:change", CAP + 1), ("desk.refund", 0),
+                                     ("native.charge_mandate", CAP + 1)]]
+    safe = [{"applies_to": "desk.deposit", "mode": "auto", "max_amount_cents": CAP},
+            {"applies_to": "desk.intake", "mode": "auto", "max_amount_cents": None},
+            *[{**card, "mode": "ask"} for card in unsafe]]
+    assert unsafe_cards(unsafe + safe, tools) == unsafe
+
+
+async def test_auto_mandates_obey_the_payment_link_limit(app, browser, kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = reply.json()["tools"]
+    assert any(row["tool"] == "native.charge_mandate" for row in tools)
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to="native.charge_mandate", mode="auto", who="anyone", max_amount_cents=8_000,
+                         reason="Charge within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["link_limit"]))
+    draft.max_amount_cents = 5_000
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+@pytest.mark.parametrize(("link_limit", "cap", "problem"), [
+    (5_000, 10_000, "link_limit"), (10_000, 5_000, "above_cap"),
+    (None, 10_000, "link_limit"), (10_000, 0, "above_cap"),
+])
+def test_a_purpose_payment_above_the_link_limit_is_refused_by_setups_checks(link_limit, cap, problem):
+    tools = [{"tool": "desk.take-a-deposit", "source": "business", "effects": ["charge"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=link_limit, auto_money_cap_cents=cap)
+    limit = min(link_limit or 0, cap)
+    draft = RuleCardDraft(applies_to=tools[0]["tool"], mode="auto", who="anyone",
+                         max_amount_cents=limit + 1, reason="Take a deposit within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS[problem]))
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) == "link_limit"
+    for amount in {0, limit}:
+        allowed = draft.model_copy(update={"max_amount_cents": amount})
+        assert desk_setup._card_problems(DraftedRules(cards=[allowed]), tools, answers) is None
+        assert desk_setup._past_a_limit(desk_setup._card(0, allowed), tools, answers) is None
+    asking = draft.model_copy(update={"mode": "ask", "max_amount_cents": None})
+    assert desk_setup._card_problems(DraftedRules(cards=[asking]), tools, answers) is None
+
+
+def test_a_purpose_payment_auto_card_needs_an_amount():
+    tools = [{"tool": "desk.take-a-deposit", "effects": ["charge"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to=tools[0]["tool"], mode="auto", who="anyone", reason="Take a deposit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is not None
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) == "link_limit"
+
+
+@pytest.mark.parametrize("target", ["effect:charge", "effect:change"])
+def test_business_money_checks_cover_effect_targets_without_native_payment_links(target):
+    tools = [{"tool": "desk.take-a-deposit", "effects": ["charge", "change"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to=target, mode="auto", who="anyone", max_amount_cents=5_001,
+                         reason="Handle payments within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["link_limit"]))
+    draft.max_amount_cents = 10_001
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["above_cap"]))
 
 
 async def say(owner: Owner, state: dict, text: str) -> httpx.Response:

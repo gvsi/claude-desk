@@ -14,6 +14,7 @@ import type {
   BusinessOut,
   Choice,
   ConnectorProposal,
+  DemoTaskSet,
   DeskSetup,
   DeskSummary,
   JobProposal,
@@ -47,6 +48,9 @@ import { storedPublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
+
+/** Setup's business types (the API's `BusinessType`), each also a set of the agent's task words. */
+type BusinessType = Exclude<DemoTaskSet, 'rivera'>;
 
 /** Plan 02's limits on the business's description and on an answer. */
 const DESCRIPTION_MAX = 1500;
@@ -107,6 +111,8 @@ interface Interview {
   business: string;
   ownerName: string | null;
   about: string | null;
+  /** The business type setup read in the description (`businessTypeOf`). */
+  businessType: BusinessType;
   timezone: string;
   /** Include "search fails" in the description to preview the API's single search failure label. */
   searchFails: boolean;
@@ -311,6 +317,22 @@ function aboutOf(description: string): string | null {
   return line === '' ? null : line;
 }
 
+/**
+ * The business type setup's start would read in the description (the API's `SetupStart.business_type`,
+ * which a model chooses there): work at the customer's place, appointments at an office, renting
+ * homes, or anything else. The mock reads it from a few words, in English and Spanish.
+ */
+const OFFICE = /\b(?:CPA|accountants?|accounting|bookkeeping|tax(?:es)?|dentists?|dental|lawyers?|law firm|clinic|contables?|contabilidad|impuestos|dentista)\b/i;
+const LANDLORD = /\b(?:apartments?|rentals?|tenants?|landlord|units?|departamentos?|inquilinos?|alquiler(?:es)?)\b/i;
+const TRADE = /\b(?:plumb(?:er|ing)|electricians?|cleaning|cleaners?|leaks?|drains?|water heaters?|handyman|roofing|plomer[oa]s?|fugas?|drenajes?)\b/i;
+
+function businessTypeOf(description: string): BusinessType {
+  if (OFFICE.test(description)) return 'office';
+  if (LANDLORD.test(description)) return 'landlord';
+  if (TRADE.test(description)) return 'trade';
+  return 'other';
+}
+
 /** A slug for the business, unique in the copy. */
 function slugFor(world: MockWorld, business: string): string {
   const base =
@@ -378,9 +400,10 @@ type BookingDays = NonNullable<RuleCard['hours']>['days'];
 const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 /**
- * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
- * the rules its draft names them in. Only the words and the business's own booking days differ
- * between businesses: what each situation tries, plans and gets otherwise follows the draft alone.
+ * A business's words for the six situations setup tries (`situationsFor`), in their order, for
+ * the rules its draft names them in, and for the web searches setup shows once the owner allows its
+ * reads. Only the words and the business's own booking days differ between businesses: what each
+ * situation tries, plans and gets otherwise follows the draft alone.
  */
 interface SituationWords {
   /**
@@ -403,6 +426,11 @@ interface SituationWords {
   saturday: string;
   /** Someone else's private details. */
   someoneElses: string;
+  /**
+   * What setup searches the web for once the owner allows it: two topics about running this kind
+   * of business, each shown as "Searched the web: …".
+   */
+  searches: readonly [string, string];
 }
 
 /** Rivera Plumbing's words: the situations as the mock always told them. */
@@ -415,6 +443,7 @@ const PLUMBER_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants a Saturday morning visit for a slow drain',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['emergency plumber call-out fees', 'water heater replacement quotes'],
 };
 
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
@@ -427,6 +456,7 @@ const ANY_BUSINESS_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants to book a time on Saturday morning',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['small business booking and deposit policies', 'new customer intake questions'],
 };
 
 /** A CPA firm's description, as the consultant run tells one apart. */
@@ -452,6 +482,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: "A client asks for last year's return",
       saturday: 'A visitor wants a free consult on Saturday morning',
       someoneElses: "Someone asks for another client's tax return",
+      searches: ['CPA free consultation and engagement letters', 'tax return client intake questions'],
     },
   ],
   [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
@@ -468,6 +499,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A client asks for their last receipt',
       saturday: 'A visitor wants balayage on Saturday morning',
       someoneElses: "Someone asks for another client's phone number",
+      searches: ['hair salon deposits and late cancellations', 'salon new client consultation form'],
     },
   ],
   [
@@ -481,6 +513,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A tenant asks for a copy of their lease',
       saturday: 'A visitor wants a Saturday morning viewing',
       someoneElses: 'Someone asks which apartment another tenant lives in',
+      searches: ['rental application fees and deposits', 'tenant maintenance request form'],
     },
   ],
 ];
@@ -1020,8 +1053,7 @@ function completeConsent(interview: Interview): void {
     if (interview.searchFails) {
       say(interview, 'tool_label', "Couldn't search the web just now");
     } else {
-      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
-      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+      for (const search of interview.words.searches) say(interview, 'tool_label', `Searched the web: ${search}`);
     }
   }
   if (interview.consultant) openConsultant(interview);
@@ -1294,6 +1326,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     business,
     ownerName,
     about: aboutOf(text),
+    businessType: businessTypeOf(text),
     timezone,
     searchFails: /search fails/i.test(text),
     capCents: 0,
@@ -1609,6 +1642,14 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
 /** The unreviewed About for the owner's draft, kept even when the public scan refuses it. */
 export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
   return interviewForDesk(world, desk.summary.desk_id)?.about ?? null;
+}
+
+/**
+ * Which words the built-in agent's tasks take on the Desk (`GET …/agent_tasks`): its setup business
+ * type for a Desk setup made, else null (the copy's own Desk, Rivera's, whose set is `rivera`).
+ */
+export function setupTaskSet(world: MockWorld, deskId: string): BusinessType | null {
+  return interviewForDesk(world, deskId)?.businessType ?? null;
 }
 
 /**

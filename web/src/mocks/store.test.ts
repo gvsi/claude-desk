@@ -257,6 +257,27 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('invoice_asks_to_confirm_first_in_a_chat_not_verified_as_its_owner', async () => {
+    // Only the invoice's own verified owner skips the code. A chat with a code sent but not yet
+    // entered, and a chat verified as someone else, each start verification as before: the
+    // checked line, the verify card and a code to Dana's contact on record, with no invoice.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is on record');
+    mockStore.world.verify(record, rivera.people.bob);
+    await send('Please send my last invoice.');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => [b.kind, b.template])] : []));
+    const confirmFirst = [['prose', null], ['card', 'verify_prompt']];
+    expect(replies).toEqual([confirmFirst, confirmFirst, confirmFirst]);
+    const codes = mockStore.world.inbox.filter((r) => r.sessionId === session.session_id && r.entry.kind === 'verification_code');
+    expect(codes.map((r) => r.entry.to)).toEqual(Array(3).fill(rivera.people.dana.maskedContact));
+  });
+
   it('script_matches_whole_words', async () => {
     // A rule's word picks it only as a word of its own, never inside another one.
     const cases: [text: string, rule: RuleName][] = [
@@ -700,14 +721,14 @@ describe('the scripted Desk', () => {
         'en',
         [
           ['prose', null, []],
-          ['card', 'Tuesday, November 3', ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']],
+          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Maria Rivera']],
         ],
       ],
       [
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
+          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
@@ -1421,18 +1442,28 @@ describe("a verified visitor's document link", () => {
     return answer;
   }
 
-  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
-  async function invoiceToken(): Promise<string> {
-    const { events } = await openChat();
+  /** Dana confirms it's her with the code and gets her last invoice: her chat, with every event its stream got. */
+  async function danaVerified() {
+    const chat = await openChat();
     await send("I'm Dana Whitfield. Please send my last invoice.");
     await drain();
     expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
     await drain();
+    return chat;
+  }
+
+  /** The token of the link the newest invoice card in `events` hands out. */
+  function newestToken(events: [number, SseEvent][]): string {
     const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
     expect(card?.title).toBe(rivera.blocks.document_link.en.title);
     const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
     if (token === undefined) throw new Error('the invoice card links to its document');
     return token;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
+  async function invoiceToken(): Promise<string> {
+    return newestToken((await danaVerified()).events);
   }
 
   it('the_first_open_gets_the_document', async () => {
@@ -1474,12 +1505,32 @@ describe("a verified visitor's document link", () => {
     expect(open('GET', token).status).toBe(200);
   });
 
-  it('each_card_hands_out_a_link_of_its_own', async () => {
-    // Dana asks again and gets a new card: its link is a new one, which opens once, and the link
-    // she already opened stays used.
-    const first = await invoiceToken();
+  it('asking_again_in_the_verified_chat_hands_out_a_new_card_with_no_new_code', async () => {
+    // Verification lasts for the chat, as the API's does: verified Dana asks again and Claude's
+    // turn after a confirmed code runs at once, with no code to her contact and no card asking her
+    // to confirm. The invoice is released to her as its verified owner, and the new card's link is
+    // a new one, which opens once; the link she already opened stays used.
+    const { session, events } = await danaVerified();
+    const first = newestToken(events);
     expect(open('GET', first).status).toBe(200);
-    const second = await invoiceToken();
+    const before = events.length;
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const again = events.slice(before);
+    expect(typesOf(again)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(again.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => [b.kind, b.template, b.text ?? b.title]) : []))).toEqual([
+      ['prose', null, "Thanks, Dana. Here's your invoice."],
+      ['card', 'document_link', rivera.blocks.document_link.en.title],
+    ]);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id);
+    expect(decided.map(({ decision }) => [decision.action?.tool, decision.outcome, decision.reason_plain])).toEqual([
+      [DECISIONS.startVerification.tool, 'allow', DECISIONS.startVerification.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+    ]);
+    const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id && record.entry.kind === 'verification_code');
+    expect(codes).toHaveLength(1);
+    const second = newestToken(again);
     expect(second).not.toBe(first);
     expect(open('GET', first).status).toBe(404);
     expect(open('GET', second).status).toBe(200);

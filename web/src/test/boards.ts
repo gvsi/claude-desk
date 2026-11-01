@@ -3,6 +3,7 @@
  * the design system's board helpers (`ds/boards/spec.ts`, the checks the `Boards/*` stories run)
  * on a page the app rendered, in test code only.
  */
+import { expect, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
 import {
@@ -56,10 +57,17 @@ const CARD_OF_ROWS = 'cd-card--padding-0';
 /** Such a card's look: the card's, with no padding of its own. */
 const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as const;
 
+/** A part's loading shapes, laid out, shown or fading over it. */
+const SKELETON_LAYER = '.cd-skeleton-screen__layer';
+
+/** Long enough for a fading layer to go on a busy browser, past its one-second fallback. */
+const SKELETON_GONE_MS = 3_000;
+
 /**
- * An owner page as its signed board draws it: the frame with `current` as the current page, the
- * concept footer, every card in the card look (or, with `cards: false`, no card at all), a
- * conversation's type and receipts, and the order Tab takes through `tabStops`.
+ * An owner page as its signed board draws it, once its loading shapes have gone: the frame with
+ * `current` as the current page, the concept footer, every card in the card look (or, with
+ * `cards: false`, no card at all), a conversation's type and receipts, and the order Tab takes
+ * through `tabStops`.
  *
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
@@ -73,6 +81,10 @@ export async function expectOwnerBoard(
   root: HTMLElement,
   { current, fill = false, transcript = false, cards = true, tabStops, user }: OwnerBoardOptions,
 ): Promise<void> {
+  // A board draws the page at rest. Loading shapes take their parts' own classes for their sizes
+  // (a connector's section, its icon, a card), so while a layer of them is still there, fading
+  // over the part that arrived, its shapes would be checked as the part.
+  await vi.waitFor(() => expect(root.querySelector(SKELETON_LAYER), 'loading shapes still on the page').toBeNull(), { timeout: SKELETON_GONE_MS });
   await expectOwnerFrame(root, current, { fill });
   await expectFooter(root);
   if (transcript) {
