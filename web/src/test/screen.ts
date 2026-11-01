@@ -134,11 +134,14 @@ export function expectNoWindowScroll(): void {
   expect(document.documentElement.scrollHeight).toBe(window.innerHeight);
 }
 
-/** The color a token computes to, read off a probe element. */
-export function tokenColor(token: string): string {
+/**
+ * The color a token computes to, read off a probe element: in the app's palette, or inside `within`, where a page
+ * on a palette of its own (the About set's paper) points the token elsewhere.
+ */
+export function tokenColor(token: string, within: Element = document.body): string {
   const probe = document.createElement('span');
   probe.style.color = `var(${token})`;
-  document.body.append(probe);
+  within.append(probe);
   const color = getComputedStyle(probe).color;
   probe.remove();
   return color;

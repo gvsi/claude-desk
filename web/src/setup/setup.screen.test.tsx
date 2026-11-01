@@ -8,16 +8,19 @@ import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
-import { cleanup, type RenderResult } from 'vitest-browser-react';
+import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import { routes } from '../app/routes.tsx';
 import type { RouteObject } from 'react-router';
 import type { RuleCard } from '../api/contracts.ts';
-import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
+import type { BusinessOut, JobKind, ProposalCard as Proposal, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { framesWithin } from '../ds/test/framesWithin.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { settled } from '../ds/test/settled.ts';
+import { coarsePointer } from '../ds/test/touch.ts';
 import { pairContrast } from '../ds/contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
@@ -26,16 +29,18 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { lineWords } from '../ds/test/lineWords.ts';
+import { ARROW_CHARACTERS } from '../ds/test/copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
-import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
-import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
+import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { ProposalCard } from './ProposalCard.tsx';
+import { assertNoJargon, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 
 const DESCRIPTION =
   "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
@@ -46,6 +51,13 @@ const EXAMPLE_CHIPS = ['A hair salon in Oakland', 'A plumber in Oakland', 'Apart
 
 /** The requests a route got, by key, from the `from`th request on. */
 const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
+
+/** The public lines are now reviewed between Real situations and Safety check. */
+async function reviewPublicLines(screen: RenderResult): Promise<void> {
+  await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+}
 
 /** A new interview in the mock, made the way the start page makes one; with consent given unless `consent` is false. */
 async function startInterview(consent: boolean | null = true, description = DESCRIPTION): Promise<SetupState> {
@@ -375,7 +387,7 @@ describe('setup', () => {
     const consent = screen.getByText(/^Thanks, Maria\. Before I ask anything/);
     await expect.element(consent).toBeVisible();
     expect(inSerif(consent.element())).toBe(true);
-    await expect.element(screen.getByText("About seven. Answer in your own words; I'll turn them into rules you can check.", { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
 
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const first = SETUP_QUESTIONS[0]?.text ?? '';
@@ -383,7 +395,7 @@ describe('setup', () => {
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
     await expect.element(screen.getByText(MEMORY_LABEL, { exact: true })).toBeVisible();
     expect(inSerif(screen.getByText(first, { exact: true }).element())).toBe(true);
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Yes, use it' }).elements()).toHaveLength(0);
     // The answer the owner gave shows as theirs.
@@ -1017,7 +1029,7 @@ describe('setup', () => {
     // An interview this copy doesn't hold: the not-found screen, never a retry.
     const { screen } = await renderRoute('/app/setup/setup-not-in-this-copy');
     await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
-    expect(requests('setup').map((r) => r.path)).toEqual(['/api/owner/setup/setup-not-in-this-copy']);
+    expect(requests('setup').map((r) => r.path)).toEqual(['/api/owner/setup/setup-not-in-this-copy?cards=1']);
     expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
@@ -1027,7 +1039,7 @@ describe('setup', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await box.click();
     await userEvent.keyboard('Leaks and drains.{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('');
     await expect.element(box).toHaveFocus();
   });
@@ -1040,7 +1052,7 @@ describe('setup', () => {
     await box.click();
     for (let answer = 1; answer <= 6; answer += 1) {
       await userEvent.keyboard('Yes, that works.{Enter}');
-      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[answer]?.text ?? ''}`, { exact: true })).toBeVisible();
       await expect.element(box).toHaveFocus();
       await expect.poll(() => {
         const rect = box.element().getBoundingClientRect();
@@ -1061,7 +1073,7 @@ describe('setup', () => {
     await box.click();
     for (let answer = 1; answer <= 4; answer += 1) {
       await userEvent.keyboard('Yes, that works.{Enter}');
-      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[answer]?.text ?? ''}`, { exact: true })).toBeVisible();
       await expect.element(box).toHaveFocus();
     }
     mockStore.inject({ route: 'setupAnswer', status: 503 });
@@ -1073,12 +1085,38 @@ describe('setup', () => {
       return rect.top >= 0 && rect.bottom <= window.innerHeight;
     }, { message: 'The focused retry button fits in the viewport' }).toBe(true);
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByText('Question 6 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[5]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
     await expect.poll(() => {
       const rect = box.element().getBoundingClientRect();
       return rect.top >= 0 && rect.bottom <= window.innerHeight;
     }, { message: 'The textarea returned after retry fits in the viewport' }).toBe(true);
+  });
+
+  it('keeps_a_long_failed_answer_and_retry_reachable_in_the_phone_dock', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const words = 'I help clients with returns and books. '.repeat(60).slice(0, 1919);
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await box.fill(words);
+    await userEvent.keyboard('{Enter}');
+    const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toHaveFocus();
+    const rect = retry.element().getBoundingClientRect();
+    expect(rect.top).toBeGreaterThanOrEqual(0);
+    expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+    const retained = screen.container.querySelector<HTMLElement>('.cd-setup-dock .cd-composer__kept')!;
+    expect(retained.textContent).toBe(words);
+    expect(retained.scrollHeight).toBeGreaterThan(retained.clientHeight);
+    retained.scrollTop = retained.scrollHeight;
+    expect(retained.scrollTop).toBeGreaterThan(0);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+    await retry.click();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]!.text}`, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+    expect(requests('setupAnswer').map(({ body }) => body)).toEqual([{ question: 'what_you_do', text: words }, { question: 'what_you_do', text: words }]);
   });
 
   it('keyboard_answer_keeps_focus_through_failure_and_retry', async () => {
@@ -1091,7 +1129,7 @@ describe('setup', () => {
     const retry = screen.getByRole('button', { name: 'Try again' });
     await expect.element(retry).toHaveFocus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
   });
 
@@ -1103,7 +1141,7 @@ describe('setup', () => {
     await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: 'what_you_do', text: 'Leaks.' } });
     await box.click();
     await userEvent.keyboard('Drains too.{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('Drains too.');
     await expect.element(box).toHaveFocus();
   });
@@ -1128,7 +1166,7 @@ describe('setup', () => {
     const exit = screen.getByRole('link', { name: 'Save and exit' });
     (exit.element() as HTMLElement).focus();
     await expect.element(exit).toHaveFocus();
-    await screen.getByText('Question 1 of 7', { exact: true }).click();
+    await screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true }).click();
     expect(document.activeElement).toBe(document.body);
     release();
     await expect.element(box).toBeEnabled();
@@ -1149,11 +1187,11 @@ describe('setup', () => {
     await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
     await expect.element(keptAnswer(screen).getByText(answer, { exact: true })).toBeVisible();
     expect(box.elements()).toHaveLength(0);
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
 
     await screen.getByRole('button', { name: 'Try again' }).click();
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('');
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     // Each send names the question it answers.
@@ -1218,7 +1256,7 @@ describe('setup', () => {
     mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
     await screen.getByRole('button', { name: 'Send' }).click();
     await expect.element(screen.getByText(FOLLOW_UP, { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(box).toHaveValue('');
     expect(requests('setupAnswer', mark)).toHaveLength(1);
@@ -1266,7 +1304,7 @@ describe('setup', () => {
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Leaks and drains.', { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('Water heaters too.');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     expect(requests('setupAnswer', mark).map((r) => r.body)).toEqual([{ question: 'what_you_do', text: 'Water heaters too.' }]);
     expect(requests('setup', mark).length).toBeGreaterThan(0);
     expect(screen.getByRole('log', { name: 'Setup questions' }).getByText('Water heaters too.', { exact: true }).elements()).toHaveLength(0);
@@ -1318,8 +1356,8 @@ describe('setup', () => {
       await expect.element(writing).toBeVisible();
       expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
       await expect.element(wait).toBeVisible();
-      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
-      await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+      await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
       expect(writing.element().nextElementSibling).toBe(wait.element());
       const log = screen.getByRole('log', { name: 'Setup questions' }).element();
       expect(wait.element().getBoundingClientRect().left).toBe(log.getBoundingClientRect().left);
@@ -1348,7 +1386,7 @@ describe('setup', () => {
     }
   });
 
-  it('async_consent_waits_without_a_composer_then_focuses_the_first_question', async () => {
+  it('async_consent_docks_a_disabled_composer_then_focuses_the_first_question', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1359,8 +1397,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
+    await expect.element(box).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
     expectNoHorizontalScroll();
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     onTestFinished(() => scroll.mockRestore());
@@ -1369,7 +1407,7 @@ describe('setup', () => {
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     await expect.element(box).toBeEnabled();
     await expect.element(box).toHaveFocus();
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scroll).not.toHaveBeenCalled();
     await expect.element(writing).not.toBeInTheDocument();
   });
 
@@ -1412,7 +1450,7 @@ describe('setup', () => {
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
     });
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).not.toBeInTheDocument();
+    await expect.element(box).toBeDisabled();
     finish('landed');
     await screen.getByRole('button', { name: 'Try again' }).click();
     await until(() => {
@@ -1439,7 +1477,7 @@ describe('setup', () => {
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -1460,7 +1498,7 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expect(requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -1497,7 +1535,8 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     expect(writing.elements(), 'setup stays mounted while the destination suspends').toHaveLength(1);
@@ -1530,7 +1569,7 @@ describe('setup', () => {
     vi.useRealTimers();
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     const retry = screen.getByRole('button', { name: 'Try again' });
@@ -1558,7 +1597,7 @@ describe('setup', () => {
     const before = writing.element();
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     const leftAt = reads();
@@ -1581,7 +1620,8 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'Save and exit' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const leftAt = reads();
@@ -1589,6 +1629,42 @@ describe('setup', () => {
     await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
     expect(reads()).toBe(leftAt);
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  it.each(['answer', 'decision'] as const)('busy_%s_polling_stops_on_leave_and_resumes_on_back_before_the_destination_draws', async (action) => {
+    const state = await consultantAt('schedule');
+    const finish = action === 'answer' ? holdNextAnswer(mockStore.world, state.interview_id) : holdNextDecision(mockStore.world, state.interview_id);
+    const response = await mockStore.dispatch(action === 'answer' ? 'setupAnswer' : 'setupProposal', {
+      params: { id: state.interview_id, proposal_id: state.pending_card! }, query: { cards: '1' },
+      body: action === 'answer' ? { question: null, card: state.pending_card, text: 'Yes, please' } : { accept: true },
+    });
+    expect(response).toMatchObject({ status: 202, body: { busy: true, pending_card: state.pending_card } });
+    const firstVisit = holdFirstVisit();
+    onTestFinished(firstVisit.draw);
+    const path = `/app/setup/${state.interview_id}`;
+    const { screen, router } = await renderRoute(path, { routes: firstVisit.routes, strict: true });
+    const writing = screen.getByText('Claude is writing', { exact: true });
+    await expect.element(writing).toBeVisible();
+    const before = writing.element();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
+    await router.navigate('/');
+    expect(router.state.location.pathname).toBe('/');
+    const leftAt = reads();
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
+    expect(reads()).toBe(leftAt);
+    expect(writing.element(), 'the same setup stays mounted while the destination suspends').toBe(before);
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe(path);
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(leftAt);
+    const interviewGets = sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET');
+    expect(interviewGets.every(([input]) => new URL(String(input), window.location.origin).searchParams.get('cards') === '1')).toBe(true);
+    finish();
+    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
+    expect(router.state.location.pathname).toBe(path);
   });
 
   it('lost_consent_is_read_before_it_is_sent_again', async () => {
@@ -1640,11 +1716,14 @@ describe('setup', () => {
     await expect.element(review.getByText('Refund', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
-    // Connected is not on: back on the list, Stripe doesn't read "On", and opening it again connects nothing more.
+    // Connected is not on: back on the list, Stripe doesn't read "On" but "Needs review", it can't
+    // be connected again, and reviewing it again connects nothing more.
     await screen.getByRole('button', { name: 'Cancel' }).click();
     await expect.element(connectorRow(screen, 'Stripe')).toBeVisible();
     expect(connectorRow(screen, 'Stripe').getByText('On', { exact: true }).elements()).toHaveLength(0);
-    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(connectorRow(screen, 'Stripe').getByText('Needs review', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Connect Stripe' }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Review Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
     expect(requests('setupConnect', mark)).toHaveLength(1);
 
@@ -1665,7 +1744,7 @@ describe('setup', () => {
     expect(requests('confirmRules', mark).map((r) => r.body)).toEqual([{ version: drafted }]);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Connect Stripe' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^(Connect|Review) Stripe$/ }).elements()).toHaveLength(0);
     expect(requests('confirmTool', mark)).toHaveLength(1);
   });
 
@@ -1898,6 +1977,7 @@ describe('setup', () => {
     await expect.element(refused.getByText('Never', { exact: true })).toBeVisible();
 
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety check' })).toBeVisible();
   });
 
@@ -1961,6 +2041,20 @@ describe('setup', () => {
     expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
     expect(requests('setupConfirm')).toHaveLength(0);
+  });
+
+  it('setup_preview_payment_links_note_no_chat', async () => {
+    // Setup's preview sits inside an owner screen, so a payment link it shows has no public chat to
+    // lead back to: the checkout's "Go back to the chat" stays plain words.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByText(DISCLOSURE)).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    await expect.element(box).toBeEnabled();
+    await box.fill('How do I pay the deposit?');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(screen.getByRole('link', { name: 'Open payment page' })).toBeVisible();
+    expect(localStorage.getItem('claude-desk.pay-chats')).toBeNull();
   });
 
   it('setup_gives_the_new_business_its_own_name', async () => {
@@ -2055,6 +2149,7 @@ describe('setup', () => {
     const counts = watchCount();
     const spoken = watchCount('spoken');
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
 
@@ -2080,8 +2175,11 @@ describe('setup', () => {
     expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
 
     // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    // The landing class leaves on the render after the last animation ends, so wait for that too.
     await expect.poll(() => moving(list.element())).toEqual([]);
-    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    const landed = () => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName);
+    await expect.poll(() => landed().filter((name) => name !== 'none')).toEqual([]);
+    expect(landed().length).toBeGreaterThan(0);
     await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A screen reader reads the check's own count from the first, never the ticks, all six rows
@@ -2100,6 +2198,7 @@ describe('setup', () => {
     const drawn = watchRows('Tricks tried');
     const counts = watchCount();
     await screen.getByRole('button', { name: 'Looks right' }).click();
+    await reviewPublicLines(screen);
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
 
@@ -2110,12 +2209,15 @@ describe('setup', () => {
     expect(counts()).toEqual(['6 of 6 stopped']);
   });
 
-  /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
+  /** An interview opened at Real situations, now at public lines with "Looks right" ready. */
   async function openedAtSituations(): Promise<RenderResult> {
     const { state } = await interviewAtRules();
     await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
     return screen;
   }
 
@@ -2320,8 +2422,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
-    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Acting for you now" shows.
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -2347,7 +2449,7 @@ describe('setup', () => {
     await screen.getByRole('link', { name: 'Go to Today' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     // Today's Answering reads on at once: going live refreshed the Desks the page had read.
-    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
     // And the Desk is live, so Today no longer leads back into setup.
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
@@ -2453,7 +2555,7 @@ describe('setup', () => {
     await expect.element(live).toHaveAttribute('aria-current', 'step');
     await expect.element(live).not.toHaveTextContent('done');
     expect(stepCircle(live.element()).textContent).toBe('5');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
@@ -2474,11 +2576,11 @@ describe('setup', () => {
     });
     await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
 
-    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
-    const answering = screen.getByText('Answering now', { exact: true });
+    // Under the title and its line, "Acting for you now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Acting for you now', { exact: true });
     await expect.element(answering).toBeVisible();
     const dot = answering.element().querySelector('.cd-status-dot--handled');
-    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    if (!dot) throw new Error('No handled dot beside "Acting for you now"');
     expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
     expect(getComputedStyle(dot).animationName).not.toBe('none');
     // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
@@ -2505,14 +2607,14 @@ describe('setup', () => {
 
     // "Go live" in the stale preview: the API says it is live already (409), the interview read again
     // says so, and the step shows live, its check drawn, but with Answering off it never says
-    // "Answering now", before or after the Desks are read again.
+    // "Acting for you now", before or after the Desks are read again.
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(requests('goLive', mark)).toHaveLength(1);
     await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     expect(deskOf(state).summary.answering).toBe(false);
   });
 
@@ -2533,7 +2635,7 @@ describe('setup', () => {
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
 
     // While they are read, the step waits whole, on setup's loading line: no title without its
-    // business, and no link that "Answering now" would push down when it lands.
+    // business, and no link that "Acting for you now" would push down when it lands.
     await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
     expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
@@ -2541,7 +2643,7 @@ describe('setup', () => {
     // Once they land, the title, its line and the link draw together, and the link stays put.
     release();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
     const link = screen.getByRole('button', { name: 'Copy link' });
     await expect.element(link).toBeVisible();
     const top = link.element().getBoundingClientRect().top;
@@ -2550,7 +2652,7 @@ describe('setup', () => {
     expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
 
     // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
-    // on the preview until they land, then turns live with "Answering now" already under the title.
+    // on the preview until they land, then turns live with "Acting for you now" already under the title.
     const second = await interviewAtPreview();
     const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
     await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
@@ -2576,7 +2678,7 @@ describe('setup', () => {
     expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
     land();
     await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
+    expect(page2.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(1);
   });
 
   it('going_live_under_reduced_motion_is_drawn_still', async () => {
@@ -2595,10 +2697,10 @@ describe('setup', () => {
       expect(getComputedStyle(check).animationName).toBe('none');
       expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
       expect(check.getAnimations()).toHaveLength(0);
-      const answering = screen.getByText('Answering now', { exact: true });
+      const answering = screen.getByText('Acting for you now', { exact: true });
       await expect.element(answering).toBeVisible();
       const dot = answering.element().querySelector('.cd-status-dot--handled');
-      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      if (!dot) throw new Error('No handled dot beside "Acting for you now"');
       expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
       expect(dot.getAnimations()).toHaveLength(0);
     } finally {
@@ -2619,7 +2721,7 @@ describe('setup', () => {
     expect(getComputedStyle(check).animationName).toBe('none');
     expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
     // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
     const off = await interviewAtPreview();
@@ -2628,7 +2730,7 @@ describe('setup', () => {
     const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
     // The title names the business from the Desks, so once it does, the line has had its answer.
     await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(reopened.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
@@ -2867,6 +2969,485 @@ describe('setup', () => {
     }
   });
 
+  /** The preview's frame and its parts, as a test measures them. */
+  function previewParts(screen: RenderResult) {
+    const preview = screen.container.querySelector<HTMLElement>('.cd-setup-live__preview');
+    const shell = preview?.querySelector<HTMLElement>('.cd-public-shell:not(.cd-public-shell--skeleton)');
+    const chat = shell?.querySelector<HTMLElement>('.cd-public-shell__chat');
+    const scroll = shell?.querySelector<HTMLElement>('.cd-public-shell__scroll');
+    const composer = shell?.querySelector<HTMLElement>('.cd-public-shell__composer');
+    if (!preview || !shell || !chat || !scroll || !composer) throw new Error('the preview draws the public page');
+    return { preview, shell, chat, scroll, composer };
+  }
+
+  /** Sends `text` in the preview's chat and waits for Claude's answer to land under it. */
+  async function sayInPreview(screen: RenderResult, text: string): Promise<void> {
+    const replies = () => screen.container.querySelectorAll('.cd-setup-live__preview .cd-claude-message').length;
+    const before = replies();
+    await screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).fill(text);
+    await screen.getByRole('button', { name: 'Send' }).click();
+    await vi.waitFor(() => expect(replies()).toBeGreaterThan(before), { timeout: 10_000 });
+    await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
+  }
+
+  it.each([503, 404])('preview_centres_its_unavailable_notice_in_the_frame_at_1440_for_%s', async (status) => {
+    const state = await interviewAtPreview();
+    mockStore.inject({ route: 'publicDesk', status });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop' });
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    await vi.waitFor(() => {
+      const preview = screen.container.querySelector('.cd-setup-live__preview')?.getBoundingClientRect();
+      const notice = screen.container.querySelector('.cd-public-state__main > *')?.getBoundingClientRect();
+      expect(notice).toBeDefined();
+      expect(Math.abs((notice!.top + notice!.bottom) / 2 - (preview!.top + preview!.bottom) / 2)).toBeLessThanOrEqual(3);
+    });
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_fills_to_go_live_with_its_disclosure_and_composer_in_a_compact_laptop', async () => {
+    // At 1280 x 700 the frame still fills the height down to "Go live" and the page doesn't scroll.
+    // The frame is under 520 px tall there, so the public page takes its short layout: the chat's head
+    // with the disclosure and the composer stay in the frame while the rest scrolls between them.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1280, height: 700 } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, shell, composer } = previewParts(screen);
+    const opened = preview.getBoundingClientRect();
+    expect(opened.height).toBeGreaterThanOrEqual(300);
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOnTheFirstScreen(screen);
+    await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--short')).toBe(true));
+    const transcript = shell.querySelector<HTMLElement>('.cd-transcript')!;
+    for (let n = 0; transcript.scrollHeight <= shell.clientHeight && n < 6; n += 1) await sayInPreview(screen, 'How much is drain clearing?');
+    expect(transcript.scrollHeight).toBeGreaterThan(shell.clientHeight);
+    expect(shell.scrollHeight).toBeGreaterThan(shell.clientHeight);
+    await vi.waitFor(() => expect(shell.scrollTop + shell.clientHeight).toBeGreaterThanOrEqual(shell.scrollHeight - 1));
+    const frame = preview.getBoundingClientRect();
+    const head = shell.querySelector('.cd-public-shell__chat-head')!;
+    expect(head.querySelector('.cd-public-shell__disclosure')?.textContent).toContain('Claude, an AI');
+    for (const element of [head, composer]) {
+      const rect = element.getBoundingClientRect();
+      expect(rect.top).toBeGreaterThanOrEqual(frame.top);
+      expect(rect.bottom).toBeLessThanOrEqual(frame.bottom);
+    }
+    expect({ top: frame.top, height: frame.height }).toEqual({ top: opened.top, height: opened.height });
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoHorizontalScroll();
+  });
+
+  /**
+   * The launch bar under the preview: the bar; its two lines, the first an info dot and its words, the
+   * second under those words; and "Go live" in it.
+   */
+  function launchParts(screen: RenderResult) {
+    const bar = screen.container.querySelector<HTMLElement>('.cd-setup-live__launch');
+    const text = bar?.querySelector<HTMLElement>('.cd-setup-live__launch-text');
+    const line = text?.querySelector<HTMLElement>('.cd-setup-live__launch-line');
+    const words = line?.querySelector<HTMLElement>('.cd-status-label > span:last-child');
+    const note = text?.querySelector<HTMLElement>('.cd-setup-live__launch-note');
+    const goLive = screen.getByRole('button', { name: 'Go live' }).element() as HTMLElement;
+    if (!bar || !text || !line || !words || !note || !bar.contains(goLive)) throw new Error('the preview step draws its launch bar, with "Go live" in it');
+    return { bar, text, line, words, note, goLive };
+  }
+
+  /** The launch bar the step's own gap under the frame, and nothing else between them. */
+  function expectLaunchBarOneGapUnder(screen: RenderResult, preview: HTMLElement) {
+    const gap = parseFloat(getComputedStyle(preview.parentElement!).rowGap);
+    const bar = launchParts(screen).bar.getBoundingClientRect();
+    expect(Math.abs(preview.getBoundingClientRect().bottom + gap - bar.top)).toBeLessThanOrEqual(1);
+  }
+
+  /** "Go live" on the first screen: the page doesn't scroll (to within 1 px) and the launch bar lies wholly inside the window. */
+  function expectLaunchBarOnTheFirstScreen(screen: RenderResult) {
+    const page = document.documentElement;
+    expect(page.scrollHeight - page.clientHeight).toBeLessThanOrEqual(1);
+    const bar = launchParts(screen).bar.getBoundingClientRect();
+    expect(bar.top).toBeGreaterThanOrEqual(0);
+    expect(bar.bottom).toBeLessThanOrEqual(window.innerHeight);
+  }
+
+  /** No unused height between the last action and the footer pinned to the window's foot. */
+  function expectPreviewFillsToFooter(screen: RenderResult) {
+    const main = screen.container.querySelector<HTMLElement>('.cd-setup__main')!;
+    const footer = main.querySelector<HTMLElement>(':scope > .cd-concept-footer')!;
+    const footerText = footer.querySelector('.cd-concept-footer__text')!;
+    const bar = launchParts(screen).bar.getBoundingClientRect();
+    expect(Math.abs(footerText.getBoundingClientRect().top - bar.bottom - parseFloat(getComputedStyle(footer).paddingTop))).toBeLessThanOrEqual(1);
+    expect(Math.abs(footer.getBoundingClientRect().bottom + parseFloat(getComputedStyle(main).paddingBottom) - window.innerHeight)).toBeLessThanOrEqual(1);
+  }
+
+  /**
+   * The public page's first view in a shell under 900 px wide, before the first message: the composer
+   * under the greeting, and About under the composer, in the chat rather than its scroll region.
+   */
+  function expectNarrowFirstView(screen: RenderResult) {
+    const { shell, chat, composer } = previewParts(screen);
+    expect(shell.classList.contains('cd-public-shell--first-view')).toBe(true);
+    const greeting = shell.querySelector('.cd-public-shell__greeting')!.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    expect(composerBox.top).toBeGreaterThanOrEqual(greeting.bottom - 1);
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    expect(about.parentElement).toBe(chat);
+    expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(composerBox.bottom - 1);
+  }
+
+  /** Once a message is sent: the shell leaves its first view, and About opens the scroll region. */
+  async function expectAboutInTheScrollRegionOnceTheChatStarts(screen: RenderResult) {
+    const { shell, scroll } = previewParts(screen);
+    await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--first-view')).toBe(false));
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    expect(about.parentElement).toBe(scroll);
+  }
+
+  it('preview_fills_to_go_live_with_about_in_the_scroll_region_at_800', async () => {
+    // Below 900 px of shell width About can't sit beside the chat. Before the first message the page
+    // shows its first view (the composer under the greeting, About under the composer); once the chat
+    // starts, About opens the scroll region and the composer sits at the frame's foot. The frame fills
+    // down to the launch bar throughout, and the page doesn't scroll.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 800, height: 900 } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, composer } = previewParts(screen);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectNarrowFirstView(screen);
+    expectNoWindowScroll();
+
+    await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
+    expect(Math.round(preview.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom)).toBe(1);
+    expectPreviewFillsToFooter(screen);
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_fills_the_height_down_to_go_live_on_a_laptop', async () => {
+    // On a laptop the customer preview is a full-height chat: it runs from under the step's title down
+    // to "Go live" and fills that height, as the public page fills its window: the chat's head at its
+    // top, the composer at its bottom and About in the right column, with only the conversation
+    // scrolling between them. At 1440 x 900 "Go live" is on the first screen: the page itself scrolls
+    // neither down nor sideways.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop' });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, shell, chat, scroll, composer } = previewParts(screen);
+    const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
+    const box = preview.getBoundingClientRect();
+    const chatBox = chat.getBoundingClientRect();
+    expect(box.height).toBeGreaterThanOrEqual(300);
+    expect(chatBox.height).toBeGreaterThanOrEqual(300);
+    expect(box.top).toBeGreaterThan(title.getBoundingClientRect().bottom);
+    // The step's own gap is all there is between the preview and "Go live".
+    expectLaunchBarOneGapUnder(screen, preview);
+    // The chat and its composer reach the frame's bottom edge, inside its 1 px border.
+    expect(Math.round(box.bottom - chatBox.bottom)).toBe(1);
+    expect(Math.round(box.bottom - composer.getBoundingClientRect().bottom)).toBe(1);
+    expect(composer.getBoundingClientRect().top).toBeGreaterThan(box.top + box.height / 2);
+    // About in the right column, beside the chat from the header down.
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element().getBoundingClientRect();
+    expect(about.left).toBeGreaterThanOrEqual(chatBox.right - 1);
+    expect(Math.round(about.top)).toBe(Math.round(chatBox.top));
+    expect(Math.round(about.bottom)).toBe(Math.round(chatBox.bottom));
+    expect(shell.classList.contains('cd-public-shell--short')).toBe(false);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+
+    // A conversation longer than its room scrolls inside the preview, which keeps its size: the
+    // newest answer above the composer, and the page still doesn't scroll.
+    const before = { top: box.top, height: box.height };
+    for (let n = 0; scroll.scrollHeight <= scroll.clientHeight && n < 6; n += 1) await sayInPreview(screen, 'How much is drain clearing?');
+    expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+    const after = preview.getBoundingClientRect();
+    expect({ top: after.top, height: after.height }).toEqual(before);
+    await vi.waitFor(() => expect(scroll.scrollTop + scroll.clientHeight).toBeGreaterThanOrEqual(scroll.scrollHeight - 1));
+    const replies = scroll.querySelectorAll('.cd-claude-message');
+    const newest = replies[replies.length - 1]?.getBoundingClientRect();
+    expect(newest?.bottom).toBeLessThanOrEqual(composer.getBoundingClientRect().top + 1);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
+  it.each([768, 657, 625])('preview_fills_the_height_with_go_live_on_the_first_screen_at_1366x%s', async (height) => {
+    // A 1366 x 768 laptop: a window of the screen's full height, then Chrome's page on that screen
+    // (657 px tall, 625 with the bookmarks bar). The frame runs from under the title down to "Go live",
+    // which stays on the first screen, with the composer at the frame's bottom and About beside the chat.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1366, height } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, chat, composer } = previewParts(screen);
+    const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
+    const box = preview.getBoundingClientRect();
+    expect(box.height).toBeGreaterThanOrEqual(300);
+    expect(box.top).toBeGreaterThan(title.getBoundingClientRect().bottom);
+    expectLaunchBarOneGapUnder(screen, preview);
+    // The composer reaches the frame's bottom edge, inside its border.
+    expect(Math.abs(box.bottom - parseFloat(getComputedStyle(preview).borderBottomWidth) - composer.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element().getBoundingClientRect();
+    expect(about.left).toBeGreaterThanOrEqual(chat.getBoundingClientRect().right - 1);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_keeps_300_pixels_in_a_window_too_short_for_it', async () => {
+    // Only a tiny window has less room than the frame's 300 px: the frame keeps them and the page
+    // scrolls to reach the launch bar. The window is still tall enough for the full-height chat.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1280, height: 520 } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview } = previewParts(screen);
+    expect(Math.abs(preview.getBoundingClientRect().height - 300)).toBeLessThanOrEqual(1);
+    const page = document.documentElement;
+    expect(page.scrollHeight).toBeGreaterThan(page.clientHeight + 1);
+    const { bar } = launchParts(screen);
+    expect(bar.getBoundingClientRect().bottom).toBeGreaterThan(window.innerHeight);
+    onTestFinished(() => window.scrollTo(0, 0));
+    window.scrollTo(0, page.scrollHeight);
+    await vi.waitFor(() => expect(bar.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight));
+    expect(bar.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    expectNoHorizontalScroll();
+  });
+
+  /**
+   * The preview in a window too short for the full-height chat: the frame is as tall as the page it
+   * holds, the first view's About under the composer and, once the chat starts, About opening the
+   * conversation under the chat's head; as the conversation grows the frame grows with it and the page
+   * scrolls, never the frame. Nothing scrolls sideways.
+   */
+  async function expectPreviewGrowsWithTheChat(screen: RenderResult): Promise<void> {
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, shell, scroll } = previewParts(screen);
+    const holdsItAll = (when: string) => {
+      // The frame's 1 px border on each side, around the page at its own height.
+      expect(Math.round(preview.getBoundingClientRect().height), when).toBe(Math.round(shell.getBoundingClientRect().height) + 2);
+      expect(shell.scrollHeight, when).toBeLessThanOrEqual(shell.clientHeight);
+      expect(scroll.scrollHeight, when).toBeLessThanOrEqual(scroll.clientHeight);
+      expectLaunchBarOneGapUnder(screen, preview);
+      expectNoHorizontalScroll();
+    };
+    holdsItAll('as it opens');
+    expectNarrowFirstView(screen);
+    const opened = preview.getBoundingClientRect().height;
+
+    await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
+    holdsItAll('after an answer');
+    expect(preview.getBoundingClientRect().height).toBeGreaterThan(opened);
+    expect(document.documentElement.scrollHeight).toBeGreaterThan(window.innerHeight);
+  }
+
+  it('preview_fills_the_height_down_to_the_launch_bar_on_a_phone', async () => {
+    // A phone is tall enough for the full-height chat: the frame runs from under the title down to the
+    // launch bar and "Go live" stays on the first screen. Before the first message the page shows its
+    // first view in the frame; once the chat starts, a long conversation scrolls inside the frame with
+    // the composer at its foot. The frame is under 520 px tall, so the public page takes its short
+    // layout, its brand header scrolling with the chat.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, shell, composer } = previewParts(screen);
+    const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
+    const border = parseFloat(getComputedStyle(preview).borderBottomWidth);
+    const opened = preview.getBoundingClientRect();
+    expect(opened.height).toBeGreaterThanOrEqual(300);
+    expect(opened.top).toBeGreaterThan(title.getBoundingClientRect().bottom);
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNarrowFirstView(screen);
+    await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--short')).toBe(true));
+
+    await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
+    const transcript = shell.querySelector<HTMLElement>('.cd-transcript')!;
+    for (let n = 0; transcript.scrollHeight <= shell.clientHeight && n < 6; n += 1) await sayInPreview(screen, 'How much is drain clearing?');
+    expect(shell.scrollHeight).toBeGreaterThan(shell.clientHeight);
+    const after = preview.getBoundingClientRect();
+    expect({ top: after.top, height: after.height }).toEqual({ top: opened.top, height: opened.height });
+    expect(Math.abs(after.bottom - border - composer.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_fills_the_height_on_a_shorter_phone', async () => {
+    // 390 x 700 still has room for the frame's 300 px: it fills down to the launch bar and "Go live"
+    // stays on the first screen.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 700 } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview } = previewParts(screen);
+    expect(preview.getBoundingClientRect().height).toBeGreaterThanOrEqual(300);
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectPreviewFillsToFooter(screen);
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_keeps_300_pixels_on_a_short_phone', async () => {
+    // 390 x 600: less room than the frame's 300 px, so the frame keeps them and the page scrolls to
+    // reach the launch bar.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 600 } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview } = previewParts(screen);
+    expect(Math.abs(preview.getBoundingClientRect().height - 300)).toBeLessThanOrEqual(1);
+    expectLaunchBarOneGapUnder(screen, preview);
+    const page = document.documentElement;
+    expect(page.scrollHeight).toBeGreaterThan(page.clientHeight + 1);
+    const { bar } = launchParts(screen);
+    expect(bar.getBoundingClientRect().bottom).toBeGreaterThan(window.innerHeight);
+    onTestFinished(() => window.scrollTo(0, 0));
+    window.scrollTo(0, page.scrollHeight);
+    await vi.waitFor(() => expect(bar.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight));
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_grows_with_the_chat_on_a_sideways_phone', async () => {
+    // Wide enough for a laptop's layout but too short for the full-height chat: the frame grows with
+    // the chat and the page scrolls.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 844, height: 390 } });
+    await expectPreviewGrowsWithTheChat(screen);
+  });
+
+  it('preview_centres_its_unavailable_notice_in_the_frame_on_a_phone', async () => {
+    const state = await interviewAtPreview();
+    mockStore.inject({ route: 'publicDesk', status: 503 });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    await vi.waitFor(() => {
+      const preview = screen.container.querySelector('.cd-setup-live__preview')?.getBoundingClientRect();
+      const notice = screen.container.querySelector('.cd-public-state__main > *')?.getBoundingClientRect();
+      expect(notice).toBeDefined();
+      expect(Math.abs((notice!.top + notice!.bottom) / 2 - (preview!.top + preview!.bottom) / 2)).toBeLessThanOrEqual(3);
+    });
+    expectLaunchBarOnTheFirstScreen(screen);
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_keeps_its_unavailable_notice_a_window_tall_on_a_sideways_phone', async () => {
+    // As the public page has it in a short window: the notice's page is at least the window's height,
+    // and the frame grows to hold it.
+    const state = await interviewAtPreview();
+    mockStore.inject({ route: 'publicDesk', status: 503 });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 844, height: 390 } });
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    const preview = screen.container.querySelector<HTMLElement>('.cd-setup-live__preview')!;
+    await vi.waitFor(() => expect(preview.querySelector('.cd-public-state__main > *')).not.toBeNull());
+    const page = preview.querySelector<HTMLElement>('.cd-public-state')!.getBoundingClientRect();
+    expect(page.height).toBeGreaterThanOrEqual(window.innerHeight - 0.5);
+    expect(Math.round(preview.getBoundingClientRect().height)).toBe(Math.round(page.height) + 2);
+    expectNoHorizontalScroll();
+  });
+
+  it('preview_says_answering_stays_off_once_in_its_launch_bar', async () => {
+    // The preview's title stands alone; its words are in the launch bar under the preview, once each,
+    // in reading order: the first line after an info dot, the second under it, then "Go live". The
+    // bar is no landmark of its own. Once live, the step is as it was, with no bar.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop' });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
+    expect(title.closest('.cd-page-header')?.querySelector('.cd-page-header__subtitle')).toBeNull();
+    const lines = ['Claude takes messages only until you go live.', SETUP_COPY.live.previewOnlyYou];
+    for (const words of lines) expect(ownerParts(screen.container).textContent?.split(words).length, words).toBe(2);
+    const { bar, line, note, goLive } = launchParts(screen);
+    expect(line.textContent).toBe(lines[0]);
+    expect(line.querySelector('.cd-status-dot--info')).not.toBeNull();
+    expect(note.textContent).toBe(lines[1]);
+    expect(line.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(note.compareDocumentPosition(goLive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bar.tagName).toBe('DIV');
+    expect(bar.getAttribute('role')).toBeNull();
+
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(screen.container.querySelector('.cd-setup-live__launch')).toBeNull();
+    for (const words of lines) expect(screen.container.textContent).not.toContain(words);
+  });
+
+  it.each([
+    [1440, 900],
+    [1366, 768],
+  ])('launch_bar_holds_its_line_at_the_left_and_go_live_at_the_right_at_%sx%s', async (width, height) => {
+    // One row, the step's gap under the frame: the two lines at the bar's left, the second under the
+    // first one's words, and "Go live" at its right, at least the margin column's width, centred on
+    // the lines; the bar on the first screen.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview } = previewParts(screen);
+    const { bar, text, line, words, note, goLive } = launchParts(screen);
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectLaunchBarOnTheFirstScreen(screen);
+    const box = bar.getBoundingClientRect();
+    const style = getComputedStyle(bar);
+    const textBox = text.getBoundingClientRect();
+    const button = goLive.getBoundingClientRect();
+    expect(Math.abs(textBox.left - (box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)))).toBeLessThanOrEqual(1);
+    expect(Math.abs(button.right - (box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)))).toBeLessThanOrEqual(1);
+    expect(textBox.right).toBeLessThanOrEqual(button.left);
+    expect(Math.abs((textBox.top + textBox.bottom) / 2 - (button.top + button.bottom) / 2)).toBeLessThanOrEqual(1);
+    const noteWords = document.createRange();
+    noteWords.selectNodeContents(note);
+    expect(Math.abs(noteWords.getBoundingClientRect().left - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(note.getBoundingClientRect().top - line.getBoundingClientRect().bottom - parseFloat(getComputedStyle(note).marginTop))).toBeLessThanOrEqual(1);
+    expect(button.width).toBeGreaterThanOrEqual(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-margin')));
+    expectNoHorizontalScroll();
+  });
+
+  it.each([
+    [390, 844],
+    [390, 700],
+    [390, 600],
+  ])('launch_bar_never_covers_the_composer_on_a_phone_at_%sx%s', async (width, height) => {
+    // On a phone the bar stacks in the page's flow under the preview, the lines over a full-width
+    // "Go live", and wherever a long chat has the preview and the page scrolled, the bar never covers
+    // the preview's composer.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height } });
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    const { preview, shell, composer } = previewParts(screen);
+    const { bar, text, goLive } = launchParts(screen);
+    const style = getComputedStyle(bar);
+    expect(style.position).toBe('static');
+    expect(style.flexDirection).toBe('column');
+    const inner = bar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    expect(Math.abs(goLive.getBoundingClientRect().width - inner)).toBeLessThanOrEqual(1);
+    expect(text.getBoundingClientRect().bottom).toBeLessThanOrEqual(goLive.getBoundingClientRect().top);
+    expectLaunchBarOneGapUnder(screen, preview);
+
+    const transcript = shell.querySelector<HTMLElement>('.cd-transcript')!;
+    for (let n = 0; transcript.scrollHeight <= shell.clientHeight && n < 6; n += 1) await sayInPreview(screen, 'How much is drain clearing?');
+    expect(shell.scrollHeight).toBeGreaterThan(shell.clientHeight);
+    const page = document.documentElement;
+    onTestFinished(() => window.scrollTo(0, 0));
+    for (const pageTop of [0, page.scrollHeight]) {
+      for (const chatTop of [0, shell.scrollHeight]) {
+        window.scrollTo(0, pageTop);
+        shell.scrollTop = chatTop;
+        const where = `page at ${window.scrollY}, chat at ${shell.scrollTop}`;
+        const a = bar.getBoundingClientRect();
+        const b = composer.getBoundingClientRect();
+        const overlaps = a.top < b.bottom && b.top < a.bottom && a.left < b.right && b.left < a.right;
+        expect(overlaps, where).toBe(false);
+        // The chat's head, with the disclosure that Claude, an AI, answers, stays in the frame.
+        const frame = preview.getBoundingClientRect();
+        const head = shell.querySelector('.cd-public-shell__chat-head')!;
+        expect(head.querySelector('.cd-public-shell__disclosure')?.textContent, where).toContain('Claude, an AI');
+        const rect = head.getBoundingClientRect();
+        expect(rect.top, where).toBeGreaterThanOrEqual(frame.top);
+        expect(rect.bottom, where).toBeLessThanOrEqual(frame.bottom);
+      }
+    }
+    expectLaunchBarOneGapUnder(screen, preview);
+    expectNoHorizontalScroll();
+  });
+
   /**
    * A step's own words, without the public page in the preview's frame: that is the visitor's page as
    * visitors read it ("Policy" is a business's own policy there), checked as a visitor surface.
@@ -2896,5 +3477,1073 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Turn it on' }).click();
     await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+});
+
+const CPA_DESCRIPTION = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+
+async function consultantAt(kind = 'opening'): Promise<SetupState> {
+  const start = await startInterview(null, CPA_DESCRIPTION);
+  const id = start.interview_id;
+  const call = async (key: 'setupConsent' | 'setupAnswer' | 'setupProposal', body: unknown, proposal_id?: string) => {
+    const response = await mockStore.dispatch(key, { params: { id, ...(proposal_id ? { proposal_id } : {}) }, query: { cards: '1' }, body });
+    if ('network' in response || response.status !== 200) throw new Error('fixture turn failed');
+    return response.body as SetupState;
+  };
+  let state = await call('setupConsent', { allow: true });
+  if (kind === 'opening') return state;
+  state = await call('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  while (state.pending_card) {
+    const card = state.messages.at(-1)!.card!;
+    if ((card.job?.job ?? card.connector?.app) === kind) return state;
+    state = await call('setupProposal', { accept: card.job?.job !== 'payment' }, card.proposal_id);
+  }
+  return state;
+}
+
+describe('consultant setup', () => {
+  it('focuses_a_failed_choice_retry_and_enter_retries_without_opening_the_phone_keyboard', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toBeVisible();
+    await expect.poll(() => document.activeElement === retry.element()).toBe(true);
+    await userEvent.keyboard('{Enter}');
+    const connect = screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true });
+    await expect.element(connect).toHaveFocus();
+    expect(requests('setupAnswer').map(({ body }) => body)).toEqual([
+      { question: 'what_you_do', text: 'Both, about evenly' }, { question: 'what_you_do', text: 'Both, about evenly' },
+    ]);
+  });
+
+  it.each(['fine', 'coarse'] as const)('returns_a_plain_question_to_the_composer_only_with_a_%s_pointer', async (pointer) => {
+    if (pointer === 'coarse') await coarsePointer();
+    expect(window.matchMedia('(pointer: fine)').matches).toBe(pointer === 'fine');
+    const state = await consultantAt();
+    const next: SetupState = { ...state, pending_card: null, question: SETUP_QUESTIONS[1]!.key, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: SETUP_QUESTIONS[1]!.text, choices: [], card: null },
+    ] };
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    mockStore.inject({ route: 'setupAnswer', status: 200, body: next });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[1]!.text, { exact: true })).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    if (pointer === 'fine') await expect.poll(() => document.activeElement === box.element()).toBe(true);
+    else expect(document.activeElement).not.toBe(box.element());
+  });
+
+
+  it.each(['desktop', 'phone'] as const)('answers_the_first_panel_by_keys_after_consent_without_manual_focus_on_%s', async (viewport) => {
+    const state = await startInterview(null, CPA_DESCRIPTION);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await screen.getByRole('button', { name: 'Yes, use it', exact: true }).click();
+    const first = screen.getByRole('button', { name: 'Both, about evenly', exact: true });
+    await expect.element(first).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}2{Enter}');
+    await expect.poll(() => requests('setupAnswer').at(-1)?.body).toEqual({ question: 'what_you_do', text: 'Mostly individuals' });
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'Your answer' }).element());
+  });
+
+
+  it('focuses_the_next_docked_question_after_a_card_and_esc_opens_the_phone_composer', async () => {
+    const state = await consultantAt('status');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    await screen.getByRole('article', { name: 'Answer “Where’s my return?”', exact: true }).getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: 'Ask me before every payment', exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveFocus();
+    expect(screen.container.querySelector('.cd-setup-q3')).toBeNull();
+  });
+
+  it.each(['Connect', 'Not now'] as const)('answers_google_calendar_with_%s_in_chat', async (action) => {
+    const state = await consultantAt('google_calendar');
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Google Calendar', exact: true });
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(card.getByText('Mock', { exact: true }).element().closest('.cd-connector-name--inline')).not.toBeNull();
+    await card.getByRole('button', { name: action, exact: true }).click();
+    await expect.element(screen.getByRole('article', { name: 'Book a free intro call', exact: true })).toBeVisible();
+    await expect.element(card.getByText(action === 'Connect' ? 'Connected' : 'Not now', { exact: true })).toBeVisible();
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: action === 'Connect' });
+    expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+  });
+
+  it.each(['proposed', 'declined'] as const)('does_not_show_a_connected_status_on_a_%s_connector', async (decision) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.state = decision;
+    proposal.connector!.connected = true;
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => {}} />);
+    expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-setup-c3__decision--accepted')).toBeNull();
+    if (decision === 'declined') await expect.element(screen.getByText('Not now', { exact: true })).toBeVisible();
+  });
+
+  it.each([false, undefined] as const)('collapses_an_accepted_app_without_a_connected_status_when_connected_is_%s', async (connected) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.state = 'accepted';
+    if (connected === undefined) delete proposal.connector!.connected;
+    else proposal.connector!.connected = connected;
+    const screen = await render(<ProposalCard proposal={proposal} live={false} disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('accepted app must be read-only'); }} />);
+    await expect.element(screen.getByRole('heading', { name: 'Google Calendar Mock', exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(screen.container.querySelector('.cd-setup-c3__decision')).toBeNull();
+    expect(screen.container.querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it.each([
+    ['google_calendar', undefined], ['google_calendar', 'connection_failed'],
+    ['stripe', undefined], ['stripe', 'connection_failed'],
+  ] as const)('collapses_a_simulated_%s_connection_after_polling_%s', async (app, outcome) => {
+    const state = await consultantAt(app);
+    const id = state.interview_id;
+    const proposal = state.messages.at(-1)!.card!;
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    const release = holdNextDecision(mockStore.world, id);
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const card = screen.getByRole('article', { name: proposal.connector!.label, exact: true });
+    const posts = requests('setupProposal').length;
+    await card.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.poll(() => requests('setupProposal').length).toBe(posts + 1);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    release(outcome);
+    await expect.element(screen.getByRole('article', { name: app === 'stripe' ? 'Send a retainer link' : 'Book a free intro call', exact: true })).toBeVisible();
+    await expect.poll(() => card.getByRole('button').elements().length).toBe(0);
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    if (outcome === 'connection_failed') {
+      expect(card.element().querySelector('.cd-setup-c3__decision')).toBeNull();
+      expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+    } else {
+      await expect.element(card.getByText('Connected', { exact: true })).toBeVisible();
+      expect(card.element().querySelector('.cd-setup-c3__decision svg')).not.toBeNull();
+    }
+    const read = await mockStore.dispatch('setup', { params: { id }, query: { cards: '1' } });
+    if ('network' in read) throw new Error('read failed');
+    expect((read.body as SetupState).messages.find(({ card }) => card?.proposal_id === proposal.proposal_id)?.card).toMatchObject({ state: 'accepted', connector: { connected: outcome !== 'connection_failed' } });
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['proposed', 'accepted', 'declined'] as const)('keeps_%s_unavailable_app_cards_read_only_with_their_explanation', async (decision) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.connector!.connectable = false;
+    proposal.state = decision;
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('unavailable app must not decide'); }} />);
+    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(proposal.connector!.why, { exact: true })).toBeVisible();
+    expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it.each(['google_calendar', 'gmail', 'google_drive', 'quickbooks', 'stripe', 'square', 'calendly'] as const)('uses_the_same_connect_action_for_catalog_app_%s', async (app) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.connector!.app = app;
+    const decisions: unknown[] = [];
+    const props = { proposal, live: true, disabled: false, busyAction: null, failed: false, amountRequired: false, onRetry: () => {}, onDecision: (decision: unknown) => { decisions.push(decision); } };
+    const screen = await render(<ProposalCard {...props} />);
+    const tile = screen.container.querySelector('.cd-connector-icon')!;
+    expect(tile.querySelector('svg')).not.toBeNull();
+    expect(tile.getAttribute('aria-hidden')).toBe('true');
+    if (app !== 'stripe' && app !== 'google_calendar') expect(tile.classList.contains('cd-connector-icon--built-in')).toBe(true);
+    await screen.getByRole('button', { name: 'Connect', exact: true }).click();
+    expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true } }]);
+    await screen.rerender(<ProposalCard {...props} proposal={{ ...proposal, state: 'accepted', connector: { ...proposal.connector!, connected: true } }} live={false} />);
+    await expect.element(screen.getByText('Connected', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it('renders_named_arrow_key_icons_without_arrow_characters_and_passes_screen_basics', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: 'Who do you work with most?', exact: true });
+    await expect.element(panel).toBeVisible();
+    const hint = panel.element().querySelector('.cd-setup-q3__hint')!;
+    const caps = [...hint.querySelectorAll('kbd')];
+    expect(caps.slice(0, 2).map((cap) => cap.textContent)).toEqual(['Up arrow', 'Down arrow']);
+    for (const cap of caps.slice(0, 2)) {
+      expect(cap.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+      expect(cap.querySelector('.cd-sr-only')).not.toBeNull();
+    }
+    expect(caps[0]!.querySelector('svg path')?.getAttribute('d')).toBe(caps[1]!.querySelector('svg path')?.getAttribute('d'));
+    expect(getComputedStyle(caps[0]!.querySelector('svg')!).transform).toBe('matrix(-1, 0, 0, -1, 0, 0)');
+    expect(ARROW_CHARACTERS.test(hint.outerHTML)).toBe(false);
+    expect(caps.slice(2).map((cap) => cap.textContent)).toEqual(['1–4', 'Enter', 'Esc']);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('keeps_the_other_answer_within_the_existing_answer_limit', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const other = screen.getByRole('textbox', { name: 'Something else…', exact: true });
+    await other.fill('x'.repeat(2001));
+    await expect.element(other).toHaveValue('x'.repeat(2000));
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: 'x'.repeat(2000) });
+  });
+
+  it.each(['proposed', 'accepted', 'declined', 'changed'] as const)('keeps_long_untrusted_%s_card_text_inside_the_phone_viewport', async (decision) => {
+    const state = await consultantAt('schedule');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.state = decision;
+    proposal.job!.title = 'W'.repeat(60);
+    proposal.job!.who = 'W'.repeat(60);
+    proposal.job!.how = 'W'.repeat(300);
+    await page.viewport(390, 844);
+    const screen = await render(<ProposalCard proposal={proposal} live={false} disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('read-only card must not decide'); }} />);
+    await expect.element(screen.getByText(proposal.job!.title, { exact: true }).first()).toBeVisible();
+    expectNoHorizontalScroll();
+  });
+
+  it('keeps_1200_character_question_paragraphs_and_choices_in_one_phone_scroll_area', async () => {
+    const state = await consultantAt();
+    const question = state.messages.at(-1)!;
+    const paragraphs = ['Which clients should your Desk help first? '.repeat(20).slice(0, 599), 'Which services do they ask you about most? '.repeat(20).slice(0, 599)];
+    question.text = paragraphs.join('\n\n');
+    expect(question.text).toHaveLength(1200);
+    mockStore.inject({ route: 'setup', status: 200, body: state });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    expect([...panel.element().querySelectorAll('.cd-setup-q3__question p')].map((p) => p.textContent)).toEqual(paragraphs);
+    const area = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
+    expect(area).not.toBeNull();
+    expect(area.scrollWidth).toBeLessThanOrEqual(area.clientWidth);
+    const dismiss = panel.getByRole('button', { name: 'Dismiss', exact: true }).element().getBoundingClientRect();
+    expect(dismiss.top).toBeGreaterThanOrEqual(area.getBoundingClientRect().top);
+    expect(area.contains(panel.element().querySelector('.cd-setup-q3__question'))).toBe(true);
+    expect(area.contains(panel.element().querySelector('ol'))).toBe(true);
+    expect(area.scrollHeight).toBeGreaterThan(area.clientHeight);
+    expect(panel.element().getBoundingClientRect().height).toBeLessThanOrEqual(window.innerHeight * 0.6 + 1);
+    const options = [...panel.element().querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')];
+    options[0]!.focus({ preventScroll: true });
+    await userEvent.keyboard('4');
+    await expect.poll(() => {
+      const row = options[3]!.getBoundingClientRect();
+      const bounds = area.getBoundingClientRect();
+      return row.top >= bounds.top && row.bottom <= bounds.bottom;
+    }).toBe(true);
+    const composer = screen.getByRole('textbox', { name: 'Your answer' }).element().getBoundingClientRect();
+    expect(composer.top).toBeGreaterThan(0);
+    expect(composer.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expectNoHorizontalScroll();
+  });
+
+  it('caps_long_phone_questions_and_scrolls_every_choice_inside_the_panel_by_touch_and_keys', async () => {
+    const state = await consultantAt();
+    const question = state.messages.at(-1)!;
+    question.text = 'Which clients and services should your Desk help with first? '.repeat(6).slice(0, 300);
+    question.choices = ['Individuals', 'Small businesses', 'New clients', 'Existing clients'].map((text) => ({ text: `${text}: ${'WWWWWWWWWW '.repeat(8)}`.slice(0, 80), recommended: false }));
+    mockStore.inject({ route: 'setup', status: 200, body: state });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    const list = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
+    expect(list.scrollWidth).toBeLessThanOrEqual(list.clientWidth);
+    const bounds = list.getBoundingClientRect();
+    expect(panel.getByRole('button', { name: 'Dismiss', exact: true }).element().getBoundingClientRect().top).toBeGreaterThanOrEqual(bounds.top);
+    expect(panel.element().querySelector('.cd-setup-q3__row')!.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left + 4);
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true }).element();
+    const inView = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    };
+    expect(panel.element().getBoundingClientRect().height).toBeLessThanOrEqual(window.innerHeight * 0.6 + 1);
+    expect(inView(box)).toBe(true);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    const rows = [...list.querySelectorAll<HTMLElement>('.cd-setup-q3__row')];
+    const insideList = (row: HTMLElement) => {
+      const outer = list.getBoundingClientRect();
+      const rect = row.getBoundingClientRect();
+      return rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1;
+    };
+    // Scroll only the options, as a finger would, including the last "Something else" row.
+    for (const row of rows) {
+      list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      await expect.poll(() => insideList(row)).toBe(true);
+      expect(inView(box)).toBe(true);
+    }
+    list.scrollTop = 0;
+    rows[0]!.focus({ preventScroll: true });
+    for (let index = 1; index < rows.length; index += 1) {
+      await userEvent.keyboard('{ArrowDown}');
+      await expect.poll(() => insideList(rows[index]!)).toBe(true);
+      expect(rows[index]!.contains(document.activeElement)).toBe(true);
+      expect(inView(box)).toBe(true);
+    }
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.poll(() => insideList(rows[0]!)).toBe(true);
+    await userEvent.keyboard('4');
+    await expect.poll(() => insideList(rows[3]!)).toBe(true);
+    expectNoHorizontalScroll();
+  });
+
+  it('shows_claudes_markdown_in_the_conversation_as_one_reply', async () => {
+    // A reply whose list has blank lines between its items is one list, with its bold.
+    const state = await consultantAt();
+    const reply = 'Thanks. Here is what I took from that:\n\n- **Individuals** come to you for their returns\n\n- **Small businesses** come for their books';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: reply, choices: [], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const bold = screen.getByRole('log').getByText('Individuals', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect(message.querySelectorAll('ul')).toHaveLength(1);
+    expect([...message.querySelectorAll('li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Individuals come to you for their returns',
+      'Small businesses come for their books',
+    ]);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
+  it('shows_a_docked_question_in_markdown_named_without_its_marks', async () => {
+    const state = await consultantAt();
+    const question = 'Got it.\n\n**Which work comes in most** during tax season?\n\n- Returns for individuals\n- Books for small businesses';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Returns', recommended: true }, { text: 'Books', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Returns', exact: true })).toBeVisible();
+    const dock = screen.container.querySelector('.cd-setup-question-panel section') as HTMLElement;
+    const shown = dock.querySelector('.cd-setup-q3__question') as HTMLElement;
+
+    // The question's bold and list, in the dock's own type, its paragraphs as far apart as before.
+    expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
+    expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
+    const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+
+    // The dock is named by the question as it reads, with none of the Markdown's marks.
+    await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
+  });
+
+  it('enter_on_a_link_in_a_docked_question_is_the_links_own', async () => {
+    const state = await consultantAt();
+    const question = 'Which payments do you take? [Stripe’s guide](https://stripe.com/docs) lists the usual ones.';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Cards', recommended: true }, { text: 'Bank transfers', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const link = screen.getByRole('link', { name: 'Stripe’s guide', exact: true });
+    await expect.element(link).toHaveAttribute('href', 'https://stripe.com/docs');
+    link.element().focus();
+    // The dock's keys leave a focused link alone: Enter opens it and sends no choice.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    link.element().dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
+  it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const panel = screen.getByRole('region', { name: 'Who do you work with most?', exact: true });
+    await expect.element(panel).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    const hint = panel.element().querySelector('.cd-setup-q3__hint')!;
+    expect(getComputedStyle(hint).display).toBe(viewport === 'phone' ? 'none' : 'flex');
+    const questionStyle = getComputedStyle(panel.element().querySelector('.cd-setup-q3__question')!);
+    expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['17px', '25px']);
+    const key = panel.element().querySelector('kbd')!.getBoundingClientRect();
+    expect([key.width, key.height]).toEqual([22, 22]);
+    expect(panel.element().getBoundingClientRect().bottom).toBeLessThan(box.element().getBoundingClientRect().top);
+    const dock = screen.container.querySelector('.cd-setup-dock')!.getBoundingClientRect();
+    expect(dock.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
+    expectNoHorizontalScroll();
+    const scroll = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
+    // The bar's business name comes from a second read (the Desks) after the panel is drawn; on a
+    // phone it makes the bar's second line 2 px taller, and the transcript re-pins to its new end a
+    // frame later. A Home pressed in between ends 2 px short of the top, so the screen settles first.
+    await expect.element(screen.getByRole('banner').getByText('Chen & Co.', { exact: true })).toBeVisible();
+    await settled(screen.container);
+    const end = () => scroll.scrollHeight - scroll.clientHeight;
+    // Home has somewhere to go: the transcript overflows by more than the pin's 1 px and starts at its end.
+    await expect.poll(() => end() - scroll.scrollTop).toBeLessThanOrEqual(1);
+    expect(end()).toBeGreaterThan(1);
+    scroll.focus();
+    expect(document.activeElement).toBe(scroll);
+    await userEvent.keyboard('{Home}');
+    await expect.poll(() => scroll.scrollTop).toBe(0);
+    // Nothing pulls the owner who scrolled back to read down to the end again.
+    await framesWithin('the transcript after Home', 2);
+    expect(scroll.scrollTop).toBe(0);
+    await expectScreenBasics(screen.container, { owner: true });
+    await panel.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    expect(panel.elements()).toHaveLength(0);
+    await expect.element(box).toHaveFocus();
+    await expect.element(screen.getByRole('log').getByText('Who do you work with most?', { exact: true })).toBeVisible();
+  });
+
+  it.each([
+    ['schedule', 'Your opening hours', 'You approve each request in Needs you'],
+    ['payment', 'Stripe', 'Each payment shows in Today'],
+    ['intake', null, 'Their answers show on the booking'],
+    ['price', 'Your prices', null], ['urgent', 'Alerts you right away', null],
+    ['status', null, null], ['documents', null, null], ['answer', null, null],
+  ] as const)('uses_only_the_signed_rows_for_%s_and_renders_who_as_untrusted_text', async (kind, uses, next) => {
+    const state = await consultantAt('schedule');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    const who = '<img src=x onerror=alert(1)>';
+    proposal.job = { ...proposal.job!, job: kind as JobKind, who, autonomy: 'ask', config: null };
+    const screen = await render(<ProposalCard proposal={proposal} live={false} disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('read-only card must not decide'); }} />);
+    await expect.element(screen.getByText(who, { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('img')).toBeNull();
+    const labels = [...screen.container.querySelectorAll('dt')].map((element) => element.textContent);
+    expect(labels).toEqual(['Who', ...(uses ? ['Uses'] : []), ...(next ? ['Next for you'] : [])]);
+    if (uses) await expect.element(screen.getByText(uses, { exact: true })).toBeVisible();
+    if (next) await expect.element(screen.getByText(next, { exact: true })).toBeVisible();
+  });
+
+  it.each([undefined, null, '', '  '])('omits_an_empty_optional_who_row_%s', async (who) => {
+    const state = await consultantAt('schedule');
+    const proposal = structuredClone(state.messages.at(-1)!.card!) as Proposal;
+    if (who === undefined) delete proposal.job!.who;
+    else proposal.job!.who = who;
+    const screen = await render(<ProposalCard proposal={proposal} live={false} disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('read-only card must not decide'); }} />);
+    await expect.element(screen.getByRole('article', { name: proposal.job!.title })).toBeVisible();
+    expect(screen.getByText('Who', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('renders_the_signed_job_rows_and_collapses_set_up_cards', async () => {
+    const state = await consultantAt('schedule');
+    const job = state.messages.at(-1)!.card!.job!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: job.title, exact: true });
+    await expect.element(card.getByText('Uses', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Your opening hours', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Who', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('New clients', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('The booking shows in Today, with their answers', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('New clients pick a time within your opening hours and book a 20-minute call.', { exact: true })).toBeVisible();
+    expect(card.getByText(job.why, { exact: true }).elements()).toHaveLength(0);
+    expect(card.getByRole('button', { name: 'Change', exact: true }).elements()).toHaveLength(0);
+    expect(card.getByRole('textbox').elements()).toHaveLength(0);
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(card.element().querySelector('dl')).toBeNull();
+    expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    const intake = screen.getByRole('article', { name: 'Ask new clients three questions', exact: true });
+    expect(intake.getByText('Uses', { exact: true }).elements()).toHaveLength(0);
+    expect(intake.getByText('Your questions', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Great, I’ll set it up this way. Next: the questions new clients answer before their call.', { exact: true }).elements()).toHaveLength(1);
+    await expect.element(intake.getByText('Is it for you or your business? Which tax years or months? Any bookkeeping software?', { exact: true })).toBeVisible();
+    await expect.element(intake.getByText('Their answers show on the booking', { exact: true })).toBeVisible();
+  });
+
+  it('connects_stripe_in_chat_and_collapses_it_without_turning_on_its_tools', async () => {
+    const state = await consultantAt('stripe');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const stripe = screen.getByRole('article', { name: 'Stripe', exact: true });
+    await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
+    await stripe.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
+    const amount = screen.getByRole('article', { name: 'Send a retainer link', exact: true }).getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.poll(() => document.activeElement === amount.element()).toBe(true);
+    expect(stripe.getByRole('button').elements()).toHaveLength(0);
+    expect(stripe.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true });
+    expect(mockStore.world.desk(state.desk_id)!.tools.filter(({ tool }) => tool.startsWith('payments.')).map(({ status }) => status)).toEqual(['needs_review', 'needs_review']);
+  });
+
+  it('collapses_the_old_card_to_changed_below_when_typing_reproposes_it', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.fill('Make it 15 minutes, and check with me before booking.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Changed below', { exact: true })).toBeVisible();
+    expect(screen.getByRole('article', { name: 'Book a free intro call', exact: true }).elements()).toHaveLength(0);
+    const oldTitle = screen.getByText('Book a free intro call', { exact: true }).element();
+    expect(getComputedStyle(oldTitle).textDecorationLine).toBe('line-through');
+    await expect.element(screen.getByRole('article', { name: 'Request a free intro call', exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('dismisses_the_question_with_escape_and_keeps_composer_and_other_words_literal', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('123');
+    await expect.element(box).toHaveValue('123');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await expect.element(panel).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(panel.elements()).toHaveLength(0);
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('123');
+    await expect.element(screen.getByRole('log').getByText(question.text, { exact: true })).toBeVisible();
+    await box.fill('Both, about evenly');
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(panel.elements()).toHaveLength(0);
+  });
+
+  it('sends_the_last_numbered_row_as_free_text', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    (panel.getByRole('list').getByRole('button').first().element() as HTMLElement).focus();
+    await userEvent.keyboard('{ArrowUp}');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await userEvent.keyboard('123 individuals{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: '123 individuals' });
+    expect(panel.elements()).toHaveLength(0);
+  });
+
+  it('moves_picks_and_sends_docked_choices_with_the_keyboard_without_capturing_composer_text', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard('{ArrowDown}');
+    await expect.element(options.nth(1)).toHaveAttribute('aria-current', 'true');
+    await userEvent.keyboard('3');
+    await expect.element(options.nth(2)).toHaveAttribute('aria-current', 'true');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![2]!.text });
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true })).toHaveFocus();
+  });
+
+  it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    expect(panel.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(screen.getByRole('log').getByText(question.text, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(panel.getByRole('textbox', { name: 'Something else…', exact: true })).toBeVisible();
+    await panel.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.element(screen.getByRole('log').getByText(question.text, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('log').getByText('Both, about evenly', { exact: true })).toBeVisible();
+    expect(screen.getByRole('region', { name: question.text, exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
+  });
+
+  it.each(['answer', 'suggestions'] as const)('keeps_cards_and_the_dock_waiting_during_an_%s_turn', async (action) => {
+    const state = await consultantAt('intake');
+    const id = state.interview_id;
+    let release: () => void;
+    if (action === 'answer') release = holdNextAnswer(mockStore.world, id);
+    else {
+      let open = () => {};
+      const gate = new Promise<void>((resolve) => { open = resolve; });
+      release = open;
+      onTestFinished(open);
+      worker.use(http.post(`/api/owner/setup/${id}/suggestions`, async () => { await gate; return undefined; }, { once: true }));
+    }
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const key = action === 'answer' ? 'setupAnswer' : 'setupSuggestions';
+    const mark = requests(key).length;
+    if (action === 'answer') { await box.fill('Yes, please'); await screen.getByRole('button', { name: 'Send', exact: true }).click(); }
+    else await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(box).toBeDisabled();
+    const setup = screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(setup).not.toHaveAttribute('disabled');
+    expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
+    const suggestions = screen.getByRole('button', { name: 'Use your suggestions', exact: true });
+    await expect.element(suggestions).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(suggestions).not.toHaveAttribute('disabled');
+    if (action === 'suggestions') await expect.element(suggestions).toHaveAttribute('aria-busy', 'true');
+    if (action === 'answer') await expect.poll(() => requests(key).length).toBe(mark + 1);
+    release();
+    if (action === 'answer') await expect.element(screen.getByRole('article', { name: 'Stripe' }).getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    else await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+  });
+
+  it('can_answer_a_failed_card_by_typing_and_keep_focus_for_the_next_turn', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro call' });
+    mockStore.inject({ route: 'setupProposal', status: 503 });
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Yes, please{Enter}');
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('a_page_opened_at_tools_skips_the_closing', async () => {
+    const state = await consultantAt('intake');
+    await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'A few questions', exact: true }).elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-setup-dock')).toBeNull();
+  });
+
+  it.each(['lost', 'error'] as const)('suggestions_recover_a_%s_reply_without_sending_blindly', async (outcome) => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const reads = requests('setup').length;
+    mockStore.inject(outcome === 'lost' ? { route: 'setupSuggestions', status: 'network', afterCommit: true } : { route: 'setupSuggestions', status: 503 });
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    if (outcome === 'lost') {
+      await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+      expect(requests('setupTools')).toHaveLength(0);
+    } else {
+      await expect.element(screen.getByRole('alert')).toHaveTextContent(UNREACHABLE_COPY.en);
+      await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeEnabled();
+    }
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    expect(requests('setupSuggestions')).toHaveLength(1);
+  });
+
+  it.each([404, 409, 422])('a_card_%s_rereads_and_shows_the_decision_the_server_holds', async (status) => {
+    const state = await consultantAt('schedule');
+    const id = state.interview_id;
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro call' });
+    await expect.element(card.getByRole('button', { name: 'Set it up', exact: true })).toBeVisible();
+    await mockStore.dispatch('setupProposal', { params: { id, proposal_id: state.pending_card! }, query: { cards: '1' }, body: { accept: true } });
+    const reads = requests('setup').length;
+    mockStore.inject({ route: 'setupProposal', status });
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    expect(card.getByText('I couldn’t save that just now. Try again.', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('only_the_latest_choices_are_live_and_money_limits_have_no_recommendation', async () => {
+    const state = await consultantAt('money');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    expect(screen.getByRole('button', { name: 'Both, about evenly' }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Set an amount now', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: 'Up to $100', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Set an amount now', exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Recommended', { exact: true }).elements()).toHaveLength(0);
+    const live = screen.getByRole('region', { name: "What's the most I should take or pay out without asking you?", exact: true });
+    expect(live.getByRole('list').getByRole('button').elements()).toHaveLength(4);
+  });
+
+  it('shows_coming_later_only_until_a_job_is_decided', async () => {
+    const state = await consultantAt('status');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Answer “Where’s my return?”', exact: true });
+    await expect.element(card.getByText('Coming later', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(card.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('shows_coming_later_jobs_and_simulated_connected_apps', async () => {
+    const state = await consultantAt('money');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const status = screen.getByRole('article', { name: 'Answer “Where’s my return?”' });
+    expect(status.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(status.getByText('Set up', { exact: true })).toBeVisible();
+    expect(status.getByRole('button').elements()).toHaveLength(0);
+    const calendar = screen.getByRole('article', { name: 'Google Calendar' });
+    await expect.element(calendar.getByText('Connected', { exact: true })).toBeVisible();
+    await expect.element(calendar.getByText('Mock', { exact: true })).toBeVisible();
+    expect(calendar.getByRole('button').elements()).toHaveLength(0);
+    const stripe = screen.getByRole('article', { name: 'Stripe' });
+    await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
+    await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
+  });
+
+  it.each(['schedule', 'google_calendar'] as const)('collapses_a_declined_%s_card_to_its_tile_title_and_decision', async (kind) => {
+    const state = await consultantAt(kind);
+    const proposal = state.messages.at(-1)!.card!;
+    const title = proposal.job?.title ?? proposal.connector!.label;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const card = screen.getByRole('article', { name: title, exact: true });
+    await card.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect.poll(() => card.getByRole('button').elements().length).toBe(0);
+    await expect.element(card.getByText('Not now', { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('heading', { name: kind === 'google_calendar' ? 'Google Calendar Mock' : title, exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(card.element().querySelector('dl')).toBeNull();
+    expect(card.getByRole('textbox').elements()).toHaveLength(0);
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: false });
+    expect(card.element().querySelector('.cd-setup-c3--declined')).not.toBeNull();
+    if (kind === 'google_calendar') await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+  });
+
+  it.each(['invalid', 'amount_required'] as const)('rereads_a_payment_422_%s_without_retrying_the_rejected_body', async (code) => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
+    const reads = requests('setup').length;
+    mockStore.inject({ route: 'setupProposal', status: 422, body: { error: code } });
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests('setup').length).toBeGreaterThan(reads);
+    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('textbox', { name: 'Amount', exact: true })).toHaveValue('750');
+    expect(card.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
+  });
+
+  it.each(['answer', 'decision'] as const)('keeps_an_unapplied_%s_after_another_runs_202_and_poll', async (action) => {
+    const state = await consultantAt('schedule');
+    const id = state.interview_id;
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    const card = screen.getByRole('article', { name: 'Book a free intro call', exact: true });
+    await expect.element(card).toBeVisible();
+    const complete = holdNextAnswer(mockStore.world, id);
+    let released = false;
+    const release = () => { if (!released) { released = true; complete(); } };
+    onTestFinished(release);
+    expect(await mockStore.dispatch('setupAnswer', { params: { id }, query: { cards: '1' }, body: { question: null, card: state.pending_card, text: 'How would that work?' } })).toMatchObject({ status: 202, body: { busy: true } });
+    const key = action === 'answer' ? 'setupAnswer' : 'setupProposal';
+    const sent = requests(key).length;
+    if (action === 'answer') { await box.fill('Keep these words for my next answer.'); await userEvent.keyboard('{Enter}'); }
+    else await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests(key).length).toBe(sent + 1);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(box).toBeDisabled();
+    release();
+    await expect.element(box).toBeEnabled();
+    if (action === 'answer') await expect.element(box).toHaveValue('Keep these words for my next answer.');
+    else await expect.element(card.getByRole('button', { name: 'Set it up', exact: true })).toBeEnabled();
+    expect(card.getByText('Set up', { exact: true }).elements()).toHaveLength(0);
+    expect(card.getByText('I couldn’t save that just now. Try again.', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
+    const current = await mockStore.dispatch('setup', { params: { id }, query: { cards: '1' } });
+    expect(current).toMatchObject({ status: 200, body: { pending_card: state.pending_card, busy: false } });
+    if ('network' in current) throw new Error('read failed');
+    expect((current.body as SetupState).messages.some(({ role, text }) => role === 'owner' && text === 'Keep these words for my next answer.')).toBe(false);
+  });
+
+  it.each([
+    ['schedule', 'Book a free intro call', 'Set it up', 'Ask new clients three questions'],
+    ['google_calendar', 'Google Calendar', 'Connect', 'Book a free intro call'],
+    ['payment', 'Send a retainer link', 'Set it up', 'Answer “Where’s my return?”'],
+  ] as const)('a_202_%s_decision_keeps_the_pressed_button_busy_and_its_neighbors_waiting', async (kind, title, action, next) => {
+    const state = await consultantAt(kind);
+    const release = holdNextDecision(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: title, exact: true });
+    const accept = card.getByRole('button', { name: action, exact: true });
+    if (kind === 'payment') {
+      await expect.element(accept).toBeDisabled();
+      await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
+    }
+    const decline = card.getByRole('button', { name: 'Not now', exact: true });
+    const suggestions = screen.getByRole('button', { name: 'Use your suggestions', exact: true });
+    const reads = requests('setup').length;
+    const posts = requests('setupProposal').length;
+    const suggested = requests('setupSuggestions').length;
+    await accept.click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(accept).toHaveAttribute('aria-busy', 'true');
+    await expect.element(accept).not.toHaveAttribute('disabled');
+    await expect.element(accept).toHaveFocus();
+    await expect.element(decline).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(decline).not.toHaveAttribute('disabled');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(suggestions).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(suggestions).not.toHaveAttribute('disabled');
+    if (kind !== 'schedule') {
+      await userEvent.keyboard('{Tab}');
+      await expect.element(decline).toHaveFocus();
+      await userEvent.keyboard('{Enter} ');
+      await userEvent.keyboard('{Tab}');
+      await expect.element(suggestions).toHaveFocus();
+      await userEvent.keyboard('{Enter} ');
+    }
+    expect(requests('setupSuggestions')).toHaveLength(suggested);
+    expect(screen.getByText('Putting together what I’d have your Desk do. This can take a minute or so.', { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => requests('setupProposal').length).toBe(posts + 1);
+    release();
+    await expect.element(screen.getByRole('article', { name: next, exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    if (kind === 'schedule') await expect.element(screen.getByRole('article', { name: next, exact: true }).getByRole('button', { name: 'Set it up', exact: true })).toHaveFocus();
+    else await expect.element(suggestions).toHaveFocus();
+  });
+
+  it('the_last_answer_answered_202_holds_the_closing_until_continue', async () => {
+    let state = await consultantAt('payment');
+    const id = state.interview_id;
+    // Accept the retainer and status cards to reach the last, opt-in money question.
+    for (const body of [{ accept: true, amount_cents: 75000 }, { accept: true }]) {
+      const response = await mockStore.dispatch('setupProposal', { params: { id, proposal_id: state.pending_card! }, query: { cards: '1' }, body });
+      expect(response).toMatchObject({ status: 200 });
+      if ('network' in response) throw new Error('fixture decision failed');
+      state = response.body as SetupState;
+    }
+    expect(state).toMatchObject({ step: 'questions', question: 'money_limit', pending_card: null });
+    const release = holdNextAnswer(mockStore.world, id);
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    let answerStatus: number | undefined;
+    const answered = ({ request, response }: { request: Request; response: Response }) => {
+      if (request.method === 'POST' && new URL(request.url).pathname === `/api/owner/setup/${id}/answer`) answerStatus = response.status;
+    };
+    worker.events.on('response:mocked', answered);
+    onTestFinished(() => { worker.events.removeListener('response:mocked', answered); });
+    const answers = requests('setupAnswer').length;
+    await screen.getByRole('button', { name: 'Ask me before every payment', exact: true }).click();
+    await expect.poll(() => answerStatus).toBe(202);
+    expect(requests('setupAnswer')).toHaveLength(answers + 1);
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'money_limit', text: 'Ask me before every payment' });
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue', exact: true }).elements()).toHaveLength(0);
+    const reads = requests('setup').length;
+    release();
+    // Only the page's real polling reads the completed turn; the test does not re-read it.
+    const transcript = screen.getByRole('log');
+    await expect.element(transcript.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    for (const line of [
+      'It books free 20-minute intro consults and asks new clients three questions first. Once you’ve priced the work, it sends the retainer link, and it asks you before every payment. Questions about where a return stands come to you for now.',
+      'A few conversations it’s ready for:',
+      'Someone asks if you can do their 2025 return and their LLC’s books. The Desk explains the free consult, asks its three questions and books a time.',
+      'A client you’ve priced asks how to pay. The Desk asks you first, then sends them the retainer link.',
+      'Someone asks where their return is. The Desk takes their name and question and tells them you’ll reply.',
+      'Next, check the tools these jobs use.',
+    ]) await expect.element(transcript.getByText(line, { exact: true })).toBeVisible();
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+    expect(next.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(screen.container.querySelector('.cd-composer')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'What Claude can use', exact: true }).elements()).toHaveLength(0);
+    expect(requests('setupTools')).toHaveLength(0);
+    await next.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+  });
+
+  it('suggestions_finish_a_pending_card_show_read_only_leftovers_and_wait_for_continue', async () => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByText('Here’s the rest, as I’d set it up.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
+    const payment = screen.getByRole('article', { name: 'Send a retainer link' });
+    await expect.element(payment.getByText('Not now', { exact: true })).toBeVisible();
+    expect(screen.getByRole('log').getByRole('button').elements().every((element) => (element as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Use your suggestions', exact: true }).elements()).toHaveLength(0);
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+    expect(next.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(requests('setupSuggestions').at(-1)?.body).toEqual({});
+    await next.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+  });
+
+  it('typing_answers_the_pending_card_and_returns_focus_to_the_composer', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Yes, please{Enter}');
+    const consult = screen.getByRole('article', { name: 'Book a free intro call' });
+    await expect.element(consult.getByText('Set up', { exact: true })).toBeVisible();
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: null, card: state.pending_card, text: 'Yes, please' });
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('');
+  });
+
+  it.each(['desktop', 'phone'] as const)('keeps_the_dock_in_the_%s_viewport_while_only_the_transcript_scrolls', async (viewport) => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    const scroll = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll');
+    expect(scroll).not.toBeNull();
+    const dock = screen.container.querySelector<HTMLElement>('.cd-setup-dock')!;
+    const before = dock.getBoundingClientRect();
+    scroll!.scrollTop = 0;
+    expect(scroll!.scrollHeight).toBeGreaterThan(scroll!.clientHeight);
+    expect(dock.getBoundingClientRect().top).toBe(before.top);
+    expect(before.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).element().getBoundingClientRect().top).toBeGreaterThan(0);
+    expectNoHorizontalScroll();
+    scroll!.scrollTop = scroll!.scrollHeight;
+  });
+
+  it.each(['page', 'card button'] as const)('keeps_the_live_card_at_the_bottom_when_resizing_to_phone_with_%s_focus_without_pulling_a_reader_down', async (focus) => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop', strict: true });
+    const card = screen.getByRole('article', { name: 'Ask new clients three questions', exact: true });
+    await expect.element(card).toBeVisible();
+    const pane = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
+    expect(pane.scrollHeight).toBeGreaterThan(pane.clientHeight);
+    const atBottom = () => pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+    const focusedButton = card.getByRole('button', { name: 'Set it up', exact: true });
+    if (focus === 'card button') {
+      (focusedButton.element() as HTMLElement).focus({ preventScroll: true });
+      await expect.element(focusedButton).toHaveFocus();
+    }
+    pane.scrollTop = pane.scrollHeight;
+    await expect.poll(atBottom).toBe(true);
+    await page.viewport(390, 844);
+    await expect.poll(atBottom).toBe(true);
+    if (focus === 'card button') await expect.element(focusedButton).toHaveFocus();
+    const rect = card.element().getBoundingClientRect();
+    const bounds = pane.getBoundingClientRect();
+    expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
+    expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    expectNoHorizontalScroll();
+    // Reading earlier messages cancels pinning, including across another resize.
+    pane.scrollTop = 0;
+    await expect.poll(() => pane.scrollTop).toBe(0);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await page.viewport(1440, 900);
+    await expect.poll(() => pane.scrollTop).toBe(0);
+    await page.viewport(390, 844);
+    await expect.poll(() => pane.scrollTop).toBe(0);
+  });
+
+  it('retries_a_failed_card_decision_with_the_same_body', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro call' });
+    const mark = requests('setupProposal').length;
+    mockStore.inject({ route: 'setupProposal', status: 503 });
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByText('I couldn’t save that just now. Try again.', { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('button', { name: 'Try again', exact: true })).toHaveFocus();
+    expect(card.getByRole('button', { name: 'Set it up', exact: true }).elements()).toHaveLength(0);
+    await card.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').slice(mark).map(({ body }) => body)).toEqual([{ accept: true }, { accept: true }]);
+  });
+
+  it('shows_and_requires_amount_for_a_payment_with_hidden_config', async () => {
+    const state = await consultantAt('payment');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.job!.config = null;
+    const decisions: unknown[] = [];
+    await page.viewport(390, 844);
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={(decision) => decisions.push(decision)} />);
+    const amount = screen.getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.element(amount).toBeVisible();
+    const setup = screen.getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toBeDisabled();
+    await expect.element(screen.getByText('Stripe', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Each payment shows in Today', { exact: true })).toBeVisible();
+    await amount.fill('750.00');
+    await setup.click();
+    expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true, amount_cents: 75000 } }]);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['7,5', '75 0', '1,50.00'] as const)('refuses_ambiguous_payment_grouping_%s_without_sending', async (dollars) => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    const sent = requests('setupProposal').length;
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill(dollars);
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    expect(requests('setupProposal')).toHaveLength(sent);
+    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+  });
+
+  it.each(['$1,500', '1500', '1,500.00', ' $ 1,500.00 '] as const)('accepts_payment_dollars_as_typed_%s', async (dollars) => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill(dollars);
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests('setupProposal').at(-1)?.body).toEqual({ accept: true, amount_cents: 150000 });
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+  });
+
+  it('requires_a_payment_amount_and_sends_owner_dollars_as_integer_cents', async () => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.element(amount).toBeVisible();
+    const setup = card.getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toBeDisabled();
+    const mark = requests('setupProposal').length;
+    for (const invalid of ['bad', '0', '$0.00', '-1', '1.234', '10000.01']) {
+      await amount.fill(invalid);
+      await setup.click();
+      await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
+      await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+      expect(requests('setupProposal')).toHaveLength(mark);
+    }
+    await amount.fill('');
+    await expect.element(setup).toBeDisabled();
+    await amount.fill('750.00');
+    await setup.click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(card.getByRole('textbox').elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, amount_cents: 75000 });
+  });
+
+  it('a_choice_answers_and_only_the_pending_card_has_actions', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const choice = screen.getByRole('button', { name: 'Both, about evenly' });
+    await choice.click();
+    const calendar = screen.getByRole('article', { name: 'Google Calendar', exact: true });
+    await calendar.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.element(calendar.getByText('Connected', { exact: true })).toBeVisible();
+    expect(calendar.getByRole('button').elements()).toHaveLength(0);
+    const consult = screen.getByRole('article', { name: 'Book a free intro call' });
+    await expect.element(consult).toBeVisible();
+    expect(choice.elements()).toHaveLength(0);
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'what_you_do', text: 'Both, about evenly' });
+    expect([...screen.container.querySelectorAll('.cd-claude-message')].filter((node) => node.textContent === '')).toHaveLength(0);
+    await consult.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(consult.getByText('Set up', { exact: true })).toBeVisible();
+    expect(consult.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true });
+  });
+
+  it('opens_with_choices_and_no_cards_or_question_subtitle', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeVisible();
+    expect(screen.getByRole('article').elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
+    expect(screen.getByText(/Question \d of|About seven/).elements()).toHaveLength(0);
   });
 });

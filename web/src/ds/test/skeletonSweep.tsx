@@ -138,6 +138,49 @@ export async function resizeWindow(width: number, height: number): Promise<void>
   expect(window.innerWidth).toBe(width);
 }
 
+/** A responsive render can move shapes after resize listeners ran, without resizing their region. */
+export async function expectBandsFollowLateResizeLayout(): Promise<void> {
+  await page.viewport(900, 700);
+  onTestFinished(() => page.viewport(1280, 820));
+  const host = document.createElement('div');
+  host.style.width = '600px';
+  document.body.append(host);
+  const root = createRoot(host);
+  const watch = watchRegion(host);
+  onTestFinished(() => { watch.stop(); root.unmount(); host.remove(); });
+  flushSync(() => root.render(
+    <SkeletonScreen loading status="Loading layout" skeleton={
+      <>
+        <Skeleton shape="block" width={100} height={20} anchor="fixed" />
+        <div data-resize-layout style={{ marginLeft: 264 }}>
+          <Skeleton shape="block" width={100} height={20} anchor="moved" />
+        </div>
+      </>
+    } />,
+  ));
+  await watch.reached('shown');
+  await nextFrame();
+  await nextFrame();
+  const region = host.querySelector('.cd-skeleton-screen')!;
+  const before = region.getBoundingClientRect();
+  const shapes = [...host.querySelectorAll<HTMLElement>('.cd-skeleton')];
+  expect(shapes[1]!.getBoundingClientRect().left - shapes[0]!.getBoundingClientRect().left).toBe(264);
+  const layout = host.querySelector<HTMLElement>('[data-resize-layout]')!;
+  // Registered after SkeletonScreen's listener: model the responsive commit that removes a column.
+  const move = () => { layout.style.marginLeft = '0px'; };
+  window.addEventListener('resize', move, { once: true });
+  onTestFinished(() => window.removeEventListener('resize', move));
+  await resizeWindow(620, 700);
+  const after = region.getBoundingClientRect();
+  expect([after.width, after.height]).toEqual([before.width, before.height]);
+  expect(shapes[1]!.getBoundingClientRect().left).toBe(shapes[0]!.getBoundingClientRect().left);
+  for (const shape of shapes) {
+    expect(Math.abs(Number.parseFloat(shape.style.getPropertyValue('--cd-skeleton-x')) - shape.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+  }
+  const { centres } = bandCentres(shapes);
+  expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(1);
+}
+
 /** The pixels of a capture of `element`, and how many capture pixels make one CSS pixel. */
 async function capture(element: HTMLElement): Promise<{ pixels: ImageData; scale: number }> {
   const base64 = await page.screenshot({ element, save: false });

@@ -41,6 +41,7 @@ const publicDesk = {
       cardBlock('policy', { fact_id: 'charter:policy:decisions', title: 'Plan checkers decide what needs a permit and what’s exempt.' }),
       cardBlock('contact', { fact_id: 'charter:contact', title: '(415) 555-0186', lines: ['Permit Center, 250 Harbor Street'] }),
     ],
+    starters: [],
     agent_card: [],
     // Friday, October 30, at 10:00 in the city's time zone: open until 4:30 pm.
     open_status: {

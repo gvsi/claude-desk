@@ -16,6 +16,7 @@
 - One click on Pay calls `onPay` once and one on Cancel calls `onCancel` once. The pressed button then spins in place of its words (`busy`) and the other waits in its busy colors (`waiting`). Both keep focus, say `aria-disabled`, and ignore every click, even a second one that lands before the page has drawn the first, until the request ends: the screen changes `state`, or reports a new `error`. Clearing an old error, as the screen does when a retry starts, ends nothing, so the retry stays locked and its button keeps spinning. The screen's `busy` does the same with nothing pressed here, spinning Pay.
 - With `error`, an error `Notice` (`role="alert"`) under the buttons reads "That didn’t go through. Reload this page to see where the payment stands." The request is over, so both buttons are at rest again. A second try is safe: the kernel completes a link only while it is `issued`.
 - Every other state drops the amount, the test card, the name and the buttons, and shows one line with its dot that says what happened and where to go next (the table below). Paid adds a check, drawn once in the line's own ink: status color appears only as the dot.
+- Paid, with `chatHref`, keeps the same words and makes "Go back to the chat" ("Vuelve al chat") a `TextLink` inside the sentence (`runningText`), to the visitor's chat in the same tab. Only a public chat's own path (`/d/<slug>`, matching `^/d/[a-z0-9-]+$`) is linked: anything else, or no `chatHref`, leaves the line with no link. No other state links, whatever `chatHref` says.
 - A state this build doesn't know shows no buttons and reads as `unknown`, still being confirmed, with the chat as where the result shows.
 - The line sits in a result region (`role="status"`, `aria-live="polite"`, `aria-atomic="true"`) that is there in every state: visually hidden and empty while the link is open, and holding the line once it isn't. Each new line is read out whenever it arrives, from issued to paid or from still being confirmed to paid, wherever focus is.
 - When the link closes while the page is open (a pay or a cancel went through, or the link expired), the buttons go with it. If focus was in the checkout, on a button the close takes away included, the card's title (`tabindex="-1"`) takes it, so focus doesn't fall to the top of the page; the region reads the line, so focus doesn't read it twice. The checkout knows where focus was from its own `focusin` and `focusout`. Focus elsewhere on the page stays where it is, and so does focus on nothing when it wasn't in the checkout, whether it never was or left for nothing before the link closed. A page that opens on a closed link moves nothing.
@@ -24,7 +25,7 @@
 | `state` | Shows |
 | --- | --- |
 | `issued` | The amount, "This link works once.", the test card, "Pay {amount}" and "Cancel payment". |
-| `paid` | Handled dot, then the check: "Paid. Go back to the chat to see it there." |
+| `paid` | Handled dot, then the check: "Paid. Go back to the chat to see it there." With a `chatHref`, "Go back to the chat" is a link to it. |
 | `expired` | Info dot: "This payment link expired. Ask in the chat for a new one." |
 | `cancelled` | Info dot: "This payment was cancelled. Nothing was charged." |
 | `cancelled`, `cancelReason: 'rules_changed'` | Info dot: "This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay." Never the generic cancelled line. |
@@ -35,6 +36,7 @@
 - `merchant`: the business's name, `PaymentLinkView.business_name`.
 - `title`, `state`, `language` and `cancelReason`: the link's `PaymentLinkView.title`, `state`, `language` and `cancel_reason`.
 - `amount`: the page's amount string, made from `PaymentLinkView.amount_cents`. It shows exactly as given, large and in "Pay {amount}".
+- `chatHref`: the visitor's chat as its own path (`/d/rivera-plumbing`), when the page knows it. The checkout page knows it from this browser's record of the chat that showed the link's card; the API's link view doesn't carry it.
 - `customerName`: `PaymentLinkView.customer_name`, the kernel's first name and last initial ("Dana W.") for a link from a verified session, present only while the link is open. The component shows it as given and formats nothing. Without it, or with a blank one, the name is the empty field above.
 - `onPay` and `onCancel`: complete or cancel the link through the API's payment routes. Neither gets any argument. Set `error` back to false when a request starts, so a retry that fails again is a new error and brings the buttons back.
 - `busy` while a request is in flight, `error` when it fails with anything but an answer that says the link's state.
@@ -54,7 +56,7 @@
 | Pay | Pay {amount} | Pagar {amount} |
 | Cancel | Cancel payment | Cancelar pago |
 | Error | That didn’t go through. Reload this page to see where the payment stands. | No se pudo completar. Recarga esta página para ver el estado del pago. |
-| Paid | Paid. Go back to the chat to see it there. | Pagado. Vuelve al chat para verlo allí. |
+| Paid (the link's words, with a `chatHref`: "Go back to the chat", "Vuelve al chat") | Paid. Go back to the chat to see it there. | Pagado. Vuelve al chat para verlo allí. |
 | Expired | This payment link expired. Ask in the chat for a new one. | Este enlace de pago venció. Pide uno nuevo en el chat. |
 | Cancelled | This payment was cancelled. Nothing was charged. | Este pago se canceló. No se cobró nada. |
 | Cancelled by a rule change | This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay. | Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar. |
@@ -69,7 +71,7 @@ The merchant, the title and the customer's name are someone's own words, marked 
 - The amount in `amount` type (sans 32/40, weight 500, -0.3 px), "This link works once." `space-2` under it in `meta`, `text-secondary`.
 - Each group's label in `meta`, `text-secondary`, `space-6` over its values. The test card in one `line-control` outline at `radius-control`: the number across the top with a 14 px lock at its right, the expiry and the security code side by side under it, half each, split by the same line. Each value is `size-control-main` tall inside its lines, padded `space-12`, in `body` type and `text-secondary`. The customer's name is one value in its own `line-control` outline. The field to type a name in has the outline every editable field has, `line-field` (3:1 against the ground), with the typed text in `text-primary`, at the same height. Each hint is `space-6` under what it describes, in `caption` type and `text-secondary`: the lock's line, with a 14 px lock, under the customer's name, or under the card when the name is the field; the name field's own line, with no icon, under the field.
 - Pay (primary) over Cancel (secondary), both main buttons as wide as the card's content, `space-8` apart. Any error line follows.
-- A final state's line in `body` type and `text-primary`: the dot, then the words, `space-10` apart, the dot and the paid check on the middle of the first line, the check `space-6` before the words, in the same ink.
+- A final state's line in `body` type and `text-primary`: the dot, then the words, `space-10` apart, the dot and the paid check on the middle of the first line, the check `space-6` before the words, in the same ink. The paid line's link is `TextLink` in `accent-blue` with its quiet underline, in the sentence's own type.
 - The footnote in `caption` type and `text-secondary`, `space-12` under a `line-hairline` rule.
 - The paid check draws once at `motion-base`, short arm first as a hand writes one; the buttons follow `Button`. Nothing moves under reduced motion.
 
@@ -84,6 +86,7 @@ The merchant, the title and the customer's name are someone's own words, marked 
 | `cancelReason` | `'rules_changed'` | `PaymentLinkView.cancel_reason`; read only when `state` is `cancelled`. |
 | `language` | `'en' \| 'es'` | Required. `PaymentLinkView.language`. |
 | `customerName` | `string` | `PaymentLinkView.customer_name`; see above. |
+| `chatHref` | `string` | The visitor's chat, `/d/<slug>`; read only when `state` is `paid`. Anything else is ignored. |
 | `busy` | `boolean` | A request is in flight. |
 | `error` | `boolean` | The last request failed. |
 | `onPay` | `() => void` | Required. Called with no arguments. |

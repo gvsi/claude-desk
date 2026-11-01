@@ -24,6 +24,9 @@ async function interviewAtTools() {
   }
   const desk = mockStore.world.desks.find((row) => row.summary.desk_id === state.desk_id);
   if (!desk) throw new Error('Setup has a Desk');
+  // Finishing the run turns its accepted jobs into business tools; these tests start from the
+  // signed board's fixture jobs instead.
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
   seedBusinessTools(desk);
   // The signed Chen setup lists its two jobs and Verification, with Stripe still to connect.
   desk.summary.business_name = 'Chen & Co. CPA';

@@ -48,7 +48,8 @@
   color: var(--text-secondary);
 }
 
-/* What to do: how many tools an app brings, 14 px before its button. */
+/* What to do: how many tools an app brings, 14 px before its button, or before "Needs review"
+   and its button. */
 .cd-setup-tools__end--action {
   gap: var(--space-14);
 }
@@ -57,6 +58,8 @@
   color: var(--text-secondary);
 }
 
+/* "Needs review" beside its held dot, 6 px apart, in secondary meta: a job's, or an app's that is
+   connected with its tools waiting. */
 .cd-setup-tools__job-status {
   display: inline-flex;
   align-items: center;

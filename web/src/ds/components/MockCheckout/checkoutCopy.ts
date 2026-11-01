@@ -39,9 +39,29 @@ export interface CheckoutCopy {
   error: string;
   /** Each final state's line, which says where to go next. */
   final: Readonly<Record<FinalPaymentState, string>>;
+  /**
+   * The paid line (`final.paid`) in its three parts: the words before the way back to the chat, the
+   * way back itself, a link when the page knows the visitor's chat, and the words after it.
+   */
+  paid: PaidLine;
   /** A cancelled link that a change to the business's rules cancelled. */
   cancelledRulesChanged: string;
 }
+
+/** A line with a way back to the chat inside it. */
+export interface PaidLine {
+  before: string;
+  back: string;
+  after: string;
+}
+
+/** The paid line's parts, by language: the line is these, joined, so the two never differ. */
+const PAID = {
+  en: { before: 'Paid. ', back: 'Go back to the chat', after: ' to see it there.' },
+  es: { before: 'Pagado. ', back: 'Vuelve al chat', after: ' para verlo allí.' },
+} as const satisfies Record<CopyLanguage, PaidLine>;
+
+const joined = ({ before, back, after }: PaidLine) => `${before}${back}${after}`;
 
 /** The test card every checkout shows, filled in and locked. */
 export const TEST_CARD = {
@@ -66,11 +86,12 @@ export const CHECKOUT_COPY = {
     cancel: 'Cancel payment',
     error: 'That didn’t go through. Reload this page to see where the payment stands.',
     final: {
-      paid: 'Paid. Go back to the chat to see it there.',
+      paid: joined(PAID.en),
       expired: 'This payment link expired. Ask in the chat for a new one.',
       cancelled: 'This payment was cancelled. Nothing was charged.',
       unknown: 'This payment is still being confirmed. The chat will show the result.',
     },
+    paid: PAID.en,
     cancelledRulesChanged:
       'This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay.',
   },
@@ -89,11 +110,12 @@ export const CHECKOUT_COPY = {
     cancel: 'Cancelar pago',
     error: 'No se pudo completar. Recarga esta página para ver el estado del pago.',
     final: {
-      paid: 'Pagado. Vuelve al chat para verlo allí.',
+      paid: joined(PAID.es),
       expired: 'Este enlace de pago venció. Pide uno nuevo en el chat.',
       cancelled: 'Este pago se canceló. No se cobró nada.',
       unknown: 'Este pago aún se está confirmando. El chat mostrará el resultado.',
     },
+    paid: PAID.es,
     cancelledRulesChanged:
       'Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar.',
   },

@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
-import { Button, Card, Notice, PageHeader, Pill, StatusDot } from '../ds/index.ts';
+import { Button, Card, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
@@ -42,8 +42,9 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
 
 /**
  * The last step, opened by a confirmed setup. Before going live (step `preview`): the public page
- * in a frame, on the owner's own preview chat, while Answering is off; "Go live" turns it on. Live:
- * "Answering now" under the title, its handled dot breathing, while the Desk answers; the link to
+ * in a frame, on the owner's own preview chat, while Answering is off; under it the launch bar, that
+ * Answering stays off and only the owner sees the preview, and "Go live", which turns it on. Live:
+ * "Acting for you now" under the title, its handled dot breathing, while the Desk answers; the link to
  * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
  * draws it: the link's QR code, and the website embed, coming later. It is built from the link
  * alone; the printable card and the ready-made words are on Share.
@@ -67,7 +68,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk
-      // is live. The Desks are read again first, so a step that turns live draws with "Answering now"
+      // is live. The Desks are read again first, so a step that turns live draws with "Acting for you now"
       // as they say, rather than gaining it a moment later and moving down.
       const recover = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
       if (recover) await queryClient.refetchQueries({ queryKey: DESKS_KEY });
@@ -137,15 +138,23 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
 
   return (
     <div className="cd-setup-step">
-      <PageHeader title={copy.previewTitle} subtitle={copy.previewSubtitle} />
+      <PageHeader title={copy.previewTitle} />
       <div className="cd-setup-live__preview">
         <PublicChat slug={state.slug} previewDeskId={state.desk_id} embedded />
       </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}
-      <div className="cd-setup-step__actions">
-        <Button variant="primary" size="main" busy={pending} onClick={() => void goLive()}>
-          {copy.goLive}
-        </Button>
+      <div className="cd-setup-live__launch">
+        <div className="cd-setup-live__launch-text">
+          <p className="cd-setup-live__launch-line cd-type-section">
+            <StatusLabel tone="info">{copy.previewAnsweringOff}</StatusLabel>
+          </p>
+          <p className="cd-setup-live__launch-note cd-type-meta">{copy.previewOnlyYou}</p>
+        </div>
+        <div className="cd-setup-live__go">
+          <Button variant="primary" size="main" busy={pending} onClick={() => void goLive()}>
+            {copy.goLive}
+          </Button>
+        </div>
       </div>
     </div>
   );

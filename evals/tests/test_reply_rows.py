@@ -19,16 +19,22 @@ from evals.tier1.harness import TravelClock, match_expect
 from evals.tier1.test_reply_golden import ReplyRow, load_rows
 
 
+def test_timeout_reply_waits_past_the_production_soft_check_deadline():
+    from desk.kernel_service.decisions import SOFT_PROMISE_TIMEOUT_S
+
+    assert reply_golden.SOFT_PROMISE_REPLIES["timeout"].seconds > SOFT_PROMISE_TIMEOUT_S
+
+
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 56
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 55, ("01b",): 1}
+    assert len(rows) == len({row.id for row in rows}) == 70
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 64, ("01b",): 1, ("01c",): 5}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
 def test_rows_show_the_blocks_the_table_states():
-    """A failed check of Claude's draft shows only the handoff clause; a passing one its prose (when
-    not empty), then a card per clause."""
+    """Prose-only failures keep checked cards; other failures show the handoff. Passing drafts
+    show their prose (when not empty), then a card per clause."""
     rows = {row.id: row for row in load_rows()}
     assert rows["r-en-clean"].blocks == ["prose"]
     assert rows["c-own-quote"].blocks == ["prose", "quote"]
@@ -36,6 +42,8 @@ def test_rows_show_the_blocks_the_table_states():
     assert rows["c-hours"].blocks == ["prose", "hours"]
     assert rows["c-other-session-quote"].blocks == ["handoff"]
     assert rows["r-en-dollar"].blocks == ["handoff"]
+    assert rows["c-final-prose-quote"].blocks == ["quote"]
+    assert rows["c-digit-quote-payment"].blocks == ["quote", "payment_link"]
 
 
 def test_rows_hold_the_amended_table_expectations():
@@ -142,6 +150,9 @@ QUOTE_CLAUSE = {"template": "quote", "fact": "own-quote"}
     {"soft_promise": "flag"},                                                   # a flag can't pass
     {"soft_promise": "error", "expect": {"ok": False, "violations": ["soft_promise", "promise_word"]}},
     {"soft_promise": "maybe"},
+    {"soft_promise": "timeout", "expect": {"ok": False, "violations": ["soft_promise"]}},   # no verdict
+    {"soft_promise": ["pass"]},                                                # one reply, not a list of tries
+    {"soft_promise": ["timeout", "pass"]},                                     # no recheck can pass a draft
 ])
 def test_rows_refuse_mistakes(change):
     ReplyRow.model_validate(GOOD_ROW)
@@ -191,6 +202,39 @@ def test_verdict_expect_states_each_block_and_its_fact():
         assert match_expect(200, shown.model_dump(mode="json"), failed), shown
 
 
+@pytest.mark.parametrize("kind", ["number_in_prose", "promise_word", "soft_promise", "uncertain_language",
+                                  "check_unavailable"])
+def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
+    """A failure only of the prose keeps the checked cards, then a handoff clause Claude drafted
+    (the owner's ruling of 2026-11-01); without a drafted one, the cards alone."""
+    alone = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE],
+                                    "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+    assert alone.blocks == ["quote"]
+    with pytest.raises(ValueError):
+        ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}, QUOTE_CLAUSE],
+                                 "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+    row = ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}, QUOTE_CLAUSE],
+                                  "expect": {"ok": False, "violations": [kind], "blocks": ["quote", "handoff"]}})
+    expect = row.verdict_expect(0, {"own-quote": "quote:Q-1"})
+    assert match_expect(200, verdict([kind], [QUOTE_CARD, HANDOFF]).model_dump(mode="json"), expect) == []
+    for blocks in ([PROSE, QUOTE_CARD, HANDOFF], [QUOTE_CARD], [HANDOFF, QUOTE_CARD], [HANDOFF], [],
+                   [QUOTE_CARD.model_copy(update={"fact_id": "quote:wrong"}), HANDOFF],
+                   [QUOTE_CARD.model_copy(update={"title": None}), HANDOFF],
+                   [QUOTE_CARD.model_copy(update={"lines": []}), HANDOFF]):
+        assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), expect)
+    no_cards = ReplyRow.model_validate({**GOOD_ROW, "expect": {"ok": False, "violations": [kind]}})
+    assert no_cards.blocks == ["handoff"]
+
+
+@pytest.mark.parametrize("kind", ["canary", "unknown_fact", "stale_fact", "unentitled_fact", "unsupported_language",
+                                  "session_paused"])
+def test_non_prose_failure_cannot_expect_kept_cards(kind):
+    raw = {**GOOD_ROW, "clauses": [QUOTE_CLAUSE], "expect": {"ok": False, "violations": [kind]}}
+    assert ReplyRow.model_validate(raw).blocks == ["handoff"]
+    with pytest.raises(ValueError):
+        ReplyRow.model_validate({**raw, "expect": {**raw["expect"], "blocks": ["quote"]}})
+
+
 def test_violation_kinds_compare_as_sets():
     rows = {row.id: row for row in load_rows()}
     # r-en-dollar: violations [number_in_prose]; r-en-time: violations_any [number_in_prose, promise_word]
@@ -234,9 +278,14 @@ async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock, ro
     shown = signed_verdict([PROSE, card], row.expect.language or "en")
     caller = SimpleNamespace(state=SimpleNamespace(session_id=ROW_SESSION, generation=0))
 
-    async def check_reply(k, who, prose, clauses=None, *, expect, generation=None):
+    async def check_reply(k, who, prose, clauses=None, *, expect, generation=None, final=True):
+        calls.append({"model": reply_golden.SOFT_PROMISE_MODEL})
         assert match_expect(200, shown.model_dump(mode="json"), expect) == []
         return shown
+
+    fake = FakeAnthropic()
+    calls = []
+    monkeypatch.setattr(fake, "calls", lambda model=None, schema=None: calls)   # the soft check's calls alone
 
     async def returns(value):
         return value
@@ -246,7 +295,7 @@ async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock, ro
     monkeypatch.setattr(reply_golden, "cite_facts", lambda *args, **kwargs: returns({"own-quote": ROW_QUOTE}))
     monkeypatch.setattr(reply_golden, "check_reply", check_reply)
     monkeypatch.setattr(reply_golden, "signing_key", lambda *args: returns(ROW_SIGNER.public_key_hex()))
-    await reply_golden.test_reply_row(SimpleNamespace(is_real=True, clock=TravelClock(START)), FakeAnthropic(), None,
+    await reply_golden.test_reply_row(SimpleNamespace(is_real=True, clock=TravelClock(START)), fake, None,
                                       row)
 
 
@@ -320,3 +369,24 @@ async def test_quote_row_fails_a_signed_card_with_a_date_its_quote_doesnt_hold(
     this check can catch them."""
     with pytest.raises(AssertionError, match="quote card"):
         await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))
+
+
+@pytest.mark.parametrize(("reply", "ok", "kinds"), [
+    ("pass", True, None),
+    ("flag", False, ["soft_promise"]),
+    ("denies_ai", False, ["soft_promise"]),
+    ("timeout", False, ["check_unavailable"]),
+    ("error", False, ["check_unavailable"]),
+    ("unparsable", False, ["check_unavailable"]),
+    ("refusal", False, ["check_unavailable"]),
+])
+def test_the_one_soft_check_reply_pins_the_verdict(reply, ok, kinds):
+    """One try with no recheck (the owner's decision of 2026-10-31): a flag is `soft_promise`,
+    and no verdict (a timeout, an error, an unparsable answer or a refusal) is `check_unavailable`."""
+    expect = {"ok": ok, **({"violations": kinds} if kinds else {})}
+    row = ReplyRow.model_validate({**GOOD_ROW, "soft_promise": reply, "expect": expect})
+    assert row.soft_promise == reply
+    wrong = {"ok": not ok, **({"violations": ["soft_promise"]} if ok else {})}
+    if reply != "pass":  # a passing checker can still follow a lexical rejection in another row
+        with pytest.raises(ValueError):
+            ReplyRow.model_validate({**GOOD_ROW, "soft_promise": reply, "expect": wrong})

@@ -197,7 +197,8 @@ SOFT_PROMISE_SCHEMA = {
 async def test_reviewer_and_soft_promise_request_shapes_are_accepted(fake: FakeAnthropic, client: AsyncAnthropic):
     """The kernel's two checks, called as Plan 01a calls them, and the API's betas and fallbacks."""
     fake.default("claude-sonnet-5-5", Json(REVIEW_PASS))
-    fake.default("claude-haiku-5-5", Json({"promises_beyond_cards": False, "denies_being_ai": False}))
+    fake.default("claude-sonnet-5-5", Json({"promises_beyond_cards": False, "denies_being_ai": False}),
+                 schema="SoftPromiseVerdict")
     review = {
         "model": "claude-sonnet-5-5", "max_tokens": 2048, "system": "You review one proposed action.",
         "messages": [{"role": "user", "content": '{"action": {"tool": "native.quote"}}'}],
@@ -205,12 +206,12 @@ async def test_reviewer_and_soft_promise_request_shapes_are_accepted(fake: FakeA
         "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": REVIEW_SCHEMA}},
     }
     soft_promise = {
-        "model": "claude-haiku-5-5", "max_tokens": 1024, "system": "You check one reply.",
+        "model": "claude-sonnet-5-5", "max_tokens": 1024, "system": "You check one reply.",
         "messages": [{"role": "user", "content": '{"language": "en", "prose": "Here is your quote."}'}],
-        "thinking": {"type": "disabled"},
+        "thinking": {"type": "adaptive"},
         "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": SOFT_PROMISE_SCHEMA}},
     }
-    checked = client.with_options(timeout=4.0, max_retries=0)
+    checked = client.with_options(timeout=6.0, max_retries=0)
     reviewed = await checked.messages.create(**review)
     verdict = await checked.messages.create(**soft_promise)
     beta = await client.beta.messages.create(
@@ -220,8 +221,9 @@ async def test_reviewer_and_soft_promise_request_shapes_are_accepted(fake: FakeA
     assert json.loads(reviewed.content[0].text)["recommendation"] == "allow"
     assert json.loads(verdict.content[0].text) == {"promises_beyond_cards": False, "denies_being_ai": False}
     assert beta.model == "claude-sonnet-5-5"
-    assert fake.calls("claude-sonnet-5-5") == [review, {**review, "fallbacks": [{"model": "claude-opus-5-5"}]}]
-    assert fake.calls("claude-haiku-5-5") == [soft_promise]
+    assert fake.calls("claude-sonnet-5-5") == [review, soft_promise,
+        {**review, "fallbacks": [{"model": "claude-opus-5-5"}]}]
+    assert fake.calls("claude-sonnet-5-5", schema="SoftPromiseVerdict") == [soft_promise]
 
 
 async def test_auth_headers_are_never_stored(fake: FakeAnthropic):

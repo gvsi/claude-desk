@@ -343,17 +343,23 @@ describe('customers', () => {
   });
 
   it('people_loading_then_failure_offers_a_retry', async () => {
-    // While the list is on its way: the loading line under a hairline, where the list goes, until
-    // the test lets the answer land.
+    // While the list is on its way: the list's shapes under the header, where the list goes, and
+    // the loading words in a visually hidden status, until the test lets the answer land.
     const list = held();
     mockStore.inject({ route: 'people', status: 200, until: list.until, body: { people: [], leads: [] } });
     const slow = await renderRoute(PEOPLE, { pollScale: 100 });
     const loading = slow.screen.getByRole('status').filter({ hasText: /^Loading your customers$/ });
-    await expect.element(loading).toBeVisible();
+    await expect.element(loading).toBeInTheDocument();
+    await expect.element(slow.screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
+    expect(loading.element().classList.contains('cd-sr-only')).toBe(true);
+    const region = loading.element().closest('.cd-people__region');
+    expect(region?.querySelector('.cd-skeleton-screen__body')?.getAttribute('aria-busy')).toBe('true');
+    expect(region?.querySelector('.cd-skeleton-screen__layer [data-skeleton-anchor="person-row-0"]')).not.toBeNull();
     expect(slow.screen.getByText('No customers yet', { exact: true }).query()).toBeNull();
     list.release();
     await expect.element(slow.screen.getByText('No customers yet', { exact: true })).toBeVisible();
     expect(loading.query()).toBeNull();
+    expect(document.querySelector('[aria-busy="true"]')).toBeNull();
 
     // A read that fails (and its one retry, at once): what went wrong and a way to read it again, no list.
     mockStore.inject({ route: 'people', status: 503, times: 2 });

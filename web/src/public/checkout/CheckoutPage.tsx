@@ -9,8 +9,12 @@
  * link a rule change cancelled says so; an answer that was lost may have been applied, so the page
  * reads the link again before it says the request didn't go through. The token in the address is
  * the only credential: the page sends nothing typed on it.
+ *
+ * Once paid, the line's "Go back to the chat" links to the visitor's chat in the same tab, when
+ * this browser's public chat noted it showing this link (`payChats.ts`): only that token's entry,
+ * and only a public chat's own path. Otherwise the line has no link.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 
 import type { PaymentLinkState } from '../../api/contracts.ts';
@@ -19,6 +23,7 @@ import type { CancelReason, PaymentLinkOut } from '../../api/views.ts';
 import { Button, ConceptFooter, DisclosureLine, MockCheckout, Notice, UNREACHABLE_COPY, type CopyLanguage } from '../../ds/index.ts';
 import { formatMoneyExact } from '../../lib/format.ts';
 import { browserLanguage } from '../../lib/language.ts';
+import { payChatFor } from '../../lib/payChats.ts';
 import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 
@@ -58,6 +63,8 @@ export function CheckoutPage() {
   // names it, when the kernel sends it. Before a link shows, the app's own name stays.
   const shown = load.kind === 'ready' ? load.link : null;
   useDocumentTitle(shown === null ? null : shown.business_name ? `${shown.title} · ${shown.business_name}` : shown.title);
+  // The chat this link's card was shown in, as this browser noted it: the paid line's way back.
+  const chat = useMemo(() => payChatFor(token), [token]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   // Set while a pay or cancel is out, so a second press before the page re-renders sends nothing.
@@ -125,6 +132,7 @@ export function CheckoutPage() {
           cancelReason={link.cancel_reason ?? undefined}
           language={link.language}
           customerName={link.customer_name ?? undefined}
+          chatHref={chat ?? undefined}
           busy={busy}
           error={error}
           onPay={() => act('completePayment')}

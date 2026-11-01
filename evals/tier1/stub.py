@@ -107,6 +107,7 @@ def _fixed_fields(model: type[BaseModel]) -> dict[str, Any]:
         Fact: {"claims": []},
         ProbeResult: {"probe": STUB_PROBE},
         PublicDesk: {"open_status": STUB_OPEN_STATUS},
+        KernelError: {"detail": None},
         SessionCreated: {"session_token": STUB_SESSION_TOKEN},
         DemoAgentIssued: {"agent_private_key_hex": STUB_AGENT_KEY_HEX},
     }.get(model, {})
@@ -398,6 +399,8 @@ class ContractStub:
             raise ContractError(f"{route}: the expected values don't fit the response model: "
                                 f"{validation_summary(error, tp)}") from None
         response = None if tp is None else TypeAdapter(tp).dump_python(model, mode="json")
+        if tp is KernelError and response["detail"] is None:
+            del response["detail"]
         self.responses.append(Called(route=route, request=request, status=answer.status, body=response, raw=response))
         if mismatches := match_expect(answer.status, response, expect):
             raise ContractError(f"{route}: the stub can't build the expected answer: {'; '.join(mismatches)}")

@@ -54,6 +54,7 @@ export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './c
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
+export { ACTING_SWITCH_COPY } from './components/Switch/copy.ts';
 export {
   SegmentedControl,
   type SegmentedControlProps,
@@ -187,12 +188,13 @@ export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
 export { ClaudeMessage, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
+export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';
 export { PersonMessage, type PersonMessageProps } from './components/PersonMessage/PersonMessage.tsx';
 export { AgentMessage, type AgentMessageProps } from './components/AgentMessage/AgentMessage.tsx';
 export { Whisper, type WhisperProps } from './components/Whisper/Whisper.tsx';
@@ -208,6 +210,7 @@ export {
   type TranscriptRowProps,
 } from './components/TranscriptRow/TranscriptRow.tsx';
 export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
+export { RulesReceipt, type RulesReceiptProps } from './components/MarginReceipt/RulesReceipt.tsx';
 export {
   OWNER_REASON_STATES,
   OWNER_STATE_WORDS,
@@ -262,7 +265,7 @@ export {
   type ConnectorDirectoryProps,
   type DirectoryRowView,
 } from './components/ConnectorDirectory/ConnectorDirectory.tsx';
-export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export { ALWAYS_ON, AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,
   type ChangeReviewProps,
@@ -271,7 +274,7 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
-export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit
@@ -318,6 +321,7 @@ export { ToolReviewCard, type ToolReviewCardProps, type ToolRowView } from './co
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
+export { chainLine } from './components/ChainStatus/chainLine.ts';
 export { AttemptRow, type AttemptRowProps } from './components/AttemptRow/AttemptRow.tsx';
 export {
   CheckpointMeter,

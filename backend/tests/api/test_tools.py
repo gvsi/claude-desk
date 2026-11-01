@@ -33,7 +33,7 @@ from desk.api.tools import (
     to_api_name,
     tool_delta,
 )
-from desk.contracts import ClauseTemplate, Decision, ToolCall, ToolName
+from desk.contracts import Clause, ClauseTemplate, Decision, ToolCall, ToolName, Violation
 from desk.events import EvHeld, EvReceipt, SseEvent
 from desk.kernel_api import DecideRequest, ExecuteRequest, SessionContext
 from tests.api.conftest import new_visitor
@@ -41,6 +41,106 @@ from tests.api.fakes import ScriptedModel, tool_use
 from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 
 EVENT = TypeAdapter(SseEvent)
+
+
+@pytest.mark.parametrize("missing_fact_clause", [True, False])
+def test_feedback_omits_clause_references_when_fact_metadata_is_empty(missing_fact_clause):
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="quote", fact_id="bad\u0000id"), *([Clause(template="quote")] if missing_fact_clause else [])]
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="unknown_fact", rule_id="no_such_fact", span="quote", fact_ids=[]) for _ in clauses])
+    assert tools._feedback(verdict, clauses) == [
+        {"kind": "unknown_fact", "rule_id": "no_such_fact"} for _ in clauses]
+
+
+def test_feedback_names_a_card_whose_claims_changed_at_signing_and_a_callback_claim():
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="hours", fact_id="charter:hours")]
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="stale_fact", rule_id="claims_changed", span="hours", fact_ids=["charter:hours"]),
+        Violation(kind="promise_word", rule_id="lex.es.callback", span="Su llamada está confirmada.")])
+    feedback = tools._feedback(verdict, clauses)
+    assert feedback == [
+        {"kind": "stale_fact", "rule_id": "claims_changed", "clause_index": 0, "template": "hours",
+         "fact_id": "charter:hours"},
+        {"kind": "promise_word", "rule_id": "lex.es.callback"}]
+    assert tools._blocked(feedback).result["diagnostics"] == [
+        tools.REPLY_DIAGNOSTICS["not_current"], tools.REPLY_DIAGNOSTICS["lex.en.callback"]]
+
+
+def test_feedback_names_the_policy_card_that_reads_as_a_promise_beside_the_prose():
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="hours", fact_id="charter:hours"),
+               Clause(template="policy", fact_id="charter:policy:pricing")]
+    verdict = SimpleNamespace(violations=[Violation(kind="unknown_fact", rule_id="policy_combined", span="policy",
+                                                    fact_ids=["charter:policy:pricing"])])
+    feedback = tools._feedback(verdict, clauses)
+    assert feedback == [{"kind": "unknown_fact", "rule_id": "policy_combined", "clause_index": 1,
+                         "template": "policy", "fact_id": "charter:policy:pricing"}]
+    assert tools._blocked(feedback).result["diagnostics"] == [tools.REPLY_DIAGNOSTICS["policy_combined"]]
+
+
+def test_an_outage_beside_a_jev_flag_asks_for_the_flag_to_be_fixed():
+    # The model check gave no verdict while Jev flagged a promise: both reach Claude, and the outage's line defers
+    # to the flag rather than asking for the same prose again.
+    from types import SimpleNamespace
+
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="check_unavailable", rule_id="soft.unavailable", span="Maria will call you today."),
+        Violation(kind="soft_promise", rule_id="soft.jev", span="Maria will call you today.")])
+    feedback = tools._feedback(verdict, [])
+    assert feedback == [{"kind": "check_unavailable", "rule_id": "soft.unavailable"},
+                        {"kind": "soft_promise", "rule_id": "soft.jev"}]
+    diagnostics = tools._blocked(feedback).result["diagnostics"]
+    assert diagnostics == [tools.REPLY_DIAGNOSTICS["soft.unavailable"], tools.REPLY_DIAGNOSTICS["soft.promise"]]
+    assert diagnostics[0].startswith("This check returned no verdict. Fix any other violations listed")
+    assert "nothing was flagged" not in json.dumps(diagnostics)
+
+
+def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
+    from types import SimpleNamespace
+
+    secret = "private-claim-canary-span"
+    clauses = [Clause(template="quote", fact_id="quote:known")] * 2
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="soft_promise", rule_id=secret, span=secret, fact_ids=[secret]),
+        Violation(kind="unknown_fact", rule_id="template_mismatch", span="quote", fact_ids=["quote:known"]),
+        Violation(kind="unknown_fact", rule_id="no_such_fact", span=secret, fact_ids=[secret])])
+    feedback = tools._feedback(verdict, clauses)
+    assert secret not in json.dumps(feedback)
+    assert feedback[0] == {"kind": "soft_promise", "rule_id": "other"}
+    assert feedback[1] == {"kind": "unknown_fact", "rule_id": "template_mismatch"}
+    assert "clause_index" not in feedback[1]
+    invalid = tools._draft({"prose": "Hello", "clauses": [{"template": "quote", "fact_id": 9}]})
+    assert invalid == [{"kind": "invalid_input", "rule_id": "other", "field": "clauses.0.fact_id",
+                        "code": "string_type", "expected": "a string"}]
+    assert secret not in json.dumps(tools._draft({"prose": "Hello", secret: True}))
+
+
+@pytest.mark.parametrize("state, expected, error", [
+    ("executed", "done", False), ("denied", "refused", True), ("expired", "refused", True),
+    ("cancelled", "refused", True), ("refused_at_execution", "refused", True),
+    ("failed", "failed", True),
+    ("approved", "held_for_owner", False), ("unknown", "held_for_owner", False),
+])
+async def test_recovering_an_answered_hold_uses_current_state(api_conn, caller, visitor, fake,
+                                                            state, expected, error):
+    block = tool_use("native__quote", {**DRAIN, "requested_discount_bp": 1500})
+    held = await visitor.kernel.call("POST /decide", DecideRequest(
+        session_id=caller.session_id, generation=0,
+        call=ToolCall(call_id=block["id"], tool="native.quote", args=block["input"])))
+    record = fake.decisions[held.decision_id]
+    record.decision = held.model_copy(update={"state": state})
+    fake.calls.clear()
+
+    outcome = await recover_call(api_conn, caller, 0, block, made_at=0)
+
+    assert (outcome.result["outcome"], outcome.is_error) == (expected, error)
+    assert outcome.status is None             # the resume job publishes an answered hold
+    assert fake.called("POST /execute") == []
 
 
 def test_tool_names_round_trip():
@@ -71,7 +171,7 @@ async def test_model_tools_are_enabled_sorted_and_end_with_send_reply(visitor):
     tools = model_tools(context)
 
     declared = sorted(context.tools_declared, key=lambda profile: to_api_name(profile.tool))
-    assert len(declared) == 10 and tools[-1] == SEND_REPLY_TOOL
+    assert len(declared) == 11 and tools[-1] == SEND_REPLY_TOOL         # the seed's urgent tool among them
     given = {profile.tool for profile in context.tools}
     assert tools[:-1] == [
         {"name": to_api_name(profile.tool), "description": profile.description_confirmed,
@@ -102,11 +202,13 @@ async def test_tool_delta(visitor, fake):
     fake.verify(visitor.ids.session_id, "dana")
     verified = await session_context(visitor)
     frozen = FrozenTools.from_context(stored(model_tools(unverified)), [])
-    assert frozen.loaded == {"native__book", "native__capture_lead", "native__find_slots", "native__payment_link",
-                             "native__quote", "native__request_callback", "native__start_verification", "send_reply"}
+    assert frozen.loaded == {"desk__emergency-callback", "native__book", "native__capture_lead", "native__find_slots",
+                             "native__payment_link", "native__quote", "native__request_callback",
+                             "native__start_verification", "send_reply"}
 
-    answering_off = unverified.model_copy(update={"tools": [
-        profile for profile in unverified.tools if profile.tool in ("native.capture_lead", "native.request_callback")]})
+    answering_off = unverified.model_copy(update={"tools": [         # the urgent tool stays beside its base callback
+        profile for profile in unverified.tools
+        if profile.tool in ("desk.emergency-callback", "native.capture_lead", "native.request_callback")]})
     reworded = unverified.model_copy(update={"tools": [
         profile.model_copy(update={"description_confirmed": "Quote, now with more words."})
         if profile.tool == "native.quote" else profile for profile in unverified.tools]})
@@ -553,13 +655,46 @@ async def test_checked_reply_is_delivered(api_conn, caller, fake):
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_reply", message.message_id, 1)]
 
 
+async def test_template_feedback_names_the_clause_then_corrects(api_conn, caller, fake):
+    draft = {"prose": "Here is the information.", "clauses": [
+        {"template": "quote", "fact_id": "charter:hours"}]}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_bad_template")
+    assert first.result["delivered"] is False
+    assert first.result["violations"] == [{"kind": "unknown_fact", "rule_id": "template_mismatch",
+                                           "clause_index": 0, "template": "quote", "fact_id": "charter:hours"}]
+    assert first.result["diagnostics"] and first.result["instruction"] == REWRITE_INSTRUCTION
+    assert await events(api_conn, caller.session_id) == []
+    assert await delivered_rows(api_conn, caller.session_id) == []
+    fixed = await send_reply(api_conn, caller, 0, {**draft, "clauses": [
+        {"template": "hours", "fact_id": "charter:hours"}]}, 2, call_id="toolu_right_template")
+    assert fixed.result["outcome"] == "delivered"
+    assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
+
+
+async def test_final_prose_failure_delivers_checked_cards_without_handoff(api_conn, caller, fake):
+    quote = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN, id="toolu_quote"))
+    clauses = [{"template": "quote", "fact_id": quote.result["fact_ids"][0]}]
+    draft = {"prose": "Here is $89.", "clauses": clauses}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_first")
+    assert first.result["violations"][0] == {"kind": "number_in_prose", "rule_id": "digit"}
+    assert [e for e in await events(api_conn, caller.session_id) if e.type == "message"] == []
+    second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_final")
+    assert second.result == {"outcome": "delivered", "message_id": second.message_id, "prose_shown": False}
+    assert second.delivered == "reply" and not second.is_error
+    message = (await events(api_conn, caller.session_id))[-1]
+    assert not message.handoff and [b.template for b in message.blocks] == ["quote"]
+    assert len(await stopped_drafts(api_conn, caller.session_id)) == 1
+    assert fake.handoffs == {}
+
+
 async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
     draft = {"prose": "It comes to $89 for the visit.", "clauses": []}
     first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
 
     assert first.result == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "violations": [
-        {"kind": "number_in_prose", "span": "89 for the visit."},
-        {"kind": "number_in_prose", "span": "$89 for the visit."}]}
+        {"kind": "number_in_prose", "rule_id": "digit"},
+        {"kind": "number_in_prose", "rule_id": "currency"}], "delivered": False,
+        "diagnostics": [tools.REPLY_DIAGNOSTICS["digit"]]}
     assert (first.is_error, first.delivered, first.status) == (True, None, None)
     assert await events(api_conn, caller.session_id) == []                  # nothing is shown
     # The owner keeps the draft and each violation in full. The outcome carries them, with the verdict's message ID and
@@ -576,7 +711,7 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
     (message,) = await events(api_conn, caller.session_id)
     assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
     assert message.blocks[0].text == "Let me check with Maria Rivera."
-    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert len(check_drafts(fake)) == 2                                     # the verdict's handoff, no third check
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_2", message.message_id, 1)]
     # The second try's draft is kept with the handoff shown in its place, naming that verdict; the handoff, not the
@@ -605,7 +740,7 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
 
         outcome = await send_reply(api_conn, caller, 0, {"prose": prose, "clauses": []}, 1, call_id="toolu_" + kind)
 
-        assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff"}, True,
+        assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True,
                                                                          "handoff"), kind
         assert len(fake.called("/check_reply")) == checks + 1, kind               # one check, no rewrite
         (message,) = await events(api_conn, caller.session_id)
@@ -615,6 +750,28 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
         ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
         assert (ref_id, kept["draft"], [violation["kind"] for violation in kept["violations"]]) == (
             message.message_id, {"prose": prose, "clauses": []}, [kind]), kind
+
+
+async def test_an_unavailable_first_check_gets_the_outage_correction_and_the_final_check_tries_again(
+        api_conn, caller, fake):
+    # The soft check's one try gave no verdict on the first attempt: nothing is shown and no handoff opens, Claude
+    # gets the outage's fixed correction, and the final check makes its own try.
+    fake.soft_checks("error", "pass")
+    draft = {"prose": "Here is the information.", "clauses": []}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
+
+    assert first.result == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "delivered": False,
+                            "violations": [{"kind": "check_unavailable", "rule_id": "soft.unavailable"}],
+                            "diagnostics": [tools.REPLY_DIAGNOSTICS["soft.unavailable"]]}
+    assert (first.is_error, first.delivered) == (True, None)
+    assert await events(api_conn, caller.session_id) == [] and fake.handoffs == {}
+
+    second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_2")
+    (message,) = await events(api_conn, caller.session_id)
+    assert second.result == {"outcome": "delivered", "message_id": message.message_id}
+    assert not message.handoff and [block.text for block in message.blocks] == ["Here is the information."]
+    assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
+    assert fake.handoffs == {}
 
 
 class Replayed(httpx.AsyncBaseTransport):
@@ -665,14 +822,17 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     ]
     for tool_input, violations in cases:
         outcome = await send_reply(api_conn, caller, 0, tool_input, 1, call_id="toolu_bad")
-        assert outcome.result == {"outcome": "blocked", "violations": violations,
-                                  "instruction": REWRITE_INSTRUCTION}, tool_input
+        assert outcome.result["outcome"] == "blocked" and outcome.result["delivered"] is False
+        assert outcome.result["instruction"] == REWRITE_INSTRUCTION and outcome.result["diagnostics"]
+        assert [v["kind"] for v in outcome.result["violations"]] == [v["kind"] for v in violations]
+        assert all("span" not in v and "rule_id" in v for v in outcome.result["violations"])
         assert (outcome.is_error, outcome.delivered) == (True, None)
     assert fake.called("/check_reply") == [] and await events(api_conn, caller.session_id) == []
 
     # wrong twice: the handoff, checked as the API's own draft and recorded as what the call put on screen
     twice = await send_reply(api_conn, caller, 0, cases[0][0], 2, call_id="toolu_bad")
-    assert (twice.result, twice.is_error, twice.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (twice.result, twice.is_error, twice.delivered) == (
+        {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     (message,) = await events(api_conn, caller.session_id)
@@ -685,7 +845,8 @@ async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, call
     # checked as the API's own (final) draft and recorded as what the call put on screen
     bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
     outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
-    assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (outcome.result, outcome.is_error, outcome.delivered) == (
+        {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     assert [call.body.get("final", True) for call in fake.called("/check_reply")] == [True]

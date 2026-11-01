@@ -631,6 +631,14 @@ class LedgerEntry(Base):
 
 # app.*: the API process (role desk_api)
 
+class ActionUpdateMetadata(BaseModel):
+    """An action update's association for summaries, separate from its frozen model text."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    state: str
+    result_fact_ids: list[str]
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = {"schema": "app"}
@@ -642,7 +650,8 @@ class Message(Base):
     kind: Mapped[str] = mapped_column(Text)
     author: Mapped[str] = mapped_column(Text)
     text: Mapped[str | None] = mapped_column(Text)                 # untrusted
-    blocks: Mapped[list[c.RenderedBlock] | None] = mapped_column(ContractJSON(list[c.RenderedBlock]))
+    blocks: Mapped[list[c.RenderedBlock] | ActionUpdateMetadata | None] = mapped_column(
+        ContractJSON(list[c.RenderedBlock] | ActionUpdateMetadata))
     language: Mapped[str | None] = mapped_column(Text)
     owner_translation: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(Text)

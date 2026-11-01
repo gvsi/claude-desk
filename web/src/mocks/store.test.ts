@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, HoursWindow, KnowledgeItem, LedgerPage, PublicDesk, RuleCard, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -36,6 +36,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
+import type { DocumentAnswer } from './documents.ts';
 import {
   CALLBACK_WINDOW,
   DECISIONS,
@@ -51,7 +52,7 @@ import {
   turnLanguage,
   type RuleName,
 } from './script.ts';
-import { RIVERA } from './seed.ts';
+import { PRESETS, RIVERA, RIVERA_HOURS, presetCards } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 import { validateContract } from './validate.ts';
@@ -98,6 +99,70 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
+  it('answers_each_first_view_starter_in_its_language', () => {
+    const cases = [
+      ['How much is drain clearing?', 'price', 'en'],
+      ['Can someone come Tuesday?', 'book', 'en'],
+      ['¿Cuánto cuesta destapar un desagüe?', 'price', 'es'],
+      ['¿Puede venir alguien el martes?', 'book', 'es'],
+      ['Do you work in Alameda?', 'area', 'en'],
+      ['¿Trabajan en Alameda?', 'area', 'es'],
+    ];
+    for (const [words, rule, language] of cases) {
+      expect(matchRule(words!).name, words).toBe(rule);
+      expect(turnLanguage(words!), words).toBe(language);
+    }
+  });
+
+  it('kept_cards_with_drafted_handoff_open_the_owner_card_handoff', async () => {
+    const { session, events } = await openChat();
+    await send('cards-kept-handoff');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'desk_data', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.quote.en, rivera.blocks.handoff.en] });
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id)).toMatchObject([
+      { decision: null, handoff: { kind: 'card', status: 'open' } },
+    ]);
+  });
+
+  it('cards_only_failure_keeps_checked_cards_without_a_handoff', async () => {
+    const { session, events } = await openChat();
+    await send('cards-only');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
+    expect(reply).toMatchObject({ handoff: false, visitor_plain: VISITOR_PLAIN.en.reply_checked, blocks: [rivera.blocks.quote.en] });
+    expect([...mockStore.world.handoffs.values()].filter((h) => h.handoff.session_id === session.session_id)).toEqual([]);
+  });
+
+  it('passed_handoff_card_sets_the_handoff_flag_and_line', async () => {
+    const { session, events } = await openChat();
+    await send('Talk to Maria');
+    await drain();
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.handoff.en] });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: true, violations: [] });
+  });
+
   it('script_matches_the_first_rule', async () => {
     const cases: [text: string, rule: RuleName, language: 'en' | 'es'][] = [
       // "off" comes before "pay": a discount asked with cash is held, not a payment link.
@@ -192,6 +257,27 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it('invoice_asks_to_confirm_first_in_a_chat_not_verified_as_its_owner', async () => {
+    // Only the invoice's own verified owner skips the code. A chat with a code sent but not yet
+    // entered, and a chat verified as someone else, each start verification as before: the
+    // checked line, the verify card and a code to Dana's contact on record, with no invoice.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is on record');
+    mockStore.world.verify(record, rivera.people.bob);
+    await send('Please send my last invoice.');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => [b.kind, b.template])] : []));
+    const confirmFirst = [['prose', null], ['card', 'verify_prompt']];
+    expect(replies).toEqual([confirmFirst, confirmFirst, confirmFirst]);
+    const codes = mockStore.world.inbox.filter((r) => r.sessionId === session.session_id && r.entry.kind === 'verification_code');
+    expect(codes.map((r) => r.entry.to)).toEqual(Array(3).fill(rivera.people.dana.maskedContact));
+  });
+
   it('script_matches_whole_words', async () => {
     // A rule's word picks it only as a word of its own, never inside another one.
     const cases: [text: string, rule: RuleName][] = [
@@ -202,6 +288,13 @@ describe('the scripted Desk', () => {
       ['Who is Mariana?', 'other'],
       ['¿Cuánto?', 'price'],
       ['Llámame.', 'callback'],
+      // The two demo commands for a kept-card reply pick their rule only as the whole message.
+      ['cards-only', 'cards-only'],
+      [' Cards-Kept-Handoff ', 'cards-kept-handoff'],
+      ['Are you cards-only, or can I pay cash?', 'deposit'],
+      ['Is it cards-kept-handoff?', 'other'],
+      ['solo-tarjetas', 'cards-only'],
+      ['¿Aceptan solo-tarjetas?', 'other'],
     ];
     for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
 
@@ -628,14 +721,14 @@ describe('the scripted Desk', () => {
         'en',
         [
           ['prose', null, []],
-          ['card', 'Tuesday, November 3', ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']],
+          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Maria Rivera']],
         ],
       ],
       [
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
+          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
@@ -808,7 +901,7 @@ describe('the scripted Desk', () => {
     expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
     const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
     expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
-      'Book the earliest visit for a leaking water heater for Alex Kim.',
+      'What’s your earliest visit for a leaking water heater? Any day this week.',
     ]);
     expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
 
@@ -836,6 +929,25 @@ describe('the scripted Desk', () => {
     await drain();
     expect(shown(previewEvents.map(([, ev]) => ev)).map(([, template]) => template)).toEqual([null, 'quote']);
     expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
+  });
+
+  it.each(['Talk to Maria', 'cards-kept-handoff'])('preview_handoff_opens_no_owner_item_%s', async (text) => {
+    mockStore.reset('rivera_quiet');
+    const opened = await call('openPreview', { params: { desk_id: deskId } });
+    expect(opened.status).toBe(200);
+    const { state } = opened.body as VisitorSession;
+    const events: [number, SseEvent][] = [];
+    mockStore.listen(slug, 0, (seq, ev) => events.push([seq, ev]));
+    await send(text);
+    await drain();
+
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off });
+    expect(reply?.type === 'message' && reply.blocks.some((block) => block.template === 'handoff')).toBe(true);
+    expect([...mockStore.world.handoffs.values()].filter((h) => h.handoff.session_id === state.session_id)).toEqual([]);
+    expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
+    const entries = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === state.session_id);
+    expect(entries?.some((e) => e.event.summary.part === 'handoffs')).toBe(false);
   });
 
   it('answering_is_read_when_a_turn_starts', async () => {
@@ -1026,9 +1138,63 @@ describe('the scripted Desk', () => {
     expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
   });
 
+  it('booking_closes_the_chats_card_handoff_as_the_kernel_does', async () => {
+    // As the kernel's `native.book` does (the owner's decision of 2026-11-01): a booking closes the
+    // chat's open handoff the handoff card opened, exactly as the owner's mark of done does
+    // (`done`), recorded `desk_data` naming it with `closed_by: "booking"` just before the
+    // booking's own execution entry, so Needs you stops listing the chat. Finding open times
+    // closes nothing, and another chat's card handoff stays open.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const other = mockStore.world.addSession(desk);
+    mockStore.world.reply(other, [rivera.blocks.handoff.en], 'en');
+    const handoffsOf = (sessionId: string) => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === sessionId);
+    expect(handoffsOf(other.state.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    await send('Can I talk to Maria?');
+    await drain();
+    const card = handoffsOf(session.session_id)[0]?.handoff_id ?? '';
+    await send('Can someone come Tuesday?');
+    await drain();
+    expect(handoffsOf(session.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+
+    const ledgered = desk.ledger.length;
+    await send('The first one, please.');
+    await drain();
+    expect(handoffsOf(session.session_id).map((h) => [h.handoff_id === card, h.kind, h.status])).toEqual([[true, 'card', 'done']]);
+    expect(handoffsOf(other.state.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    const events = desk.ledger.slice(ledgered).map((entry) => entry.event);
+    const ran = events.findIndex((event) => event.kind === 'execute');
+    expect(events[ran - 1]).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], closed_by: 'booking' } });
+    expect(events.filter((event) => event.kind === 'desk_data')).toHaveLength(1);
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id)).toEqual([]);
+    expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
+  });
+
+  it('booking_leaves_a_call_back_open', async () => {
+    // A call-back promises the visitor a call, which a booking doesn't keep: it stays open, and
+    // nothing is recorded closing it.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can you call me back?');
+    await drain();
+    await send('Can someone come Tuesday?');
+    await drain();
+    const ledgered = desk.ledger.length;
+    await send('The first one, please.');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['callback', 'open']]);
+    expect(desk.ledger.slice(ledgered).map((entry) => entry.event.kind)).toContain('execute');
+    expect(desk.ledger.slice(ledgered).filter((entry) => entry.event.kind === 'desk_data')).toEqual([]);
+  });
+
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
-    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
-    // on every read, not what they had written when it opened.
+    // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
+    // most recently, their previous and last messages joined with " · ", on every read, not what
+    // they had written when it opened.
     const { session } = await openChat();
     const quoted = async () =>
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
@@ -1039,7 +1205,55 @@ describe('the scripted Desk', () => {
     expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    await send('Is   Tuesday\n\nfine?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
+  });
+
+  it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
+    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
+    const { session } = await openChat();
+    const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
+    await send(long);
+    await drain();
+    await send('Can I get 50%   off if I pay cash?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.session_id === session.session_id,
+    );
+    expect(held?.from_the_visitor).toBe(`${'x'.repeat(198)}… · Can I get 50% off if I pay cash?`);
+    expect(Array.from(held?.from_the_visitor?.split(' · ')[0] ?? '')).toHaveLength(199);
+  });
+
+  it('needs_you_summarises_a_handoff_never_a_hold', async () => {
+    // As the API's Needs you sends `claude_summary`: on a handoff, the newest AI-written triage of
+    // its chat's stopped attempts, the summary Safety shows for it; on a held request, never, since
+    // a visitor could steer a summary to sway an approval.
+    const read = async () => (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const [seeded] = await read();
+    if (!seeded?.decision) throw new Error('a fresh copy holds the seeded request');
+    // The seeded chat has the stopped draft Safety lists, and its request still carries no summary.
+    expect(seeded.claude_summary).toBeNull();
+    const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
+    expect(handed?.handoff?.kind).toBe('card');
+    expect(handed?.claude_summary).toBe(triage.summary);
+    expect(handed?.from_the_visitor).toBe(seeded.from_the_visitor);
+
+    // A chat with nothing stopped has no triage to summarise it.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
+    expect(asked?.handoff?.kind).toBe('card');
+    expect(asked?.claude_summary).toBeNull();
   });
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
@@ -1228,6 +1442,162 @@ describe('the scripted Desk', () => {
     expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id).sort()).toEqual(
       [preview.state.session_id, again.state.session_id].sort(),
     );
+  });
+
+  it('summary_carries_the_visitors_newest_words', async () => {
+    const latest = async (sessionId: string) =>
+      ((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).find((c) => c.session_id === sessionId)
+        ?.latest_visitor_text;
+    // Dana's seeded chat, by her newest message; the visiting agent's chat has none.
+    expect(await latest('ses-dana-web')).toBe('Tuesday at 2 works.');
+    expect(await latest('ses-alex-agent')).toBeNull();
+
+    // A new chat has none until the visitor writes, then their newest message, its whitespace
+    // collapsed to single spaces, and cut to 199 characters and "…" past 200.
+    const { session } = await openChat();
+    expect(await latest(session.session_id)).toBeNull();
+    await send('  Do you   work\n\nweekends?  ');
+    await drain();
+    expect(await latest(session.session_id)).toBe('Do you work weekends?');
+    const whole = 'w'.repeat(200);
+    await send(whole);
+    await drain();
+    expect(await latest(session.session_id)).toBe(whole);
+    await send(`${'a'.repeat(150)} ${'b'.repeat(100)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'a'.repeat(150)} ${'b'.repeat(48)}…`);
+    // A cut that falls just after a space ends on the word before it, with no space before the "…".
+    await send(`${'c'.repeat(198)} ${'d'.repeat(10)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'c'.repeat(198)}…`);
+    // A message that is all whitespace leaves none, as the API's null.
+    await send(' \n\t ');
+    await drain();
+    expect(await latest(session.session_id)).toBeNull();
+
+    // The owner's own preview has none, whatever she writes there.
+    const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    await send('Do you work weekends?');
+    await drain();
+    expect(await latest(preview.state.session_id)).toBeNull();
+  });
+});
+
+describe("a verified visitor's document link", () => {
+  /** The headers the API sends with a document and with a refusal on its link, so it is never cached, sniffed, sent on or indexed. */
+  const PRIVATE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' };
+  const USED_OR_EXPIRED = 'This link was already opened or has expired. Ask in the chat for a new one.';
+
+  /** A document link's answer, which must be one with a status (not a dropped connection). */
+  function open(method: 'GET' | 'HEAD', token: string, headers: Record<string, string> = {}): DocumentAnswer {
+    const answer = mockStore.document(method, token, { headers });
+    if ('network' in answer) throw new Error(`${method} ${token} dropped the connection`);
+    return answer;
+  }
+
+  /** Dana confirms it's her with the code and gets her last invoice: her chat, with every event its stream got. */
+  async function danaVerified() {
+    const chat = await openChat();
+    await send("I'm Dana Whitfield. Please send my last invoice.");
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    return chat;
+  }
+
+  /** The token of the link the newest invoice card in `events` hands out. */
+  function newestToken(events: [number, SseEvent][]): string {
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
+    expect(card?.title).toBe(rivera.blocks.document_link.en.title);
+    const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
+    if (token === undefined) throw new Error('the invoice card links to its document');
+    return token;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
+  async function invoiceToken(): Promise<string> {
+    return newestToken((await danaVerified()).events);
+  }
+
+  it('the_first_open_gets_the_document', async () => {
+    // As the API sends the kernel's document: plain text, shown in the tab under its title's file name.
+    const opened = open('GET', await invoiceToken());
+    expect(opened).toEqual({
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
+      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+    });
+  });
+
+  it('a_second_open_is_404', async () => {
+    const token = await invoiceToken();
+    expect(open('GET', token).status).toBe(200);
+    // The API's short static copy, in the browser's language, or its error when JSON is asked for.
+    const refused = { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE, vary: 'accept, accept-language' };
+    expect(open('GET', token)).toEqual({ status: 404, headers: { ...refused, 'content-language': 'en' }, body: USED_OR_EXPIRED });
+    expect(open('GET', token, { 'accept-language': 'es-MX,es;q=0.9,en;q=0.8' })).toEqual({
+      status: 404,
+      headers: { ...refused, 'content-language': 'es' },
+      body: 'Este enlace ya se abrió o caducó. Pide uno nuevo en el chat.',
+    });
+    expect(open('GET', token, { accept: 'application/json' })).toEqual({
+      status: 404,
+      headers: { 'content-type': 'application/json', ...PRIVATE, vary: 'accept, accept-language' },
+      body: '{"error":"link_used_or_expired"}',
+    });
+  });
+
+  it('an_unknown_link_is_404', async () => {
+    // Before any card hands it out, the invoice's link names nothing, as a made-up one doesn't.
+    for (const token of [rivera.blocks.document_link.en.href?.slice('/api/d/'.length) ?? '', 'nothing-here']) {
+      expect([open('GET', token).status, open('GET', token).body], token).toEqual([404, USED_OR_EXPIRED]);
+    }
+    expect(open('GET', 'nothing-here').status).toBe(404);
+    const token = await invoiceToken();
+    expect(open('GET', `${token}x`).status).toBe(404);
+    expect(open('GET', token).status).toBe(200);
+  });
+
+  it('asking_again_in_the_verified_chat_hands_out_a_new_card_with_no_new_code', async () => {
+    // Verification lasts for the chat, as the API's does: verified Dana asks again and Claude's
+    // turn after a confirmed code runs at once, with no code to her contact and no card asking her
+    // to confirm. The invoice is released to her as its verified owner, and the new card's link is
+    // a new one, which opens once; the link she already opened stays used.
+    const { session, events } = await danaVerified();
+    const first = newestToken(events);
+    expect(open('GET', first).status).toBe(200);
+    const before = events.length;
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const again = events.slice(before);
+    expect(typesOf(again)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(again.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => [b.kind, b.template, b.text ?? b.title]) : []))).toEqual([
+      ['prose', null, "Thanks, Dana. Here's your invoice."],
+      ['card', 'document_link', rivera.blocks.document_link.en.title],
+    ]);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id);
+    expect(decided.map(({ decision }) => [decision.action?.tool, decision.outcome, decision.reason_plain])).toEqual([
+      [DECISIONS.startVerification.tool, 'allow', DECISIONS.startVerification.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+    ]);
+    const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id && record.entry.kind === 'verification_code');
+    expect(codes).toHaveLength(1);
+    const second = newestToken(again);
+    expect(second).not.toBe(first);
+    expect(open('GET', first).status).toBe(404);
+    expect(open('GET', second).status).toBe(200);
+    expect([open('GET', first).status, open('GET', second).status]).toEqual([404, 404]);
+  });
+
+  it('a_look_before_opening_never_uses_the_link', async () => {
+    // A link checker's HEAD answers 200 with the document's privacy headers and no body, whatever
+    // the token names, and the link still opens once after it.
+    const token = await invoiceToken();
+    for (const named of [token, token, 'nothing-here']) expect(open('HEAD', named)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(200);
+    expect(open('HEAD', token)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(404);
   });
 });
 
@@ -1446,7 +1816,7 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
+      ['business', 'cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
     );
     // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
     const quote = rivera.ruleCards['rv-quote'];
@@ -1486,6 +1856,62 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
+    // Rivera's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
+    // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
+    const preset = async () => (await call('draftPreset', { params: { desk_id: deskId }, body: { preset: 'auto' } })).body as RulesDraft;
+    const bookings = (cards: readonly RuleCard[]) => cards.filter((card) => card.applies_to === 'native.book');
+    const [shipped] = bookings(PRESETS.auto);
+    if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
+    const draft = await preset();
+    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
+    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
+    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+
+    // A Desk with no hours books weekdays 9 to 5: the preset's cards as they are.
+    mockStore.reset('rivera');
+    const desk = mockStore.world.desk(deskId);
+    if (desk === undefined) throw new Error("Rivera's Desk is in the copy");
+    desk.summary.hours = [];
+    expect((await rules()).preset).toBeNull();
+    const fallback = await preset();
+    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect((await confirm(fallback.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+  });
+
+  it('preset_cards_match_the_apis', () => {
+    // The mock drafts a preset as the API does (`desk.api.rules.preset_cards`): a booking card per
+    // weekday window, numbered by first day and then hours, none for hours only at weekends, and the
+    // presets' cards as they are for no hours at all or exactly 9 to 5.
+    const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
+    const bookings = (hours: HoursWindow[]) => presetCards('auto', hours).filter((card) => card.applies_to === 'native.book').map((card) => [card.card_id, card.hours]);
+    const monToThu = window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00');
+    const friday = window(['fri'], '08:00:00', '16:00:00');
+    expect(bookings([friday, window(['sat'], '09:00:00', '13:00:00'), monToThu])).toEqual([
+      ['preset-book-weekday-1', monToThu],
+      ['preset-book-weekday-2', friday],
+    ]);
+    expect(bookings([window(['thu', 'fri'], '08:00:00', '18:00:00'), window(['sun', 'wed', 'tue', 'mon'], '08:00:00', '18:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')],
+    ]);
+    expect(bookings([window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '00:00:00', '00:00:00')],
+    ]);
+    for (const hours of [[], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto);
+    }
+    // Hours at weekends alone: no booking card, so weekday bookings ask first.
+    for (const hours of [[window(['sat'], '09:00:00', '13:00:00')], [window(['sat', 'sun'], '10:00:00', '16:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto.filter((card) => card.applies_to !== 'native.book'));
+    }
+    expect(presetCards('ask_first', RIVERA_HOURS)).toEqual(PRESETS.ask_first);
   });
 
   it('rule_chat_answers_about_the_hold_a_question_names', async () => {
@@ -2126,6 +2552,28 @@ describe('epochs', () => {
   });
 });
 
+describe('Safety triage', () => {
+  it('describes_the_seeded_stopped_reply_as_wording', async () => {
+    const entries = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    const reply = entries.find((entry) => entry.kind === 'reply_blocked');
+    expect(reply?.triage).toEqual({
+      category: 'wording',
+      summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
+    });
+  });
+
+  it('describes_the_demo_agents_over_limit_request_as_limits', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'safety-limit' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+    const entries = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    expect(entries.find((entry) => entry.kind === 'refused')?.triage).toEqual({
+      category: 'limits',
+      summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.',
+    });
+  });
+});
+
 describe("Today's windows", () => {
   /** Thursday, October 29, 10:30 am in Los Angeles. */
   const NOW = new Date('2026-10-29T17:30:00Z');
@@ -2146,6 +2594,7 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
+      answers: 0,
       turned_down: 0,
       total: 0,
       newest: { turned_down: null, booking: null, lead_or_answer: null },
@@ -2179,7 +2628,7 @@ describe("Today's windows", () => {
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, answers: 1, turned_down: 0, total: 2 });
     expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
@@ -2212,7 +2661,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
+    expect(both.briefing).toMatchObject({ conversations: 5, answers: 3, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -2221,7 +2670,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, answers: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -2249,6 +2698,8 @@ describe("Today's windows", () => {
     const full = await list();
     expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
+    // The answers counted are the list's own.
+    expect(answered.briefing.answers).toBe(full.items.filter((item) => item.kind === 'answer').length);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 

@@ -10,6 +10,13 @@ import { SHARE_COPY, displayLink, spokenLink } from './shareCopy.ts';
 const URL = 'https://desk.example/d/rivera';
 
 describe('share copy', () => {
+  it('voicemail_keeps_one_period_after_the_business_name', () => {
+    const voicemail = SHARE_COPY('Chen & Co.', 'Linda', URL).find((block) => block.title === 'Voicemail');
+    expect(voicemail?.text).toBe(
+      'You’ve reached Chen & Co. For quotes and bookings, visit desk.example slash d slash rivera, where Claude, an AI, answers any time. For an emergency, leave a message and Linda will call you back.',
+    );
+  });
+
   it('share_copy_names_the_link_and_ai', () => {
     const blocks = SHARE_COPY('Rivera Plumbing', 'Maria Rivera', URL);
     expect(blocks.map((block) => block.title)).toEqual(['Google profile', 'Email signature', 'Voicemail']);

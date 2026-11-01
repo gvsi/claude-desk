@@ -30,3 +30,21 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* Once its confirm is answered in Ask Claude, the review fades out on motion-fast, and the receipt
+   lands in its place. Under reduced motion the receipt is there at once. */
+.cd-rule-draft--leaving {
+  animation: cd-rule-draft-leave var(--motion-fast) var(--motion-ease) forwards;
+}
+
+@keyframes cd-rule-draft-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-rule-draft--leaving {
+    animation: none;
+  }
+}

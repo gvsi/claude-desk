@@ -357,14 +357,14 @@ const paymentsReview = {
     {
       key: 'native.payment_link',
       name: 'Payment link',
-      description: 'Makes a one-time link to pay an invoice. Charges money. Can be undone.',
+      description: "Makes a one-time link to pay an invoice. Charges money. Can't be undone.",
       mode: 'ask',
       coveredBy: [noMoneyWithoutARule],
     },
     {
       key: 'native.charge_mandate',
       name: 'Charge within a signed limit',
-      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
       mode: 'ask',
       coveredBy: [noMoneyWithoutARule],
     },
@@ -479,6 +479,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.en, cards.contact.en, cards.policy.en],
+    starters: [],
     agent_card: [],
   },
   es: {
@@ -487,6 +488,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.es, cards.contact.es, cards.policy.es],
+    starters: [],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;

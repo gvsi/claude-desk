@@ -1518,8 +1518,26 @@ def test_kernel_ro_views_run_as_a_role_bound_by_row_security(admin):
     assert owners == [("desk_ro_owner",)]
     attributes = admin.execute("SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'desk_ro_owner'")
     assert attributes.fetchone() == (False, False, False)
-    # it reads exactly the columns the views show, in the copy set by its copy_read policy
-    assert column_readers(admin, "desk_ro_owner") == {view: set(KERNEL_RO_COLUMNS[view]) for view in KERNEL_RO_VIEWS}
+    # It reads exactly the source columns the views need. The business field is projected from
+    # profile JSON; desk_api still cannot read that underlying column (test_business_view).
+    expected = {view: set(KERNEL_RO_COLUMNS[view]) for view in KERNEL_RO_VIEWS}
+    expected["tools"] = (expected["tools"] - {"business"}) | {"profile"}
+    assert column_readers(admin, "desk_ro_owner") == expected
+
+
+def test_business_tools_view_migration_goes_down_and_up(scratch):
+    admin = scratch.conn
+    scratch.migrate(command.downgrade, "desk_simulated_memory")
+    try:
+        assert columns(admin, "kernel_ro", "tools")[-1] == "review_reason"
+        assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert columns(admin, "kernel_ro", "tools") == list(KERNEL_RO_COLUMNS["tools"])
+    owner, options = admin.execute("SELECT pg_get_userbyid(relowner), reloptions FROM pg_class"
+                                   " WHERE oid = 'kernel_ro.tools'::regclass").fetchone()
+    assert owner == "desk_ro_owner" and "security_barrier=true" in options
+    assert not admin.execute("SELECT has_column_privilege('desk_api', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
 
 
 def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):

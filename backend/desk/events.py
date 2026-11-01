@@ -21,7 +21,8 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
     generation: int
     author: Literal["claude", "owner", "desk"]   # "desk" for payment_confirmed and link_cancelled
     language: Literal["en", "es"]
-    handoff: bool                         # not verdict.ok
+    handoff: bool                         # the reply shows the handoff clause
+                                          # a final failure that keeps only cards is a reply, not a handoff
     blocks: list[RenderedBlock]
     visitor_plain: str                    # the reply receipt
     ledger_seq: int

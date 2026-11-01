@@ -61,7 +61,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
                 </div>
               </div>
               <div className="cd-suggestion-chips">
-                {DEMO_TASKS.map((task, i) => <Skeleton key={task} shape="block" measure={{ label: DEMO_TASK_COPY[language][task], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" anchor={`task-chip-${i}`} />)}
+                {DEMO_TASKS.map((task, i) => <Skeleton key={task} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[task], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" anchor={`task-chip-${i}`} />)}
               </div>
             </div>
           </SkeletonCard>

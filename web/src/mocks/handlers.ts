@@ -2,9 +2,11 @@
  * MSW handlers: the mock API's transport, over one store. Each served route parses the request and
  * hands it, with its cookies, to the store's `dispatch`, and sends the answer back with the
  * `Set-Cookie` lines the store gives it; the visitor's event stream goes through MSW's `sse()`,
- * named by type with the seq as its id, as Plan 02's API sends it. Any other `/api/` request is
- * answered 501 and recorded, so a screen test fails on a route nobody mocked. The screen tests'
- * service worker runs them over `mockStore` (browser.ts), the dev server over its own (devServer.ts).
+ * named by type with the seq as its id, as Plan 02's API sends it; a document card's link
+ * (`/api/d/{token}`) answers with the document or the API's refusal (documents.ts). Any other
+ * `/api/` request is answered 501 and recorded, so a screen test fails on a route nobody mocked.
+ * The screen tests' service worker runs them over `mockStore` (browser.ts), the dev server over
+ * its own (devServer.ts).
  * A request stamped with the epoch it was sent in (the screen tests' page stamps each one) reaches
  * the store with that epoch and its URL as the app sent it; the store drops it if that epoch is over.
  */
@@ -164,9 +166,23 @@ export function createHandlers(store: MockStore): HttpHandler[] {
     }),
   ];
 
+  /**
+   * A document card's link, which the visitor's browser opens in a tab: none of the app's routes, and
+   * answered as the document or the API's refusal, not as JSON.
+   */
+  const documentLink = (['GET', 'HEAD'] as const).map((method) =>
+    http[method === 'GET' ? 'get' : 'head']('/api/d/:token', ({ request, params }) => {
+      const { epoch } = unstamped(request);
+      const answer = store.document(method, stringParams(params).token ?? '', { headers: request.headers, epoch });
+      if ('network' in answer) return HttpResponse.error();
+      return new HttpResponse(answer.body, { status: answer.status, headers: answer.headers });
+    }),
+  );
+
   return [
     ...eventStream,
     ...SERVED_KEYS.filter((key) => key !== 'events').map(served),
+    ...documentLink,
     http.all('/api/*', ({ request }) => {
       const { url, epoch } = unstamped(request);
       if (!store.admits(epoch)) return HttpResponse.error();

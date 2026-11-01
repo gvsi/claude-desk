@@ -78,7 +78,7 @@ PRICED_EFFECTS = frozenset({"charge"})
 
 # The Rivera seed's people and price items (master "Rivera seed"), by their seed refs and item ids.
 SeedPersonRef = Literal["dana", "bob"]
-SeedItem = Literal["deposit", "drain", "heater", "leak"]
+SeedItem = Literal["deposit", "drain", "heater", "leak", "pipe", "short-notice"]
 
 # What a scenario assumes, which the report lists among its limits.
 Assumption = Literal[

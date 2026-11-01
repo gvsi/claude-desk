@@ -25,11 +25,7 @@
   color: var(--text-secondary);
 }
 
-.cd-reviewer-bar > .cd-button {
+.cd-reviewer-bar > .cd-button,
+.cd-reviewer-bar > .cd-skeleton {
   flex: none;
-}
-
-.cd-reviewer-bar .cd-reviewer-bar__phone-line { display: none; }
-@media (max-width: 639.98px) {
-  .cd-reviewer-bar .cd-reviewer-bar__phone-line { display: flex; }
 }

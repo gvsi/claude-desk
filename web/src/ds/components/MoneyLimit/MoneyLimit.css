@@ -34,6 +34,13 @@
   font-weight: 520;
 }
 
+/* Once a confirmed change set it, "Updated" follows the line, 8 px after its last word, centered
+   on it (its arrival is the shared one, in Landing.css). */
+.cd-money-limit__line > .cd-landed-updated {
+  margin-left: var(--space-8);
+  vertical-align: middle;
+}
+
 .cd-money-limit__reading > .cd-button {
   flex: none;
 }

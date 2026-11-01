@@ -190,7 +190,7 @@ function stoppedDraft(seq: number, at: string): { entry: LedgerEntry; attempt: A
 }
 
 /**
- * The built-in agent tries to charge $250 in one go, over its signed limit, and the kernel refuses
+ * The built-in agent tries to charge $185 in one go, over its signed limit, and the kernel refuses
  * it: a request this week's count takes in, unlike a draft of Claude's the reply check stopped.
  */
 async function refuseTheAgentsCharge(): Promise<void> {
@@ -261,7 +261,7 @@ describe('Safety', () => {
         mockStore.inject({ route: 'safety', status: 200, body: [], until: pending.until });
       } else {
         // Claude's summaries are outside the page's copy contract, in the row and detail alike.
-        injectAttempts([attempt({ created_at: isoTime(NOW.getTime()), triage: { summary: 'An attempt described by Claude.', category: 'impersonation' } })]);
+        injectAttempts([attempt({ created_at: isoTime(NOW.getTime()), triage: { summary: 'An attempt described by Claude.', category: 'other' } })]);
         await stoppedThisWeek(1);
       }
       try {
@@ -269,10 +269,10 @@ describe('Safety', () => {
         if (state === 'empty') {
           await expect.element(screen.getByText(NONE_TURNED_DOWN, { exact: true })).toBeVisible();
         } else if (state === 'loading') {
-          await expect.element(screen.getByRole('status').filter({ hasText: /^Reading/ })).toBeVisible();
+          await expect.element(screen.getByRole('status').filter({ hasText: /^Reading/ })).toHaveClass('cd-sr-only');
         } else {
           await expect.element(screen.getByRole('list')).toBeVisible();
-          if (state === 'chip with nothing') await screen.getByRole('button', { name: 'Codes', exact: true }).click();
+          if (state === 'chip with nothing') await screen.getByRole('button', { name: 'Verification codes', exact: true }).click();
         }
 
         const safety = document.querySelector<HTMLElement>('.cd-safety');
@@ -284,13 +284,14 @@ describe('Safety', () => {
           ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'alt'].map((name) => el.getAttribute(name) ?? ''),
         );
         expect(names.join(' '), 'accessible names and descriptions').not.toMatch(/attempt/i);
-        await expect.element(viewOption(screen, 'Stopped')).toHaveAttribute('aria-checked', 'true');
+        if (state !== 'loading') await expect.element(viewOption(screen, 'Stopped')).toHaveAttribute('aria-checked', 'true');
         if (state === 'empty') {
           await expect.element(screen.getByText(NOTHING, { exact: true })).toBeVisible();
           expect(screen.getByText('Nothing stopped this week', { exact: true }).elements()).toHaveLength(0);
           await expect.element(screen.getByRole('link', { name: 'Open your public page' })).toBeVisible();
         } else if (state === 'loading') {
-          await expect.element(screen.getByText('Reading what was stopped', { exact: true })).toBeVisible();
+          expect(screen.getByText('Reading the attempts', { exact: true }).elements()).toHaveLength(0);
+          await expect.element(screen.getByText('Reading what was stopped', { exact: true })).toHaveClass('cd-sr-only');
         } else {
           await expect.element(screen.getByRole('group', { name: 'Show by kind' })).toBeVisible();
           if (state === 'chip with nothing') {
@@ -316,7 +317,7 @@ describe('Safety', () => {
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
     await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
     expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
@@ -417,7 +418,7 @@ describe('Safety', () => {
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
-    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.fromTheVisitor === ask)?.decision;
+    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.decision.action?.discount_bp === 5000)?.decision;
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
@@ -443,7 +444,7 @@ describe('Safety', () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
     await expect.element(screen.getByText("Entry 2 doesn't match the chain", { exact: true })).toBeVisible();
-    expect(screen.getByText('Every entry checks out').elements()).toHaveLength(0);
+    expect(screen.getByText('Every entry matches the chain').elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.
     await recordRow(screen, 3).click();
@@ -615,9 +616,9 @@ describe('Safety', () => {
 
   it('triage_is_labelled_ai_written', async () => {
     injectLedger(ledgerPage(threeEntries()));
-    const summary = 'Claimed to be the owner to move a customer’s refund to another card.';
+    const summary = 'Someone asked to move a customer’s refund to another card. The Desk refused.';
     injectAttempts([
-      attempt({ triage: { summary, category: 'impersonation' } }),
+      attempt({ triage: { summary, category: 'prices' } }),
       attempt({ ref_id: 'dec-other', reason_plain: 'Someone asked for another customer’s invoice.', ledger_seq: 3 }),
     ]);
     const { screen } = await renderRoute(`${SAFETY}/dec-refund`);
@@ -626,7 +627,7 @@ describe('Safety', () => {
     await expect.element(screen.getByRole('link', { name: new RegExp(`^Oct 20, 9:51 am ${summary}`) })).toBeVisible();
     await expect.element(open.getByText('Summary written by Claude', { exact: true })).toBeVisible();
     await expect.element(open.getByText(summary, { exact: true })).toBeVisible();
-    await expect.element(open.getByText('Posing as you', { exact: true })).toBeVisible();
+    await expect.element(open.getByText('Prices and discounts', { exact: true })).toBeVisible();
     await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeVisible();
 
     // An attempt Claude hasn't summed up yet keeps the checkpoint's reason, with no summary.
@@ -717,6 +718,10 @@ describe('Safety', () => {
     await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
     expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
+    // The entry's full trace reads the row's name as its sentence.
+    await recordRow(screen, opened ?? 0).click();
+    const trace = region(screen, `Full trace of entry ${opened}`);
+    await expect.element(trace.getByText('Chat handed to you. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
   it('handoff_closed_by_a_call_back_says_so', async () => {
@@ -765,6 +770,34 @@ describe('Safety', () => {
     await expect.element(recordRow(screen, wrote.seq).getByText('Handoff closed when you wrote in the chat', { exact: true })).toBeVisible();
     expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
+    // The closing's full trace reads the row's name as its sentence.
+    await recordRow(screen, tookOver.seq).click();
+    const trace = region(screen, `Full trace of entry ${tookOver.seq}`);
+    await expect.element(trace.getByText('Handoff closed when you took over. Recorded by the checkpoint.', { exact: true })).toBeVisible();
+  });
+
+  it('handoff_closed_by_a_booking_says_so', async () => {
+    // The handoff card hands Maria the chat, then the visitor books a time in it, which closes the
+    // card's handoff: the record calls that closing what it was, never her Mark done, and its full
+    // trace reads the row's name as its sentence.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can someone come Tuesday?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'The first one, please.' } });
+    await expect.poll(() => [...mockStore.world.handoffs.values()].map((h) => h.handoff.status), { timeout: 5_000 }).toEqual(['done']);
+    const { entries } = await mockLedger();
+    const closed = entries.find((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && e.event.summary.closed_by === 'booking');
+    if (!closed) throw new Error('the booking closed the card handoff');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, closed.seq).getByText('Handoff closed when they booked a time', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+    await recordRow(screen, closed.seq).click();
+    const trace = region(screen, `Full trace of entry ${closed.seq}`);
+    await expect.element(trace.getByText('Handoff closed when they booked a time. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
   it('filters_start_with_all', async () => {
@@ -772,28 +805,29 @@ describe('Safety', () => {
     const sorted = (summary: string, category: TriageCategory, n: number) =>
       attempt({ ref_id: `att-${n}`, triage: { summary, category }, created_at: `2026-10-20T16:4${n}:00.000000Z`, ledger_seq: 100 + n });
     injectAttempts([
-      sorted('Posed as Maria to get a refund', 'impersonation', 5),
-      sorted('Pushed for half off', 'discount_push', 4),
-      sorted('Agent went over its signed limit', 'over_limit', 3),
-      sorted('Asked for Bob’s warranty', 'private_data', 2),
+      sorted('Asked to move a refund to another card. The Desk refused.', 'prices', 5),
+      sorted('Asked for half off. The Desk refused.', 'prices', 4),
+      sorted('An agent requested more than its signed limit. The Desk refused.', 'limits', 3),
+      sorted('Asked for Bob’s warranty. The Desk refused.', 'records', 2),
       attempt({ ref_id: 'att-1', reason_plain: 'Someone asked for a callback at midnight.', created_at: '2026-10-20T16:41:00.000000Z', ledger_seq: 101 }),
     ]);
     const { screen } = await renderRoute(SAFETY);
     const filters = screen.getByRole('group', { name: 'Show by kind' });
     const list = screen.getByRole('list', { name: 'Stopped, newest first' });
     const shown = () => list.getByRole('link').elements().map((a) => a.querySelector('.cd-attempt-row__title')?.textContent);
-    const ALL = ['Posed as Maria to get a refund', 'Pushed for half off', 'Agent went over its signed limit', 'Asked for Bob’s warranty', 'Someone asked for a callback at midnight.'];
+    const ALL = ['Asked to move a refund to another card. The Desk refused.', 'Asked for half off. The Desk refused.', 'An agent requested more than its signed limit. The Desk refused.', 'Asked for Bob’s warranty. The Desk refused.', 'Someone asked for a callback at midnight.'];
 
-    // "All" first and pressed, every attempt listed; then the categories in order, one "Money", and "Not sorted yet" last.
+    // "All" first and pressed, every attempt listed; then the seven subjects in order, and "Not sorted yet" last.
     await expect.element(list.getByRole('link').first()).toBeVisible();
     const chips = filters.getByRole('button');
     expect(chips.elements().map((b) => b.textContent)).toEqual([
       'All',
-      'Posing as you',
-      'Money',
-      'Private data',
-      'Codes',
-      'Hidden instructions',
+      'Prices and discounts',
+      "Someone's records",
+      'Verification codes',
+      'Instructions in a message',
+      'Above a limit',
+      "The AI's wording",
       'Other',
       'Not sorted yet',
     ]);
@@ -801,23 +835,59 @@ describe('Safety', () => {
     expect(chips.elements().filter((b) => b.getAttribute('aria-pressed') === 'true')).toHaveLength(1);
     expect(shown()).toEqual(ALL);
 
-    // A category shows only its attempts, and "Money" both kinds of money attempt.
-    await filters.getByRole('button', { name: 'Posing as you', exact: true }).click();
-    await expect.element(filters.getByRole('button', { name: 'Posing as you', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // A subject shows only its entries; refunds and discounts both concern prices.
+    await filters.getByRole('button', { name: 'Above a limit', exact: true }).click();
+    await expect.element(filters.getByRole('button', { name: 'Above a limit', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect.element(filters.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'false');
-    expect(shown()).toEqual(['Posed as Maria to get a refund']);
-    await filters.getByRole('button', { name: 'Money', exact: true }).click();
-    await expect.poll(shown).toEqual(['Pushed for half off', 'Agent went over its signed limit']);
+    expect(shown()).toEqual(['An agent requested more than its signed limit. The Desk refused.']);
+    await filters.getByRole('button', { name: 'Prices and discounts', exact: true }).click();
+    await expect.poll(shown).toEqual(['Asked to move a refund to another card. The Desk refused.', 'Asked for half off. The Desk refused.']);
     await filters.getByRole('button', { name: 'Not sorted yet', exact: true }).click();
     await expect.poll(shown).toEqual(['Someone asked for a callback at midnight.']);
     // A category with none says so, and how to see the rest.
-    await filters.getByRole('button', { name: 'Codes', exact: true }).click();
+    await filters.getByRole('button', { name: 'Verification codes', exact: true }).click();
     await expect.element(screen.getByText('Nothing of this kind. Choose All to see the rest.', { exact: true })).toBeVisible();
     expect(list.elements()).toHaveLength(0);
 
     // "All" brings them back.
     await filters.getByRole('button', { name: 'All', exact: true }).click();
     await expect.poll(shown).toEqual(ALL);
+  });
+
+  it('every_subject_has_its_own_chip_and_filters_to_its_entries', async () => {
+    const subjects: readonly [TriageCategory, string, string][] = [
+      ['prices', 'Prices and discounts', 'Someone asked for half off. The Desk refused.'],
+      ['records', "Someone's records", 'Someone asked for another customer’s invoice. The Desk refused.'],
+      ['codes', 'Verification codes', 'Someone asked to send a code to a different address. The Desk refused.'],
+      ['instructions', 'Instructions in a message', 'A message asked the Desk to ignore its rules. The Desk refused.'],
+      ['limits', 'Above a limit', 'An agent requested more than its signed limit. The Desk refused.'],
+      ['wording', "The AI's wording", 'Claude’s draft stated a price in prose. The Desk stopped the reply.'],
+      ['other', 'Other', 'Someone asked for a different service. The Desk refused.'],
+    ];
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts(subjects.flatMap(([category, , summary], index) => [1, 2].map((n) => attempt({
+      ref_id: `subject-${category}-${n}`,
+      kind: category === 'wording' ? 'reply_blocked' : 'refused',
+      triage: { category, summary: `${summary} Entry ${n}.` },
+      ledger_seq: 100 + index * 2 + n,
+    }))));
+    const { screen } = await renderRoute(SAFETY);
+    const filters = screen.getByRole('group', { name: 'Show by kind' });
+    const list = screen.getByRole('list', { name: 'Stopped, newest first' });
+    await expect.element(list.getByRole('link').first()).toBeVisible();
+    expect(filters.getByRole('button').elements().map((chip) => chip.textContent)).toEqual([
+      'All', ...subjects.map(([, label]) => label), 'Not sorted yet',
+    ]);
+    expect(list.getByRole('link').elements()).toHaveLength(14);
+    for (const [, label, summary] of subjects) {
+      const chip = filters.getByRole('button', { name: label, exact: true });
+      await chip.click();
+      await expect.element(chip).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => list.getByRole('link').elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([
+        `${summary} Entry 1.`, `${summary} Entry 2.`,
+      ]);
+      await expect.element(detail(screen).getByText(label, { exact: true })).toBeVisible();
+    }
   });
 
   it('replayed_entries_are_labelled', async () => {
@@ -905,7 +975,7 @@ describe('Safety', () => {
     await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     // A held request is held, not stopped, and claims nothing about what happens next.
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
@@ -924,7 +994,7 @@ describe('Safety', () => {
     await stoppedThisWeek(2);
     injectLedger(ledgerPage(threeEntries()));
     injectAttempts([
-      attempt({ triage: { summary: 'Claimed to be the owner to move a refund to another card.', category: 'impersonation' } }),
+      attempt({ triage: { summary: 'Someone asked to move a refund to another card. The Desk refused.', category: 'prices' } }),
       attempt({ ref_id: '3', kind: 'reply_blocked', reason_plain: "Claude's reply put a price in its own words, so it wasn't shown.", ledger_seq: 3 }),
     ]);
     const sorted = await renderRoute(SAFETY);
@@ -945,7 +1015,7 @@ describe('Safety', () => {
     // The record was read and checked; then a later read fails. The check says so, first, beside
     // what it last found, and stays until a read works, so an old check never reads as current.
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    const checked = screen.getByText('Every entry checks out', { exact: true });
+    const checked = screen.getByText('Every entry matches the chain', { exact: true });
     const record = screen.getByRole('list', { name: 'Every entry, newest first' });
     await expect.element(checked).toBeVisible();
     await expect.element(record).toBeVisible();
@@ -1004,7 +1074,7 @@ describe('Safety', () => {
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(nothing).not.toBeInTheDocument();
-    expect(line.element().compareDocumentPosition(screen.getByText('Every entry checks out').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(screen.getByText('Every entry matches the chain').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);
@@ -1098,7 +1168,7 @@ describe('Safety', () => {
     // The attempt open on arrival, or after a filter, leaves the focus where it is.
     expect(document.activeElement).toBe(document.body);
     const filters = screen.getByRole('group', { name: 'Show by kind' });
-    await filters.getByRole('button', { name: 'Codes', exact: true }).click();
+    await filters.getByRole('button', { name: 'Verification codes', exact: true }).click();
     const all = filters.getByRole('button', { name: 'All', exact: true });
     await all.click();
     await expect.element(open.getByText('This reply was never shown.', { exact: true })).toBeVisible();

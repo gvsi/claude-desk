@@ -19,7 +19,9 @@ which runs in the background while the kernel serves (`activation.rebuild_in_bac
 `app.state.rebuilding`) and is cancelled at shutdown, and last reconciles the executions and the
 payment links a stopped kernel left behind (`execute.reconcile_at_startup`,
 `payments.reconcile_links_at_startup`), each within `STARTUP_RECONCILE_S`, since a read settles
-them too.
+them too, and last starts the pass that keeps setup-made Desks' calendars open from their hours,
+now and then daily, beside the kernel (`desks.keep_calendars_open`, `app.state.calendar_refresh`),
+which is cancelled at shutdown too.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -65,7 +67,7 @@ from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, Docume
                              OwnerMessageRequest, PaymentLinkActionRequest, PaymentLinkStateResult, PaymentLinkView,
                              PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed,
                              ToolsConfirmRequest, ToolsConnectRequest, ToolsSimulateChangeRequest)
-from desk.kernel_service import (activation, agents, approvals, auth, context, copies, decide, demo_inbox, desks,
+from desk.kernel_service import (activation, agents, approvals, auth, business_tools, context, copies, decide, demo_inbox, desks,
                                  execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions, turn,
                                  verification)
 from desk.kernel_service.adapters import release_document
@@ -74,6 +76,7 @@ from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
                                       route_template, storable)
+from desk.kernel_service.settings import MOCKPAY_URL, KernelSettings
 from desk.mockpay.definitions import EXIT_BIND_FAILED, is_placeholder_key
 
 log = logging.getLogger("desk.kernel_service")
@@ -102,26 +105,6 @@ class RedactLinkTokens(logging.Filter):
 
 
 ACCESS_LOG_FILTER = RedactLinkTokens()
-
-
-MOCKPAY_URL = "http://127.0.0.1:8702"
-
-
-@dataclass(frozen=True)
-class KernelSettings:
-    database_url: str = field(repr=False)   # carries the role's password
-    env: str = "dev"                        # DESK_ENV
-    decisions: str = "anthropic"            # DESK_DECISIONS: "anthropic", or "offline" (a test hook)
-    mockpay_url: str = MOCKPAY_URL          # MOCKPAY_URL: the mock payments server the kernel calls
-    mockpay_key: str = field(default="", repr=False)   # MOCKPAY_KEY: the kernel's alone, never the API's
-    mockpay_spawn: bool = False             # MOCKPAY_SPAWN=1: run that server as the kernel's child
-
-    @classmethod
-    def from_env(cls) -> "KernelSettings":
-        return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"),
-                   decisions=os.environ.get("DESK_DECISIONS", "anthropic"),
-                   mockpay_url=os.environ.get("MOCKPAY_URL") or MOCKPAY_URL,
-                   mockpay_key=os.environ.get("MOCKPAY_KEY", ""), mockpay_spawn=os.environ.get("MOCKPAY_SPAWN") == "1")
 
 
 TEST_HOOK_VARIABLES = ("ANTHROPIC_BASE_URL", "DESK_PROVE")   # a fake model server; a stand-in prover
@@ -309,6 +292,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
         rebuilding: asyncio.Task | None = None
+        refreshing: asyncio.Task | None = None
         app.state.mockpay = mockpay
         try:
             if mockpay is not None:
@@ -338,11 +322,16 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                     log.info("%s_cut_off", name)
                 except Exception as exc:
                     log_error(log, exc, "%s_failed", name)
+            # setup-made Desks' calendars kept open from their hours: a pass now, then one a day, beside
+            # the kernel, which doesn't wait for it
+            refreshing = asyncio.create_task(desks.keep_calendars_open(app.state.kernel), name="calendar-refresh")
+            app.state.calendar_refresh = refreshing
             yield
         finally:
-            if rebuilding is not None:
-                rebuilding.cancel()
-                await asyncio.gather(rebuilding, return_exceptions=True)
+            for task in (rebuilding, refreshing):
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
             if mockpay is not None:
                 await mockpay.stop()
             await engine.dispose()
@@ -350,6 +339,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.proof_mode = "bounded"   # until the startup selftest passes
     app.state.rebuilding = None        # the background rebuild of what startup left, if anything
+    app.state.calendar_refresh = None  # the daily pass that keeps setup-made Desks' calendars open
     app.state.mockpay = None           # the mock payments child, while the kernel runs one
     app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
@@ -368,6 +358,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(verification.router)
     app.include_router(agents.router)
     app.include_router(desk_router)
+    app.include_router(business_tools.router)
     app.include_router(document_link_router)
     app.include_router(payment_link_router)
     app.include_router(inbox_router)
@@ -403,7 +394,7 @@ async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> Desk
     if body.desk.auto_money_cap_cents != 0:
         raise KernelFailure(422, "invalid", "desk_money_cap")
     created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
-    await activation.activate_shipped(ctx, created.desk_id, "ask_first", 0)
+    await activation.activate_shipped(ctx, created.desk_id, desks.NEW_DESK_PRESET, 0)
     return created
 
 
@@ -736,8 +727,10 @@ async def _open_desk(ctx: KernelCtx, request: Request, desk_id: str) -> None:
                         named=Named(copy_id=ctx.copy_id, desk_id=desk_id))
 
 
-def error_response(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:
-    return JSONResponse(KernelError(code=code).model_dump(), status_code=status, headers=headers)
+def error_response(status: int, code: str, headers: dict[str, str] | None = None, *,
+                   detail: dict[str, list[str]] | None = None) -> JSONResponse:
+    return JSONResponse(KernelError(code=code, detail=detail).model_dump(exclude_none=True),
+                        status_code=status, headers=headers)
 
 
 async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
@@ -755,10 +748,16 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
     else:
         log.info("kernel_failure route=%s status=%d code=%s reason=%s", route_template(request), exc.status,
                  exc.code, exc.reason)
-    return error_response(exc.status, exc.code)
+    return error_response(exc.status, exc.code, detail=exc.detail)
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if route_template(request) == "PUT /desks/{id}/business_tools":
+        try:
+            async with kernel_transaction(request.app.state.kernel) as ctx:
+                await business_tools.refuse_invalid_request(ctx, request)
+        except KernelFailure as failure:
+            return await _kernel_failure(request, failure)
     return error_response(422, "invalid")
 
 

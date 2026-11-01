@@ -546,18 +546,46 @@ jobs:
       - name: Check the tier 2 results
         env:
           RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          FORCED: ${{ github.event_name == 'push' && github.event.forced || false }}
         run: |
+          if [ "$FORCED" = "true" ]; then
+            echo "::error::a force-push to main replaced history that CI can't check for rewritten rates or waivers"
+            exit 1
+          fi
+          HISTORY_SINCE=""
           if [ -z "$RESULTS_BASE" ]; then
             RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            HISTORY_SINCE="$RESULTS_BASE"
           fi
-          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
+          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"
 
   web:
-    needs: [changes]
-    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
     name: web tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    timeout-minutes: 5
+    needs: [changes, web-1, web-2, web-3, web-4, web-e2e]
+    if: always()
+    steps:
+      - name: Require every shard and the end-to-end test to pass
+        env:
+          NEEDED: ${{ needs.changes.outputs.web }}
+          SHARD_1: ${{ needs.web-1.result }}
+          SHARD_2: ${{ needs.web-2.result }}
+          SHARD_3: ${{ needs.web-3.result }}
+          SHARD_4: ${{ needs.web-4.result }}
+          E2E: ${{ needs.web-e2e.result }}
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped && test "$E2E" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success && test "$E2E" = success
+
+  web-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 1/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -575,9 +603,115 @@ jobs:
           cache-suffix: ${{ github.job }}
           ignore-nothing-to-cache: true
       - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=1/4 --maxWorkers=2
         run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 2/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=2/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 3/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=3/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 4/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=4/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-e2e:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests e2e
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-e2e"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
       - name: Build the web app and run the mocked end-to-end test
-        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-e2e
+        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-deps web-e2e
 
   infra:
     needs: [changes]

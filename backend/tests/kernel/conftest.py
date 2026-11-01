@@ -138,7 +138,7 @@ async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, kernel_pool: d
         monkeypatch.setattr(kernel_app, "create_async_engine",
                             lambda url, **options: make_engine(url, **options, **kernel_pool))
     settings = dataclasses.replace(KernelSettings.from_env(), mockpay_url=mockpay.url, mockpay_key=mockpay.key,
-                                   mockpay_spawn=False)
+                                   mockpay_spawn=False, typesafe_api_key="")
     kernel = create_app(settings, clock=frozen_clock, decisions=reviewer)
     try:
         async with kernel.router.lifespan_context(kernel):

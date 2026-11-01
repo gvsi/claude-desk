@@ -11,17 +11,27 @@ export interface ConversationStatus {
 }
 
 /**
- * A conversation's state, first match: something held for the owner, a chat paused after blocked
- * attempts, an open handoff, the owner in the chat, the owner's own preview, then what they are: an agent, a
- * verified customer, a visitor. `held` is how many of its requests are held now. With no name on
- * record or given, the name line (`whoLabel`) already says what they are, so the status is left
- * out (null) rather than say it twice.
+ * The part of a conversation's state that asks for the owner, first match: something held for
+ * them, a chat paused after blocked attempts, an open handoff, or the owner in the chat. Null when
+ * nothing does. `held` is how many of its requests are held now.
  */
-export function conversationStatus(s: ConversationSummary, held: number, openHandoff = false): ConversationStatus | null {
+export function attentionStatus(s: ConversationSummary, held: number, openHandoff = false): ConversationStatus | null {
   if (held > 0) return { tone: 'held', text: 'Needs you' };
   if (s.mode === 'paused') return { tone: 'held', text: 'Paused after blocked attempts' };
   if (openHandoff) return { tone: 'held', text: 'Wants you' };
   if (s.mode === 'owner') return { tone: 'info', text: "You're in this chat" };
+  return null;
+}
+
+/**
+ * A conversation's state, first match: what asks for the owner (`attentionStatus`), the owner's
+ * own preview, then what they are: an agent, a verified customer, a visitor. `held` is how many of
+ * its requests are held now. With no name on record or given, the name line (`whoLabel`) already
+ * says what they are, so the status is left out (null) rather than say it twice.
+ */
+export function conversationStatus(s: ConversationSummary, held: number, openHandoff = false): ConversationStatus | null {
+  const attention = attentionStatus(s, held, openHandoff);
+  if (attention !== null) return attention;
   if (s.owner_preview) return { tone: 'info', text: 'Your own preview' };
   if (!hasName(s)) return null;
   if (s.kind === 'agent') return { tone: 'info', text: 'Agent' };

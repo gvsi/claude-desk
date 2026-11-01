@@ -208,6 +208,8 @@ async def test_public_desk_passes_the_kernels_fields_through(app, browser, fake,
     response = await client.get(f"/api/public/{slug}", params={"lang": "es"})
 
     assert response.status_code == 200
+    assert response.json()["starters"] == [
+        "¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"]
     assert PublicDesk.model_validate(response.json()) == expected
     assert response.json() == expected.model_dump(mode="json")                    # unchanged, field for field
     assert response.headers["cache-control"] == "no-store"

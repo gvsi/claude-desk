@@ -75,7 +75,7 @@ async def test_say_returns_one_signed_owner_said_block(app, client, reviewer):
         verdict.ledger_seq, visitor.session_id, result.message_id)
     assert entry.event.summary == {"message_id": result.message_id, "author": "owner", "ok": True, "language": "en",
                                    "violations": [], "rule_ids": [], "fact_ids": [fact_id], "soft_promise": None,
-                                   "final": True}
+                                   "soft_checks": None, "dropped": [], "final": True}
     assert "tank replacement" not in entry.envelope_jcs
 
     # a conversation in Spanish gets its receipt in Spanish, and the owner's words as written

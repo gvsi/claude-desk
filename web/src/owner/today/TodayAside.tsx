@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Button, Card } from '../../ds/index.ts';
 import { customerLink, publicLink } from '../customerLink.ts';
 import { ThisWeek } from './ThisWeek.tsx';
+import { TODAY_COPY } from './copy.ts';
 
 export interface TodayAsideProps {
   deskId: string;
@@ -25,7 +26,7 @@ export function TodayAside({ deskId, slug, inbox }: TodayAsideProps) {
             Your public page
           </h2>
           <p className="cd-today-aside__link cd-type-meta">{publicLink(slug)}</p>
-          <p className="cd-today-aside__text cd-type-meta">Chats on it are real conversations with your Desk. They show up in Conversations.</p>
+          <p className="cd-today-aside__text cd-type-meta">{TODAY_COPY.publicDescription}</p>
           <div className="cd-today-aside__action">
             <Button variant="secondary" href={customerLink(slug, deskId)} external>
               Chat as a customer

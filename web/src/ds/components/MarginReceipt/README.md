@@ -43,8 +43,8 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 
 | Source | Dot |
 | --- | --- |
-| A reply that passed its check (`handoff: false`) | handled |
-| A reply whose draft was blocked and handed to the owner (`handoff: true`) | held |
+| A reply showing no handoff clause, including checked cards kept when its prose failed (`handoff: false`) | handled |
+| A reply showing the handoff clause, whether its draft passed or failed (`handoff: true`) | held |
 | `allowed`, `approved`, `executed` | handled |
 | `held`, `unknown` | held |
 | `refused`, `denied`, `failed`, `refused_at_execution` | refused |
@@ -59,8 +59,9 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 | `OWNER_REASON_STATES`, `OwnerReasonState` | `['held', 'refused', 'executed', 'allowed'] as const` and its type: the states of the receipt that reports what the kernel decided, the only ones `reason` applies to. Owner screens use it to pick the receipt that gets the reason. |
 | `OWNER_STATE_WORDS` | The owner's words for those states, which lead that receipt's line (the table above). It `satisfies Record<OwnerReasonState, string>`, so a state left out, or one added, is a compile error. |
 | `ReceiptSource`, `ReceiptView` | The types of `receiptTone`'s argument and `receiptFromEvent`'s result. |
+| `RulesReceipt`, `RulesReceiptProps` | The receipt under Claude's message in Ask Claude once the owner confirmed a rules change, in place of the review: the handled dot and "Confirmed. Version {version} of your rules, checked against the always-on rules.", "Confirmed." leading in primary ink. `version` is the version in force from the API's answer to the confirm, never the draft's. It is plain text, with no trace to open. Drawn outside a conversation's rows, it lands on its own as it is drawn: it rises space-4 as it fades in on `motion-base`, its dot growing from half size; under reduced motion it is there at once. |
 
-`MarginLine.tsx` is the line itself, shared with `MarginNote`; it isn't exported. Neither is `receiptLine` in `receiptTone.ts`, which applies the rules under "The line" for `MarginReceipt`.
+`MarginLine.tsx` is the line itself, shared with `MarginNote` and `RulesReceipt` (whose landing is its `lands` option); it isn't exported. Neither is `receiptLine` in `receiptTone.ts`, which applies the rules under "The line" for `MarginReceipt`.
 
 ## Props
 

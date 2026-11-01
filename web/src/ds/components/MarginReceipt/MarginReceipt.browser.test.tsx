@@ -14,6 +14,7 @@ import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { receiptFromEvent } from './receiptTone.ts';
 import { MarginReceipt } from './MarginReceipt.tsx';
+import { RulesReceipt } from './RulesReceipt.tsx';
 
 const [quoteRan, , quoteReply] = rivera.events.quoteTurn;
 
@@ -52,4 +53,42 @@ it('a_receipt_shown_before_doesnt_land_again', async () => {
   // The receipt shown before is already there: no slide, no fade, no dot growing.
   expectComputed(quote, { animationName: 'none' });
   expectComputed(dotOf(quote), { animationName: 'none' });
+});
+
+/** `node` rendered on its own in the page, unmounted after the test. */
+function renderAlone(node: React.ReactNode): HTMLElement {
+  const el = document.createElement('div');
+  document.body.append(el);
+  const root = createRoot(el);
+  onTestFinished(() => {
+    root.unmount();
+    el.remove();
+  });
+  flushSync(() => root.render(node));
+  return el;
+}
+
+it('a_confirmed_rules_receipt_lands_on_its_own', async () => {
+  await motion();
+  // Outside a conversation's rows, as under Claude's message in Ask Claude once a change is confirmed.
+  const el = renderAlone(<RulesReceipt version={8} />);
+  const line = el.querySelector('.cd-margin-receipt');
+  if (!line) throw new Error('the receipt is drawn');
+  expect(line.textContent).toBe('Confirmed. Version 8 of your rules, checked against the always-on rules.');
+  expect(line.querySelector('.cd-margin-line__lead')?.textContent).toBe('Confirmed.');
+  // It lands on motion-base, rising as it fades in, its handled dot growing from half size with it.
+  expectComputed(line, { animationName: 'cd-margin-line-land', animationDuration: '0.2s' });
+  const dot = line.querySelector('.cd-status-dot');
+  expect(dot?.className).toContain('handled');
+  expectComputed(dot ?? line, { animationName: 'cd-margin-line-dot', animationDuration: '0.2s' });
+});
+
+it('a_confirmed_rules_receipt_shows_at_once_under_reduced_motion', () => {
+  // This project's context emulates reduced motion: the receipt is there at once, its dot whole.
+  const el = renderAlone(<RulesReceipt version={12} />);
+  const line = el.querySelector('.cd-margin-receipt');
+  if (!line) throw new Error('the receipt is drawn');
+  expect(line.textContent).toBe('Confirmed. Version 12 of your rules, checked against the always-on rules.');
+  expectComputed(line, { animationName: 'none' });
+  expectComputed(line.querySelector('.cd-status-dot') ?? line, { animationName: 'none' });
 });

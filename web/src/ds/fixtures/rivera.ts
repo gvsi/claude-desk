@@ -199,18 +199,18 @@ const cards = {
       options: slotOptions.es,
     }),
   },
-  // As the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner},
+  // As the kernel renders a confirmed booking: {date} / {start} to {end} / With {owner},
   // and no booking ID (render/en.py and es.py).
   booking_confirmed: {
     en: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'Tuesday, November 3',
-      lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+      lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
     }),
     es: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'martes 3 de noviembre',
-      lines: ['Llegada de 14:00 a 16:00', 'Con Maria Rivera'],
+      lines: ['De 14:00 a 16:00', 'Con Maria Rivera'],
     }),
   },
   payment_link: {
@@ -1242,7 +1242,7 @@ const hubSections = [
       {
         key: 'native.payment_link',
         name: 'Payment link',
-        description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+        description: "Makes a one-time link for a quote. Charges money. Can't be undone.",
         summary: '2 rules · 1 shared',
         mode: 'auto',
         limit: '$300',
@@ -1252,7 +1252,7 @@ const hubSections = [
       {
         key: 'native.charge_mandate',
         name: 'Charge within a signed limit',
-        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
         summary: '2 rules · 1 shared',
         mode: 'auto',
         limit: '$20',
@@ -1607,11 +1607,12 @@ const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
 };
 
 /**
- * Sample copies of plan 01a's `desk.presets.PRESETS`, in its words. Both presets let Claude show
- * open times, take leads and callbacks, start verifications and read the owner's material on its
- * own (`utilityCards`); Recommended rules adds quotes at list price, weekday bookings, customers'
- * own documents and an ask before money moves. Sample data for the reviews: the description check
- * reads the presets' own cards from their export.
+ * Sample copies of plan 01a's presets as Rivera's Desk drafts them (`desk.presets.preset_cards`), in
+ * their words. Both let Claude show open times, take leads and callbacks, start verifications and
+ * read the owner's material on its own (`utilityCards`); Recommended rules adds quotes at list price,
+ * weekday bookings in her weekday hours (8:00 am to 6:00 pm), customers' own documents and an ask
+ * before money moves. Sample data for the reviews: the description check reads the presets' own
+ * cards from their export.
  */
 const utilityCards = [
   rule({ card_id: 'preset-find-slots', applies_to: 'native.find_slots', mode: 'auto', who: 'anyone', reason: 'Anyone can see the times you have open.' }),
@@ -1636,9 +1637,9 @@ const recommendedCards = [
     applies_to: 'native.book',
     mode: 'auto',
     who: 'anyone',
-    hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' },
+    hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
     review: true,
-    reason: 'Weekday bookings in working hours, checked by the reviewer.',
+    reason: 'Weekday bookings in opening hours, checked by the reviewer.',
   }),
   rule({ card_id: 'preset-documents', applies_to: 'native.release_document', mode: 'auto', who: 'record_owner', reason: "Customers get their own documents after confirming it's them." }),
   rule({ card_id: 'preset-charge-ask', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Taking a payment asks you first.' }),
@@ -1676,7 +1677,7 @@ const presetViews: Record<string, { title: string; connector?: ConnectorView; ap
     title: 'Book a visit',
     connector: connectorViews.bookings,
     appliesTo: 'Book a visit',
-    words: [word('who', 'Anyone'), word('hours', 'Weekdays, 9:00 am to 5:00 pm'), word('review', 'Checked by the reviewer')],
+    words: [word('who', 'Anyone'), word('hours', 'Weekdays, 8:00 am to 6:00 pm'), word('review', 'Checked by the reviewer')],
   },
   'preset-documents': { title: 'Share a document', connector: connectorViews.documents, appliesTo: 'Share a document', words: [word('who', "The record's owner, verified")] },
   'preset-charge-ask': { title: 'Every tool that charges money', appliesTo: 'Every tool that charges money', words: [word('who', 'Anyone')] },
@@ -1752,12 +1753,11 @@ const sharedChargeReviewRow: ChangeRowView = {
 
 /**
  * Choosing "Recommended rules": the payment link, the signed-limit charge and Refund go to the
- * preset's rules for every tool that charges money or sends it out, which ask. The bookings and
- * See charges fall to the default ask, since no card of the preset covers their whole scope:
- * weekday bookings from 8:00 am to 6:00 pm reach outside its 9-to-5 rule, Saturdays and Dana's
- * any-time rule lie outside it, and nothing governs seeing charges. That weekday rule, which no
- * dropped rule goes to, is an added row. Quotes and documents have no row: the preset's rules for
- * them enforce what Rivera's already do.
+ * preset's rules for every tool that charges money or sends it out, which ask. Saturdays, Dana's
+ * any-time rule and See charges fall to the default ask, since no card of the preset covers their
+ * whole scope. Nothing is added. Quotes, weekday bookings and documents have no row: the preset's
+ * rules for them are Rivera's own in all but their ids, its weekday booking rule in her hours
+ * (8:00 am to 6:00 pm) and her words.
  */
 const recommendedReview = presetReview(presetSamples.auto);
 
@@ -1789,8 +1789,9 @@ const directory = {
 };
 
 const listChargesProfile = {
-  tool: 'payments.list_charges',
+  tool: 'payments.list_charges' as const,
   source: 'mcp',
+  business: null,
   effects: ['private_data'],
   reversible: true,
   adapter: 'payments_mcp.list_charges',
@@ -1805,8 +1806,9 @@ const listChargesProfile = {
 } satisfies ToolProfile;
 
 const createRefundProfile = {
-  tool: 'payments.create_refund',
+  tool: 'payments.create_refund' as const,
   source: 'mcp',
+  business: null,
   effects: ['pay_out', 'private_data'],
   reversible: false,
   adapter: 'payments_mcp.create_refund',
@@ -1947,6 +1949,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['How much is drain clearing?', 'Can someone come Tuesday?', 'Do you work in Alameda?'],
     agent_card: [],
   },
   es: {
@@ -1964,6 +1967,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['¿Cuánto cuesta destapar un desagüe?', '¿Puede venir alguien el martes?', '¿Trabajan en Alameda?'],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;
@@ -2027,7 +2031,10 @@ const demoAgentIssued = {
 
 // ---------------------------------------------------------------------------------------------
 
+const bookingReasonPlain = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
+
 export const rivera = {
+  bookingReasonPlain,
   business,
   people,
   blocks,

@@ -225,7 +225,7 @@ export function Composer({
       <div ref={rootRef} className="cd-composer cd-composer--failed">
         <Notice tone="error">{failed.line}</Notice>
         <div ref={failedBoxRef} role="group" aria-label={label} className="cd-composer__box cd-composer__box--failed">
-          <span className="cd-composer__kept cd-type-body" data-copy="user">
+          <span className="cd-composer__kept cd-type-body" data-copy="user" tabIndex={0} role="region" aria-label={label}>
             {failed.text}
           </span>
           {/* While the screen sends again (`disabled`), it waits: focus stays, and nothing is called. */}

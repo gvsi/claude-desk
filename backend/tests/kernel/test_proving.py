@@ -140,14 +140,16 @@ def test_shipped_reports_match_the_current_build():
     """A change to the seed or preset cards, the adapter profiles, the schema, baseline,
     invariants, compiler output or thresholds must regenerate the reports (`make proofs`) in the
     same commit: here every shipped report has to match what the kernel compiles today. The seed is
-    compiled over the native profiles and its pinned mock payments tools, the presets over the
-    native profiles alone (plan 01c)."""
+    compiled over the native profiles, its pinned mock payments tools (plan 01c) and its urgent
+    business tool pinned at its definition, the presets over the native profiles alone."""
     assert set(activation.SHIPPED_PRESETS) == {"rivera", "ask_first", "auto"}
     assert activation.SHIPPED_CAPS == {"rivera": 50_000, "ask_first": 0, "auto": 0}
     native = activation.shipped_profiles()
     assert {p.source for p in native} == {"native"} and activation.shipped_profiles("ask_first") == native
     assert [p.tool for p in activation.shipped_profiles("rivera") if p.source == "mcp"] == [
         "payments.create_refund", "payments.list_charges"]
+    assert [(p.tool, p.status) for p in activation.shipped_profiles("rivera") if p.source == "business"] == [
+        ("desk.emergency-callback", "enabled")]
     for preset, cards in activation.SHIPPED_PRESETS.items():
         profiles = activation.shipped_profiles(preset)
         schema, cap = compiler.desk_schema(profiles), activation.SHIPPED_CAPS[preset]

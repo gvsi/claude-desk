@@ -40,7 +40,7 @@ from `config.results` alone, and the inputs it names must be its commit's, read 
 never text, codes or ids beyond scenario ids and the names of waiver signers. It lists the gated map as [object id, path] pairs sorted by path
 (`gated_pairs`), never as an object, so CI's secret scan reads no path and object id as a secret.
 
-**`results-check --base <ref>`** (`make evals-results-check`), with no database, network or key:
+**`results-check --base <ref> [--history-since <rev>]`** (`make evals-results-check`), with no database, network or key:
 exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated path and leaves
 `recorded_rates.json`, `evals/waivers.json` and `evals/results/` alone (without renames, moving a gated file out lists its
 old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
@@ -70,6 +70,12 @@ gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
 The push-to-main check uses the root commit as its base, so it validates every historical results
 file still under `evals/results/` against today's schema. A results-file schema change must migrate
 or delete those old files; incompatible historical files fail closed.
+`--history-since <rev>` additionally checks rate, waiver and landed-plan histories against every
+first-parent commit in `<rev>..HEAD` that changes those files. Earlier rate and waiver histories must
+be prefixes of the head's, and every earlier landed plan must be kept. Unreadable files fail closed.
+CI supplies the repository's root commit on pushes and manual runs, so cancelled runs cannot hide a
+rewrite. A force-push to main fails CI because its replaced commits cannot be checked. Pull requests
+use only their normal results base.
 
 **Owner-signed AI-denial waivers.** Only `disclosure.denial` can be waived, for one pass, scenario,
 run and message with its exact text hash and transcript-derived hit count. The gate subtracts the
@@ -161,6 +167,7 @@ GATED_PATHS = (
     "backend/desk/kernel_api.py",           # the requests the kernel decides on and the answers it gives
     "backend/desk/contracts.py",            # the cards, decisions and labels the kernel checks and renders
     "backend/desk/rewrites.py",             # the violations a rewrite can fix: when a handoff opens
+    "backend/desk/next_steps.py",           # the fixed session capabilities exempted by the soft check
     "backend/desk/mockpay",                 # the payment server behind the kernel's money tools
     # The prompts.
     "backend/desk/api/prompts.py",          # every fixed string the Desk's model sees
@@ -856,10 +863,15 @@ def final_gate(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
 
 # The check CI runs
 
-def results_check(base: str, root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """`make evals-results-check BASE=<ref>`: (passed, the reason). See the module docstring for the order."""
+def results_check(base: str, root: Path = REPO_ROOT, *, history_since: str | None = None) -> tuple[bool, str]:
+    """Judge results against `base`, and with `history_since` hold the head's histories to every
+    first-parent commit since that revision."""
     try:
-        return True, _check(base, root)
+        reason = _check(base, root)
+        if history_since is not None:
+            _check_histories_since(history_since, root)
+            reason += f"; rate, waiver and landed-plan histories extend every first-parent commit since {history_since}"
+        return True, reason
     except CheckFailed as failure:
         return False, str(failure)
     except GitError as failure:
@@ -976,6 +988,27 @@ def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, roo
     if dropped := [plan for plan in base_landed if plan not in landed]:
         raise CheckFailed(f"landed.toml drops plans {base} lists: {', '.join(dropped)}")
     return before
+
+
+def _check_histories_since(since: str, root: Path) -> None:
+    """Every first-parent commit since `since` that changed a history file holds rate and waiver histories that
+    are prefixes of the head's, and landed plans the head keeps: the same checks a base gets, so a rewrite whose
+    own run was cancelled or ignored still fails every later run. A file that doesn't load fails closed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        head = _materialize(root, "HEAD", Path(tmp), only=(RATES_PATH, LANDED_PATH))
+        try:
+            rates = load_recorded_rates(head / RATES_PATH) if (head / RATES_PATH).exists() \
+                else RecordedRates(history=[])
+            landed = load_landed(head / LANDED_PATH) if (head / LANDED_PATH).exists() else ()
+        except ValueError as error:
+            raise CheckFailed(f"the head's rate or landed-plan history doesn't load: {error}") from None
+    commits = git(root, "rev-list", "--first-parent", f"{since}..HEAD", "--", RATES_PATH, WAIVERS_PATH, LANDED_PATH)
+    for commit in commits.split():
+        try:
+            _check_history(rates, landed, commit, root)
+        except ValueError as error:
+            raise CheckFailed(f"{commit}'s rate or landed-plan history doesn't load: {error}") from None
+        _check_waiver_history("HEAD", commit, root)
 
 
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:

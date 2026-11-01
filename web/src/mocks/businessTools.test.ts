@@ -11,7 +11,7 @@ const booking = {
   how: 'Books a free 20-minute intro call with Linda for a new client.',
   config: { block: 'typed_booking' as const, appointment_type: 'Free intro call', minutes: 20 },
 };
-const intake = {
+const intake: { title: string; how: string; config: Extract<BusinessToolDef['config'], { block: 'intake' }> } = {
   title: 'New client intake',
   how: 'Saves the answers for Linda.',
   config: { block: 'intake' as const, questions: ['Which tax years do you need help with?'] },
@@ -50,7 +50,7 @@ it('retains empty descriptions and zero-dollar payments with their fixed block p
   expect(rows[1]).toMatchObject({
     business: { description: '', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
     effects: ['charge'], reversible: false,
-    description_confirmed: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+    description_confirmed: "Creates a secure payment link for this purpose, for the amount the owner set.",
   });
 });
 
@@ -121,11 +121,11 @@ it('uses stable definition hashes and the fixed payment and urgent profiles', ()
   const rows = businessToolRows(jobs);
   expect(rows[2]).toMatchObject({
     effects: ['charge'], reversible: false,
-    description_confirmed: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+    description_confirmed: "Creates a secure payment link for this purpose, for the amount the owner set.",
   });
   expect(rows[3]).toMatchObject({
     effects: ['change'], reversible: true,
-    description_confirmed: 'Saves an urgent callback request and alerts the owner.',
+    description_confirmed: "Saves an urgent callback request and alerts the owner right away.",
   });
   for (const row of rows) expect(row.definition_sha256).toMatch(/^[a-f0-9]{64}$/);
   const hashes = (input: typeof jobs) => businessToolRows(input).map((row) => row.definition_sha256);

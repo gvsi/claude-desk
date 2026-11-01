@@ -299,6 +299,86 @@
   padding-bottom: var(--space-8);
 }
 
+.cd-public-shell__welcome {
+  padding: var(--space-8) 0 var(--space-16);
+}
+
+.cd-public-shell__greeting {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-public-shell__invitation {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-public-shell__starters {
+  margin: var(--space-12) 0 var(--space-16);
+}
+
+/* Preserve the composer's slot spacing when a story supplies a fragment with several children. */
+.cd-public-shell__composer-lift {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cd-public-shell:not(.cd-public-shell--first-view) .cd-public-shell__welcome,
+.cd-public-shell:not(.cd-public-shell--first-view) .cd-public-shell__starters {
+  position: absolute;
+  pointer-events: none;
+}
+
+.cd-public-shell--first-view .cd-public-shell__conversation {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+@container cd-public-shell (max-width: 899.98px) {
+  .cd-public-shell--first-view .cd-public-shell__body {
+    overflow-y: auto;
+  }
+
+  .cd-public-shell--first-view.cd-public-shell--short .cd-public-shell__body {
+    overflow: visible;
+  }
+
+  .cd-public-shell--first-view .cd-public-shell__chat {
+    min-height: min-content;
+  }
+
+  .cd-public-shell--first-view .cd-public-shell__chat-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-app);
+    box-shadow: 0 0 0 var(--cd-public-gutter) var(--bg-app);
+    clip-path: inset(0 calc(-1 * var(--cd-public-gutter)));
+  }
+
+  .cd-public-shell--first-view .cd-public-shell__scroll {
+    flex: none;
+    overflow: visible;
+  }
+
+  .cd-public-shell--first-view .cd-public-shell__composer {
+    padding-top: var(--space-16);
+  }
+
+  .cd-public-shell--first-view .cd-public-shell__chat > .cd-public-shell__about {
+    flex: none;
+    width: auto;
+    margin: 0 calc(-1 * var(--cd-public-gutter));
+    padding-right: var(--cd-public-gutter);
+    padding-left: var(--cd-public-gutter);
+    border-top: 1px solid var(--line-hairline);
+    border-left: 0;
+  }
+}
+
+
 .cd-public-shell__footer {
   flex: none;
   padding-bottom: var(--space-16);

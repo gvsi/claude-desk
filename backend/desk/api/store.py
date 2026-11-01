@@ -58,7 +58,7 @@ labels (`SUMMARY_LABELS`, `SHOWN_LABELS`).
 import hashlib
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
@@ -87,7 +87,7 @@ from desk.api.prompts import (
 )
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
-from desk.db.models import Message, RunEvent
+from desk.db.models import ActionUpdateMetadata, Message, RunEvent
 from desk.kernel_api import ContextClock
 
 MESSAGES = Message.__table__
@@ -202,7 +202,8 @@ NOT_REPLAYED = MESSAGES.c.replay_id.is_(None)   # every query that builds a mode
 SEND_REPLY = SEND_REPLY_TOOL["name"]
 # The notes whose state a fresh context's summary keeps, the latest of each group: the visitor verified, and the
 # owner's latest take-over, hand-back or resume.
-STATE_NOTES = ((NOTES["verified"],), (NOTES["taken_over"], NOTES["handed_back"], NOTES["resumed"]))
+VERIFIED_NOTES = (NOTES["verified"], "The visitor verified as the contact on record.")
+STATE_NOTES = (VERIFIED_NOTES, (NOTES["taken_over"], NOTES["handed_back"], NOTES["resumed"]))
 
 
 def lock_key(name: str) -> int:
@@ -229,10 +230,11 @@ def _text_block(text: str) -> dict:
     return {"type": "text", "text": text}
 
 
-def _frozen_block(kind: str, values: dict[str, Any], state: str | None) -> dict | None:
+def _frozen_block(kind: str, values: dict[str, Any], state: str | None,
+                  result_fact_ids: Sequence[str] = ()) -> dict | None:
     """The block the model will see for a new row, or None when the model never sees it."""
     if kind == "action_update":
-        return _text_block(wrap_action_update(values["text"], values["ref_id"], state))
+        return _text_block(wrap_action_update(values["text"], values["ref_id"], state, result_fact_ids))
     if kind == "delivered":
         return _text_block(wrap(ROW_TAGS[kind], blocks_text(values["blocks"]))) if values["author"] == "desk" else None
     return _text_block(wrap(ROW_TAGS[kind], values["text"])) if kind in ROW_TAGS else None
@@ -249,10 +251,13 @@ async def _insert(conn: AsyncConnection, ids: Ids, **values: Any) -> int:
 
 
 async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: str | None = None,
+                         result_fact_ids: Sequence[str] = (),
                          replayed: Replayed | None = None, **columns: Any) -> int:
     """Append a transcript row and return its `n`, under the session's events lock (module docstring). A row the
     model will see is written with its frozen block and waits for the next model call. `state` (the decision's) is
-    required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. A `replayed` row
+    required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. Its optional
+    `result_fact_ids` and state are stored in `blocks` for the code-built summary, independently of the frozen
+    block. A `replayed` row
     (a visitor's, an agent's, a delivered one or a status) is recorded history: written at its moment with its
     `replay_id`, with no frozen block and no `wake`. Context, tool-change and model rows, which no reader polls,
     have their own functions."""
@@ -271,6 +276,8 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         raise ValueError(f"a {kind} row has text")
     if kind == "action_update" and not (values["ref_id"] and state):
         raise ValueError("an action_update names its decision (ref_id) and state")
+    if kind == "action_update":
+        values["blocks"] = ActionUpdateMetadata(state=state, result_fact_ids=list(result_fact_ids))
     if kind == "annotation" and not values["ref_id"]:
         raise ValueError("an annotation names the row it annotates (ref_id, its message_id)")
     if kind in PRESENCE_KINDS and not values.get("event_seq"):
@@ -286,7 +293,7 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         return await _insert(conn, ids, kind=kind, visibility=spec.visibility, model_content=None,
                              created_at=replayed.at, replay_id=replayed.replay_id, **values)
     return await _insert(conn, ids, kind=kind, visibility=spec.visibility,
-                         model_content=_frozen_block(kind, values, state), **values)
+                         model_content=_frozen_block(kind, values, state, result_fact_ids), **values)
 
 
 TRANSLATED_KINDS = ("visitor_text", "agent_text", "delivered")
@@ -319,6 +326,23 @@ async def triaged(conn: AsyncConnection, copy_id: str, **where: str) -> dict[str
     for ref_id, text in rows:
         if (triage := _read_triage(text)) is not None:
             found[ref_id] = triage
+    return found
+
+
+async def newest_triage(conn: AsyncConnection, copy_id: str, desk_id: str,
+                        session_ids: Iterable[str]) -> dict[str, Triage]:
+    """Each of the Desk's given sessions' newest triage row that reads back as its `Triage`, by `session_id`; a
+    session with none is left out."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    rows = await conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "triage",
+        MESSAGES.c.session_id.in_(wanted)).order_by(MESSAGES.c.n))
+    found = {}
+    for session_id, text in rows:
+        if (triage := _read_triage(text)) is not None:
+            found[session_id] = triage
     return found
 
 
@@ -401,7 +425,7 @@ async def append_note_once(conn: AsyncConnection, ids: Ids, text: str, *, wake: 
     await lock_events(conn, ids.session_id)
     noted = (await conn.execute(select(MESSAGES.c.n).where(
         MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "note",
-        MESSAGES.c.text == text).limit(1))).first()
+        MESSAGES.c.text.in_(VERIFIED_NOTES if text in VERIFIED_NOTES else (text,))).limit(1))).first()
     if noted is not None:
         return None
     return await append_message(conn, ids, "note", text=text, wake=wake)
@@ -514,8 +538,10 @@ async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResult
 
 async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:
     """What Claude's `send_reply` call `call_id` put on the visitor's screen: its `delivered` row's kernel message ID
-    (`ref_id`) and `blocks`, or None when nothing was shown for that call."""
-    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks).where(
+    (`ref_id`), its `blocks` and its event's `handoff` flag, or None when nothing was shown for that call."""
+    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks,
+                                     RUN_EVENTS.c.payload["handoff"].as_boolean().label("handoff"))
+        .select_from(WITH_EVENTS).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered", MESSAGES.c.call_id == call_id)
         .order_by(MESSAGES.c.n).limit(1))).first()
 
@@ -529,6 +555,13 @@ def _summary_line(row: Any) -> str:
     """A summary line for a row, labelled as prompts.py says: a delivered row by its author, any other by its kind."""
     if row.kind == "delivered":
         return summary_line(SHOWN_LABELS[row.author], blocks_text(row.blocks or []))
+    if row.kind == "action_update":
+        # Older rows have no structured metadata; retain their decision and text without parsing frozen text.
+        metadata = f'decision_id={json.dumps(row.ref_id, ensure_ascii=False)} '
+        if row.blocks is not None:
+            metadata += (f'state={json.dumps(row.blocks.state)} '
+                         f'result_fact_ids={json.dumps(" ".join(row.blocks.result_fact_ids), ensure_ascii=False)} ')
+        return summary_line(SUMMARY_LABELS[row.kind], metadata + (row.text or ""))
     return summary_line(SUMMARY_LABELS[row.kind], row.text or "")
 
 
@@ -562,7 +595,7 @@ async def _summary(conn: AsyncConnection, session_id: str, unread: UnreadResults
     closing, and Claude must not lose what its calls did. Rows still waiting for the model are left out; they follow
     it in full. Recorded history is never in it."""
     rows = await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
-                                     MESSAGES.c.blocks).where(
+                                     MESSAGES.c.blocks, MESSAGES.c.ref_id, MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id,
         MESSAGES.c.kind.in_(("visitor_text", "agent_text", "delivered", "action_update")),
         ~and_(MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None)), NOT_REPLAYED,

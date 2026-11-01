@@ -9,6 +9,7 @@ import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
 import { Pill } from '../Pill/Pill.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
+import { TextLink } from '../TextLink/TextLink.tsx';
 import { CHECKOUT_COPY, TEST_CARD, type FinalPaymentState } from './checkoutCopy.ts';
 
 import './MockCheckout.css';
@@ -20,6 +21,9 @@ const FINAL_DOT = {
   cancelled: 'info',
   unknown: 'held',
 } as const satisfies Record<FinalPaymentState, StatusTone>;
+
+/** A public chat's own path, `/d/` and a Desk's slug: the one place the paid line links to. */
+const CHAT_PATH = /^\/d\/[a-z0-9-]+$/;
 
 /** True for the states with a line of their own: every known state but `issued`. */
 function isFinal(state: string): state is FinalPaymentState {
@@ -61,6 +65,12 @@ export interface MockCheckoutProps {
    * what is typed there stays in it and never leaves the page.
    */
   customerName?: string;
+  /**
+   * The visitor's chat, as its own path (`/d/rivera-plumbing`), when the page knows it. Once paid,
+   * the line's "Go back to the chat" links there, in the same tab. Anything but a public chat's
+   * path is ignored, and the line keeps its words with no link.
+   */
+  chatHref?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
   busy?: boolean;
   /** The last request to pay or cancel failed: shows a line that says to reload. */
@@ -84,6 +94,7 @@ export function MockCheckout({
   cancelReason,
   language,
   customerName,
+  chatHref,
   busy = false,
   error = false,
   onPay,
@@ -134,7 +145,22 @@ export function MockCheckout({
   const final: FinalPaymentState = isFinal(state) ? state : 'unknown';
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
-  const finalLine = final === 'cancelled' && cancelReason === 'rules_changed' ? copy.cancelledRulesChanged : copy.final[final];
+  // Paid, with the visitor's chat known: the same words, with the way back a link in the sentence.
+  const back = final === 'paid' && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
+  const finalLine =
+    back !== null ? (
+      <span>
+        {copy.paid.before}
+        <TextLink href={back} runningText>
+          {copy.paid.back}
+        </TextLink>
+        {copy.paid.after}
+      </span>
+    ) : final === 'cancelled' && cancelReason === 'rules_changed' ? (
+      copy.cancelledRulesChanged
+    ) : (
+      copy.final[final]
+    );
 
   // Whether focus is in the checkout, kept from its own focus events. Focus that leaves for
   // another element is out, and so is focus that leaves for nothing while the element it left stays

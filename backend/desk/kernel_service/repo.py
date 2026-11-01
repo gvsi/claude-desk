@@ -6,13 +6,19 @@ until a copy is bound (`ctx.bind(copy_id)`), and row-level security then admits 
 rows. A route takes it as `ctx: Ctx`: the transaction commits after the route returns and before
 the answer is sent, so a failed commit answers 500, and it rolls back on any exception.
 
+An agent request first holds its turn's nonce row `FOR UPDATE` (`agents.verify_call`), across
+the soft check's one try and through the reply transaction. No path that holds a row below asks
+for a nonce row. Each reply check also holds one pooled connection across the try. With
+`seen=False` it holds no session-row lock across the model call.
+
 Row locks are taken in one order, so no two kernel transactions wait on each other:
 
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
    route, in T2 by the execution of an adapter that writes the session's own rows
-   (`locks_session`: a verification start, and a call-back request, which keeps one open handoff
-   per session) on either path, and by the owner's writes that close
+   (`locks_session`: a verification start, a call-back request, which keeps one open handoff
+   per session, a purpose payment, which keeps one open link per tool in a session, and a booking,
+   which closes the session's card handoffs) on either path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
    Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
    nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
@@ -20,8 +26,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
    own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
    its ledger entry, so it holds no lock on the row while the soft-promise check runs, and taken
-   there `FOR NO KEY UPDATE` too when its verdict shows the handoff card
-   (`reply_check.open_card_handoff`) or passed on an open handoff's card
+   there `FOR NO KEY UPDATE` too when its verdict rechecks cards (`reply_check.recheck_cards`),
+   shows the handoff card (`reply_check.open_card_handoff`) or passed on an open handoff's card
    (`reply_check.handoff_still_open`), before it looks for the session's open handoffs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
@@ -42,22 +48,35 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
    `POST /knowledge` upserts;
 10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
-    books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
+    books, which its T2 takes `FOR SHARE`, then the session's open card handoffs it closes, `FOR
+    UPDATE`; a handoff; Plan 01c's mandates), after whatever of steps
     4 to 9 the same transaction takes; and the handoffs of a session whose reply shows the
-    handoff card or passed on an open one's card: its open ones `FOR SHARE`, then, for a reply
-    that shows the card, the card's, inserted when none is open;
+    handoff card, passed on an open one's card, or rechecks fact-backed cards: its open ones
+    `FOR SHARE` before facts, including when losing the last checked card could require a handoff;
+    then, for a reply that shows the card, the card's, inserted when none is open (a fresh key
+    waits for nothing, so this insertion may follow the fact recheck);
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
     a handoff expires its own, an hours write rewrites the Desk's, an execution or reconciliation
     that withholds a result narrows the ones it names (`execute._narrow_to_owner`), after the
-    adapter's hook wrote them;
+    adapter's hook wrote them; a reply check's cited fact rows `FOR SHARE` in fact ID order,
+    refreshed after the session and handoff locks and held through signing and commit, so a
+    withdrawal that needs no session lock (including payment-link cancellation) commits before
+    the refresh or waits for the verdict;
 12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
-    reads it `FOR SHARE`).
+    reads it `FOR SHARE`). A reply's card recheck takes this lock after facts, before checking
+    expiry, so currency uses the time after every lock wait. A subsequent handoff fallback
+    reuses the already-held session and open-handoff locks and inserts only fresh keys.
 
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
 any of these, and a write to the business its row after the Desk's. The calendar write then takes
 the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
-of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
+of a slot it drops or moves either commits first or waits for it. The kernel's daily calendar
+refresh holds the Desk row the same way, one Desk to a transaction (`desks.extend_calendar`), then
+only reads the Desk's slots and inserts new ones under fresh keys before it takes the ledger head:
+every write that changes or deletes a slot holds the Desk row first, so a booking holding its slot
+`FOR SHARE` and the refresh never wait on each other for a slot; like any two writes to one Desk,
+they take turns only at its ledger head. Closing a handoff holds a Desk row too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.
@@ -89,6 +108,17 @@ after it commits, never during it. So a take-over that arrives while the reviewe
 the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`, 4 s), then
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
+
+A reply check's soft call is one try of at most 6 s (`decisions.SOFT_PROMISE_TIMEOUT_S`), with no
+recheck and no fallback (the owner's decision of 2026-10-31 replaced an earlier unchanged-input
+recheck), inside the API's 10 s for `/check_reply`. This is the model budget, not an end-to-end
+deadline. Finalize can then wait on its session write behind T1's re-list and normalize (about
+3 s), a queued decision's normalize and review (about 5 s), and a provider completion (about
+2 s), as below: about 16 s including its own model budget, plus queries, ledger contention and
+commit. Arbitrary lock contention has no finite overall bound. Past the API's 10 s the API shows
+`kernel_unavailable`; the kernel may still commit the verdict and open the owner's handoff. The
+generation fence is unchanged: `open_card_handoff` re-reads the generation under lock and
+`deliver()` drops stale verdicts. This fails closed.
 
 A payment link's completion holds the same row `FOR SHARE` across its provider call (C2,
 `payments._pay`, Plan 01c), so a decision and a completion on one session take turns: each takes
@@ -310,14 +340,16 @@ Persist = Callable[[KernelCtx], Awaitable[object]]
 
 
 class KernelFailure(Exception):
-    """A refusal answered with `status` and `KernelError{code}`.
+    """A refusal answered with `status` and `KernelError{code, detail?}`.
 
     `reason` is internal, for the kernel's log (never a token or contact). `persist`, when given,
     runs in a fresh transaction after the request's transaction has rolled back and before the
     answer; if it fails, the answer is 500 `internal` instead, since the attempt went unrecorded.
+    `detail`, when given, names refused public-policy keys and rule IDs, never their values.
     """
 
-    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None):
+    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None, *,
+                 detail: dict[str, list[str]] | None = None):
         if code not in ERROR_CODES:
             raise ValueError(f"{code!r} is not a KernelError code")
         if not 400 <= status <= 599:
@@ -327,6 +359,14 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+        self.detail = detail
+
+
+async def limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
+    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
+    owner's write holds makes background work (the rebuild, the calendar pass) try that Desk again
+    later rather than stall the others."""
+    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
 
 
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:

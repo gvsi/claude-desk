@@ -37,6 +37,14 @@
   overflow-wrap: anywhere;
 }
 
+/* The note: a quieter line under the subtitle, 8 px further down, at a reading measure. */
+.cd-page-header__note {
+  max-width: 68ch;
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .cd-page-header__actions {
   display: flex;
   flex: none;
@@ -59,7 +67,8 @@
     display: contents;
   }
 
-  .cd-page-header__subtitle {
+  .cd-page-header__subtitle,
+  .cd-page-header__note {
     grid-column: 1 / -1;
   }
 

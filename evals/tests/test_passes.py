@@ -154,48 +154,48 @@ def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None,
 
 async def test_the_kernels_soft_promise_spend_alone_stops_a_pass_at_its_budget(repo):
     """Each run is the real runner on the stand-in Desk, priced at list prices, and its checked reply's
-    soft-promise call on Haiku is nested in its `reply` ledger entry as the kernel writes it. That spend
+    soft-promise call on Sonnet is nested in its `reply` ledger entry as the kernel writes it. That spend
     takes the pass to --max-usd and no new run starts, as any other spend does; the same runs without
     the call spend a fraction of the cap and all four run."""
     from evals.pricing import cost_usd
-    from evals.tests.test_usage_and_latency import HAIKU, call_usage
+    from evals.tests.test_usage_and_latency import SONNET, call_usage
     from evals.tier2.passes import priced_spend
 
-    soft = call_usage(HAIKU, input_tokens=4_000_000, cached=0, output=1_000_000)   # outsized: $0.90 a check
+    soft = call_usage(SONNET, input_tokens=200_000, cached=0, output=50_000)   # outsized: $0.90 a check
     result = await run_pass(config(runs=2, max_usd=1.6, split="heldout"),
                             deps(repo, stand_in_runs(soft), cost=priced_spend))
     assert [row.status for row in result.runs] == ["scored", "scored"] and result.estimated_spend == []
-    assert result.stopped_by_budget and result.served_models["kernel_checks"] == [HAIKU]
-    haiku = 2 * cost_usd(soft, HAIKU, "anthropic")
-    assert result.spend.total_usd >= 1.6 > result.spend.total_usd - haiku   # the checks took it past the cap
+    assert result.stopped_by_budget and result.served_models["kernel_checks"] == [SONNET]
+    checks = 2 * cost_usd(soft, SONNET, "anthropic")
+    assert result.spend.total_usd >= 1.6 > result.spend.total_usd - checks   # the checks took it past the cap
     unchecked = await run_pass(config(runs=2, max_usd=1.6, split="heldout"),
                                deps(repo, stand_in_runs(None), cost=priced_spend, spend_file=repo / "other-spend.csv"))
     assert not unchecked.stopped_by_budget and len(unchecked.runs) == 4 and unchecked.spend.total_usd < 0.1
 
 
 async def test_a_run_whose_usage_cant_all_be_read_is_charged_what_it_read_and_the_estimate(repo):
-    """A run whose reply check spent $0.90 on Haiku and whose next `reply` entry can't be read fails as
+    """A run whose reply check spent $0.90 on Sonnet and whose next `reply` entry can't be read fails as
     `infra`. It is charged everything it read plus a run's estimate for what it couldn't, never less, keeps
     the models it read, and the estimated part is listed and marked. That figure crosses --max-usd, where
     the $0.90 alone wouldn't, so the run isn't retried and no new run starts."""
     from evals.pricing import cost_usd
-    from evals.tests.test_usage_and_latency import HAIKU, call_usage
+    from evals.tests.test_usage_and_latency import SONNET, call_usage
     from evals.tier2.passes import priced_spend
 
-    soft = call_usage(HAIKU, input_tokens=4_000_000, cached=0, output=1_000_000)   # $0.90
+    soft = call_usage(SONNET, input_tokens=200_000, cached=0, output=50_000)   # $0.90
     attempts: list[str] = []
     result = await run_pass(config(runs=1, max_usd=1.2, split="heldout"),   # two runs, estimated at $0.80
                             deps(repo, stand_in_runs(soft, {**soft, "output_tokens": None}, attempts=attempts),
                                  cost=priced_spend))
     assert attempts == ["atk-held"] and result.stopped_by_budget   # neither retried nor followed
     assert [row.status for row in result.runs] == ["incomplete"] and result.errors == 1
-    measured = cost_usd(soft, HAIKU, "anthropic")
+    measured = cost_usd(soft, SONNET, "anthropic")
     assert result.spend.total_usd >= measured + 0.40 > 1.2 > measured
     assert result.spend.estimated_usd == pytest.approx(0.40)
     [estimated] = result.estimated_spend
     assert (estimated.scenario_id, estimated.attempt, estimated.usd) == ("atk-held", 1, pytest.approx(0.40))
     assert "couldn't be read" in estimated.reason and "output_tokens" in estimated.reason
-    assert result.served_models["kernel_checks"] == [HAIKU]
+    assert result.served_models["kernel_checks"] == [SONNET]
     row = spend_row(repo)
     assert row["runs"] == "1" and float(row["total_usd"]) == pytest.approx(result.spend.total_usd, abs=1e-4)
     assert float(row["estimated_usd"]) == pytest.approx(0.40)   # the row is written to four decimals
@@ -684,7 +684,7 @@ async def test_pass_without_prices_for_its_provider_refuses(repo):
     with pytest.raises(PassRefused, match="no list prices for anthropic claude-haiku-5-5"):
         await run_pass(config(), deps(repo, run_one, prices={}))
     # A Bedrock pass still needs the Claude API's prices for the kernel's checks.
-    with pytest.raises(PassRefused, match="anthropic claude-haiku-5-5, anthropic claude-sonnet-5-5"):
+    with pytest.raises(PassRefused, match="no list prices for anthropic claude-sonnet-5-5 in evals.pricing.PRICES"):
         await run_pass(config(provider="bedrock"), deps(repo, run_one, prices={"bedrock": ALL_MODELS}))
     assert run_one.calls == []
     dry = await run_pass(config(dry_run=True, max_usd=0), deps(repo, run_one, prices={}, keys={}))

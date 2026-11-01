@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ConversationSummary } from '../../api/views.ts';
-import { conversationStatus, whoLabel } from './status.ts';
+import { attentionStatus, conversationStatus, whoLabel } from './status.ts';
 
 function summary(fields: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
@@ -20,6 +20,20 @@ function summary(fields: Partial<ConversationSummary> = {}): ConversationSummary
     ...fields,
   };
 }
+
+describe('attentionStatus', () => {
+  it('is_the_table_rows_that_ask_for_the_owner', () => {
+    // The table's first four rows, in its order; what someone is never asks for the owner.
+    const chat = summary({ display_name: 'Dana Whitfield' });
+    expect(attentionStatus(chat, 1, true)).toEqual({ tone: 'held', text: 'Needs you' });
+    expect(attentionStatus({ ...chat, mode: 'paused' }, 0, true)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
+    expect(attentionStatus(chat, 0, true)).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(attentionStatus({ ...chat, mode: 'owner' }, 0)).toEqual({ tone: 'info', text: "You're in this chat" });
+    for (const fields of [{}, { owner_preview: true }, { kind: 'agent' }, { verified: true }] as const) {
+      expect(attentionStatus({ ...chat, ...fields }, 0)).toBeNull();
+    }
+  });
+});
 
 describe('conversationStatus', () => {
   it('open_handoff_follows_held_requests_and_paused_chats', () => {

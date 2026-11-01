@@ -1,5 +1,6 @@
 import type { RuleCard } from '../../../api/contracts.ts';
 import { Icon } from '../../icons/index.tsx';
+import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
 import { OutcomeMenu } from '../OutcomeMenu/OutcomeMenu.tsx';
 import type { RuleMode } from '../OutcomeMenu/outcomeWords.ts';
 
@@ -28,6 +29,8 @@ export interface RuleRowProps {
   shared?: { appliesTo: string };
   /** Makes the outcome a menu; the pick goes to the screen, which shows the drafted change first. */
   onChangeOutcome?: (mode: RuleMode) => void;
+  /** Where a confirmed change landed: its reason and words cross-fade to the new ones as they change. */
+  fade?: boolean;
 }
 
 /** What a card enforces as one line: its words, blank ones left out, joined by " · ". */
@@ -42,14 +45,20 @@ export function ruleWordsLine(words: readonly RuleWord[]): string {
  * One rule: its reason, the words for what it enforces, a line for a shared rule, and its outcome
  * at the right, or on its own line under them when the row is under 640 px wide.
  */
-export function RuleRow({ rule, words, limit, shared, onChangeOutcome }: RuleRowProps) {
+export function RuleRow({ rule, words, limit, shared, onChangeOutcome, fade = false }: RuleRowProps) {
   const line = ruleWordsLine(words);
   return (
     <div className="cd-rule-row">
       <div className="cd-rule-row__layout">
         <div className="cd-rule-row__text">
-          <p className="cd-rule-row__reason cd-type-body">{rule.reason}</p>
-          {line !== '' ? <p className="cd-rule-row__words cd-type-meta">{line}</p> : null}
+          <p className="cd-rule-row__reason cd-type-body">
+            <CrossFade text={rule.reason} fade={fade} />
+          </p>
+          {line !== '' ? (
+            <p className="cd-rule-row__words cd-type-meta">
+              <CrossFade text={line} fade={fade} />
+            </p>
+          ) : null}
           {shared ? (
             <p className="cd-rule-row__shared cd-type-caption">
               <Icon name="shared" size={14} />

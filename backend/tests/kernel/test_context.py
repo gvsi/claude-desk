@@ -20,6 +20,7 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import SessionContext
 from desk.kernel_service import adapters, auth, context, decide, labels
+from desk.kernel_service.adapters import blocks
 from desk.kernel_service.decide import TOOL_NAMES
 from desk.kernel_service.sessions import principal_for
 
@@ -104,11 +105,13 @@ STANDING_FAKES = {
 
 
 async def test_tools_follow_the_session_kind(app, client, registry):
-    # a stranger on Rivera Plumbing gets every native tool a stranger is given, all declared
+    # a stranger on Rivera Plumbing gets every native tool a stranger is given, and the seed's urgent
+    # tool beside the native callback, all declared
     copy, stranger = await visitor_of(app, client)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-                                 "native.quote", "native.request_callback", "native.start_verification"]
+    assert tools(seen.tools) == ["desk.emergency-callback", "native.book", "native.capture_lead", "native.find_slots",
+                                 "native.payment_link", "native.quote", "native.request_callback",
+                                 "native.start_verification"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
     declared = {profile.tool: profile for profile in seen.tools_declared}
     assert all(declared[profile.tool] == profile for profile in seen.tools)
@@ -117,9 +120,9 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     [dana] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "dana"))
     await verify_session(app, copy.copy_id, stranger.session_id, dana.person_id)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-                                 "native.quote", "native.release_document", "native.request_callback",
-                                 "payments.create_refund", "payments.list_charges"]
+    assert tools(seen.tools) == ["desk.emergency-callback", "native.book", "native.capture_lead", "native.find_slots",
+                                 "native.payment_link", "native.quote", "native.release_document",
+                                 "native.request_callback", "payments.create_refund", "payments.list_charges"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
     # a new Desk in the same copy connects nothing, so even a verified customer there gets neither
     response = await client.post("/desks", headers=copy.owner, json={
@@ -221,10 +224,15 @@ async def test_tools_carry_strict_input_schemas_and_confirmed_descriptions(app, 
     confirmed = {row.tool: row.description_confirmed for row in await rows_of(app, copy.copy_id, select(Tool))}
     assert seen.tools
     for profile in seen.tools:
-        adapter = adapters.ADAPTERS[profile.tool]
-        assert profile.input_schema == adapter.Args.model_json_schema(), profile.tool   # the schema the kernel enforces
+        if profile.source == "business":       # the seed's urgent tool: its block's arguments, its own words quoted
+            args = blocks.BLOCK_ARGS[profile.business.config.block]
+            description = blocks.profile(profile.tool, profile.business).description_confirmed
+        else:
+            adapter = adapters.ADAPTERS[profile.tool]
+            args, description = adapter.Args, adapter.profile.description_confirmed
+        assert profile.input_schema == args.model_json_schema(), profile.tool   # the schema the kernel enforces
         assert all(schema.get("additionalProperties") is False for schema in objects(profile.input_schema))
-        assert profile.description_confirmed == confirmed[profile.tool] == adapter.profile.description_confirmed
+        assert profile.description_confirmed == confirmed[profile.tool] == description
 
     # a connected tool whose definition changed waits for the owner: declared at its status, with
     # the description the owner confirmed and none of the changed definition's text
@@ -472,7 +480,8 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
 
 # The Rivera seed's price list as the catalog names it: each item's ID and title, in ID order.
 RIVERA_CATALOG = [("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
-                  ("leak", "Leak repair")]
+                  ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"),
+                  ("short-notice", "Short-notice fee")]
 
 
 def catalog_of(seen: SessionContext) -> Fact:

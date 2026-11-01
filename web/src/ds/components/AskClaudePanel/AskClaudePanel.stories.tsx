@@ -5,6 +5,7 @@ import { expect, fn, within } from 'storybook/test';
 import { chen, proseBlock } from '../../fixtures';
 import { AppShell } from '../AppShell/AppShell.tsx';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { settled } from '../../test/settled.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { AskClaudePanel } from './AskClaudePanel.tsx';
@@ -264,5 +265,8 @@ export const BesideAt1024: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     await expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
     await expect(lineCount(canvas.getByRole('heading', { level: 1, name: 'Rules' }))).toBe(1);
+    // The story ends with the panel open, and the accessibility check runs next: let the panel finish
+    // arriving, so it measures the text's own colors rather than a frame of the fade.
+    await settled(canvasElement);
   },
 };

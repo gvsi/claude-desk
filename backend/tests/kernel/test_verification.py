@@ -326,7 +326,7 @@ async def test_sixth_challenge_in_an_hour_is_refused(app, client, frozen_clock):
         prefs = (await ctx.db.scalars(repo.scoped(select(NotificationPref)))).one()
         prefs.now = [kind for kind in prefs.now if kind != "lockout"]
     assert api_rows(copy.copy_id, "SELECT now FROM kernel_ro.notification_prefs") == [
-        (["approval", "emergency", "breaker", "handoff"],)]
+        (["approval", "callback", "breaker", "handoff"],)]
     visitor = await open_visitor(client, copy)
     for _ in range(5):
         await started(client, visitor, DANA_PHONE)

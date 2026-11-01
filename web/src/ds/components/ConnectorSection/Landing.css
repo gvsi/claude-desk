@@ -1,0 +1,57 @@
+/* Where a confirmed change landed: a fill behind the row or card that lights up in the selected
+   fill on motion-fast, holds 1.6 s (eight motion-base beats), then lets go on motion-base; and
+   "Updated", which grows from 95% as it fades in on motion-base. Under reduced motion both are at
+   their end state at once: "Updated", and no fill. The parent places the fill. */
+
+.cd-landed-glow {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  animation:
+    cd-landed-light var(--motion-fast) var(--motion-ease) forwards,
+    cd-landed-let-go var(--motion-base) var(--motion-ease) calc(var(--motion-fast) + var(--motion-base) * 8) forwards;
+}
+
+@keyframes cd-landed-light {
+  from {
+    background-color: transparent;
+  }
+
+  to {
+    background-color: var(--bg-selected);
+  }
+}
+
+@keyframes cd-landed-let-go {
+  from {
+    background-color: var(--bg-selected);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+.cd-landed-updated {
+  display: inline-flex;
+  flex: none;
+  animation: cd-landed-updated var(--motion-base) var(--motion-ease-emphasis) backwards;
+}
+
+@keyframes cd-landed-updated {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-landed-glow {
+    display: none;
+  }
+
+  .cd-landed-updated {
+    animation: none;
+  }
+}

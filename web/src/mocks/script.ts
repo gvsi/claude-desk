@@ -29,13 +29,14 @@ import {
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
+import { afterName } from '../lib/names.ts';
 
 export type Language = 'en' | 'es';
 
 /** How far apart a turn's events arrive. */
 export const EVENT_GAP_MS = 150;
 
-const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola'] as const;
+const SPANISH_MARKERS = ['¿', 'cuánto', 'descuento', 'reservar', 'hablar', 'factura', 'pagar', 'llámame', 'hola', 'tarjetas'] as const;
 
 /** A turn is in Spanish when the visitor's text has one of the markers, else in English. */
 export function turnLanguage(text: string): Language {
@@ -44,50 +45,119 @@ export function turnLanguage(text: string): Language {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Visitor-facing text: the kernel's templates and the fixture cards, by language
+// Whom the visitor's lines name: the Desk's own owner
 
 /**
- * The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them (a
- * store test holds each one to the fixtures). An executed action has no line here: it carries its
- * tool's own line, the design system's `executedLine`.
+ * Whom a Desk's visitor lines name (`MockWorld.ownerOf`), as the kernel renders them from the
+ * Desk's `owner_display_name`: the owner's display name, or null when they gave none and the Desk
+ * carries setup's fallback, "Owner", which is no one's name; and the business's name, as its
+ * public page shows it, which a verification code's message names and `NO_NAME_OWNER` may name in
+ * that owner's place.
  */
-export const VISITOR_PLAIN = {
+export interface DeskOwner {
+  readonly name: string | null;
+  readonly business: string;
+}
+
+/** Maria Rivera, whom Rivera Plumbing's seeded Desks name, in the fixtures' signed words. */
+export const RIVERA_OWNER: DeskOwner = { name: rivera.business.ownerName, business: rivera.business.name };
+
+/**
+ * How the visitor's lines name an owner who gave no name: "the business owner" ("el dueño del
+ * negocio"), the words the public page already uses for them ("The business owner is in this
+ * chat."). Proposed here for the project owner's sign-off. Should he decline, set this to `null`:
+ * the lines then name the business instead, as the handoff card did before.
+ */
+export const NO_NAME_OWNER: Record<Language, string> | null = { en: 'the business owner', es: 'el dueño del negocio' };
+
+/** How a line in `language` names the Desk's owner within a sentence: by display name, else `NO_NAME_OWNER`. */
+function ownerIn(language: Language, owner: DeskOwner): string {
+  return owner.name ?? NO_NAME_OWNER?.[language] ?? owner.business;
+}
+
+/**
+ * `template` naming the owner as `who`, as the kernel's templates do: `{owner}` within a sentence
+ * and `{Owner}` starting one. A sentence that ends on the owner gets one stop, never a second
+ * after a name that ends in one ("Bob Smith Jr."). Spanish joins "de" and "a" with an "el" that
+ * follows ("del dueño del negocio"); a name's own "El" keeps its capital, so it is never joined.
+ */
+function naming(template: string, who: string, language: Language): string {
+  const line = template.replace(/\{(owner|Owner)\}(\.?)/g, (_, form: string, stop: string) =>
+    `${form === 'Owner' ? who.charAt(0).toUpperCase() + who.slice(1) : who}${afterName(who, stop)}`,
+  );
+  return language === 'es' ? line.replace(/(?<!\p{L})(de|a) el(?!\p{L})/gu, '$1l') : line;
+}
+
+/** `template` naming the Desk's owner (`owner`) as a line in `language` does (`ownerIn`). */
+function withOwner(template: string, language: Language, owner: DeskOwner): string {
+  return naming(template, ownerIn(language, owner), language);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Visitor-facing text: the kernel's templates and the fixture cards, by language
+
+/** A visitor status line: each decision state's but `executed`, the mandate refusal's, a reply's and the owner's words'. */
+export type VisitorLine = Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said';
+
+/**
+ * The kernel's visitor status lines (its render/en.py and es.py), `{owner}` naming the Desk's
+ * owner. An executed action has no line here: it carries its tool's own line, the design system's
+ * `executedLine`.
+ */
+const VISITOR_TEMPLATES = {
   en: {
-    allowed: "Checked against Maria Rivera's rules",
-    held: 'Waiting for Maria Rivera to approve',
+    allowed: "Checked against {owner}'s rules",
+    held: 'Waiting for {owner} to approve',
     refused: 'Not something I can do here',
     refused_over_mandate: 'Refused: over the signed limit for this agent',
-    approved: 'Maria Rivera approved this',
-    denied: 'Maria Rivera decided not to go ahead',
+    approved: '{Owner} approved this',
+    denied: '{Owner} decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
-    reply_checked: "Reply checked against Maria Rivera's rules",
-    reply_handed_off: 'Passed to Maria Rivera to answer',
-    owner_said: 'Written by Maria Rivera',
+    reply_checked: "Reply checked against {owner}'s rules",
+    reply_handed_off: 'Passed to {owner} to answer',
+    owner_said: 'Written by {owner}',
   },
   es: {
-    allowed: 'Revisado con las reglas de Maria Rivera',
-    held: 'Esperando la aprobación de Maria Rivera',
+    allowed: 'Revisado con las reglas de {owner}',
+    held: 'Esperando la aprobación de {owner}',
     refused: 'No es algo que pueda hacer aquí',
     refused_over_mandate: 'Rechazado: supera el límite firmado para este agente',
-    approved: 'Maria Rivera lo aprobó',
-    denied: 'Maria Rivera decidió no seguir adelante',
+    approved: '{Owner} lo aprobó',
+    denied: '{Owner} decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
-    reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
-    reply_handed_off: 'Pasado a Maria Rivera para responder',
-    owner_said: 'Escrito por Maria Rivera',
+    reply_checked: 'Respuesta revisada con las reglas de {owner}',
+    reply_handed_off: 'Pasado a {owner} para responder',
+    owner_said: 'Escrito por {owner}',
   },
-} as const satisfies Record<
-  Language,
-  Record<Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
->;
+} as const satisfies Record<Language, Record<VisitorLine, string>>;
+
+/** The visitor's status line `line` on a Desk whose owner is `owner`, in `language`. */
+export function visitorLine(language: Language, line: VisitorLine, owner: DeskOwner): string {
+  return withOwner(VISITOR_TEMPLATES[language][line], language, owner);
+}
+
+/** Every visitor status line on a Desk whose owner is `owner`, in `language`. */
+function visitorLines(language: Language, owner: DeskOwner): Record<VisitorLine, string> {
+  const lines = Object.keys(VISITOR_TEMPLATES[language]) as VisitorLine[];
+  return Object.fromEntries(lines.map((line) => [line, visitorLine(language, line, owner)])) as Record<VisitorLine, string>;
+}
+
+/**
+ * The visitor status lines on Maria Rivera's Desk, as the Rivera fixtures write them (a store test
+ * holds each one to the fixtures).
+ */
+export const VISITOR_PLAIN: Record<Language, Record<VisitorLine, string>> = {
+  en: visitorLines('en', RIVERA_OWNER),
+  es: visitorLines('es', RIVERA_OWNER),
+};
 
 /**
  * Tools that only read for Claude and so have no executed line of their own. Every other tool has
@@ -100,20 +170,20 @@ const NO_EXECUTED_LINE = {
   'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
-function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
+function hasExecutedLine(tool: string): tool is ExecutedTool {
   return !Object.hasOwn(NO_EXECUTED_LINE, tool);
 }
 
-const OWNER = rivera.business.ownerName;
-
 /**
- * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
- * signed per-tool words the design system's fixtures carry, never a bare "Done".
+ * The visitor's line for a decision in `state` on a Desk whose owner is `owner` (Rivera's unless
+ * given): an executed one names what its tool did, in the signed per-tool words the design
+ * system's fixtures carry, never a bare "Done".
  */
-export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: ToolName | null): string {
-  if (state !== 'executed') return VISITOR_PLAIN[language][state];
+export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: string | null, owner: DeskOwner = RIVERA_OWNER): string {
+  if (state !== 'executed') return visitorLine(language, state, owner);
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
-  return executedLine(tool, language, OWNER);
+  // The tool's line as the fixtures write it, with `{owner}` left in, named as every line here is.
+  return withOwner(executedLine(tool, language, '{owner}'), language, owner);
 }
 
 const { blocks } = rivera;
@@ -156,81 +226,169 @@ function discountedQuote(language: Language, quote: { listCents: number; discoun
 /** The callback window the script offers: Monday 8 to 9 am in the business's time zone. */
 export const CALLBACK_WINDOW = '2026-11-02T08:00:00-08:00/2026-11-02T09:00:00-08:00';
 
-/** The callback card's title, rendered from the handoff fact as Plan 01b does. */
-const callbackCards: Record<'window' | 'open', Record<Language, CardBlock>> = {
+/** The callback card's title, rendered from the handoff fact as Plan 01b does: with the script's window, or with none. */
+const CALLBACK_TITLES: Record<'window' | 'open', Record<Language, string>> = {
   window: {
-    en: cardBlock('callback_confirmed', {
-      fact_id: 'handoff:callback',
-      title: 'Maria Rivera will call you back on Monday, between 8:00 am and 9:00 am',
-    }),
-    es: cardBlock('callback_confirmed', {
-      fact_id: 'handoff:callback',
-      title: 'Maria Rivera te llamará el lunes, entre las 8:00 y las 9:00',
-    }),
+    en: '{Owner} will call you back on Monday, between 8:00 am and 9:00 am',
+    es: '{Owner} te llamará el lunes, entre las 8:00 y las 9:00',
   },
   open: {
-    en: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera will call you back' }),
-    es: cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: 'Maria Rivera te llamará' }),
+    en: '{Owner} will call you back',
+    es: '{Owner} te llamará',
   },
 };
 
+/** The kernel's callback card on a Desk whose owner is `owner`, in `language`. */
+function callbackCard(when: 'window' | 'open', language: Language, owner: DeskOwner): CardBlock {
+  return cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: withOwner(CALLBACK_TITLES[when][language], language, owner) });
+}
+
 /**
  * Booking the first time offered: Claude's checked words carry no price or date and promise
- * nothing the card doesn't back, and the kernel's card says what was booked. The Spanish card is
- * the design system fixture's.
+ * nothing the card doesn't back, and the kernel's card says what was booked (`bookedCard`).
  */
 const bookedProse: Record<Language, RenderedBlock> = {
   en: proseBlock("You're all set. Here's your visit."),
   es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
-const bookedCard: Record<Language, CardBlock> = {
-  en: cardBlock('booking_confirmed', {
-    fact_id: 'booking:B-77',
-    title: 'Tuesday, November 3',
-    lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
-  }),
-  es: blocks.booking_confirmed.es,
+/** The booked card's words, as the kernel renders a confirmed booking: {date} / {start} to {end} / With {owner}. */
+const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
+  en: { title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With {owner}'] },
+  es: { title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con {owner}'] },
+};
+
+/** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Rivera's Desk, the fixtures' card. */
+function bookedCard(language: Language, owner: DeskOwner): CardBlock {
+  const { title, lines } = BOOKED[language];
+  return cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title, lines: lines.map((line) => withOwner(line, language, owner)) });
+}
+
+/**
+ * Claude's checked words that name the Desk's owner: `help` when nothing more specific fits, a
+ * question only the owner can answer, with the way to reach them; `held` after a request is held
+ * for them, whose answer comes back into this chat. No digits, amounts, dates or promises, and no
+ * promise of what the owner will say.
+ */
+interface OwnerProse {
+  help: string;
+  held: string;
+}
+
+/** Rivera's words, as the signed boards write them, `{owner}` for Maria. */
+const RIVERA_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: '{Owner} can tell you once she sees it. You can ask for her here anytime.',
+    held: "That's for {owner} to decide, so I've asked her. Her answer will show up here.",
+  },
+  es: {
+    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.',
+    held: 'Eso lo decide {owner}, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  },
+};
+
+/** The same words with no pronoun, for an owner whose pronouns the Desk doesn't know. */
+const PRONOUN_FREE_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: '{Owner} can tell you after taking a look. You can ask for {owner} here anytime.',
+    held: "That's for {owner} to decide, so I've asked. The answer will show up here.",
+  },
+  es: {
+    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con {owner} aquí cuando quieras.',
+    held: 'Eso lo decide {owner}, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  },
 };
 
 /**
- * Claude's checked words when nothing more specific fits, as the signed board answers a question
- * only Maria can: no digits, amounts, dates or promises, and the way to reach her.
+ * Claude's words for a named owner other than Maria Rivera, by first name. Proposed here for the
+ * project owner's sign-off. Should he decline, set this to `RIVERA_PROSE`: Rivera's sentences with
+ * the owner's name in them, pronouns kept.
  */
-const helpProse: Record<Language, RenderedBlock> = {
-  en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
-  es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
+export const NAMED_OWNER_PROSE: Record<Language, OwnerProse> = PRONOUN_FREE_PROSE;
+
+/** Whom a visitor can ask for when the owner gave no name, as the public page's "Ask for a person" has it. */
+const A_PERSON: Record<Language, string> = { en: 'a person', es: 'una persona' };
+
+/** The same words for an owner who gave no name, `NO_NAME_OWNER`'s words for them, with a person to ask for. */
+const NO_NAME_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: `{Owner} can tell you after taking a look. You can ask for ${A_PERSON.en} here anytime.`,
+    held: PRONOUN_FREE_PROSE.en.held,
+  },
+  es: {
+    help: `{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con ${A_PERSON.es} aquí cuando quieras.`,
+    held: PRONOUN_FREE_PROSE.es.held,
+  },
 };
 
+/** An owner's first name, the one Claude's words call them by: "Maria" for Maria Rivera. */
+function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
 /**
- * Claude's checked words after a request is held for Maria, as the signed board writes them: she
- * decides, and her answer comes back into this chat. No amount, discount or date, and no promise
- * of what she'll say.
+ * Claude's words `line` on a Desk whose owner is `owner`, in `language`: Rivera's signed words on
+ * her Desk (setup names an owner by one word, so no Desk it makes has her name), else
+ * `NAMED_OWNER_PROSE` by first name, else `NO_NAME_PROSE`.
  */
+function ownerProse(language: Language, owner: DeskOwner, line: keyof OwnerProse): string {
+  if (owner.name === null) return withOwner(NO_NAME_PROSE[language][line], language, owner);
+  const prose = owner.name === RIVERA_OWNER.name ? RIVERA_PROSE : NAMED_OWNER_PROSE;
+  return naming(prose[language][line], firstName(owner.name), language);
+}
+
+/** Claude's checked words after a request is held for the Desk's owner. */
+export function heldProse(language: Language, owner: DeskOwner): string {
+  return ownerProse(language, owner, 'held');
+}
+
+/** Claude's checked words after a request is held for Maria, on Rivera's Desk. */
 export const HELD_PROSE: Record<Language, string> = {
-  en: "That's for Maria to decide, so I've asked her. Her answer will show up here.",
-  es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  en: heldProse('en', RIVERA_OWNER),
+  es: heldProse('es', RIVERA_OWNER),
 };
+
+/** Claude's checked words when nothing more specific fits: a question only the Desk's owner can answer. */
+function helpProse(language: Language, owner: DeskOwner): RenderedBlock {
+  return proseBlock(ownerProse(language, owner, 'help'));
+}
 
 /**
  * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
  * kernel plan 01c), which only the kernel issues.
  */
+const LINK_CANCELLED_TEMPLATES: Record<Language, string> = {
+  en: "This payment link was cancelled because {owner}'s rules changed. Ask again if you still want to pay.",
+  es: 'Este enlace de pago se canceló porque cambiaron las reglas de {owner}. Pídelo de nuevo si todavía quieres pagar.',
+};
+
+/** The kernel's `link_cancelled` line on a Desk whose owner is `owner`, in `language`. */
+function linkCancelledLine(language: Language, owner: DeskOwner): string {
+  return withOwner(LINK_CANCELLED_TEMPLATES[language], language, owner);
+}
+
+/** The kernel's `link_cancelled` line on Rivera's Desk. */
 export const LINK_CANCELLED: Record<Language, string> = {
-  en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
+  en: linkCancelledLine('en', RIVERA_OWNER),
+  es: linkCancelledLine('es', RIVERA_OWNER),
 };
 
 /**
  * The `link_cancelled` card as the kernel renders it from the cancelled link's own `payment_link`
- * fact, in the chat's language: the link's amount as its title, then what the link was for and the
- * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
+ * fact, in the chat's language, on a Desk whose owner is `owner` (Rivera's unless given): the
+ * link's amount as its title, then what the link was for and the kernel's line. It cites the
+ * deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
+export function linkCancelledBlock(
+  link: Pick<PaymentLinkView, 'title' | 'amount_cents'>,
+  language: Language,
+  factId = blocks.payment_link[language].fact_id ?? null,
+  owner: DeskOwner = RIVERA_OWNER,
+): CardBlock {
   return cardBlock('link_cancelled', {
-    fact_id: blocks.payment_link[language].fact_id ?? null,
+    fact_id: factId,
     title: moneyText(link.amount_cents),
-    lines: [link.title, LINK_CANCELLED[language]],
+    lines: [link.title, linkCancelledLine(language, owner)],
   });
 }
 
@@ -250,10 +408,10 @@ const verifyFirstProse: Record<Language, RenderedBlock> = {
 
 /**
  * The kernel's Demo inbox message for a verification code (`inbox_code_body`, kernel verification,
- * plan 01b), rendered from the business's name and the code in the chat's language.
+ * plan 01b), rendered from the Desk's business name (`DeskOwner.business`) and the code in the
+ * chat's language. No sentence ends on the name, so none needs `afterName`.
  */
-function codeBody(language: Language, code: string): string {
-  const business = rivera.business.name;
+function codeBody(language: Language, code: string, business: string): string {
   return language === 'es'
     ? `Tu código de ${business} es ${code}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`
     : `Your ${business} code is ${code}. It expires in ten minutes. If you didn't ask for it, ignore this message.`;
@@ -314,7 +472,7 @@ export const DECISIONS = {
   },
   /** Verified Dana wants her $180.00 drain clearing payment back; the refund card asks about every refund. */
   heldRefund: {
-    tool: refundFixture.action.tool,
+    tool: refundFixture.action.tool as ToolName,
     effects: refundFixture.action.effects,
     outcome: 'hold',
     executed: false,
@@ -349,7 +507,7 @@ export const DECISIONS = {
     outcome: 'allow',
     executed: true,
     cardIds: ['rv-book-wk'],
-    reasonPlain: 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.',
+    reasonPlain: rivera.bookingReasonPlain,
     resource: { kind: 'slot', id: 'S-20261103-1400', owner_person_id: null },
   },
   paymentLink: {
@@ -462,13 +620,19 @@ export interface TurnContext {
   readonly text: string;
   /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
   readonly person: { personId: string; name: string } | null;
+  /**
+   * Whom the Desk's lines name, its handoff card's among them (`MockWorld.ownerOf`): read only when
+   * a step names them, so making a context never reads the Desk.
+   */
+  readonly owner: DeskOwner;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
   /**
-   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
-   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   * A checked reply's shown blocks and ledger entry; `blocked` when Claude's draft failed the
+   * check, and `paused` when the check stopped it because the chat is paused. Shown blocks may
+   * keep checked cards after a prose failure, with or without a drafted handoff.
    */
   reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
@@ -506,12 +670,16 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'cards-only' | 'cards-kept-handoff' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** A demo command: one of `words` picks the rule only as the whole message, never inside a question. */
+  command?: true;
+  /** Whom a visitor asks for on the Desk (`askWords`) picks the rule too, found whole as `words` are. */
+  askFor?: true;
   /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
   tools: readonly ToolName[];
   steps: readonly Step[];
@@ -545,26 +713,68 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118'
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
-/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
-const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+/** The kernel's `handoff` template: its title, then its line. */
+const HANDOFF: Record<Language, { title: string; line: string }> = {
+  en: { title: 'Let me check with {owner}.', line: '{Owner} will reply here.' },
+  es: { title: 'Déjame consultarlo con {owner}.', line: '{Owner} te responderá aquí.' },
+};
+
+/**
+ * The kernel's handoff card in `language`, handing the visitor to the Desk's owner (`owner`). For
+ * Maria Rivera it is the fixtures' own card.
+ */
+export function handoffBlock(language: Language, owner: DeskOwner): CardBlock {
+  const { title, line } = HANDOFF[language];
+  return cardBlock('handoff', { fact_id: null, title: withOwner(title, language, owner), lines: [withOwner(line, language, owner)] });
+}
+
+/** The turn's handoff card: the Desk's own, in the turn's language. */
+const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.owner);
+
+/** Claude hands the visitor to the Desk's owner: the kernel's handoff card, as asking for them gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([handoff(ctx)])];
 
 /**
  * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
  * the kernel's handoff, which its check stops as paused.
  */
-export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([handoff(ctx)], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
+  {
+    // A final prose-only failure: the checked card stays, and none of the draft's prose is shown.
+    name: 'cards-only',
+    words: ['cards-only', 'solo-tarjetas'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true }),
+    ],
+  },
+  {
+    // The same failure with Claude's drafted handoff kept after the checked card.
+    name: 'cards-kept-handoff',
+    words: ['cards-kept-handoff', 'tarjetas-con-traspaso'],
+    command: true,
+    tools: ['native.quote'],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language], handoff(ctx)], { blocked: true }),
+    ],
+  },
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
     tools: ['native.quote'],
     steps: [
       writing,
-      // The percent the visitor asked for, held past the quote card's limit for Maria.
+      // The percent the visitor asked for, held past the quote card's limit for the owner.
       (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
-      // Claude's checked words say Maria decides; the held receipt under them says what waits.
-      (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
+      // Claude's checked words say the owner decides; the held receipt under them says what waits.
+      (ctx) => ctx.reply([proseBlock(heldProse(ctx.language, ctx.owner))]),
     ],
   },
   {
@@ -580,7 +790,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         ctx.startVerification({
           person: rivera.people.dana,
           code: DEMO_CODE,
-          body: codeBody(ctx.language, DEMO_CODE),
+          body: codeBody(ctx.language, DEMO_CODE, ctx.owner.business),
           preview: inboxPreview[ctx.language],
         }),
     ],
@@ -598,7 +808,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         return ctx.status('receipt', decision);
       },
       // The card points at the link this turn issued, by its own token.
-      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
+      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], fact_id: `payment_link:${ctx.latestLink()}`, href: `/pay/${ctx.latestLink()}` }]),
     ],
   },
   {
@@ -609,12 +819,12 @@ export const SCRIPT: readonly ScriptRule[] = [
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
-      (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard[ctx.language]]),
+      (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard(ctx.language, ctx.owner)]),
     ],
   },
   {
     name: 'book',
-    words: ['book', 'tuesday', 'reservar'],
+    words: ['book', 'tuesday', 'reservar', 'martes'],
     tools: ['native.find_slots'],
     steps: [
       writing,
@@ -633,6 +843,12 @@ export const SCRIPT: readonly ScriptRule[] = [
     ],
   },
   {
+    name: 'area',
+    words: ['alameda'],
+    tools: [],
+    steps: [writing, (ctx) => ctx.reply([rivera.blocks.policy[ctx.language]])],
+  },
+  {
     name: 'callback',
     words: ['call me', 'callback', 'llámame'],
     tools: ['native.request_callback'],
@@ -646,13 +862,14 @@ export const SCRIPT: readonly ScriptRule[] = [
       },
       (ctx) => {
         const tonight = ctx.text.toLowerCase().includes('tonight');
-        return ctx.reply([callbackCards[tonight ? 'open' : 'window'][ctx.language]]);
+        return ctx.reply([callbackCard(tonight ? 'open' : 'window', ctx.language, ctx.owner)]);
       },
     ],
   },
   {
     name: 'talk',
-    words: ['maria', 'talk to', 'hablar'],
+    words: ['talk to', 'hablar'],
+    askFor: true,
     tools: [],
     steps: HANDOFF_STEPS,
   },
@@ -666,7 +883,7 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'other',
     words: [],
     tools: [],
-    steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
+    steps: [writing, (ctx) => ctx.reply([helpProse(ctx.language, ctx.owner)])],
   },
 ];
 
@@ -708,7 +925,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
-  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+  (ctx) => ctx.reply([handoff(ctx)], { blocked: true }),
 ];
 
 /**
@@ -728,13 +945,23 @@ function ruleNamed(name: RuleName): ScriptRule {
 }
 
 /**
- * The first rule with one of its words, whole, in the lowercased text, else the last rule. A
- * discount asked at 0% is a question about the list price (the price rule), and one over 100% is
- * no discount anyone can give (the last rule's plain answer).
+ * Whom a visitor asks for on a Desk whose owner is `owner`, as lowercase words: the owner's first
+ * name, or a person, in either language, when they gave none.
  */
-export function matchRule(text: string): ScriptRule {
+function askWords(owner: DeskOwner): string[] {
+  return owner.name === null ? [A_PERSON.en, A_PERSON.es] : [firstName(owner.name).toLowerCase()];
+}
+
+/**
+ * The first rule with one of its words, whole, in the lowercased text, else the last rule; on a
+ * Desk whose owner is `owner` (Rivera's unless given), asking for them is one of the talk rule's
+ * words. A discount asked at 0% is a question about the list price (the price rule), and one over
+ * 100% is no discount anyone can give (the last rule's plain answer).
+ */
+export function matchRule(text: string, owner: DeskOwner = RIVERA_OWNER): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  const wordsOf = (r: ScriptRule) => (r.askFor ? [...r.words, ...askWords(owner)] : r.words);
+  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : wordsOf(r).some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   if (rule.name !== 'discount') return rule;
   const asked = askedDiscountBp(text);
@@ -759,9 +986,20 @@ export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[
   return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
 }
 
-/** The turn the visitor's words start: their rule's steps, as the session may run them. */
-export function scriptedTurn(text: string, allTools: boolean): readonly Step[] {
-  const rule = matchRule(text);
+/** Whether the chat's verified person (`person`, null when it has none) is the one the invoice belongs to. */
+function ownsInvoice(person: { personId: string } | null): boolean {
+  return person !== null && person.personId === DECISIONS.releaseInvoice.resource.owner_person_id;
+}
+
+/**
+ * The turn the visitor's words start on a Desk whose owner is `owner`, in a chat whose verified
+ * person is `person`: their rule's steps, as the session may run them. Verification lasts for the
+ * chat, as the API's does, so the invoice's owner asking for it again once verified gets Claude's
+ * turn after a confirmed code (`afterVerify`), with no second code.
+ */
+export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner, person: { personId: string } | null): readonly Step[] {
+  const rule = matchRule(text, owner);
+  if (rule.name === 'invoice' && ownsInvoice(person)) return afterVerify(allTools);
   return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 
@@ -793,7 +1031,7 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved
   if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (decision.state === 'refused_at_execution') return [resolved];
-  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([handoff(ctx)])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
     return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
@@ -868,9 +1106,15 @@ function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'w
 /** Monday to Friday, all day. */
 const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
 
+/** Whether `card` applies on a Saturday or a Sunday: with no hours, it applies every day. */
+function coversAWeekend(card: RuleCard): boolean {
+  const hours = card.hours ?? null;
+  return hours === null || hours.days.some((day) => day === 'sat' || day === 'sun');
+}
+
 /** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
 export interface HeldForChat {
-  tool: ToolName;
+  tool: string;
   reasonPlain: string;
   heldBy: string | null;
   /** It moves more money than the payment limit, which no rule goes past, so no rule could let it through. */
@@ -885,7 +1129,7 @@ const DEFAULT_ASK_REASON = 'Not covered by a rule yet, so it asks you.';
  * words (`TOOL_LABELS` in `backend/desk/api/rules.py`), but "identity check" for a verification,
  * as the owner app and Rules' question about a hold name it.
  */
-export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
+export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
   'native.quote': 'quote',
   'native.find_slots': 'open times',
   'native.book': 'booking',
@@ -901,7 +1145,7 @@ export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
 
 /**
  * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
- * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
+ * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rules for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
  * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
  * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
@@ -911,7 +1155,8 @@ export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
 export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
   if (lower.includes('weekend') && lower.includes('quot')) {
-    const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quotes = active.filter((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quote = quotes[0];
     const weekdays = draftCard({
       card_id: 'card-weekday-quotes',
       applies_to: 'native.quote',
@@ -921,9 +1166,12 @@ export function ruleChatReply(text: string, active: readonly RuleCard[], held: r
       hours: WEEKDAYS_ALL_DAY,
       reason: 'Quotes from your price list on weekdays. Weekend quotes wait for your answer.',
     });
+    // Every other one that still quotes on its own at weekends, such as a water heater rule added
+    // since, moves to weekdays too, so the change isn't "No rules change" while one does.
+    const others = quotes.slice(1).filter(coversAWeekend).map((card) => ({ ...card, hours: WEEKDAYS_ALL_DAY, reason: `${card.reason.replace(/\.$/, '')}, on weekdays.` }));
     return {
       answer: "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.",
-      add: [weekdays],
+      add: [weekdays, ...others],
     };
   }
   if (lower.includes('water heater')) {

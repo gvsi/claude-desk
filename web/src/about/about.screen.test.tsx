@@ -149,7 +149,7 @@ describe('About pages', () => {
     const SUMMARIES: Record<string, string> = {
       'Capability prediction':
         'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
-      'Product proposal': 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
+      'Product proposal': 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       Vision: 'A front desk that never closes: where a Desk could go next, and the rules that wouldn’t change.',
     };
     for (const [lastDesk, to] of [
@@ -198,6 +198,93 @@ describe('About pages', () => {
       await expect.poll(() => router.state.location.pathname).toBe(next.path);
     }
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Capability prediction', exact: true })).toBeVisible();
+  });
+
+  it('the_reading_pages_share_the_vision_articles_paper', async () => {
+    // The two reading pages are drawn in the Vision article's light reading style, so the set looks like one: the
+    // same paper, ink and secondary ink, hairlines, link color, sticky bar, switch, way into the prototype, "Read
+    // next" card and footer, read off the article itself at each size.
+    const PAPER = 'rgb(244, 242, 236)';
+    const INK = 'rgb(28, 27, 25)';
+    const LINK = 'rgb(45, 91, 138)';
+    /** What each page's set of parts computes to, by the part's role on the page. */
+    const look = (container: HTMLElement, secondary: Element | null, compact: boolean) => {
+      const bar = container.querySelector('header') as HTMLElement;
+      const root = bar.parentElement as HTMLElement;
+      const documents = container.querySelector('nav[aria-label="About this prototype"]') as HTMLElement;
+      const current = documents.querySelector('[aria-current="page"]') as HTMLElement;
+      const other = documents.querySelector('a:not([aria-current])') as HTMLElement;
+      const tryIt = bar.querySelector('a.cd-about-try') as HTMLElement;
+      const card = container.querySelector('[data-next-label]')?.parentElement as HTMLElement;
+      const footer = container.querySelector('p[data-ds="concept-footer"]') as HTMLElement;
+      const style = (el: Element | null) => getComputedStyle(el as Element);
+      return {
+        page: [style(root).backgroundColor, style(root).color, style(root).colorScheme],
+        bar: [style(bar).position, style(bar).backgroundColor, style(bar).borderBottomColor],
+        current: [style(current).backgroundColor, style(current).color],
+        other: style(other).color,
+        tryIt: style(tryIt).color,
+        // The phone's top bar draws the link without its outline (PrototypeLink), so its edge is read on a desktop.
+        tryEdge: compact ? null : style(tryIt).boxShadow,
+        card: [style(card).backgroundColor, style(card).borderTopColor],
+        footer: style(footer).color,
+        secondary: style(secondary).color,
+      };
+    };
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const vision = await renderRoute('/about/vision', { viewport });
+      await expect.element(vision.screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+      const paper = look(vision.screen.container, vision.screen.container.querySelector('[data-meta]'), viewport === 'phone');
+      expect(paper.page, viewport).toEqual([PAPER, INK, 'light']);
+
+      for (const { path, title } of PAGES) {
+        const where = `${path} at ${viewport}`;
+        const { screen } = await renderRoute(path, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
+        expect(look(screen.container, screen.container.querySelector('[data-summary]'), viewport === 'phone'), where).toEqual(paper);
+        // The figures sit on the article's paper cards, and a link in the text is in the article's link color.
+        const frame = screen.container.querySelector('[data-hero] .cd-about-frame') as HTMLElement;
+        expect(getComputedStyle(frame).backgroundColor, where).toBe(paper.card[0]);
+        const link = screen.container.querySelector('a.cd-text-link') as HTMLElement;
+        expect(getComputedStyle(link).color, where).toBe(LINK);
+      }
+    }
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_three_pages_share_one_top_bar_on_%s', async (viewport) => {
+    // Going from one page of the set to another, the bar across the top doesn't move (owner, 2026-11-01): the same
+    // height, the app's lockup in the same place, each page of the switch and the way into the prototype in the
+    // same place, drawn in the same colors. Only which page the switch marks differs. Measured at the top of each
+    // page, against the capability prediction's.
+    const SET = [
+      { path: '/about/prediction', heading: 'Capability prediction' },
+      { path: '/about/proposal', heading: 'Product proposal' },
+      { path: '/about/vision', heading: 'A front desk that never closes' },
+    ] as const;
+    const bars: { path: string; bar: TopBar }[] = [];
+    for (const { path, heading } of SET) {
+      const { screen } = await renderRoute(path, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading, exact: true }), { message: path }).toBeVisible();
+      await document.fonts.ready;
+      bars.push({ path, bar: topBarOf(screen.container) });
+    }
+    const [first, ...rest] = bars;
+    if (!first) throw new Error('no pages');
+    for (const { path, bar } of rest) {
+      const where = `${path} against ${first.path} at ${viewport}`;
+      for (const [part, box] of Object.entries(bar.boxes)) {
+        const want = first.bar.boxes[part];
+        if (!want) throw new Error(`${where}: no ${part} on ${first.path}`);
+        const off = (['x', 'y', 'width', 'height'] as const).filter((side) => Math.abs(box[side] - want[side]) > 0.5);
+        expect(
+          off.map((side) => `${part}.${side}: ${box[side]} against ${want[side]}`),
+          where,
+        ).toEqual([]);
+      }
+      expect(bar.look, where).toEqual(first.bar.look);
+    }
+    // Focus and a section opened by its address stop clear of the bar on each page, whatever its height.
+    for (const { path, bar } of bars) expect(bar.clearance, `${path} at ${viewport}`).toBe((bar.boxes.bar as Box).height + 24);
   });
 
   it('about_pages_make_no_requests', async () => {
@@ -299,6 +386,69 @@ async function untilAtRest(where: string): Promise<void> {
     await expect.poll(() => figure.dataset.play, { message: `${where}: the figure played in view` }).not.toBe('ready');
   }
   await expect.poll(() => document.getAnimations().length, { message: `${where}: nothing animates`, timeout: 5000 }).toBe(0);
+}
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What one page's top bar is: where each part sits, how it is drawn, and how far below the top focus stops. */
+interface TopBar {
+  boxes: Record<string, Box>;
+  look: Record<string, string[]>;
+  /** The scroll margin above a link in the page's main region, in px. */
+  clearance: number;
+}
+
+/**
+ * A page's top bar, found by what it shows rather than by its classes, so each page's own bar is read: the first
+ * header, its part that names the product, the About set's switch (in the bar, or under it on a phone) and the way
+ * into the prototype.
+ */
+function topBarOf(container: HTMLElement): TopBar {
+  const bar = container.querySelector('header');
+  if (!bar) throw new Error('no top bar');
+  const lockup = [...bar.children].find((el) => el.textContent?.includes('Claude Desk'));
+  const name = [...bar.querySelectorAll('*')].find((el) => [...el.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent === 'Claude Desk'));
+  const documents = container.querySelector('nav[aria-label="About this prototype"]');
+  const links = [...(documents?.querySelectorAll('a') ?? [])];
+  const current = links.find((link) => link.getAttribute('aria-current') === 'page');
+  const other = links.find((link) => link.getAttribute('aria-current') === null);
+  const tryIt = [...container.querySelectorAll('a')].find((link) => link.textContent === 'Try Desk prototype');
+  const inMain = container.querySelector('main a');
+  if (!lockup || !name || !documents || links.length !== 3 || !current || !other || !tryIt || !inMain) {
+    throw new Error('the top bar is missing a part');
+  }
+  const box = (el: Element): Box => {
+    const { x, y, width, height } = el.getBoundingClientRect();
+    return { x, y, width, height };
+  };
+  const style = (el: Element, ...names: string[]) => {
+    const computed = getComputedStyle(el);
+    return names.map((prop) => computed.getPropertyValue(prop));
+  };
+  const TYPE = ['font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing'];
+  return {
+    boxes: {
+      bar: box(bar),
+      lockup: box(lockup),
+      name: box(name),
+      switch: box(documents),
+      ...Object.fromEntries(links.map((link) => [`switch "${link.textContent}"`, box(link)])),
+      'Try Desk prototype': box(tryIt),
+    },
+    look: {
+      bar: style(bar, 'position', 'top', 'background-color', 'border-bottom-width', 'border-bottom-style', 'border-bottom-color', 'color'),
+      name: style(name, 'color', ...TYPE),
+      current: style(current, 'background-color', 'color', ...TYPE),
+      other: style(other, 'background-color', 'color', 'text-decoration-line', ...TYPE),
+      tryIt: style(tryIt, 'background-color', 'color', 'box-shadow', 'text-decoration-line', ...TYPE),
+    },
+    clearance: parseFloat(getComputedStyle(inMain).scrollMarginTop),
+  };
 }
 
 /** Waits a quarter of a second: a request sent while the page drew has reached the mock API by then. */

@@ -88,6 +88,49 @@ def model_view(fact_id: str, quote_id: str, lines: Sequence[dict[str, Any]]) -> 
             "items": [{"item_id": line["item_id"], "title": line["title"], "qty": line["qty"]} for line in lines]}
 
 
+async def written_quote(ctx: KernelCtx, action: NormalizedAction) -> tuple[Quote, Fact] | None:
+    """This action's quote and its exact fact, if already written, even alongside link facts."""
+    existing = (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(
+        Quote.action_id == action.action_id)))).one_or_none()
+    if existing is not None:
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == action.desk_id, FactRow.fact_id == f"quote:{existing.quote_id}",
+            FactRow.action_id == action.action_id, FactRow.kind == "quote")))).one()
+        return existing, labels.fact_of(row)
+    return None
+
+
+async def write_quote(xctx: ExecCtx, action: NormalizedAction, lines: list[dict[str, Any]]) -> tuple[Quote, Fact]:
+    """Write one action's priced quote and session-labelled fact in the caller's transaction.
+
+    The execution framework serializes retries by action; the unique action_id also fences writes.
+    Reconciliation may find the quote already committed and returns that same fact.
+    """
+    ctx = xctx.ctx
+    if (existing := await written_quote(ctx, action)) is not None:
+        return existing
+    now = ctx.clock.now()
+    expires_at = now + QUOTE_TTL
+    tz = await business_timezone(ctx, xctx.desk_row)
+    session_id = xctx.session_row.session_id
+    quote_id = new_id("quote")
+    fact = Fact(fact_id=f"quote:{quote_id}", kind="quote", status="available", source="kernel", claims=[
+        Claim(key="items", kind="text", value=items_text(lines)),
+        Claim(key="list", kind="money", value=action.list_cents),
+        Claim(key="total", kind="money", value=action.amount_cents),
+        Claim(key="discount", kind="percent_bp", value=action.discount_bp),
+        Claim(key="expires", kind="datetime", value=expires_at.astimezone(tz).isoformat()),
+    ], label=labels.new_fact_label(xctx.session_row), expires_at=expires_at)
+    ctx.db.add(Quote(quote_id=quote_id, copy_id=action.copy_id, desk_id=action.desk_id, session_id=session_id,
+                     items=lines, list_cents=action.list_cents, discount_bp=action.discount_bp, amount_cents=action.amount_cents,
+                     status="available", expires_at=expires_at, action_id=action.action_id, created_at=now))
+    ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
+                               action_id=action.action_id))
+    await ctx.db.flush()
+    quote = (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(Quote.quote_id == quote_id)))).one()
+    return quote, fact
+
+
 class QuoteAdapter:
     profile = PROFILE
     Args = QuoteArgs
@@ -114,25 +157,8 @@ class QuoteAdapter:
         if (list_cents, discount_bp, discounted(list_cents, discount_bp)) != (
                 action.list_cents, action.discount_bp, action.amount_cents):
             raise AdapterFailure("price_changed")
-        now = ctx.clock.now()
-        expires_at = now + QUOTE_TTL
-        tz = await business_timezone(ctx, xctx.desk_row)
-        session_id = xctx.session_row.session_id
-        quote_id = new_id("quote")
-        fact = Fact(fact_id=f"quote:{quote_id}", kind="quote", status="available", source="kernel", claims=[
-            Claim(key="items", kind="text", value=items_text(lines)),
-            Claim(key="list", kind="money", value=list_cents),
-            Claim(key="total", kind="money", value=action.amount_cents),
-            Claim(key="discount", kind="percent_bp", value=discount_bp),
-            Claim(key="expires", kind="datetime", value=expires_at.astimezone(tz).isoformat()),
-        ], label=labels.new_fact_label(xctx.session_row), expires_at=expires_at)
-        ctx.db.add(Quote(quote_id=quote_id, copy_id=action.copy_id, desk_id=action.desk_id, session_id=session_id,
-                         items=lines, list_cents=list_cents, discount_bp=discount_bp, amount_cents=action.amount_cents,
-                         status="available", expires_at=expires_at, action_id=action.action_id, created_at=now))
-        ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
-                                   action_id=action.action_id))
-        await ctx.db.flush()
-        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, quote_id, lines))
+        quote, fact = await write_quote(xctx, action, lines)
+        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, quote.quote_id, lines))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
         """The quote the action wrote, if it wrote one."""

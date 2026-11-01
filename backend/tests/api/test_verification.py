@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from desk.api import store
 from desk.api.main import create_app
+from desk.api.prompts import NOTES
 from desk.api.sse import emit_inbox
 from desk.contracts import InboxNotice
 from tests.api.conftest import CLIENT_IP, PASSCODE
@@ -292,13 +293,13 @@ async def test_verification_wakes_claude_with_new_tools(app, browser, fake, kern
     # The second call: the note in the user turn, then the tool changes, last before Claude's turn.
     *_, user, system = second.messages
     assert user["role"] == "user" and system["role"] == "system"
-    assert {"type": "text", "text": "<note>The visitor verified as the contact on record.</note>"} in user["content"]
+    assert {"type": "text", "text": "<note>" + NOTES["verified"] + "</note>"} in user["content"]
     changes = {(change["type"], change["tool"]["name"]) for change in system["content"]}
     assert ("tool_addition", "native__release_document") in changes
     assert ("tool_removal", "native__start_verification") in changes
     assert second.tools == first.tools                                  # the context's tools stay as they were
     assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
-        ("The visitor verified as the contact on record.", True)]
+        (NOTES["verified"], True)]
 
 
 async def test_verify_is_rate_limited(app, browser, fake, kernel_http, clock):
@@ -367,13 +368,13 @@ async def test_the_verified_note_is_written_once_per_session(app, browser, fake,
     assert (await answering.post(verify_path(slug, "check"), json={"code": code})).status_code == 200
     await app.state.runtime.runner.drain()
     assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
-        ("The visitor verified as the contact on record.", True)]
+        (NOTES["verified"], True)]
     assert len(model.requests) == 1
 
     # Once noted, it isn't again: another check writes no second note and wakes no turn.
     assert (await answering.post(verify_path(slug, "check"), json={"code": code})).status_code == 200
     await app.state.runtime.runner.drain()
     assert await conversation_notes(engine, session_id, "text", "model_seq IS NOT NULL") == [
-        ("The visitor verified as the contact on record.", True)]
+        (NOTES["verified"], True)]
     assert len(model.requests) == 1
     await answering.aclose()

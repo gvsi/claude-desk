@@ -37,7 +37,7 @@ from desk.kernel_service.sessions import principal_for
 
 from .helpers import kernel_ctx, ledger_rows, make_copy_rows, rows_of
 from .test_adapters import Rivera, quote_args, rivera
-from .test_decide import add_desk, decided, open_visitor, post_decide
+from .test_decide import add_desk, decided, open_visitor, post_decide, set_session
 from .test_execute import executed, executions_of, post_execute
 from .test_verification import DANA_PHONE, code_in, codes, rivera_copy
 
@@ -761,3 +761,34 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
         tool.status = "disabled"
     text = "\n".join(b.text for b in PublicDesk.model_validate((await client.get(f"/public/{copy.slug}")).json()).agent_card)
     assert "find open times" in text and "book a visit" not in text
+
+
+@pytest.mark.parametrize("kind", ["canary", "unsupported_language", "session_paused", "check_unavailable",
+                                  "uncertain_language"])
+# A soft-check outage is rewritten too (the owner's ruling of 2026-11-01), so its turn goes on.
+async def test_nonfinal_reply_kinds_end_only_unrecoverable_agent_turns(app, client, frozen_clock, reviewer, kind):
+    copy, agent, created = await agent_on_rivera(app, client, frozen_clock)
+    signed = turn(agent, copy.slug, created.state.session_id, frozen_clock)
+    prose = "I can help with that."
+    if kind == "canary":
+        canary = (await rows_of(app, copy.copy_id, select(Document)))[0].canary
+        prose = f"Your reference is {canary}."
+    elif kind == "unsupported_language":
+        prose = "Je peux vous aider avec ça."
+    elif kind == "uncertain_language":
+        prose = "Absolutely. Payment link below."
+    elif kind == "check_unavailable":
+        reviewer.soft_answer = None
+    else:
+        await set_session(app, copy, created.state.session_id, mode="paused")
+    response = await check_as(client, signed, prose, final=False)
+    assert response.status_code == 200, response.text
+    verdict = ReplyVerdict.model_validate(response.json())
+    assert {v.kind for v in verdict.violations} == {kind}
+    response = await whoami_as(client, signed)
+    rewritable = kind in ("uncertain_language", "check_unavailable")
+    assert response.status_code == (200 if rewritable else 409), response.text
+    if rewritable:
+        assert verdict.blocks == []
+    else:
+        assert response.json() == {"code": "replayed"}

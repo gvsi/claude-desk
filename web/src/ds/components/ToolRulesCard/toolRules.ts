@@ -2,8 +2,8 @@ import type { Effect, RuleCard } from '../../../api/contracts.ts';
 import type { AnyToolName } from '../../../api/views.ts';
 
 /** A tool as `rulesForTool` reads it: its name and its effects, from its profile or tool row. */
-export interface RulesTool {
-  tool: AnyToolName;
+export interface RulesTool<Name extends string = AnyToolName> {
+  tool: Name;
   effects: readonly Effect[];
 }
 
@@ -54,7 +54,7 @@ function jointScope(a: RuleCard, b: RuleCard): boolean {
  * every effect of the tool is named by an `auto` effect card at the same specificity and for the
  * same person or agent, so one principal satisfies them all (one card per effect, jointly).
  */
-function effectCardCovers(card: RuleCard, tool: RulesTool, effectCards: readonly RuleCard[]): boolean {
+function effectCardCovers(card: RuleCard, tool: RulesTool<string>, effectCards: readonly RuleCard[]): boolean {
   if (!tool.effects.some((effect) => card.applies_to === `effect:${effect}`)) return false;
   if (card.mode !== 'auto') return true;
   return tool.effects.every((effect) =>
@@ -70,7 +70,7 @@ function effectCardCovers(card: RuleCard, tool: RulesTool, effectCards: readonly
  * does. Any other card reaches everyone it is for (a person's or an agent's combination is that
  * person's or agent's).
  */
-function jointReach(card: RuleCard, tool: RulesTool, effectCards: readonly RuleCard[]): RuleCard {
+function jointReach(card: RuleCard, tool: RulesTool<string>, effectCards: readonly RuleCard[]): RuleCard {
   if (card.mode !== 'auto' || personScoped(card)) return card;
   let width: number = GROUP_WIDTH[card.who as Group];
   for (const effect of tool.effects) {
@@ -110,7 +110,7 @@ function rank(card: RuleCard): number {
  * Default cards (`is_default`) are left out: the card's fallback line says what they do. It lists
  * cards and decides no outcome; the kernel decides every request.
  */
-export function rulesForTool(tool: RulesTool, cards: readonly RuleCard[]): RuleCard[] {
+export function rulesForTool(tool: RulesTool<string>, cards: readonly RuleCard[]): RuleCard[] {
   const owned = cards.filter((card) => card.is_default !== true);
   const toolCards = owned.filter((card) => card.applies_to === tool.tool);
   const effectCards = owned.filter((card) => card.applies_to.startsWith('effect:'));

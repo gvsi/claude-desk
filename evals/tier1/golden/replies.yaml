@@ -13,14 +13,17 @@
 #                  visitor's; own-booking, this session's booking of the seed's weekday slot, which
 #                  the reviewed rv-book-wk card allows; other-session-booking, another visitor's;
 #                  other-session-owner-statement, an owner say in another visitor's session, Plan
-#                  01b); fact_id is sent as written
-#   soft_promise   the soft-promise check's reply (claude-haiku-5-5): pass, the default; flag
-#                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
-#                  unparsable (the text "maybe")
+#                  01b); own-payment-link, a link for this session's drain quote, Plan 01c; fact_id is sent as written
+#   final          false for the first draft of a reply; default true
+#   soft_promise   the soft-promise check's one reply (claude-sonnet-5-5; no recheck, no fallback):
+#                  pass, the default; flag (promises_beyond_cards true); denies_ai (denies_being_ai
+#                  true); error (HTTP 500); timeout (9 s, past the check's 8 s); unparsable (the text
+#                  "maybe"); refusal. A flag is soft_promise; no verdict is check_unavailable.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
-#                  in order: "prose" or a card's template. A failed check shows only the handoff clause
-#                  (the default); a passing one its prose when not empty, then a card per clause, each
+#                  in order: "prose" or a card's template. A failed check shows its checked cards, then
+#                  any drafted handoff, when only the prose failed, else the handoff clause, and nothing
+#                  on a first draft a rewrite can fix; a passing one its prose when not empty, then a card per clause, each
 #                  carrying its clause's fact and card data.
 #
 # On the real kernel every verdict also has its signature verified, its visible free text scanned by
@@ -185,6 +188,7 @@
 
 - id: r-fr
   requires: [01a]
+  final: false
   prose: "Je peux vous aider avec ça."
   expect: {ok: false, violations: [unsupported_language]}
 
@@ -200,19 +204,28 @@
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
   soft_promise: error
-  expect: {ok: false, violations: [soft_promise]}
+  expect: {ok: false, violations: [check_unavailable]}
+
+# A soft-check outage on a first draft is rewritten like any prose failure: nothing shows
+# (the owner's ruling of 2026-11-01); the final check makes its own try.
+- id: r-soft-unavailable-first-draft
+  requires: [01a]
+  prose: "I'm sure Maria will sort it out for you."
+  final: false
+  soft_promise: error
+  expect: {ok: false, violations: [check_unavailable], blocks: []}
 
 - id: r-soft-promise-timeout
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
   soft_promise: timeout
-  expect: {ok: false, violations: [soft_promise]}
+  expect: {ok: false, violations: [check_unavailable]}
 
 - id: r-soft-promise-unparsable
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
   soft_promise: unparsable
-  expect: {ok: false, violations: [soft_promise]}
+  expect: {ok: false, violations: [check_unavailable]}
 
 # A reply that denies being an AI: the check's `denies_being_ai` flag is a soft_promise violation
 # (rule_id soft.denies_ai), the kernel's only fixed, model-free handling of an AI denial.
@@ -337,6 +350,18 @@
   clauses: [{template: booking_confirmed, fact: own-booking}]
   expect: {ok: true, language: en, blocks: [prose, booking_confirmed]}
 
+# The built-in agent asks an office Desk for a consult and any other Desk for an appointment (plan 09, C2): the
+# Desk's claim that either is booked needs the booking card too.
+- id: r-consult-claim-without-a-card
+  requires: [01a]
+  prose: "Your consult is booked."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: r-appointment-claim-without-a-card
+  requires: [01a]
+  prose: "Your appointment is confirmed."
+  expect: {ok: false, violations: [promise_word]}
+
 - id: c-booking-claim-beside-its-card-es
   requires: [01a]
   prose: "Tu cita está confirmada."
@@ -358,3 +383,81 @@
   requires: [01a]
   prose: "Turn off the water main right away."
   expect: {ok: true, language: en, blocks: [prose]}
+
+# Unmarked prose gets one fully checked rewrite and never reaches the visitor unchecked.
+- id: r-unmarked
+  requires: [01a]
+  prose: "Entendido, revisamos ambos grifos."
+  expect: {ok: false, violations: [uncertain_language]}
+
+- id: c-unmarked-payment-rewrite
+  requires: [01c]
+  prose: "Absolutely. Payment link below."
+  clauses: [{template: payment_link, fact: own-payment-link}]
+  final: false
+  expect: {ok: false, violations: [uncertain_language], blocks: []}
+
+- id: c-payment-correction
+  requires: [01c]
+  prose: "Here is the link to pay."
+  clauses: [{template: payment_link, fact: own-payment-link}]
+  expect: {ok: true, blocks: [prose, payment_link]}
+
+- id: r-soft-refusal
+  requires: [01a]
+  prose: "I can help with that."
+  soft_promise: refusal
+  expect: {ok: false, violations: [check_unavailable]}
+
+# English markers do not make an unread number safe: the soft check must still flag it.
+- id: r-unread-price
+  requires: [01a]
+  prose: "The total is lima puluh ribu rupiah, thanks."
+  soft_promise: flag
+  expect: {ok: false, violations: [soft_promise]}
+
+- id: r-pay-link
+  requires: [01a]
+  prose: "Here is the link to pay."
+  expect: {ok: true, blocks: [prose]}
+
+# Card retention changes in the following task; the digit stays blocked in both versions.
+- id: c-digit-quote-payment
+  requires: [01c]
+  prose: "Here is $20."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote, payment_link]}
+
+- id: c-final-prose-quote
+  requires: [01a]
+  prose: "Here is $20."
+  clauses: [{template: quote, fact: own-quote}]
+  final: true
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote]}
+
+# A handoff clause Claude drafted beside the card follows the kept card (the owner's ruling of
+# 2026-11-01); the prose is still dropped.
+- id: c-final-prose-quote-drafted-handoff
+  requires: [01a]
+  prose: "Here is $20."
+  clauses: [{template: handoff}, {template: quote, fact: own-quote}]
+  final: true
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote, handoff]}
+
+# A visitor asks to pay the service call deposit: the quote and its payment link pass their clause
+# checks, and the soft check flags both drafts. The final check keeps both cards, so the visitor can
+# still pay (a live report: the handoff used to replace them).
+- id: c-deposit-soft-flag-first
+  requires: [01c]
+  prose: "Here's the quote for the service call deposit, and a link to pay it."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  soft_promise: flag
+  expect: {ok: false, violations: [soft_promise]}
+
+- id: c-deposit-soft-flag-final
+  requires: [01c]
+  prose: "Here's the quote for the service call deposit, and a link to pay it."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  soft_promise: flag
+  final: true
+  expect: {ok: false, violations: [soft_promise], blocks: [quote, payment_link]}

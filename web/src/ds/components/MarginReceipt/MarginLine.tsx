@@ -17,6 +17,11 @@ export interface MarginLineProps {
   onOpen?: () => void;
   /** The line was on screen before its row arrived: under a row that lands, it shows at once. */
   shownBefore?: boolean;
+  /**
+   * The line lands on its own as it is drawn, outside a conversation's rows (which land their own
+   * lines): it rises space-4 as it fades in on motion-base, its dot growing from half size.
+   */
+  lands?: boolean;
 }
 
 /**
@@ -24,8 +29,8 @@ export interface MarginLineProps {
  * primary ink when given. With `onOpen` (owner screens) it is a button named "{lead} {text} Open
  * the full trace."; without it, plain text. Shared by `MarginReceipt` and `MarginNote`.
  */
-export function MarginLine({ kind, tone, text, lead, check = false, onOpen, shownBefore = false }: MarginLineProps) {
-  const className = `cd-margin-line cd-margin-${kind} cd-type-caption${shownBefore ? ' cd-margin-line--shown' : ''}`;
+export function MarginLine({ kind, tone, text, lead, check = false, onOpen, shownBefore = false, lands = false }: MarginLineProps) {
+  const className = `cd-margin-line cd-margin-${kind} cd-type-caption${shownBefore ? ' cd-margin-line--shown' : ''}${lands ? ' cd-margin-line--lands' : ''}`;
   const hasLead = lead !== undefined && lead !== '';
   const content = (
     <>

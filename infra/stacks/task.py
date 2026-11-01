@@ -153,12 +153,13 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
 
 def _kernel_secrets(secrets: DeskSecrets) -> dict[str, ecs.Secret]:
     """The kernel's database logins (its own and mock payments'), the ledger's signing seed, the
-    Anthropic key for its reviewer checks and the mock payments key: every business credential."""
+    Anthropic and TypeSafe keys for its reply checks and the mock payments key: every business credential."""
     return {
         "KERNEL_DB_PASSWORD": ecs.Secret.from_secrets_manager(secrets.kernel_db, "password"),
         "MOCKPAY_DB_PASSWORD": ecs.Secret.from_secrets_manager(secrets.mockpay_db, "password"),
         "DESK_SIGNING_SEED": ecs.Secret.from_secrets_manager(secrets.signing_seed),
         "ANTHROPIC_API_KEY": ecs.Secret.from_secrets_manager(secrets.anthropic),
+        "TYPESAFE_API_KEY": ecs.Secret.from_secrets_manager(secrets.typesafe),
         "MOCKPAY_KEY": ecs.Secret.from_secrets_manager(secrets.mockpay_key),
     }
 

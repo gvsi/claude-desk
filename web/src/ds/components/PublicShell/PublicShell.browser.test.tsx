@@ -117,7 +117,17 @@ interface LongChatOptions {
   ownerInChat?: boolean;
   /** The composer is disabled, as the page disables it while it can't send. */
   composerDisabled?: boolean;
+  /** The message, counted from 1, written long: several lines on a phone, fewer on a wider window. */
+  longMessage?: number;
+  /** A 61 px line above the composer, in its area, as the public chat shows one for a waiting request. */
+  lineAbove?: boolean;
+  /** The shell's `keepComposerRoom`. */
+  keepComposerRoom?: boolean;
 }
+
+/** A long message's words: five lines or so on a phone. */
+const LONG_MESSAGE =
+  'the water heater in the garage is leaking from the bottom, the pilot light keeps going out, and there is a puddle by the floor drain. Can someone come out on Saturday morning, and is the call-out fee the same at the weekend?';
 
 /** The element whose scrolling moves `el`: its nearest scrolling ancestor, as the public chat page finds it. */
 function scrollerOfEl(el: Element): Element {
@@ -143,6 +153,9 @@ function LongChat({
   banner = false,
   ownerInChat = false,
   composerDisabled = false,
+  longMessage,
+  lineAbove = false,
+  keepComposerRoom = false,
 }: LongChatOptions) {
   const page = rivera.publicDesk[language];
   const end = useRef<HTMLDivElement>(null);
@@ -161,24 +174,30 @@ function LongChat({
       openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
       banner={banner ? <div data-testid="banner" style={{ height: 96 }} /> : undefined}
       ownerInChat={ownerInChat}
+      keepComposerRoom={keepComposerRoom}
       onAskForOwner={() => {}}
       about={page.charter}
       aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
       composer={
-        <Composer
-          variant="visitor"
-          label="Message Rivera Plumbing"
-          placeholder="Message Rivera Plumbing"
-          maxLength={2000}
-          disabled={composerDisabled}
-          onSend={() => {}}
-        />
+        <>
+          {lineAbove ? <div data-testid="line-above" style={{ height: 61 }} /> : null}
+          <Composer
+            variant="visitor"
+            label="Message Rivera Plumbing"
+            placeholder="Message Rivera Plumbing"
+            maxLength={2000}
+            disabled={composerDisabled}
+            onSend={() => {}}
+          />
+        </>
       }
     >
       <Transcript label="Conversation with Rivera Plumbing">
         {Array.from({ length: rows }, (_, index) => (
           <TranscriptRow key={index}>
-            <VisitorMessage text={`Message ${index + 1}: is drain clearing the same price on a Saturday?`} />
+            <VisitorMessage
+              text={`Message ${index + 1}: ${index + 1 === longMessage ? LONG_MESSAGE : 'is drain clearing the same price on a Saturday?'}`}
+            />
             <span className="cd-sr-only">Reply checked before the visitor saw it.</span>
           </TranscriptRow>
         ))}
@@ -383,6 +402,45 @@ function aboutDrawsItsLine(): boolean {
 
 /** Each window's name: "390x844". */
 const named = ([width, height]: Size) => `${width}x${height}`;
+
+it('the_english_disclosure_keeps_one_period_after_the_business_name', () => {
+  act(() => root.render(
+    <PublicShell brand={{ ...brandOf(desk), name: 'Chen & Co.' }} ownerName="Linda" language="en" onAskForOwner={() => {}} composer={null}>
+      {null}
+    </PublicShell>,
+  ));
+  const line = disclosureLine();
+  expect(line.textContent).toBe("You're chatting with Claude, an AI answering for Chen & Co. Ask for Linda anytime.");
+  expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Chen & Co.', 'Linda']);
+});
+
+it('the_spanish_disclosure_keeps_one_period_after_the_business_name', () => {
+  act(() => root.render(
+    <PublicShell brand={{ ...brandOf(desk), name: 'Chen & Co.' }} ownerName="Linda" language="es" onAskForOwner={() => {}} composer={null}>
+      {null}
+    </PublicShell>,
+  ));
+  const line = disclosureLine();
+  expect(line.textContent).toBe('Estás hablando con Claude, una IA que responde por Chen & Co. Puedes pedir hablar con Linda cuando quieras.');
+  expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Chen & Co.', 'Linda']);
+});
+
+it('the_no_name_disclosure_keeps_one_period_after_the_business_name', () => {
+  // With no owner name, the approved line still takes one period after a name that ends in one.
+  for (const [language, expected] of [
+    ['en', "You're chatting with Claude, an AI answering for Chen & Co. Ask for a person anytime."],
+    ['es', 'Estás hablando con Claude, una IA que responde por Chen & Co. Puedes pedir hablar con una persona cuando quieras.'],
+  ] as const) {
+    act(() => root.render(
+      <PublicShell brand={{ ...brandOf(desk), name: 'Chen & Co.' }} ownerName={null} language={language} onAskForOwner={() => {}} composer={null}>
+        {null}
+      </PublicShell>,
+    ));
+    const line = disclosureLine();
+    expect(line.textContent, language).toBe(expected);
+    expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent), language).toEqual(['Chen & Co.']);
+  }
+});
 
 it('the_document_never_scrolls', async () => {
   // However long the chat, the page is the window's height and width: the conversation scrolls
@@ -972,6 +1030,50 @@ it('short_mode_leaves_only_with_room_to_spare', async () => {
   await vi.waitFor(() => expect(isShort()).toBe(false));
 });
 
+it('kept_composer_room_holds_the_shell_as_a_line_above_the_composer_comes_and_goes', async () => {
+  // A line the page shows above the composer at times (the public chat's, for a waiting request)
+  // can tip a shell at the edge into short, and taking it away turns it tall again. Each switch
+  // moves the conversation, which can bring the reason for the line into view and out of it again,
+  // so the page and the shell would answer each other for ever. While the page asks the shell to
+  // keep the composer's room, it counts the composer area at the tallest it has been since, and the
+  // line coming and going switches nothing; once the page lets the room go, the shell fits itself
+  // again at once.
+  // With the banner pinned too, so the window that leaves the conversation that much room is over
+  // the 520 px under which a shell is short whatever it holds.
+  await renderLongChat([390, 844], { banner: true });
+  const region = one('.cd-public-shell__scroll');
+  // Tall, with 150 px of conversation: more than the 136 a short shell needs to turn tall again, and
+  // less than the 181 the line's 61 px leaves the 120 a tall one keeps.
+  const height = 844 - region.clientHeight + 150;
+  expect(height).toBeGreaterThanOrEqual(520);
+  const seen: { keep: boolean; step: string; short: boolean }[] = [];
+  for (const keep of [false, true]) {
+    await renderLongChat([390, height], { banner: true, follow: true, keepComposerRoom: keep });
+    await nextFrames();
+    seen.push({ keep, step: 'no line', short: isShort() });
+    act(() => root.render(<LongChat banner follow keepComposerRoom={keep} lineAbove />));
+    await nextFrames();
+    seen.push({ keep, step: 'line', short: isShort() });
+    act(() => root.render(<LongChat banner follow keepComposerRoom={keep} />));
+    await nextFrames();
+    seen.push({ keep, step: 'line gone', short: isShort() });
+    if (keep) {
+      act(() => root.render(<LongChat banner follow />));
+      await nextFrames();
+      seen.push({ keep, step: 'room let go', short: isShort() });
+    }
+  }
+  expect(seen).toEqual([
+    { keep: false, step: 'no line', short: false },
+    { keep: false, step: 'line', short: true },
+    { keep: false, step: 'line gone', short: false },
+    { keep: true, step: 'no line', short: false },
+    { keep: true, step: 'line', short: true },
+    { keep: true, step: 'line gone', short: true },
+    { keep: true, step: 'room let go', short: false },
+  ]);
+});
+
 it('keyboard_scrolling_on_a_short_shell_skips_nothing', async () => {
   // On a short shell the chat's head and the composer sit over the conversation. Tabbing from
   // "Ask for Maria Rivera" into the conversation leaves the newest message just above the composer,
@@ -1041,6 +1143,172 @@ it('the_reading_place_survives_a_switch_to_short_and_back', async () => {
   } finally {
     document.removeEventListener('cd-public-shell-scroller', listen);
   }
+});
+
+it('the_reading_place_survives_a_phone_turning', async () => {
+  // The same visitor reading at message 6 on a phone, who turns it on its side and back. The width
+  // changes as well as the height, so the about column, the messages and the chat's head wrap onto
+  // other lines before the shell hears of the new size, as it switches to short and back. Message 6
+  // still stays where it was under the chat's head, whether the browser's own scroll anchoring
+  // moves the conversation first (keeping still whichever element it picks) or doesn't.
+  const seen = [];
+  for (const anchoring of ['browser', 'none'] as const) {
+    const noAnchoring = document.createElement('style');
+    noAnchoring.textContent = anchoring === 'none' ? '* { overflow-anchor: none; }' : '';
+    document.head.append(noAnchoring);
+    try {
+      await renderLongChat([390, 844]);
+      const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+      const head = one('.cd-public-shell__chat-head');
+      const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+      scroller().scrollTop += offset() - 10;
+      await nextFrames();
+      const before = offset();
+      expect(Math.round(before)).toBe(10);
+
+      for (const size of [[568, 320], [390, 844]] satisfies Size[]) {
+        await page.viewport(...size);
+        await vi.waitFor(() => expect(isShort()).toBe(size[1] < 520));
+        await nextFrames();
+        const drift = offset() - before;
+        seen.push({ anchoring, window: named(size), drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+      }
+    } finally {
+      noAnchoring.remove();
+    }
+  }
+  expect(seen).toEqual([
+    { anchoring: 'browser', window: '568x320', drift: 'within 1 px' },
+    { anchoring: 'browser', window: '390x844', drift: 'within 1 px' },
+    { anchoring: 'none', window: '568x320', drift: 'within 1 px' },
+    { anchoring: 'none', window: '390x844', drift: 'within 1 px' },
+  ]);
+});
+
+it('a_scroll_before_the_shell_hears_of_a_turn_isnt_the_reading_place', async () => {
+  // As the phone turns, something can scroll the conversation before the shell hears of the new
+  // size: the browser's scroll anchoring at a layout a render forces mid-reply, or, as here, a
+  // resize listener. That scroll isn't the visitor's: message 6 goes back where the visitor last
+  // saw it, turning either way.
+  const seen = [];
+  const scrollAsTheWindowResizes = () => {
+    scroller().scrollTop += 40;
+  };
+  for (const [from, to] of [[[390, 844], [568, 320]], [[568, 320], [390, 844]]] satisfies [Size, Size][]) {
+    await renderLongChat(from);
+    const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+    const head = one('.cd-public-shell__chat-head');
+    const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+    // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
+    for (let pass = 0; pass < 2; pass += 1) scroller().scrollTop += offset() - 10;
+    await nextFrames();
+    const before = offset();
+    expect(Math.round(before)).toBe(10);
+
+    window.addEventListener('resize', scrollAsTheWindowResizes, { once: true });
+    try {
+      await page.viewport(...to);
+      await vi.waitFor(() => expect(isShort()).toBe(to[1] < 520));
+      await nextFrames();
+    } finally {
+      window.removeEventListener('resize', scrollAsTheWindowResizes);
+    }
+    const drift = offset() - before;
+    seen.push({ turn: `${named(from)} to ${named(to)}`, drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+  }
+  expect(seen).toEqual([
+    { turn: '390x844 to 568x320', drift: 'within 1 px' },
+    { turn: '568x320 to 390x844', drift: 'within 1 px' },
+  ]);
+});
+
+it('the_chats_start_stays_put_as_a_phone_turns', async () => {
+  // A visitor at the start of a chat on a phone, where the about column opens the conversation's
+  // scroll region and is what sits under the chat's head, turns the phone on its side and back. The
+  // column wraps shorter on the wider window, but its top stays where it was at the head's edge
+  // both ways: none of it is left hidden under the head.
+  await renderLongChat([390, 844]);
+  const about = one('.cd-public-shell__scroll > .cd-public-shell__about');
+  const head = one('.cd-public-shell__chat-head');
+  const offset = () => about.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+  expect(scroller().scrollTop).toBe(0);
+  const before = offset();
+
+  const seen = [];
+  for (const size of [[568, 320], [390, 844]] satisfies Size[]) {
+    await page.viewport(...size);
+    await vi.waitFor(() => expect(isShort()).toBe(size[1] < 520));
+    await nextFrames();
+    const drift = offset() - before;
+    seen.push({ window: named(size), aboutTop: Math.abs(drift) <= 1 ? 'where it was' : `${drift.toFixed(1)} px off` });
+  }
+  expect(seen).toEqual([
+    { window: '568x320', aboutTop: 'where it was' },
+    { window: '390x844', aboutTop: 'where it was' },
+  ]);
+});
+
+it('a_message_partly_under_the_head_keeps_its_share_as_a_phone_turns', async () => {
+  // A visitor reading a long message 6, its first part already scrolled up under the chat's head,
+  // turns the phone on its side and back. The message wraps onto fewer lines on the wider window;
+  // the same share of it stays above the head's edge, so the same part of it is at the edge, and it
+  // is still the first message under the head.
+  await renderLongChat([390, 844], { longMessage: 6 });
+  const rows = () => [...container.querySelectorAll<HTMLElement>('.cd-transcript-row')];
+  const row = rows()[5] as HTMLElement;
+  const head = one('.cd-public-shell__chat-head');
+  const edge = () => head.getBoundingClientRect().bottom;
+  const offset = () => row.getBoundingClientRect().top - edge();
+  const height = () => row.getBoundingClientRect().height;
+  const firstUnderTheHead = () => rows().findIndex((candidate) => candidate.getBoundingClientRect().bottom > edge()) + 1;
+  scroller().scrollTop += offset() + height() * 0.85;
+  await nextFrames();
+  const share = -offset() / height();
+  const tall = height();
+  expect(Math.round(share * 100)).toBe(85);
+  expect(firstUnderTheHead()).toBe(6);
+
+  const seen = [];
+  for (const size of [[568, 320], [390, 844]] satisfies Size[]) {
+    await page.viewport(...size);
+    await vi.waitFor(() => expect(isShort()).toBe(size[1] < 520));
+    await nextFrames();
+    const drift = offset() + share * height();
+    seen.push({
+      window: named(size),
+      wraps: height() < tall - 1 ? 'shorter' : height() > tall + 1 ? 'taller' : 'as before',
+      share: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px off`,
+      firstUnderTheHead: firstUnderTheHead(),
+    });
+  }
+  expect(seen).toEqual([
+    { window: '568x320', wraps: 'shorter', share: 'within 1 px', firstUnderTheHead: 6 },
+    { window: '390x844', wraps: 'as before', share: 'within 1 px', firstUnderTheHead: 6 },
+  ]);
+});
+
+it('a_place_read_on_the_side_holds_as_the_phone_turns_back', async () => {
+  // A visitor turns the phone on its side, scrolls on to message 12 there, and turns it back:
+  // message 12 stays where they left it under the chat's head. The place put back is the one read
+  // on the wider window, not one from before the first turn.
+  await renderLongChat([390, 844]);
+  await page.viewport(568, 320);
+  await vi.waitFor(() => expect(isShort()).toBe(true));
+  await nextFrames();
+  const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[11] as HTMLElement;
+  const head = one('.cd-public-shell__chat-head');
+  const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+  // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
+  for (let pass = 0; pass < 2; pass += 1) scroller().scrollTop += offset() - 10;
+  await nextFrames();
+  const before = offset();
+  expect(Math.round(before)).toBe(10);
+
+  await page.viewport(390, 844);
+  await vi.waitFor(() => expect(isShort()).toBe(false));
+  await nextFrames();
+  const drift = offset() - before;
+  expect(Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px`).toBe('within 1 px');
 });
 
 it('follows_the_visual_viewport_when_the_keyboard_opens', async () => {

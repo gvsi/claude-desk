@@ -26,7 +26,8 @@ read from that link's own `payment_link` fact, then the kernel's line). Each tem
 once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
-A card's `text` is the headline and then the details, one per line. A template that names no fact
+A card's `text` is the headline and then the details, one per line; the soft checks read it after
+its kind's fixed label (`CHECK_LABELS`, `check_text`). A template that names no fact
 kinds (handoff, verify_prompt) renders without one. `Template.current` says
 whether a fact may still be shown (a status the template renders, not expired), and a fact with
 nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
@@ -43,7 +44,7 @@ from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Literal
 
-from desk.contracts import CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
+from desk.contracts import BusinessToolDef, CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
 from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
 
@@ -104,10 +105,16 @@ def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> s
     return template.format(**fields, **({"owner": owner} if owner is not None else {}))
 
 
-def executed_status(tool: str, lang: str, *, owner: str) -> str:
+def executed_status(tool: str, lang: str, *, owner: str, business: BusinessToolDef | None = None) -> str:
     """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
     for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
     KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
+    from desk.contracts import is_business_tool
+    if is_business_tool(tool):
+        from desk.kernel_service.adapters.base import quoted
+        if business is None:
+            raise KeyError(tool)
+        return EXECUTED[lang][business.config.block].format(owner=owner, title=quoted(business.title))
     return EXECUTED[lang][tool].format(owner=owner)
 
 
@@ -231,3 +238,34 @@ register_template("handoff", (), en.handoff, es.handoff)
 register_template("link_cancelled", {"payment_link"}, en.link_cancelled, es.link_cancelled, key="payment_link:",
                   statuses=())
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)
+
+# What kind of card each template renders, as the soft checks read it (the owner's decision of
+# 2026-11-01): a card's text alone ("Service call deposit, $20.00") doesn't say it is a payment link.
+# English whatever the reply's language, since the checks' prompts are English; the web app's card
+# header where it names the kind, else plain words for it. Every registered template has one, the
+# link templates `payment_link` and `document_link` too, which their adapters register.
+CHECK_LABELS: dict[ClauseTemplate, str] = {
+    "quote": "Quote",
+    "booking_options": "Open times",
+    "booking_confirmed": "Booking confirmed",
+    "payment_link": "Payment link",
+    "document_link": "Document link",
+    "hours": "Hours",
+    "policy": "Policy",
+    "contact": "Contact",
+    "handoff": "Handed to a person",
+    "verify_prompt": "Verification",
+    "owner_said": "Message from the owner",
+    "charges": "Charges",
+    "refund_issued": "Refund issued",
+    "charge_confirmed": "Charge confirmed",
+    "callback_confirmed": "Callback set",
+    "payment_confirmed": "Payment confirmed",
+    "link_cancelled": "Payment link cancelled",
+}
+
+
+def check_text(card: RenderedBlock) -> str:
+    """A card as the soft checks (Sonnet's and Jev's) read it: its kind's label, then its text
+    ("Payment link card: Service call deposit, $20.00")."""
+    return f"{CHECK_LABELS[card.template]} card: {card.text}"

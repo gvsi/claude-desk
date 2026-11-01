@@ -18,6 +18,9 @@ OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                                          "owner_draft_suggestion")},
                     **{(operation, "422"): ("ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_draft_money_cap", "owner_setup_rules", "owner_setup_confirm")},
+                    **{(operation, "422"): ("SetupPublicLineError", "ApiError")
+                       for operation in ("owner_setup_put_public_line", "owner_setup_confirm_public_lines",
+                                         "owner_setup_delete_public_line", "owner_setup_delete_public_price")},
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included
@@ -36,6 +39,25 @@ def typed(schema: dict) -> bool:
 
 def test_openapi_export_is_current():
     assert export_openapi() == json.loads(OPENAPI_PATH.read_text()), "run: cd backend && uv run python scripts/export_openapi.py"
+
+
+def test_public_desk_starters_are_optional_with_an_empty_default():
+    schema = export_openapi()["components"]["schemas"]["PublicDesk"]
+    assert "starters" not in schema["required"]
+    assert schema["properties"]["starters"] == {
+        "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
+
+
+def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
+    schemas = export_openapi()["components"]["schemas"]
+    mapping = schemas["BusinessToolDef"]["properties"]["config"]["discriminator"]["mapping"]
+    assert mapping == {block: f"#/components/schemas/{name}" for block, name in (
+        ("intake", "IntakeConfig"), ("typed_booking", "TypedBookingConfig"),
+        ("purpose_payment", "PurposePaymentConfig"), ("urgent", "UrgentConfig"))}
+    # A proposal may still need the owner's amount; a configured business tool never does.
+    amount = schemas["PurposePaymentProposalConfig"]["properties"]["amount_cents"]
+    assert {"type": "null"} in amount["anyOf"]
+    assert schemas["PurposePaymentConfig"]["properties"]["amount_cents"]["type"] == "integer"
 
 
 def test_briefing_contract_counts_only_turned_down_requests():
@@ -74,6 +96,37 @@ def test_owner_refusal_reasons_are_required_and_nullable():
         field = schemas[name]["properties"]["owner_plain"]
         assert field["anyOf"] == [{"type": "string"}, {"type": "null"}]
         assert "default" not in field
+
+
+def test_public_line_writes_document_kernel_conflicts():
+    paths = export_openapi()["paths"]
+    for path, method in (
+        ("/api/owner/setup/{id}/public_lines", "put"),
+        ("/api/owner/setup/{id}/public_lines/confirm", "post"),
+        ("/api/owner/setup/{id}/public_lines/{key}", "delete"),
+        ("/api/owner/setup/{id}/public_lines/prices/{item_id}", "delete"),
+    ):
+        conflict = paths[path][method]["responses"]["409"]
+        assert conflict["content"]["application/json"]["schema"] == ERROR
+        assert "error: kernel" in conflict["description"], path
+        assert "code: conflict" in conflict["description"], path
+
+
+def test_public_fact_confirmation_and_price_removal_require_displayed_values():
+    document = export_openapi()
+    schemas = document["components"]["schemas"]
+    assert "revision" in schemas["SetupPublicLines"]["required"]
+    confirm = schemas["SetupPublicLinesConfirmIn"]
+    assert set(confirm["required"]) == {"keys", "revision"}
+    assert confirm["properties"]["keys"]["minItems"] == 1
+    assert confirm["properties"]["revision"]["minLength"] == 1
+    removal = document["paths"]["/api/owner/setup/{id}/public_lines/prices/{item_id}"]["delete"]
+    query = {parameter["name"]: parameter for parameter in removal["parameters"] if parameter["in"] == "query"}
+    assert set(query) == {"title", "unit_cents"}
+    assert all(parameter["required"] for parameter in query.values())
+    assert query["title"]["schema"]["minLength"] == 1
+    assert query["unit_cents"]["schema"]["type"] == "integer"
+    assert query["unit_cents"]["schema"]["minimum"] == 0
 
 
 def test_every_route_has_typed_responses():
@@ -146,9 +199,13 @@ def test_a2a_request_body_is_documented():
 
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
-                   "id"}
-SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
+                   "id", "proposal_id", "key", "item_id"}
+SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/events", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
+               "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
+               "/api/owner/setup/{id}/public_lines", "/api/owner/setup/{id}/public_lines/confirm",
+               "/api/owner/setup/{id}/public_lines/{key}",
+               "/api/owner/setup/{id}/public_lines/prices/{item_id}",
                *(f"/api/owner/policy/setup/{{id}}/{step}"
                  for step in ("rules", "situations", "safety_check", "confirm", "go_live"))}
 
@@ -162,7 +219,7 @@ def test_path_parameters_are_named_after_their_resource():
     for path in setup:
         for operation in document["paths"][path].values():
             assert [(parameter["name"], parameter["in"]) for parameter in operation.get("parameters", [])
-                    if parameter["in"] == "path"] == [("id", "path")], path
+                    if parameter["in"] == "path"] == [(name, "path") for name in re.findall(r"{(\w+)}", path)], path
 
 
 def test_the_keyed_starts_document_their_answers():

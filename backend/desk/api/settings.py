@@ -23,6 +23,8 @@ leaves the secrets out.
 
 `BUSINESS_TOOLS_ENABLED=1` allows setup's proposal cards to carry configurations once the kernel's
 business-tool blocks are deployed. It is off by default; setup still proposes the jobs in words.
+`SETUP_POLICY_CLAIMS_ENABLED=0` stops setup publishing business policy claims in the charter.
+It is on by default; turning it off leaves setup's answers and other Desk parts unchanged.
 """
 
 import os
@@ -73,6 +75,7 @@ class Settings:
     kernel_ro_schema: str = "kernel_ro"
     replay_night: bool = True               # each new copy asks for the recorded night; never from the environment
     business_tools_enabled: bool = False   # enable configurations only once the kernel's blocks are deployed
+    setup_policy_claims_enabled: bool = True   # runtime switch for publishing setup's policy claims
 
     @property
     def production(self) -> bool:
@@ -129,4 +132,5 @@ class Settings:
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
             business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") == "1",
+            setup_policy_claims_enabled=_env("SETUP_POLICY_CLAIMS_ENABLED") != "0",
         )

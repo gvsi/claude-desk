@@ -310,6 +310,29 @@ export const Failed: Story = {
   },
 };
 
+/** Kept words stay reachable by keyboard while retry stays in the phone viewport. */
+export const FailedLong: Story = {
+  args: { ...Failed.args, failed: { text: Array(30).fill(KEPT_ANSWER).join('\n'), line: FAILED_LINE, onRetry: fn() } },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'A long kept answer scrolls within six lines; Try again remains in view.' },
+  play: async ({ args, canvas, userEvent }) => {
+    const kept = canvas.getByRole('region', { name: args.label });
+    const retry = canvas.getByRole('button', { name: 'Try again' });
+    const lineHeight = Number.parseFloat(getComputedStyle(kept).lineHeight);
+    await expect(kept).toHaveAttribute('tabindex', '0');
+    await expect(kept.clientHeight).toBe(6 * lineHeight);
+    await expect(kept.scrollHeight).toBeGreaterThan(kept.clientHeight);
+    await expect(retry.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+    await userEvent.tab();
+    await expect(kept).toHaveFocus();
+    expectComputed(kept, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgb(126, 174, 218)', outlineOffset: '2px' });
+    await userEvent.tab();
+    await expect(retry).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.failed?.onRetry).toHaveBeenCalledTimes(1);
+  },
+};
+
 export const FailedWhileSending: Story = {
   args: { ...Failed.args, disabled: true, failed: { text: KEPT_ANSWER, line: FAILED_LINE, onRetry: fn() } },
   parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'The board draws "Try again" ready; here the answer is being sent again, so it waits.' },

@@ -10,6 +10,7 @@ import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, ty
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
+  AgentTasks,
   ApprovalAnswerOut,
   CancelAccepted,
   CancelReason,
@@ -57,8 +58,17 @@ import {
   type Language,
   type Step,
 } from './script.ts';
-import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
+import {
+  SETUP_ROUTES,
+  setupPublicDesk,
+  setupTaskSet,
+  withSetupBusinesses,
+  withSetupBusinessName,
+  withSetupDesks,
+  withSetupGreeting,
+} from './setup.ts';
+import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -128,6 +138,9 @@ type FailStatus = 401 | 403 | 404 | 409 | 422 | 429 | 501 | 503 | 504;
 /** A refusal's body, as the API writes it: `error`, with a kernel failure's `code` or a conflict's `decision`. */
 export interface ErrorBody {
   error: string;
+  /** A public-line refusal's row; the internal reason is never rendered. */
+  key?: string;
+  reason?: string[] | null;
   code?: string;
   decision?: Decision;
   /** An `above_money_cap` refusal's limit for taking money without asking. */
@@ -265,14 +278,17 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
 /**
- * How a store numbers its copies and names their payment links: the screen tests' one copy from
- * 1, so its ids are the seed's, and the dev server's at random, so each copy's are its own.
+ * How a store numbers its copies and names their payment and document links: the screen tests'
+ * one copy from 1, so its ids are the seed's, and the dev server's at random, so each copy's are
+ * its own.
  */
 export interface CopyNaming {
   /** A new copy's number, which its ids and slugs come from (seed.ts `copyIds`). */
   copyNo(): number;
   /** A new payment link's token, unique across the store's copies. */
   linkToken(): string;
+  /** A new document link's token, unique across the store's copies and never handed out again. */
+  documentToken(): string;
 }
 
 /** The API's side of one copy: the copy itself and the turns in progress. */
@@ -290,7 +306,7 @@ export class Server {
   }
 
   private freshWorld(seed: MockSeed = this.seed): MockWorld {
-    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken());
+    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken(), () => this.naming.documentToken());
     seedWorld(world);
     return world;
   }
@@ -428,6 +444,7 @@ function linkClosed(link: LinkRecord): Failure {
 const SERVED: ServedRoutes = {
   // The setup interview (setup.ts).
   ...SETUP_ROUTES,
+  ...PUBLIC_LINES_ROUTES,
   copies(sv, req) {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;
@@ -654,8 +671,9 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards in place of every owner card, personal ones included: its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, PRESETS[preset]));
+    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
+    // its diff lists each one it removes.
+    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -765,8 +783,8 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    // The turn's tools are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
@@ -816,6 +834,15 @@ const SERVED: ServedRoutes = {
     // A demo key for this browser's chat with the Desk, shown once and kept nowhere.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
+  },
+  agentTasks(sv, req) {
+    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
+    // Rivera's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const deskId = visitor.desk.summary.desk_id;
+    const own = sv.world.desks[0]?.summary.desk_id === deskId;
+    return ok({ task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other') } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
     const visitor = sv.visitor(req.params.slug, req.cookies);

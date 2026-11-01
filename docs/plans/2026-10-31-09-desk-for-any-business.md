@@ -186,9 +186,9 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A4: publish what setup learned for the visitor agent (1.5 h, must)
 
-**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`; the fact turn fields), `setup.py` (`seed_parts`). Test `test_setup_rules.py`.
+**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`, stored-only `how_we_help` ≤ 1500 for the finish step, and code-only `suggested_fields: list[str]`, default empty; each policy is a field only of the turns of the questions that ask for it: `pricing` on `what_you_do` and the quote question, `intake` on `what_you_do`, `urgent` on `what_you_do` and `contact_and_after_hours`, and `after_hours` on `hours_and_area` and `contact_and_after_hours`, with `website` on every question but `contact_and_after_hours` and no hours on `what_you_do`, so no turn has more than 20 top-level properties and every turn's strict schema compiles), `setup.py` (`seed_parts`). Test `test_setup_rules.py` and `test_setup_questions.py`. Policy descriptions and the consultant prompt keep amounts, percentages, times, days and numbers out of policy text, leave hours to their topic, and keep `after_hours` customer-facing, without private owner instructions or personal phone numbers. Limit turns read no stored policies; of the limit turns, only the existing quote turn may set `pricing`, from the owner's answer alongside its `price_items`.
 
-**Interfaces:** `seed_parts` writes text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `contact`, each only when set. Consumed by C1.
+**Interfaces:** `seed_parts` uses one `SETUP_POLICY_CLAIMS` field-to-key map to write trimmed, nonblank text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:how_we_help`. Fields in `suggested_fields` publish no policy claim until owner confirmation. `contact` comes from `public_contact`; hours keep their own part. Consumed by C1. The kernel policy-text check (B7) must ship with these claims. The public contact is held like a policy line. The kernel checks the contact first, so a refusal naming only the contact drops it without using up a policy retry. The first other detailed refusal drops its named keys and retries; a cap refusal or detail naming no charter key drops every policy claim instead. A second detailed refusal drops every policy claim left and any other key it names. At most four charter PUTs occur when the contact is refused on its own and three otherwise, nothing is re-sent unchanged (a refusal with nothing left to drop propagates), and other failures propagate. The dropped keys reach `SetupState.held_policy_keys`.
 
 - [ ] **Test** `test_seed_parts_publish_policy_claims`: answers with every field give exactly those keys, kind `text`, values trimmed; unset fields give no claim.
 - [ ] Implement; run `test_setup_rules.py test_setup_questions.py -q`; commit `feat(api): publish setup's business summary and policies to the Desk`.
@@ -211,7 +211,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A7: keep a setup Desk's calendar open (1.5 h, could)
 
-**Files:** `backend/desk/api/jobs.py`, `setup.py` (`calendar_slots`). A daily job PUTs the next 14 days of slots from the Desk's hours for every setup-made live Desk. Test `test_jobs.py`: `test_the_calendar_is_refreshed_from_the_hours`.
+**Files:** `backend/desk/calendar.py` (new: `calendar_slots`, moved from `setup.py` so the kernel can share it), `backend/desk/kernel_service/desks.py` (`extend_calendar`, `extend_calendars`, `keep_calendars_open`), `app.py` (the lifespan task), `repo.py` (`limit_lock_waits`, the lock order). The kernel's lifespan runs a pass at its start and then daily, beside the kernel and cancelled at shutdown. Each live Desk with hours that setup made (its version 1 came from the `ask_first` preset, which `POST /desks` activates; Rivera's seed starts from `rivera`) gets, in a transaction of its own under its Desk row, the slots its hours give for the days after its latest slot, up to 14 days ahead in the business's time zone. It only inserts: booked slots, slots a waiting request names and the owner's changes inside the covered days stay as they are, while a trimmed tail or a cleared calendar is filled again (wish #596). Each extension is ledgered as the owner's calendar write is, `desk_data` `{part: "calendar", refs, extended_from: "hours"}`. An API job was rejected because API jobs hold no credential and never call the kernel. Test `backend/tests/kernel/test_calendar_refresh.py`: `test_the_calendar_is_refreshed_from_the_hours`.
 
 ### Task A8: the run's fixes (in flight)
 
@@ -251,7 +251,13 @@ The seam setup needs:
 
 ### C2: the demo agent's tasks from the Desk (1.5 h, could)
 
-`DEMO_TASKS` drawn from the Desk's own tools and catalog instead of a water heater visit on every Desk.
+Instead of a water heater visit on every Desk, `DEMO_TASKS` holds a fixed line for each task in each `DemoTaskSet` (#572):
+- `rivera` for the copy's seeded Desk, its three lines unchanged;
+- `trade`, `office`, `landlord` and `other` for a Desk setup made, picked by code from its `app.setup_interviews.business_type` alone (`agents.demo_task_set`); a Desk with no known type reads `other`.
+
+`GET /api/public/desks/{slug}/agent_tasks` answers that key, and the agents page words its task chips from its own copy for it. The owner signed the lines and the chips on 2026-11-01. Two other designs were rejected:
+- (a) Lines built from the Desk's business tool titles or catalog names: that owner text would reach the agent's model, whose requests its launcher sees unchecked, widening that recorded exception.
+- (b) Hiding the agent's words for Desk-built tasks: it would undo the owner's decision to show them.
 
 ---
 

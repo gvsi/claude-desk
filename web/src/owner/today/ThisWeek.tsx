@@ -5,6 +5,7 @@ import { Card, StatusDot, TextLink } from '../../ds/index.ts';
 import { formatCents, formatDay } from '../../lib/format.ts';
 import { useToday } from '../useDesks.ts';
 import { RecordedHistoryLink } from './SinceLastNight.tsx';
+import { handledCount, steppedInCount, TODAY_COPY } from './copy.ts';
 
 /** "1 booking", "2 bookings". */
 function plural(n: number, one: string, many: string): string {
@@ -79,7 +80,7 @@ function Bookings({ week }: { week: ThisWeekFigures }) {
 function Handled({ week }: { week: ThisWeekFigures }) {
   return (
     <div className="cd-week__part">
-      <h3 className="cd-week__title cd-type-control">Handled by Claude, or by you</h3>
+      <h3 className="cd-week__title cd-type-control">{TODAY_COPY.handledTitle}</h3>
       {week.conversations === 0 ? (
         <p className="cd-week__line cd-type-meta">No conversations in the last 7 days.</p>
       ) : (
@@ -91,12 +92,12 @@ function Handled({ week }: { week: ThisWeekFigures }) {
           <ul className="cd-week__legend cd-type-meta">
             <li className="cd-week__legend-item">
               <StatusDot tone="handled" />
-              <span>Claude handled {week.handled}</span>
+              <span>{handledCount(week.handled)}</span>
             </li>
             {week.stepped_in > 0 ? (
               <li className="cd-week__legend-item">
                 <StatusDot tone="held" />
-                <span>You stepped in {plural(week.stepped_in, 'time', 'times')}</span>
+                <span>{steppedInCount(week.stepped_in)}</span>
               </li>
             ) : (
               <li className="cd-week__legend-item cd-week__legend-item--quiet">
@@ -116,7 +117,7 @@ function TurnedDown({ week, deskId }: { week: ThisWeekFigures; deskId: string })
     <div className="cd-week__part">
       <h3 className="cd-week__title cd-type-control">Turned down</h3>
       {week.stopped === 0 ? (
-        <p className="cd-week__line cd-type-meta">Nothing turned down in the last 7 days.</p>
+        <p className="cd-week__line cd-type-meta">{TODAY_COPY.turnedDownEmpty}</p>
       ) : (
         <p className="cd-week__figure">
           <span className="cd-week__number cd-type-figure-small">{week.stopped}</span>{' '}
@@ -124,7 +125,7 @@ function TurnedDown({ week, deskId }: { week: ThisWeekFigures; deskId: string })
         </p>
       )}
       <p className="cd-week__line cd-type-meta">
-        <TextLink href={`/app/${encodeURIComponent(deskId)}/safety`}>Open Safety</TextLink>
+        <TextLink href={`/app/${encodeURIComponent(deskId)}/safety`}>{TODAY_COPY.openSafety}</TextLink>
       </p>
     </div>
   );

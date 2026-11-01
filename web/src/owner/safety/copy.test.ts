@@ -10,14 +10,21 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt, RefusalCause } from '../../api/views.ts';
+import type { HandoffEntry } from '../../api/handoffEntry.ts';
+import type { Attempt, RefusalCause, TriageCategory } from '../../api/views.ts';
+// The trace's line comes from its own module: the design system's index doesn't export it, and
+// tests are outside the screens' index-only import rule.
+import { traceLine } from '../../ds/components/FullTrace/traceLine.ts';
 import {
   CATEGORY_COPY,
+  CATEGORY_LABELS,
   CAUSE_COPY,
+  HANDOFF_ENTRY_COPY,
   LEDGER_KIND_COPY,
   ORIGIN_COPY,
   anythingStoppedIn,
   anythingTurnedDownIn,
+  categoryLabel,
   causeLabel,
   entryCopy,
   entryFor,
@@ -76,8 +83,8 @@ const SIGNED_CAUSES = {
   no_rule: 'No rule covers this yet',
 } as const;
 
-/** The triage categories, as the API owner plan's triage task names them (plan 02b, Task 10). */
-const TRIAGE_CATEGORIES = ['impersonation', 'discount_push', 'private_data', 'code_redirect', 'injection', 'over_limit', 'other'];
+/** The descriptive subjects in the owner's signed order. */
+const TRIAGE_CATEGORIES = ['prices', 'records', 'codes', 'instructions', 'limits', 'wording', 'other'] as const satisfies readonly TriageCategory[];
 
 const sorted = (values: readonly string[]) => [...values].sort();
 
@@ -114,6 +121,18 @@ function page(entries: LedgerEntry[]): LedgerPage {
 }
 
 describe('Safety copy', () => {
+  it('each_subject_has_its_own_label_in_the_signed_order', () => {
+    const labels = ['Prices and discounts', "Someone's records", 'Verification codes', 'Instructions in a message', 'Above a limit', "The AI's wording", 'Other'];
+    expect(Object.keys(CATEGORY_COPY)).toEqual(TRIAGE_CATEGORIES);
+    expect(CATEGORY_LABELS).toEqual(labels);
+    for (const [index, category] of TRIAGE_CATEGORIES.entries()) {
+      const triage = { summary: 'The person asked a question. The Desk checked its reply.', category };
+      expect(categoryLabel({ triage })).toBe(labels[index]);
+    }
+    expect(categoryLabel({ triage: null })).toBe('Not sorted yet');
+    expect(categoryLabel({ triage: { summary: 'A new subject.', category: 'future' } as unknown as Attempt['triage'] })).toBe('Other');
+  });
+
   it('copy_tables_are_exhaustive', () => {
     expect(sorted(Object.keys(LEDGER_KIND_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'kind')));
     expect(sorted(Object.keys(ORIGIN_COPY))).toEqual(sorted(schemaEnum('LedgerEvent', 'origin')));
@@ -133,15 +152,37 @@ describe('Safety copy', () => {
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], replaced_by: 'handoff-2' }))).toBe('Chat moved to a call-back');
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], closed_by: 'takeover' }))).toBe('Handoff closed when you took over');
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], closed_by: 'owner_message' }))).toBe('Handoff closed when you wrote in the chat');
+    expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], closed_by: 'booking' }))).toBe('Handoff closed when they booked a time');
     // Every other `desk_data` entry is unchanged, a handoffs entry of a kind this build doesn't know among them.
     for (const summary of [{ part: 'tools', refs: ['native.quote'] }, { part: 'desk', created: true }, { part: 'hours', refs: [] }, {}]) {
       expect(entryCopy(deskData(summary)), JSON.stringify(summary)).toBe('Desk details changed');
     }
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: 'callback' }))).toBe('Desk details changed');
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: null }))).toBe('Desk details changed');
+    expect(entryCopy({ kind: 'business_tools', summary: { tools: [] } })).toBe("Your Desk's jobs changed");
     // Another kind of entry keeps its own name, whatever its summary says.
     expect(entryCopy({ kind: 'reply', summary: { part: 'handoffs', refs: ['handoff-1'], kind: 'card' } })).toBe('Reply checked');
     expect(entryCopy({ kind: 'execute', summary: { part: 'handoffs', refs: ['handoff-1'] } })).toBe('Action ran');
+  });
+
+  it('full_trace_reads_the_history_row_name_of_each_handoff_entry', () => {
+    // The design system's full trace and the owner's history rows name a handoff entry in the same
+    // signed words: the trace's line opens with the row's name as a sentence.
+    const details = {
+      opened: { kind: 'card' },
+      done: {},
+      replaced: { replaced_by: 'handoff-2' },
+      took_over: { closed_by: 'takeover' },
+      wrote: { closed_by: 'owner_message' },
+      booked: { closed_by: 'booking' },
+    } as const satisfies Record<HandoffEntry, Record<string, unknown>>;
+    for (const [handoff, more] of Object.entries(details) as [HandoffEntry, Record<string, unknown>][]) {
+      const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['handoff-1'], ...more } } as const;
+      const sentence = `${HANDOFF_ENTRY_COPY[handoff]}.`;
+      for (const origin of ['kernel', 'api'] as const) {
+        expect(traceLine({ ...event, origin }).slice(0, sentence.length), `${handoff} ${origin}`).toBe(sentence);
+      }
+    }
   });
 
   it('entry_for_matches_ledger_seq', () => {

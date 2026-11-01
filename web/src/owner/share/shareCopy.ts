@@ -4,6 +4,7 @@
  * saying that Claude, an AI, answers there (N-Run2-Share).
  */
 import type { CopyListItem } from '../../ds/index.ts';
+import { afterName } from '../../lib/names.ts';
 
 /**
  * A link under the API's paths, a card's single-use document link among them. Such a link is never
@@ -46,7 +47,7 @@ export function SHARE_COPY(business: string, ownerName: string, url: string): Co
     { title: 'Email signature', text: `Ask ${business} any time at ${link} (answered by Claude, an AI).` },
     {
       title: 'Voicemail',
-      text: `You’ve reached ${business}. For quotes and bookings, visit ${spokenLink(url)}, where Claude, an AI, answers any time. For an emergency, leave a message and ${ownerName} will call you back.`,
+      text: `You’ve reached ${business}${afterName(business, `. For quotes and bookings, visit ${spokenLink(url)}, where Claude, an AI, answers any time. For an emergency, leave a message and ${ownerName} will call you back.`)}`,
     },
   ];
 }

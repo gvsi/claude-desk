@@ -158,6 +158,33 @@
       "title": "AnswerRequest",
       "type": "object"
     },
+    "AnyToolName": {
+      "anyOf": [
+        {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "native.web_search",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "string",
+          "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+        }
+      ]
+    },
     "Approval": {
       "properties": {
         "approval_id": {
@@ -311,6 +338,130 @@
         "timezone"
       ],
       "title": "BusinessSeed",
+      "type": "object"
+    },
+    "BusinessTool": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 60,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 300,
+          "title": "Description",
+          "type": "string"
+        },
+        "config": {
+          "discriminator": {
+            "mapping": {
+              "intake": "#/$defs/IntakeConfig",
+              "purpose_payment": "#/$defs/PurposePaymentConfig",
+              "typed_booking": "#/$defs/TypedBookingConfig",
+              "urgent": "#/$defs/UrgentConfig"
+            },
+            "propertyName": "block"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IntakeConfig"
+            },
+            {
+              "$ref": "#/$defs/TypedBookingConfig"
+            },
+            {
+              "$ref": "#/$defs/PurposePaymentConfig"
+            },
+            {
+              "$ref": "#/$defs/UrgentConfig"
+            }
+          ],
+          "title": "Config"
+        },
+        "tool": {
+          "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$",
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "config",
+        "tool"
+      ],
+      "title": "BusinessTool",
+      "type": "object"
+    },
+    "BusinessToolDef": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 60,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 300,
+          "title": "Description",
+          "type": "string"
+        },
+        "config": {
+          "discriminator": {
+            "mapping": {
+              "intake": "#/$defs/IntakeConfig",
+              "purpose_payment": "#/$defs/PurposePaymentConfig",
+              "typed_booking": "#/$defs/TypedBookingConfig",
+              "urgent": "#/$defs/UrgentConfig"
+            },
+            "propertyName": "block"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IntakeConfig"
+            },
+            {
+              "$ref": "#/$defs/TypedBookingConfig"
+            },
+            {
+              "$ref": "#/$defs/PurposePaymentConfig"
+            },
+            {
+              "$ref": "#/$defs/UrgentConfig"
+            }
+          ],
+          "title": "Config"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "config"
+      ],
+      "title": "BusinessToolDef",
+      "type": "object"
+    },
+    "BusinessToolName": {
+      "type": "string",
+      "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+    },
+    "BusinessToolsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/BusinessTool"
+          },
+          "maxItems": 8,
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "BusinessToolsRequest",
       "type": "object"
     },
     "CalendarSlot": {
@@ -1878,6 +2029,32 @@
       "title": "InboxNotice",
       "type": "object"
     },
+    "IntakeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "block": {
+          "const": "intake",
+          "title": "Block",
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "maxLength": 120,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Questions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "block",
+        "questions"
+      ],
+      "title": "IntakeConfig",
+      "type": "object"
+    },
     "KernelError": {
       "properties": {
         "code": {
@@ -1897,6 +2074,30 @@
           ],
           "title": "Code",
           "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "patternProperties": {
+                "^[A-Za-z0-9_.:-]{1,120}$": {
+                  "items": {
+                    "pattern": "^[a-z0-9_.]{1,64}$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_.:-]{1,120}$"
+          },
+          "title": "Detail"
         }
       },
       "required": [
@@ -2083,7 +2284,8 @@
             "agent_auth",
             "head_checkpoint",
             "desk_data",
-            "web_search"
+            "web_search",
+            "business_tools"
           ],
           "title": "Kind",
           "type": "string"
@@ -2373,24 +2575,32 @@
           "type": "integer"
         },
         "tool": {
-          "enum": [
-            "native.quote",
-            "native.find_slots",
-            "native.book",
-            "native.release_document",
-            "native.payment_link",
-            "native.charge_mandate",
-            "native.capture_lead",
-            "native.request_callback",
-            "native.start_verification",
-            "native.fetch_website",
-            "native.read_memory",
-            "native.web_search",
-            "payments.list_charges",
-            "payments.create_refund"
+          "anyOf": [
+            {
+              "enum": [
+                "native.quote",
+                "native.find_slots",
+                "native.book",
+                "native.release_document",
+                "native.payment_link",
+                "native.charge_mandate",
+                "native.capture_lead",
+                "native.request_callback",
+                "native.start_verification",
+                "native.fetch_website",
+                "native.read_memory",
+                "native.web_search",
+                "payments.list_charges",
+                "payments.create_refund"
+              ],
+              "type": "string"
+            },
+            {
+              "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$",
+              "type": "string"
+            }
           ],
-          "title": "Tool",
-          "type": "string"
+          "title": "Tool"
         },
         "effects": {
           "items": {
@@ -3277,6 +3487,14 @@
             }
           ],
           "default": null
+        },
+        "starters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Starters",
+          "type": "array"
         }
       },
       "required": [
@@ -3288,6 +3506,34 @@
         "agent_card"
       ],
       "title": "PublicDesk",
+      "type": "object"
+    },
+    "PurposePaymentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "block": {
+          "const": "purpose_payment",
+          "title": "Block",
+          "type": "string"
+        },
+        "purpose": {
+          "maxLength": 60,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "amount_cents": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Amount Cents",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "block",
+        "purpose",
+        "amount_cents"
+      ],
+      "title": "PurposePaymentConfig",
       "type": "object"
     },
     "RenderedBlock": {
@@ -4064,28 +4310,55 @@
       "title": "ToolConfirmed",
       "type": "object"
     },
+    "ToolName": {
+      "enum": [
+        "native.quote",
+        "native.find_slots",
+        "native.book",
+        "native.release_document",
+        "native.payment_link",
+        "native.charge_mandate",
+        "native.capture_lead",
+        "native.request_callback",
+        "native.start_verification",
+        "native.fetch_website",
+        "native.read_memory",
+        "native.web_search",
+        "payments.list_charges",
+        "payments.create_refund"
+      ],
+      "type": "string"
+    },
     "ToolPin": {
       "additionalProperties": false,
       "properties": {
         "tool": {
-          "enum": [
-            "native.quote",
-            "native.find_slots",
-            "native.book",
-            "native.release_document",
-            "native.payment_link",
-            "native.charge_mandate",
-            "native.capture_lead",
-            "native.request_callback",
-            "native.start_verification",
-            "native.fetch_website",
-            "native.read_memory",
-            "native.web_search",
-            "payments.list_charges",
-            "payments.create_refund"
+          "anyOf": [
+            {
+              "enum": [
+                "native.quote",
+                "native.find_slots",
+                "native.book",
+                "native.release_document",
+                "native.payment_link",
+                "native.charge_mandate",
+                "native.capture_lead",
+                "native.request_callback",
+                "native.start_verification",
+                "native.fetch_website",
+                "native.read_memory",
+                "native.web_search",
+                "payments.list_charges",
+                "payments.create_refund"
+              ],
+              "type": "string"
+            },
+            {
+              "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$",
+              "type": "string"
+            }
           ],
-          "title": "Tool",
-          "type": "string"
+          "title": "Tool"
         },
         "definition_sha256": {
           "pattern": "^[0-9a-f]{64}$",
@@ -4103,29 +4376,38 @@
     "ToolProfile": {
       "properties": {
         "tool": {
-          "enum": [
-            "native.quote",
-            "native.find_slots",
-            "native.book",
-            "native.release_document",
-            "native.payment_link",
-            "native.charge_mandate",
-            "native.capture_lead",
-            "native.request_callback",
-            "native.start_verification",
-            "native.fetch_website",
-            "native.read_memory",
-            "native.web_search",
-            "payments.list_charges",
-            "payments.create_refund"
+          "anyOf": [
+            {
+              "enum": [
+                "native.quote",
+                "native.find_slots",
+                "native.book",
+                "native.release_document",
+                "native.payment_link",
+                "native.charge_mandate",
+                "native.capture_lead",
+                "native.request_callback",
+                "native.start_verification",
+                "native.fetch_website",
+                "native.read_memory",
+                "native.web_search",
+                "payments.list_charges",
+                "payments.create_refund"
+              ],
+              "type": "string"
+            },
+            {
+              "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$",
+              "type": "string"
+            }
           ],
-          "title": "Tool",
-          "type": "string"
+          "title": "Tool"
         },
         "source": {
           "enum": [
             "native",
-            "mcp"
+            "mcp",
+            "business"
           ],
           "title": "Source",
           "type": "string"
@@ -4235,6 +4517,17 @@
           ],
           "default": null,
           "title": "Review Reason"
+        },
+        "business": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BusinessToolDef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -4262,7 +4555,7 @@
           "items": {
             "$ref": "#/$defs/ToolPin"
           },
-          "maxItems": 14,
+          "maxItems": 22,
           "minItems": 1,
           "title": "Tools",
           "type": "array"
@@ -4384,6 +4677,55 @@
       "title": "TurnStarted",
       "type": "object"
     },
+    "TypedBookingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "block": {
+          "const": "typed_booking",
+          "title": "Block",
+          "type": "string"
+        },
+        "appointment_type": {
+          "maxLength": 60,
+          "title": "Appointment Type",
+          "type": "string"
+        },
+        "minutes": {
+          "maximum": 60,
+          "minimum": 15,
+          "title": "Minutes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "block",
+        "appointment_type",
+        "minutes"
+      ],
+      "title": "TypedBookingConfig",
+      "type": "object"
+    },
+    "UrgentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "block": {
+          "const": "urgent",
+          "title": "Block",
+          "type": "string"
+        },
+        "urgent_when": {
+          "maxLength": 300,
+          "title": "Urgent When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block",
+        "urgent_when"
+      ],
+      "title": "UrgentConfig",
+      "type": "object"
+    },
     "VerifyCheckRequest": {
       "additionalProperties": false,
       "properties": {
@@ -4455,6 +4797,8 @@
             "stale_fact",
             "canary",
             "unsupported_language",
+            "uncertain_language",
+            "check_unavailable",
             "session_paused"
           ],
           "title": "Kind",

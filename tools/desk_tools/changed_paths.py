@@ -7,7 +7,8 @@ from pathlib import Path
 
 # Inputs outside web/ read by its generators, imports and tests. Keep additions here:
 # gen-contracts/gen-api and mocks validate the schemas; fixtures read contracts, seed and
-# renderers; mocks read money-cap/API copy; board tests read the kernel's lexicons.
+# renderers; mocks read money-cap/API copy; board tests read the kernel's lexicons; the public
+# page's no-name check reads setup's owner-name fallback.
 # About pages also embed docs/*.md, already covered by WEB_PREFIXES below.
 WEB_READ_PATHS = (
     "backend/desk/contracts.schema.json",
@@ -15,6 +16,7 @@ WEB_READ_PATHS = (
     "backend/desk/contracts.py",
     "backend/desk/money_cap.py",
     "backend/desk/api/rules.py",
+    "backend/desk/api/setup.py",
     "backend/desk/kernel_service/seed.py",
     "backend/desk/kernel_service/render/",
     "backend/desk/kernel_service/lexicon/",

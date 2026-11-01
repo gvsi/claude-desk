@@ -2,14 +2,17 @@ import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode, 
 import { flushSync } from 'react-dom';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
+import { afterName } from '../../../lib/names.ts';
 import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
+import { SuggestionChips } from '../SuggestionChips/SuggestionChips.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { aboutLinkHref } from './guards.ts';
 import { PublicBrandHeader } from './PublicBrandHeader.tsx';
+import { useFirstView } from './useFirstView.ts';
 
 import './PublicShell.css';
 
@@ -45,8 +48,11 @@ export type PublicOpenStatus = PublicDesk['open_status'];
 
 export interface PublicShellProps {
   brand: PublicBrand;
-  /** `owner_display_name`: "Maria Rivera". */
-  ownerName: string;
+  /**
+   * Whom a visitor can ask for: `owner_display_name`, "Maria Rivera". Null when the owner gave no
+   * name: the shell then asks for "a person" in its own words and names no one.
+   */
+  ownerName: string | null;
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
   language: CopyLanguage;
   /**
@@ -87,6 +93,19 @@ export interface PublicShellProps {
   /** The visitor's `Composer`, under the conversation. */
   composer: ReactNode;
   /**
+   * While true, the shell counts the composer area at the tallest it has been since, when it decides
+   * whether it is short, so a line the page shows above the composer and takes away again (the public
+   * chat's, for a waiting request) can't switch it between tall and short as it comes and goes. Each
+   * switch moves the conversation, which can bring the reason for that line into view and out of it
+   * again. Once it turns false, the shell forgets that height and fits itself again at once. `false`
+   * by default.
+   */
+  keepComposerRoom?: boolean;
+  /** Before the first message only. Omit for a conversation with any history. */
+  firstView?: boolean;
+  /** Localized business content. At most three; a pick uses the page's ordinary send path. */
+  starters?: { words: readonly string[]; onPick: (text: string) => void; disabled?: boolean };
+  /**
    * A full-width line above the brand header, inside the window's height, such as the `VisionBar`
    * over a vision page. Left out, the brand header is the top of the page.
    */
@@ -103,40 +122,69 @@ function Name({ children }: { children: string }) {
 /** Shared with the wordless shape's browser measurement. */
 export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as const;
 
-/** The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off. */
+/**
+ * The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off.
+ * `owner` is the owner's name, marked as written by someone, or null when the owner gave none: then
+ * each line asks for "a person" or says "the business owner" instead, in the owner's approved words,
+ * and names no one.
+ */
 const COPY = {
   en: {
     chatWith: (name: ReactNode) => <>Chat with {name}</>,
-    disclosure: (name: ReactNode, owner: ReactNode) => (
-      <>
-        You&apos;re chatting with Claude, an AI answering for {name}. Ask for {owner} anytime.
-      </>
-    ),
+    /** @param nameText The name's plain text, used only to decide the period. */
+    disclosure: (name: ReactNode, owner: ReactNode | null, nameText: string) =>
+      owner === null ? (
+        <>
+          You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for a person anytime.')}
+        </>
+      ) : (
+        <>
+          You&apos;re chatting with Claude, an AI answering for {name}{afterName(nameText, '. Ask for ')}{owner} anytime.
+        </>
+      ),
     /** In the disclosure's place while the owner is in the chat: Claude is still named as an AI. */
-    ownerInChat: (owner: ReactNode) => (
-      <>
-        {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
-      </>
-    ),
-    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.en}{owner}</>,
+    ownerInChat: (owner: ReactNode | null) =>
+      owner === null ? (
+        <>The business owner is in this chat. Claude, an AI, is paused until they hand it back.</>
+      ) : (
+        <>
+          {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
+        </>
+      ),
+    askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.en}a person</> : <>{ASK_OWNER_PREFIX.en}{owner}</>),
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
+    greeting: (name: ReactNode) => <>How can {name} help?</>,
+    invitation: 'Try one of these, or ask in your own words.',
+    suggestions: 'Suggestions',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
-    disclosure: (name: ReactNode, owner: ReactNode) => (
-      <>
-        Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {owner} cuando quieras.
-      </>
-    ),
-    ownerInChat: (owner: ReactNode) => (
-      <>
-        {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
-      </>
-    ),
-    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.es}{owner}</>,
+    /** @param nameText The name's plain text, used only to decide the period. */
+    disclosure: (name: ReactNode, owner: ReactNode | null, nameText: string) =>
+      owner === null ? (
+        <>
+          Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con una persona cuando quieras.')}
+        </>
+      ) : (
+        <>
+          Estás hablando con Claude, una IA que responde por {name}{afterName(nameText, '. Puedes pedir hablar con ')}{owner} cuando quieras.
+        </>
+      ),
+    ownerInChat: (owner: ReactNode | null) =>
+      owner === null ? (
+        <>El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat.</>
+      ) : (
+        <>
+          {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
+        </>
+      ),
+    askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.es}una persona</> : <>{ASK_OWNER_PREFIX.es}{owner}</>),
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
+    greeting: (name: ReactNode) => <>¿En qué te puede ayudar {name}?</>,
+    invitation: 'Prueba una de estas o pregunta con tus palabras.',
+    suggestions: 'Sugerencias',
   },
 } satisfies Record<CopyLanguage, unknown>;
 
@@ -247,24 +295,41 @@ function focusInAbout(shell: HTMLElement): (() => void) | null {
 }
 
 /**
- * Where the visitor is reading: the first message under the chat's head, and how far under it.
- * Returns a way to put that message back at the same place, whichever element scrolls the
- * conversation by then. `null` when no message is under the chat's head.
+ * Where the visitor is reading: what is first under the chat's head, and how far under it. That is
+ * the about column while it opens the scroll region and still reaches under the head (the chat's
+ * start on a narrow shell), and the first message otherwise. Returns a way to put it back at the
+ * same place, whichever element scrolls the conversation by then; `null` when nothing is under the
+ * chat's head. Partly above the head, the same share of it goes back above, so the same part of it
+ * is at the head's edge however it has wrapped since, and it is still what is first under the head.
+ * Nothing is put back once the element that now scrolls the conversation no longer holds it, as
+ * when the about column has moved beside the chat.
+ *
+ * Read it while the page stands as the visitor sees it, not once a new width has laid it out: by
+ * then the about column, the messages and the chat's head have wrapped onto other lines, and the
+ * browser's scroll anchoring may have moved the conversation to keep some other element still.
  */
 function readingPlace(shell: HTMLElement): (() => void) | null {
   const { head } = partsOf(shell);
   if (!head) return null;
   const line = head.getBoundingClientRect().bottom;
+  const about = aboutInRegion(shell);
   const rows = [...shell.querySelectorAll<HTMLElement>('.cd-public-shell__conversation .cd-transcript-row')];
-  const row = rows.find((candidate) => candidate.getBoundingClientRect().bottom > line);
-  if (!row) return null;
-  const offset = row.getBoundingClientRect().top - line;
+  const anchor =
+    about && about.getBoundingClientRect().bottom > line
+      ? about
+      : rows.find((candidate) => candidate.getBoundingClientRect().bottom > line);
+  if (!anchor) return null;
+  const { top, height } = anchor.getBoundingClientRect();
+  const offset = top - line;
   return () => {
     // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
     for (let pass = 0; pass < 2; pass += 1) {
       const scroller = scrollerOf(shell);
-      const drift = row.getBoundingClientRect().top - head.getBoundingClientRect().bottom - offset;
-      if (!scroller || !row.isConnected || Math.abs(drift) < 0.5) return;
+      if (!scroller || !anchor.isConnected || !scroller.contains(anchor)) return;
+      const now = anchor.getBoundingClientRect();
+      const wanted = offset < 0 && height > 0 ? (offset * now.height) / height : offset;
+      const drift = now.top - head.getBoundingClientRect().bottom - wanted;
+      if (Math.abs(drift) < 0.5) return;
       scroller.scrollTop += drift;
     }
   };
@@ -340,18 +405,26 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * When the shell or a pinned part changes size, it lays out again at once, before the browser paints
  * and before the page's own observers measure the conversation. If the about column moves with
  * focus in it, focus goes to the same place in the moved column. If the shell turns short or tall,
- * the message the visitor was reading stays where it was under the chat's head, and the shell sends
- * `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
+ * what the visitor was reading stays where it was under the chat's head (`readingPlace`), and the
+ * shell sends `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
  */
-export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
+export function useShellLayout(shell: RefObject<HTMLElement | null>, keepComposerRoom = false): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
   const short = useRef(false);
   const observerRef = useRef<ResizeObserver | null>(null);
   const watchedAbout = useRef<HTMLElement | null>(null);
+  // `keepComposerRoom` as the shell last rendered it, and how to lay the shell out again when the page
+  // lets that room go.
+  const keepRoom = useRef(keepComposerRoom);
+  const relayoutRef = useRef<(() => void) | null>(null);
 
   // After every render, before the page's layout effects: the short class, if the shell is short,
-  // and the about column, watched where it now is and its hairline judged there.
+  // and the about column, watched where it now is and its hairline judged there. Kept room the page
+  // has let go is forgotten, and the shell fits itself again without it.
   useLayoutEffect(() => {
+    const letGo = keepRoom.current && !keepComposerRoom;
+    keepRoom.current = keepComposerRoom;
+    if (letGo) relayoutRef.current?.();
     shell.current?.classList.toggle(SHORT_CLASS, short.current);
     if (!shell.current) return;
     watchAbout(shell.current, observerRef.current, watchedAbout);
@@ -365,6 +438,9 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     // tall (it always is at first), so the room the conversation would have is the same sum
     // whichever way the shell is laid out now.
     const tallPadding = { head: 0, composer: 0 };
+    // The composer area's height inside its padding, at the tallest it has been while the page
+    // keeps its room (`keepComposerRoom`); otherwise as it is now.
+    let composerKept = 0;
     // Short or tall, measured with the about column where it now is: a column still beside a chat
     // that has just become too narrow for it would squeeze the chat's head and the composer.
     const fit = (): void => {
@@ -375,12 +451,14 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
         tallPadding.head = verticalPadding(head);
         tallPadding.composer = verticalPadding(composer);
       }
+      const composerInside = heightOf(composer) - verticalPadding(composer);
+      composerKept = keepRoom.current ? Math.max(composerKept, composerInside) : composerInside;
       const pinned =
         heightOf(banner) +
         heightOf(header) +
         heightOf(footer) +
         heightOf(head) - verticalPadding(head) + tallPadding.head +
-        heightOf(composer) - verticalPadding(composer) + tallPadding.composer;
+        composerKept + tallPadding.composer;
       const room = height - pinned;
       short.current = height < SHORT_BELOW || room < MIN_CONVERSATION + (short.current ? LEAVE_SHORT_MARGIN : 0);
       el.classList.toggle(SHORT_CLASS, short.current);
@@ -393,20 +471,41 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     fit();
     let beside = fitsBeside();
     setAboutBeside(beside);
+    // Where the visitor is reading, as they last saw it at the width the shell was laid out at
+    // (`laidOutWidth`): read after each scroll of the conversation, and each time the shell has laid
+    // itself out. The observer below hears of a new size only once the browser has laid the page out
+    // at it. At the same width nothing under the chat's head has moved by then, and the place is read
+    // there; at a new width, as when a phone turns, the about column, the messages and the chat's
+    // head have wrapped onto other lines, and the place put back is this one. A scroll at a new width
+    // the observer hasn't heard of yet isn't read: it may be the browser's, keeping some other element
+    // still. The trade-off: a visitor's own scroll in that very frame is taken for the browser's.
+    let laidOutWidth = el.offsetWidth;
+    let place = readingPlace(el);
     // The column's line steps aside near the head rather than the chat landing past it: the page lands a chat wherever its end falls.
     // Scroll events don't bubble, so the shell listens in the capture phase, for its region and itself.
-    const onScroll = () => markAboutUnderHead(el);
+    // Only the conversation's scrolling moves the place: not the about column's beside the chat, nor
+    // the composer's text box.
+    const onScroll = (event: Event) => {
+      markAboutUnderHead(el);
+      if (event.target === scrollerOf(el) && el.offsetWidth === laidOutWidth) place = readingPlace(el);
+    };
     el.addEventListener('scroll', onScroll, { capture: true, passive: true });
     const stopScroll = () => el.removeEventListener('scroll', onScroll, { capture: true });
     if (typeof ResizeObserver === 'undefined') return stopScroll;
-    const observer = new ResizeObserver(() => {
+    // Lays the shell out again: when it or a pinned part changes size, and when the page lets kept
+    // room go. Only the observer's call (`sync`) moves the about column at once; from the shell's
+    // own layout effect, React is already committing, so the column follows with the next render.
+    const relayout = (sync: boolean) => {
       const wasShort = short.current;
       const wasBeside = beside;
       const restoreFocus = focusInAbout(el);
-      const restorePlace = readingPlace(el);
+      const restorePlace = el.offsetWidth === laidOutWidth ? readingPlace(el) : place;
       // First the about column, by width, at once; then short or tall, with the column in place.
       beside = fitsBeside();
-      if (beside !== wasBeside) flushSync(() => setAboutBeside(beside));
+      if (beside !== wasBeside) {
+        if (sync) flushSync(() => setAboutBeside(beside));
+        else setAboutBeside(beside);
+      }
       fit();
       restoreFocus?.();
       const switched = short.current !== wasShort;
@@ -420,7 +519,11 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
       uncoverComposer(el);
       // A scroll the page's later ResizeObserver makes is heard only next frame; that one frame's lag, mid-resize as all moves, is accepted.
       markAboutUnderHead(el);
-    });
+      laidOutWidth = el.offsetWidth;
+      place = readingPlace(el);
+    };
+    const observer = new ResizeObserver(() => relayout(true));
+    relayoutRef.current = () => relayout(false);
     const { banner, header, head, composer } = partsOf(el);
     for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);
     observerRef.current = observer;
@@ -431,6 +534,7 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
     return () => {
       observer.disconnect();
       observerRef.current = null;
+      relayoutRef.current = null;
       watchedAbout.current = null;
       composer?.removeEventListener('focusin', onFocusIn);
       stopScroll();
@@ -517,6 +621,9 @@ export function PublicShell({
   aboutLinks,
   footer = true,
   composer,
+  keepComposerRoom = false,
+  firstView = false,
+  starters,
   banner,
   children,
 }: PublicShellProps) {
@@ -527,7 +634,8 @@ export function PublicShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const aboutRef = useRef<HTMLElement>(null);
   useVisualViewportFit(shellRef, embedded);
-  const aboutBeside = useShellLayout(shellRef);
+  const aboutBeside = useShellLayout(shellRef, keepComposerRoom);
+  const invitationShown = useFirstView(shellRef, firstView, aboutBeside, starters?.words.length ?? 0);
   // Beside the chat, a column that scrolls on its own is a stop in the tab order, so it scrolls from
   // the keyboard too; it is already named by its heading. It stays one while it has focus, so focus
   // doesn't drop to the page when the column stops scrolling under it.
@@ -553,7 +661,7 @@ export function PublicShell({
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
   }, [ownerInChat]);
   const name = <Name>{brand.name}</Name>;
-  const owner = <Name>{ownerName}</Name>;
+  const owner = ownerName === null ? null : <Name>{ownerName}</Name>;
 
   // Standalone, the shell is the page: a banner, the main region and a complementary column.
   // Embedded in an owner screen, the same parts as plain blocks and a named region.
@@ -593,7 +701,9 @@ export function PublicShell({
                 </p>
               )
             ) : (
-              <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} />
+              // The charter's cards (hours, policies, contact) never name the owner, so a Desk
+              // whose owner gave no name has nothing to put in their place.
+              <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName ?? ''} />
             ),
           )}
         </div>
@@ -616,7 +726,7 @@ export function PublicShell({
   return (
     <div
       ref={shellRef}
-      className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`}
+      className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}${firstView ? ' cd-public-shell--first-view' : ''}`}
       lang={language}
     >
       {banner ? <div className="cd-public-shell__banner">{banner}</div> : null}
@@ -631,7 +741,7 @@ export function PublicShell({
               {/* The AI disclosure, or while the owner is in the chat, the line that says so and that
                   Claude, an AI, is paused: either way Claude is named as an AI. */}
               <p className="cd-public-shell__disclosure cd-type-meta">
-                {ownerInChat ? copy.ownerInChat(owner) : copy.disclosure(name, owner)}
+                {ownerInChat ? copy.ownerInChat(owner) : copy.disclosure(name, owner, brand.name)}
               </p>
             </div>
             {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.
@@ -648,15 +758,33 @@ export function PublicShell({
               the first message. A stop in the tab order, named by the chat's title, so a
               conversation with nothing to focus in it still scrolls from the keyboard. */}
           <div className="cd-public-shell__scroll" role="group" aria-labelledby={chatId} tabIndex={0}>
-            {aboutBeside ? null : aboutColumn}
-            <div className="cd-public-shell__conversation">{children}</div>
+            {aboutBeside || firstView ? null : aboutColumn}
+            <div className="cd-public-shell__conversation">
+              {invitationShown ? (
+                <div className="cd-public-shell__welcome" aria-hidden={!firstView || undefined}>
+                  <h2 className="cd-public-shell__greeting cd-type-greeting">{copy.greeting(name)}</h2>
+                  {starters && starters.words.length > 0 ? <p className="cd-public-shell__invitation cd-type-meta">{copy.invitation}</p> : null}
+                </div>
+              ) : null}
+              {children}
+            </div>
           </div>
-          <div className="cd-public-shell__composer">{composer}</div>
+          <div className="cd-public-shell__composer">
+            <div className="cd-public-shell__composer-group">
+              <div className="cd-public-shell__composer-lift">{composer}</div>
+              {invitationShown && starters && starters.words.length > 0 ? (
+                <div className="cd-public-shell__starters" data-copy="user" aria-hidden={!firstView || undefined}>
+                  <SuggestionChips label={copy.suggestions} suggestions={starters.words} onPick={starters.onPick} disabled={!firstView || starters.disabled} />
+                </div>
+              ) : null}
+            </div>
+          </div>
           {embedded ? null : (
             <div className="cd-public-shell__footer">
               <ConceptFooter poweredBy />
             </div>
           )}
+          {!aboutBeside && firstView ? aboutColumn : null}
         </Chat>
         {aboutBeside ? aboutColumn : null}
       </div>

@@ -1,4 +1,10 @@
-.PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
+.PHONY: kernel test db-roles db-throwaway web-deps web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
+
+# Run this worktree's tests/builds on the isolated SSM test machine (docs/testbox.md).
+.PHONY: remote
+remote:
+	$(if $(strip $(value CMD)),,$(error remote: give CMD="make kernel"))
+	tools/testbox/run sh -c '$(subst ','"'"',$(value CMD))'
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -27,7 +33,7 @@ kernel-contract:
 # It reaches the kernel at KERNEL_URL (default http://127.0.0.1:8701): run `make kernel-serve` beside it.
 # No access log, as in the deploy: a request path can carry a single-use token (/api/d/..., /api/pay/...).
 api-serve:
-	cd backend && uv run --env-file ../.env uvicorn --factory desk.api.main:app_factory \
+	cd backend && uv run --env-file ../.env env -u TYPESAFE_API_KEY -u MOCKPAY_KEY uvicorn --factory desk.api.main:app_factory \
 		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
 # Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
@@ -75,11 +81,15 @@ db-throwaway:
 		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
 		-c 'ALTER SYSTEM SET full_page_writes = off' -c 'SELECT pg_reload_conf()'
 
-# The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
-# production build, its check and the mocked end-to-end test (which uses web-test's install). WebKit
-# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it.
-web-test:
-	cd web && npm ci && npx playwright install --with-deps chromium webkit && npm run typecheck && npm test
+# The web app's checks, as CI's `web tests` runs them: install (web-deps), type-check and unit tests, then
+# the production build, its check and the mocked end-to-end test (which needs the install too). WebKit
+# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it. CI runs the tests in
+# four shards, passing each its shard and worker count in WEB_TEST_ARGS; locally it's empty.
+web-deps:
+	cd web && npm ci && npx playwright install --with-deps chromium webkit
+
+web-test: web-deps
+	cd web && npm run typecheck && npm test -- $(WEB_TEST_ARGS)
 
 web-e2e:
 	cd web && npm run build && npm run check:build && npm run e2e:mock
@@ -273,6 +283,7 @@ evals-tier1:
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
 # the head's inputs is complete and its gate passes, or every head scenario is pending (no recorded rate).
+# HISTORY_SINCE preserves rate, waiver and landed-plan histories from every first-parent commit since it.
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
 # their merge base and a scenario can run under their combined landed plans or in their merge.
 # Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
@@ -281,6 +292,7 @@ evals-tier1:
 RUNS ?= 1
 MAX_USD ?= 40
 BASE ?= origin/main
+HISTORY_SINCE ?=
 HEAD ?= HEAD
 
 evals-tier2:
@@ -290,14 +302,14 @@ evals-key:
 	@$(EVALS) python -m evals.run key
 
 evals-results-check:
-	@$(EVALS) python -m evals.run results-check --base $(BASE)
+	@$(EVALS) python -m evals.run results-check --base $(BASE) $(if $(HISTORY_SINCE),--history-since "$(HISTORY_SINCE)")
 
 evals-merge-ready:
 	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"
 
 # The soft-promise check measured on the real model. It spends money: every case in
-# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Haiku 5.5 call
-# on the Claude API each (estimated at $0.0005), for at most MAX_USD dollars, which it needs on the
+# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Sonnet 5.5 call
+# on the Claude API each (estimated at $0.0026), for at most MAX_USD dollars, which it needs on the
 # command line or in the environment (the tier 2 default doesn't count). The prompt is this tree's,
 # decisions.py's at PROMPT_REF or PROMPT_FILE's text; LABEL names the run. ANTHROPIC_API_KEY comes from
 # the environment. It writes evals/out/soft-promise/<label>-<time>.json and a row in the shared spend file.
@@ -306,6 +318,18 @@ SAMPLES ?= 5
 evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
+
+# Select candidate arms new and sonnet, or diagnostic steps_only; unchanged old evidence is reused.
+# SAMPLES accepts a common count or per-arm counts, e.g. new:5,steps_only:5,sonnet:2.
+# All measured arms share MAX_USD and the durable $3.20 cap in evals/out/soft-promise/experiment.json.
+.PHONY: evals-soft-promise-experiment
+CASES ?= evals/calibration/soft_promise.yaml
+ARMS ?= new,steps_only
+RESULTS ?= evals/out/soft-promise/next-steps-experiment.json
+evals-soft-promise-experiment:
+	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise-experiment spends money: give the remaining MAX_USD=<dollars>))
+	$(if $(BASELINE_SHA),,$(error evals-soft-promise-experiment needs a frozen BASELINE_SHA))
+	$(EVALS) python -m evals.calibration.soft_promise_experiment --cases "$(CASES)" --arms "$(ARMS)" --baseline-sha "$(BASELINE_SHA)" --samples "$(SAMPLES)" --max-usd $(MAX_USD) --output "$(RESULTS)"
 
 # Compare frozen reviewer cases with prompts read from two refs. DRY_RUN=1 builds
 # inputs and estimates Sonnet 5.5 list-price cost without credentials or model calls.

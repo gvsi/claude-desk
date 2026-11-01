@@ -41,4 +41,5 @@
 | `rules` | `RuleRowProps[]` | Required. |
 | `fallback` | `boolean` | `true` by default. |
 | `onAddRule` | `() => void` | Adds "Add a rule". |
+| `landed` | `number` | The owner's confirmed change changed the tool's rules since they opened the page (a business's own job on Rules). "Updated" sits 8 px after the tool's name, centered on it, growing from 95% as it fades in on `motion-base`; each rule's reason and words cross-fade to the new ones (`RuleRow`'s `fade`); and the card lights up in `bg-selected` out to its edge, behind its words, on `motion-fast`, holds 1.6 s, then lets go on `motion-base`. A card that offers "Add a rule" takes no fill, since a Button can't sit on the selected ground. The card's content carries `data-landed`, so a screen can find a landing's rows. Each new value lights it up again; under reduced motion it is at its end state at once. See the "Landed" story. |
 | `linkComponent` | `ComponentType<RulesLinkProps>` | The app's router link; a plain `<a>` by default. It gets `href`, `className`, `aria-label`, `aria-describedby` and `children`, like `<a>`. `RulesLinkProps` is also exported, and `ConnectorSection` takes the same. |

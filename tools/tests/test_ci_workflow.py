@@ -1,6 +1,7 @@
 """The CI workflow and its setup action, read as data: what runs, when, with which pins and rights."""
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -36,12 +37,26 @@ REQUIRED_CHECKS = [
 SUITES = {"backend": "backend tests", "tier1": "tier 1 evals"}
 SHARD_JOBS = {f"{suite}-{shard}": f"{name} {shard}/4" for suite, name in SUITES.items() for shard in range(1, 5)}
 CHECK_JOBS = {suite: [f"{suite}-{shard}" for shard in range(1, 5)] for suite in SUITES}
-SCOPED_JOBS = {**dict.fromkeys([*SHARD_JOBS, "kernel", "proofs", "tier2", "infra"], "backend"), "web": "web"}
+# The web suite runs its unit and browser tests in four shards, each with fewer workers than the runner's
+# vCPUs (timing-sensitive screen tests flaked on a fully busy 4-vCPU runner), and its build and mocked
+# end-to-end test in a job of its own.
+WEB_SHARD_JOBS = {f"web-{shard}": f"web tests {shard}/4" for shard in range(1, 5)}
+WEB_E2E_JOB = {"web-e2e": "web tests e2e"}
+WEB_TEST_ARGS = "--shard={}/4 --maxWorkers=2"
+WEB_CHECK_PARTS = {**{f"SHARD_{shard}": f"web-{shard}" for shard in range(1, 5)}, "E2E": "web-e2e"}
+SCOPED_JOBS = {
+    **dict.fromkeys([*SHARD_JOBS, "kernel", "proofs", "tier2", "infra"], "backend"),
+    **dict.fromkeys([*WEB_SHARD_JOBS, *WEB_E2E_JOB], "web"),
+}
 SCOPE_COMMAND = "PYTHONPATH=tools python3 -m desk_tools.changed_paths"
 SHARD_CHECK = '''if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
   exit 0
 fi
 test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success'''
+WEB_CHECK = '''if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped && test "$E2E" = skipped; then
+  exit 0
+fi
+test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success && test "$E2E" = success'''
 SHARD_TEST_STEPS = {
     f"{suite}-{shard}": steps
     for suite, steps in {
@@ -85,6 +100,55 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
             shard = other_id.rsplit("-", 1)[-1]
             assert options == (f"--shard={shard}/4" if is_test else None)
     assert {step["name"] for step in job["steps"] if "PYTEST_ADDOPTS" in step.get("env", {})} == SHARD_TEST_STEPS[job_id]
+
+
+def test_web_shards_are_identical_except_their_shard():
+    workflow_jobs = load(WORKFLOW)["jobs"]
+    normalized = []
+    for shard in range(1, 5):
+        job = deepcopy(workflow_jobs[f"web-{shard}"])
+        assert job.pop("name") == f"web tests {shard}/4"
+        assert job.pop("runs-on") == RUNS_ON.replace("<suffix>", f"web-{shard}")
+        [test] = [step for step in job["steps"] if "WEB_TEST_ARGS" in step.get("env", {})]
+        assert test["name"] == "Run the web type check and unit tests"
+        assert test["env"] == {"WEB_TEST_ARGS": WEB_TEST_ARGS.format(shard)}
+        test["env"]["WEB_TEST_ARGS"] = WEB_TEST_ARGS.format(1)
+        normalized.append(job)
+    assert all(job == normalized[0] for job in normalized)
+    # Only the web shards' test steps pass test arguments, and `make web-test` hands them to the test run.
+    for job_id, job in workflow_jobs.items():
+        assert "WEB_TEST_ARGS" not in job.get("env", {})
+        for step in job["steps"]:
+            assert ("WEB_TEST_ARGS" in step.get("env", {})) == (job_id in WEB_SHARD_JOBS and step.get("name") == "Run the web type check and unit tests")
+    makefile = (ROOT / "Makefile").read_text()
+    recipe = makefile.split("\nweb-test: web-deps\n", 1)[1].split("\n\n", 1)[0]
+    assert recipe.strip() == "cd web && npm run typecheck && npm test -- $(WEB_TEST_ARGS)"
+
+
+@pytest.mark.parametrize("needed", ["true", "", "false"])
+@pytest.mark.parametrize("part", WEB_CHECK_PARTS)
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_the_required_web_check_fails_unless_every_shard_and_the_end_to_end_test_succeeded(tmp_path, needed, part, result):
+    job = load(WORKFLOW)["jobs"]["web"]
+    assert job["name"] == "web tests"
+    assert job["needs"] == ["changes", *WEB_CHECK_PARTS.values()]
+    assert job["if"] == "always()"
+    assert set(job) == {"name", "runs-on", "timeout-minutes", "needs", "if", "steps"}
+    [step] = job["steps"]
+    assert step["env"] == {"NEEDED": "${{ needs.changes.outputs.web }}",
+                           **{name: "${{ needs." + job_id + ".result }}" for name, job_id in WEB_CHECK_PARTS.items()}}
+    assert step["run"].strip() == WEB_CHECK
+    expected = "skipped" if needed == "false" else "success"
+    results = dict.fromkeys(WEB_CHECK_PARTS, expected)
+    results[part] = result
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED=needed, **results)
+    assert executed.returncode == (0 if result == expected else 1), executed.stderr
+
+
+def test_the_required_web_check_accepts_every_success_even_if_the_suite_was_ruled_out(tmp_path):
+    [step] = load(WORKFLOW)["jobs"]["web"]["steps"]
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED="false", **dict.fromkeys(WEB_CHECK_PARTS, "success"))
+    assert executed.returncode == 0, executed.stderr
 
 
 @pytest.mark.parametrize("job_id, shard_ids", CHECK_JOBS.items())
@@ -339,7 +403,7 @@ def test_ci_has_no_secrets_and_reads_only():
         # A job may only narrow the workflow's rights.
         assert job.get("permissions", {}) in ({}, {"contents": "read"}, {"contents": "none"}), job["name"]
         # Every job that runs repository code starts from a checkout with no token left in git.
-        if job["name"] not in {"backend tests", "tier 1 evals"}:
+        if job["name"] not in {"backend tests", "tier 1 evals", "web tests"}:
             assert is_checkout(job["steps"][0]), job["name"]
     assert "pull_request_target" not in triggers(workflow)
     for path in [WORKFLOW, *ACTIONS]:
@@ -363,15 +427,17 @@ def documented_checks() -> list[str]:
 def test_job_names_are_the_required_checks():
     workflow_jobs = jobs(load(WORKFLOW))
 
-    assert [job["name"] for job in workflow_jobs if job["name"] not in [*SHARD_JOBS.values(), "changed paths"]] == REQUIRED_CHECKS
-    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(SHARD_JOBS) + 1
+    helpers = [*SHARD_JOBS.values(), *WEB_SHARD_JOBS.values(), *WEB_E2E_JOB.values(), "changed paths"]
+    assert [job["name"] for job in workflow_jobs if job["name"] not in helpers] == REQUIRED_CHECKS
+    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(helpers)
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
         assert job["timeout-minutes"] == JOB_TIMEOUTS.get(job["name"], 25), job["name"]
 
 
 # Suite shards retain their time limit; their required checks inspect each shard's own result.
-JOB_TIMEOUTS = {**dict.fromkeys(SHARD_JOBS.values(), 40), "backend tests": 5, "tier 1 evals": 5, "changed paths": 5}
+JOB_TIMEOUTS = {**dict.fromkeys([*SHARD_JOBS.values(), *WEB_SHARD_JOBS.values()], 40),
+                "backend tests": 5, "tier 1 evals": 5, "web tests": 5, "changed paths": 5}
 
 
 # The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
@@ -404,8 +470,9 @@ def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
         assert "strategy" not in job, job["name"]
         assert "container" not in job, job["name"]
     # Each label is unique within the run and in the launcher's form.
-    assert len(suffixes) == len(set(suffixes)) == len(REQUIRED_CHECKS) + 8 + 1
-    assert set(suffixes) == RUNNER_SUFFIXES | {f"{suite}-{shard}" for suite in CHECK_JOBS for shard in range(1, 5)}
+    shard_suffixes = {f"{suite}-{shard}" for suite in [*CHECK_JOBS, "web"] for shard in range(1, 5)} | set(WEB_E2E_JOB)
+    assert len(suffixes) == len(set(suffixes)) == len(RUNNER_SUFFIXES) + len(shard_suffixes)
+    assert set(suffixes) == RUNNER_SUFFIXES | shard_suffixes
     for suffix in suffixes:
         assert re.fullmatch(r"[a-z][a-z0-9-]{0,31}", suffix), suffix
     # Hosted stays the default with the variable unset, or for a fork's pull request.
@@ -492,8 +559,14 @@ MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
 # The job's database is thrown away with its runner, so it skips durable commits.
 THROWAWAY = "make db-throwaway"
 TIER2_BASE_SETUP = (
+    'if [ "$FORCED" = "true" ]; then\n'
+    '  echo "::error::a force-push to main replaced history that CI can\'t check for rewritten rates or waivers"\n'
+    '  exit 1\n'
+    'fi\n'
+    'HISTORY_SINCE=""\n'
     'if [ -z "$RESULTS_BASE" ]; then\n'
     '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
+    '  HISTORY_SINCE="$RESULTS_BASE"\n'
     'fi'
 )
 
@@ -526,14 +599,15 @@ CHECKS = {
         ],
     ]),
     # The same gate arguments as test_gate, with a base selected for the workflow event.
-    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
-    "web tests": [
-        ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
+    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE"]],
+    "web tests": [WEB_CHECK],
+    **dict.fromkeys(WEB_SHARD_JOBS.values(), [["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"]]),
+    "web tests e2e": [
         [
             "--name", "web-e2e",
             "--run-if", "web/playwright.config.ts",
             "--required-if", "web/e2e",
-            "--", "make", "web-e2e",
+            "--", "make", "web-deps", "web-e2e",
         ],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
@@ -574,7 +648,9 @@ def test_gated_jobs_go_through_the_gate():
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
     tier2_gate = CHECKS["tier 2 results"][0]
-    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
+    assert tier2_gate[tier2_gate.index("--") + 1 :] == [
+        "make", "evals-results-check", "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE",
+    ]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
     # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
     # pushes and manual runs check the head against the root commit, even after cancelled runs.
@@ -584,8 +660,10 @@ def test_gated_jobs_go_through_the_gate():
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
     assert results["env"] == {
         "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}",
+        "FORCED": "${{ github.event_name == 'push' && github.event.forced || false }}",
     }
-    assert results["run"].rstrip().endswith('make evals-results-check BASE="$RESULTS_BASE"')
+    assert results["run"].rstrip().endswith(
+        'make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 
@@ -621,6 +699,76 @@ def test_gated_jobs_go_through_the_gate():
             "cache-suffix": "${{ github.job }}",
             "ignore-nothing-to-cache": True,
         }, step
+
+
+def test_tier2_rejects_force_push_before_running_the_gate(tmp_path):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            cwd=tmp_path, env={**os.environ, "FORCED": "true", "RESULTS_BASE": "unused"})
+    assert result.returncode == 1
+    assert result.stdout == ("::error::a force-push to main replaced history that CI can't check "
+                             "for rewritten rates or waivers\n")
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("event, gate_exit", [
+    ("pull_request", 0), ("push", 0), ("workflow_dispatch", 0),
+    ("pull_request", 7), ("push", 7), ("workflow_dispatch", 7),
+])
+def test_tier2_preserves_push_histories_without_changing_the_results_base(tmp_path, event, gate_exit):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "commands.jsonl"
+    # Exercise the workflow's actual shell, with no network or model calls.
+    stub = f"#!{sys.executable}\n" + '''import json, os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+with open(os.environ["COMMAND_LOG"], "a") as log:
+    log.write(json.dumps([name, *sys.argv[1:]]) + "\\n")
+if name == "git":
+    if sys.argv[1:] == ["rev-list", "--max-parents=0", "HEAD"]:
+        print("a" * 40)
+    else:
+        sys.exit(99)
+else:
+    sys.exit(int(os.environ["GATE_EXIT"]))
+'''
+    for name in ("git", "uv"):
+        path = bin_dir / name
+        path.write_text(stub)
+        path.chmod(0o755)
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                                 "RESULTS_BASE": "pr-base" if event == "pull_request" else "",
+                                 "FORCED": "false", "COMMAND_LOG": str(log),
+                                 "GATE_EXIT": str(gate_exit)})
+    assert result.returncode == gate_exit, result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    [gate_call] = [call for call in calls if call[0] == "uv"]
+    assert gate_call[gate_call.index("--") + 1:] == [
+        "make", "evals-results-check", f"BASE={'pr-base' if event == 'pull_request' else 'a' * 40}",
+        f"HISTORY_SINCE={'' if event == 'pull_request' else 'a' * 40}",
+    ]
+    git_calls = [call for call in calls if call[0] == "git"]
+    assert git_calls == ([] if event == "pull_request" else [["git", "rev-list", "--max-parents=0", "HEAD"]])
+
+
+@pytest.mark.parametrize("history", ["", "b" * 40])
+def test_results_make_target_forwards_only_a_supplied_history_since(history):
+    result = subprocess.run(["make", "-n", "evals-results-check", "BASE=root-commit", f"HISTORY_SINCE={history}"],
+                            cwd=ROOT, capture_output=True, text=True, check=True)
+    command = shlex.split(result.stdout.strip())
+    expected = ["results-check", "--base", "root-commit"]
+    if history:
+        expected.extend(["--history-since", history])
+    assert command[command.index("results-check"):] == expected
 
 
 def test_secret_scan_has_no_exceptions():
@@ -1005,7 +1153,7 @@ def runner_label_problems(file: str, workflow: dict) -> list[str]:
                 problems.append(f"{key}: has no runs-on")
             continue
         runs_on = job["runs-on"]
-        allowed = file == "ci.yml" and key in RUNNER_SUFFIXES | SHARD_JOBS.keys()
+        allowed = file == "ci.yml" and key in RUNNER_SUFFIXES | SHARD_JOBS.keys() | WEB_SHARD_JOBS.keys() | WEB_E2E_JOB.keys()
         if isinstance(runs_on, str) and HOSTED_IMAGE.fullmatch(runs_on):
             continue
         if allowed and runs_on == own_desk(key):

@@ -16,6 +16,7 @@
   - "No money moves without your rule or a signed limit"
   - "Every attempt is logged and shown to you"
 - No buttons, switches, links or inputs. These words are the owner's view of the baseline the kernel enforces (`cedar/baseline.cedar` and the invariants), so they are fixed copy, not data.
+- `ALWAYS_ON` exports the rules' words, so a page's skeleton (setup's draft) can measure the lines they take in the current fonts without drawing them.
 
 ## Props
 

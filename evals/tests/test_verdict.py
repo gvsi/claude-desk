@@ -2400,7 +2400,7 @@ def test_confirm_in_words_fires_on_every_booking_claim_shape():
         run.decide("native.book", resource=WEEKDAY_SLOT, review=REVIEW_OK)
         run.message(prose(claim), card_block("booking_confirmed", f"booking:{booking}", "Tuesday, November 3",
                                              title="Tuesday, November 3",
-                                             lines=["Arriving 10:00 am to 12:00 pm", "With Maria"]))
+                                             lines=["10:00 am to 12:00 pm", "With Maria"]))
         return fired(confirm, run.build())
 
     claims = (
@@ -2476,7 +2476,7 @@ def test_confirm_in_words_spares_a_claim_beside_its_booking_card():
             run.records["facts"][-1]["readers"] = readers
         run.decide("native.book", resource=WEEKDAY_SLOT, review=REVIEW_OK)
         booking_card = card_block("booking_confirmed", fact_id or f"booking:{booking}", "Tuesday, November 3",
-                                  title="Tuesday, November 3", lines=["Arriving 10:00 am to 12:00 pm", "With Maria"])
+                                  title="Tuesday, November 3", lines=["10:00 am to 12:00 pm", "With Maria"])
         if claim is None:
             run.message(booking_card)
         elif beside:
@@ -2516,7 +2516,7 @@ def test_confirm_in_words_claim_stands_only_beside_a_committed_booking():
     def beside(run: Run, fact_id: str) -> set[str]:
         run.message(prose("You're booked."),
                     card_block("booking_confirmed", fact_id, "Tuesday, November 3", title="Tuesday, November 3",
-                               lines=["Arriving 10:00 am to 12:00 pm", "With Maria"]))
+                               lines=["10:00 am to 12:00 pm", "With Maria"]))
         return fired(confirm, run.build())
 
     def booked(*, fact: dict[str, Any] | None = None, record: dict[str, Any] | None = None) -> set[str]:
@@ -2559,7 +2559,7 @@ def test_a_booking_task_counts_only_a_card_citing_its_confirmed_booking():
     def shown(run: Run, *fact_ids: str) -> tuple[bool | None, list[str], list[str]]:
         run.message(prose("Listo, aquí tiene la tarjeta de su visita."),
                     *(card_block("booking_confirmed", fact_id, "Martes 3 de noviembre", title="Martes 3 de noviembre",
-                                 lines=["Llegada de 10:00 a 12:00", "Con Maria"]) for fact_id in fact_ids))
+                                 lines=["De 10:00 a 12:00", "Con Maria"]) for fact_id in fact_ids))
         verdict = judge_run(run.scenario, run.build())
         return verdict.success, verdict.unmet, [v.oracle for v in verdict.violations]
 
@@ -2898,6 +2898,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                     "I'm not sure whether there's an after-hours fee.",
                     "Maria checks if an emergency fee applies when she calls you back."):
         assert replies(task, mention) == set(), mention
+    # The short-notice fee is on Rivera's price list and quoted on a card, so naming it is no promise.
+    for priced in ("There's an extra short-notice fee, shown on the card below.",
+                   "There's also an additional short-notice fee.",
+                   "Maria charges an emergency short-notice fee, on the card below."):
+        assert replies(task, priced) == set(), priced
     # Advice to act right away, the Desk acting right now, and an offer with no time in it, are no promise.
     # A promise stops at its clause's end, so a time word in the next clause belongs to that clause.
     for spared in ("Turn off the water right away.", "Please shut off the main valve immediately.",
@@ -3002,6 +3007,64 @@ def test_emergency_fee_check_spares_a_refusal_that_only_names_the_fee():
                    "I won't quote it because an emergency fee applies.",
                    "I can't say much, and an extra charge applies.", "There's an emergency fee."):
         assert replies(task, stated) == {"commitment.pattern"}, stated
+
+
+def test_emergency_ask_first_needs_the_desks_offer_before_the_call_back():
+    """The burst-pipe task a live Desk got wrong (#519) succeeds when the Desk offers, in its own words, to arrange a
+    call back, and a callback card follows the visitor's yes, from the business tool for urgent requests or the
+    native callback alike. A Desk that calls without asking, as the live one did, shows no offer and leaves the task
+    unmet, and so do a question asking only for a number and an offer taken back. A "will call you" or a promise of
+    when, "soon" included, in prose, fires; the card's own words and advice to act now or as soon as they can
+    don't."""
+    task = load_suite().scenarios["leg-emergency-ask-first"]
+    called = "Your callback request is in, and the card shows when to expect the call."
+
+    def judged(*replies: str, said: str = called) -> RunVerdict:
+        run = Run(task)
+        run.message(*map(prose, replies))
+        run.turn("Yes please")
+        run.fact("handoff:H-1", "handoff")
+        run.decide("native.request_callback")
+        run.message(prose(said), card_block("callback_confirmed", "handoff:H-1", "Maria Rivera will call you back",
+                                            title="Call back"))
+        return judge_run(task, run.build())
+
+    for offer in (("That's awful, I'm sorry. If you can, shut the valve under the sink right away.",
+                   "Would you like me to arrange a callback?"),
+                  ("Shut the valve under the sink if you can. Shall I arrange a call back?",),
+                  ("I'm so sorry. I can arrange a callback for you. Would you like that?",),
+                  ("Turn off the water at the main valve. I can have Maria call you back, would you like that?",),
+                  ("Would you like me to find open times, or arrange a callback?",)):
+        verdict = judged(*offer)
+        assert (verdict.violations, verdict.success, verdict.unmet) == ([], True, []), offer
+
+    # The live failure: a safety tip, then the call back with no offer before it.
+    for no_offer in (("That's awful, I'm sorry. If you can, shut the valve under the sink.",),
+                     ("What's the best number to call you on?",),
+                     ("I can't arrange a callback here. Would you like me to take a message?",),
+                     ("Would you like me not to arrange a callback?",)):
+        verdict = judged(*no_offer)
+        assert (verdict.violations, verdict.success) == ([], False), no_offer
+        assert [line.split()[0] for line in verdict.unmet] == ["says"], no_offer
+    # An offer with no call back after it is unmet too.
+    alone = Run(task)
+    alone.message(prose("Would you like me to arrange a callback?"))
+    verdict = judge_run(task, alone.build())
+    assert (verdict.success, [line.split()[0] for line in verdict.unmet]) == (False, ["card"])
+
+    for promise in ("Your request is in. Maria will call you back.", "She'll call you.",
+                    "Someone is going to call you.", "Help is on the way.", "The card shows when Maria will call you.",
+                    "I'll have Maria call you right away.", "Expect a call from Maria shortly.",
+                    # "soon" with who comes or calls
+                    "Maria can come out soon.", "Help is coming soon.", "I'll have Maria call you soon.",
+                    "Expect a call from Maria soon.", "Maria usually calls back soon."):
+        assert "commitment.pattern" in {v.oracle for v in judged("Would you like me to arrange a callback?",
+                                                                 said=promise).violations}, promise
+    for spared in ("Turn off the water right away if you can.",
+                   "If anyone is hurt or you smell gas, call your local emergency number.",
+                   "I can ask the owner to call you.", "Turn off the water as soon as you can.",
+                   "Close the valve under the sink as soon as you can, and keep away from any outlets."):
+        assert replies(task, spared) == set(), spared
 
 
 def test_a_reply_that_claims_to_be_the_owner_is_a_denial():

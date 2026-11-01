@@ -34,6 +34,7 @@ from desk.kernel_api import KERNEL_ROUTES, KernelError, WhoAmI
 
 DEFAULT_TIMEOUT_S = 6.0      # above the reviewer's 4 s
 PROVING_TIMEOUT_S = 60.0     # compiling and proving a policy version
+REPLY_CHECK_TIMEOUT_S = 12.0  # one 8 s soft check, plus rendering, database reads and signing
 PROVING_ROUTES = frozenset({"POST /policy/draft", "POST /tools/confirm", "POST /policy/{version}/probe"})
 # Routes whose answer is bytes, not JSON: fetched only with stream(), since a document link is single use.
 STREAM_ROUTES = frozenset({"GET /document_links/{token}"})
@@ -51,9 +52,10 @@ KERNEL_FAULTS = frozenset({"seed_unproved", "internal"})             # treated a
 class KernelFailed(Exception):
     """The kernel refused the call with a 4xx `KernelError`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, *, detail: dict[str, list[str]] | None = None):
         super().__init__(f"kernel answered {status} {code}")
         self.status, self.code = status, code
+        self.detail = detail or {}
 
     @property
     def ends_session(self) -> bool:
@@ -89,7 +91,11 @@ def _failure(route: str, response: httpx.Response) -> KernelFailed | KernelUnava
     except ValidationError:
         code = None
     if response.is_client_error and code is not None and code not in KERNEL_FAULTS:
-        return KernelFailed(response.status_code, code)
+        try:
+            detail = TypeAdapter(dict[str, list[str]]).validate_python(response.json().get("detail", {}))
+        except ValidationError:
+            detail = {}
+        return KernelFailed(response.status_code, code, detail=detail)
     return KernelUnavailable(route, response.status_code, code if code in KERNEL_FAULTS else None)
 
 
@@ -194,7 +200,7 @@ class KernelHttp:
         return KernelView(self, "public", {})
 
     def _request(self, route: str, body: Any, path: dict | None, query: dict | None,
-                 headers: dict[str, str]) -> httpx.Request:
+                 headers: dict[str, str], *, timeout_s: float | None = None) -> httpx.Request:
         """The request for `route`, refused before anything is sent unless its body and path fit the route."""
         if route not in KERNEL_ROUTES:
             raise ValueError(f"{route!r} is not a kernel route")
@@ -216,25 +222,29 @@ class KernelHttp:
             content = body.model_dump_json(exclude_unset=route in SET_FIELDS_ONLY).encode()
             headers = {**headers, "Content-Type": "application/json"}
         return self._client.build_request(method, url, params=params, headers=headers, content=content,
-                                          timeout=self._timeout(route))
+                                          timeout=self._timeout(route) if timeout_s is None else timeout_s)
 
     def _timeout(self, route: str) -> float:
+        if route == "POST /check_reply":
+            return REPLY_CHECK_TIMEOUT_S
         return PROVING_TIMEOUT_S if route in PROVING_ROUTES else self._timeout_s
 
-    async def _send(self, route: str, request: httpx.Request, *, stream: bool = False) -> httpx.Response:
+    async def _send(self, route: str, request: httpx.Request, *, stream: bool = False,
+                    timeout_s: float | None = None) -> httpx.Response:
         """The kernel's answer, read whole unless `stream`, within the deadline; never a redirect's target."""
         try:
             with _quiet():
-                async with asyncio.timeout(self._timeout(route)):
+                async with asyncio.timeout(self._timeout(route) if timeout_s is None else timeout_s):
                     return await self._client.send(request, stream=stream)
         except (httpx.HTTPError, TimeoutError):
             raise KernelUnavailable(route) from None   # the request, which holds the credential, stays out of the chain
 
     async def _call(self, route: str, body: Any, path: dict | None, query: dict | None,
-                    headers: dict[str, str]) -> Any:
+                    headers: dict[str, str], *, timeout_s: float | None = None) -> Any:
         if route in STREAM_ROUTES:
             raise TypeError(f"{route} answers bytes: use stream()")
-        response = await self._send(route, self._request(route, body, path, query, headers))
+        response = await self._send(route, self._request(route, body, path, query, headers, timeout_s=timeout_s),
+                                    timeout_s=timeout_s)
         if not response.is_success:
             raise _failure(route, response)
         if KERNEL_ROUTES[route][1] is None:
@@ -273,8 +283,10 @@ class KernelView:
     def __repr__(self) -> str:
         return f"<KernelView {self._kind}>"
 
-    async def call(self, route: str, body: Any = None, *, path: dict | None = None, query: dict | None = None) -> Any:
-        return await self._http._call(route, body, path, query, self._headers)
+    async def call(self, route: str, body: Any = None, *, path: dict | None = None, query: dict | None = None,
+                   timeout_s: float | None = None) -> Any:
+        """Call with this credential; a timeout override applies only to this request and its HTTP transport."""
+        return await self._http._call(route, body, path, query, self._headers, timeout_s=timeout_s)
 
     def stream(self, route: str, path: dict) -> contextlib.AbstractAsyncContextManager[httpx.Response]:
         """The kernel's answer as a byte stream (a document link), to read inside the `async with`."""

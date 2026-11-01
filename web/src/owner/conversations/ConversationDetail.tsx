@@ -18,6 +18,7 @@ import {
   Notice,
   Pill,
   RecordedNote,
+  SkeletonScreen,
   StatusDot,
   TakeOverBar,
   Transcript,
@@ -34,6 +35,9 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { TRANSCRIPT_NOTE } from './copy.ts';
+import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
+import { latestOf } from './latest.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
@@ -47,6 +51,8 @@ export interface ConversationDetailProps {
   sessionId: string;
   /** The chat as the list read it, which names who it is with; absent until the list has it. */
   summary: ConversationSummary | undefined;
+  /** The list's first read has settled, data or failure, so `summary` names who the chat is with if it can. */
+  listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
 }
@@ -61,19 +67,6 @@ function fallbackName(state: SessionState): string {
 function levelOf(state: SessionState): string {
   if (state.kind === 'agent') return 'Agent';
   return state.verified ? 'Verified' : 'Public';
-}
-
-/**
- * The kernel's line for the last thing that happened in the chat: its newest receipt or message.
- * Where the owner joined or left carries no line of the kernel's, so it is passed over.
- */
-function latestOf(read: OwnerTranscriptRead): string | null {
-  const items = [...read.items].sort((a, b) => b.n - a.n);
-  for (const { event, owner_plain: ownerPlain } of items) {
-    if (event === null || !('visitor_plain' in event)) continue;
-    return event.type !== 'message' && event.state === 'refused_at_execution' && ownerPlain != null ? ownerPlain : event.visitor_plain;
-  }
-  return null;
 }
 
 /** The newest of the visitor's own messages in the chat, by its place: 0 before the first. */
@@ -142,7 +135,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
@@ -157,10 +150,10 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   });
   // A read taken since the chat opened has come in, not only one kept from an earlier visit.
   const readSinceOpened = chat.isFetchedAfterMount && chat.isSuccess;
-  const failure = useReadFailure(chat);
+  const failure = useReadFailure(chat, { pausedRoute: 'conversation' });
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
-  const heldFailure = useReadFailure(needsYou);
+  const heldFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
   const answers = useAnswer(deskId);
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -200,27 +193,32 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     if (ended && (active === null || active === document.body)) composerRef.current?.querySelector('textarea')?.focus();
   }, [controls.sending]);
 
+  // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
+  // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
+  // way the pane ends up draws inside the one region, so it stays mounted as they change.
+  const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  const pane = (content: ReactNode) => (
+    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
+      {content}
+    </SkeletonScreen>
+  );
+  if (loading) return pane(null);
   if (chat.data === undefined) {
     if (chat.error instanceof ApiError && chat.error.kind === 'not_found') {
-      return (
+      return pane(
         <EmptyState
           title="This conversation isn't in your copy"
           body="It may belong to another demo copy, or the link is wrong. Pick a conversation from the list."
-        />
+        />,
       );
     }
-    if (failure !== null) return <FailedRead failure={failure} />;
-    return (
-      <p className="cd-conversation__loading cd-type-meta" role="status">
-        Opening the conversation
-      </p>
-    );
+    return pane(failure === null ? null : <FailedRead failure={failure} />);
   }
 
   const read = chat.data;
   const { state } = read;
   const who = summary ? whoLabel(summary) : fallbackName(state);
-  const latest = latestOf(read);
+  const latest = latestOf(read.items);
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
 
@@ -233,6 +231,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const kept = [...answers.kept.values()].filter(mine);
   const answered = [...answers.answered.values()].filter((entry) => mine(entry.item));
   const heldIds = [...new Set([...held, ...kept].map((item) => item.decision.decision_id).concat(answered.map((a) => a.decision.decision_id)))];
+  // A request still held in this chat, not answered here: its handoff cards leave Claude's note out.
+  const holdOpen = [...held, ...kept].some((item) => !answers.answered.has(item.decision.decision_id));
   const readAt = needsYou.dataUpdatedAt;
 
   // Each held request answered in place, as Today answers it: one card from held to answered, so the
@@ -296,7 +296,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     );
   }
 
-  return (
+  return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
       <header className="cd-conversation__head">
         <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
@@ -325,12 +325,12 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
         {callbacks.length > 0 ? (
           <div ref={setHandoffCards} className="cd-conversation__handoffs">
             {callbacks.map((item) => (
-              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
+              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} showSummary={!holdOpen} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
             ))}
           </div>
         ) : null}
         <Transcript label={`Conversation with ${who}`}>
-          <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
+          <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}
             agentName={who}
@@ -367,6 +367,6 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           {controls.messageError !== null ? <Notice tone="error">{controls.messageError}</Notice> : null}
         </div>
       )}
-    </section>
+    </section>,
   );
 }

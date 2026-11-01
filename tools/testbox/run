@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Sync this worktree and run an offline test/build on the SSM test box."""
+import sys
+if sys.version_info < (3, 10):
+    print("testbox: Python 3.10 or newer is required; run with python3.10+ or install a current Python 3.", file=sys.stderr)
+    sys.exit(1)
+import subprocess
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from desk_tools.testbox_client import main
+try:
+    sys.exit(main())
+except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
+    print(f"testbox: {exc}", file=sys.stderr)
+    sys.exit(1)
+except KeyboardInterrupt:
+    sys.exit(130)

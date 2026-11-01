@@ -414,7 +414,7 @@ describe('Arrival', () => {
 
     // The owner goes on to Today before it answers, and the answer comes while they are there.
     await router.navigate(TODAY);
-    const answering = screen.getByRole('switch', { name: 'Answering' });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
     await expect.element(answering).toHaveAttribute('aria-checked', 'true');
     await late.settled;
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -422,6 +422,7 @@ describe('Arrival', () => {
 
     // Today's reads are still the ones it shows: the switch follows a change, and the change saves.
     await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
     await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
     await expect.poll(() => requests('desks').length).toBeGreaterThan(1);
@@ -968,7 +969,7 @@ describe('OwnerLayout', () => {
     await expect.element(main.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
     const box = about.element().getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(main.element().getBoundingClientRect().bottom);
-    expect(box.bottom).toBeLessThanOrEqual(screen.getByRole('switch', { name: 'Answering' }).element().getBoundingClientRect().top);
+    expect(box.bottom).toBeLessThanOrEqual(screen.getByRole('switch', { name: 'Claude acts for you' }).element().getBoundingClientRect().top);
 
     // A router link: the app stays loaded and the route changes.
     await about.getByRole('link', { name: 'Product proposal' }).click();
@@ -1023,15 +1024,16 @@ describe('OwnerLayout', () => {
 
   it('answering_switch_reverts_on_error', async () => {
     const { screen } = await renderRoute(TODAY);
-    const answering = screen.getByRole('switch', { name: 'Answering' });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
     const saved = () => mockStore.world.desk(RIVERA.deskId)?.summary.answering;
     await expect.element(answering).toHaveAttribute('aria-checked', 'true');
 
     // It flips at once, and flips back when the change didn't save.
     mockStore.inject({ route: 'setAnswering', status: 500, delayMs: 400 });
     await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
-    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn't save, so Answering is still on.");
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn’t save, so Claude is still acting for you.");
     await expect.element(answering).toHaveAttribute('aria-checked', 'true');
     expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }]);
     expect(saved()).toBe(true);
@@ -1039,6 +1041,7 @@ describe('OwnerLayout', () => {
     // A change whose answer was lost but which went through stays, with no error.
     mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
     await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.poll(() => saved()).toBe(false);
     await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBeGreaterThan(1);
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
@@ -1047,12 +1050,14 @@ describe('OwnerLayout', () => {
     // A refusal says what it still is.
     mockStore.inject({ route: 'setAnswering', status: 409 });
     await answering.click();
-    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn't save, so Answering is still off.");
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn’t save, so Claude is still taking messages only.");
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
     // And a change that saves, after which the Desks are read again.
     const reads = requests('desks').length;
     await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.poll(() => saved()).toBe(true);
     await expect.element(answering).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
@@ -1064,7 +1069,8 @@ describe('OwnerLayout', () => {
     mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'desks', status: 'network', times: 2 });
     await answering.click();
-    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm that Answering is now off. Reload to see where it stands.");
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn’t confirm that Claude now takes messages only. Reload to see where it stands.");
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
     expect(saved()).toBe(false);
     await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBe(before + 3);
@@ -1075,7 +1081,8 @@ describe('OwnerLayout', () => {
     mockStore.inject({ route: 'setAnswering', status: 'network' });
     mockStore.inject({ route: 'desks', status: 'network', times: 2 });
     await answering.click();
-    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm that Answering is now on. Reload to see where it stands.");
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn’t confirm that Claude is now acting for you. Reload to see where it stands.");
     await expect.poll(() => requests('desks').length, { timeout: 5_000 }).toBe(before + 3);
     await expect.element(answering).toHaveAttribute('aria-checked', 'false');
     expect(saved()).toBe(false);
@@ -1154,6 +1161,7 @@ describe('OwnerLayout', () => {
     await expectTodayHoldsForItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
     await screen.getByRole('button', { name: 'Start over' }).click();
     await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
@@ -1161,14 +1169,16 @@ describe('OwnerLayout', () => {
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
     await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
-    // The old copy's Today is gone (still on its skeleton, its inbox still out), and the new copy's loading page is up.
-    expect(pageNow()).toBe('loading');
+    // Navigation and the held read can precede React's commit, leaving the old Today's skeleton
+    // mounted briefly. Wait for the new copy's loading page before either held answer is released.
+    await vi.waitFor(() => expect(pageNow()).toBe('loading'));
     const sawItOpening = watchFor('Opening your Demo inbox');
 
     // The old copy's inbox answers late, before the new copy's Desks do.
     const late = nextAnswerTo('ownerInbox');
     oldInbox.release();
     await late.settled;
+    newInbox.release();
     newDesks.release();
 
     // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
@@ -1195,7 +1205,7 @@ describe('OwnerLayout', () => {
     const { screen, router } = await renderRoute(TODAY);
     const sawNotFound = watchFor("This page doesn't exist");
     const heading = screen.getByRole('heading', { level: 1, name: /, Maria$/ });
-    const answering = screen.getByRole('switch', { name: 'Answering' });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
 
     // An Answering change is still out when Start over opens a fresh copy, and fails after it:
     // refused (the old copy's Desk is gone), then with its answer lost.
@@ -1206,6 +1216,7 @@ describe('OwnerLayout', () => {
       mockStore.inject({ route: 'setAnswering', status, delayMs: 2_000 });
       const late = nextAnswerTo('setAnswering');
       await answering.click();
+      await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
       await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
       await screen.getByRole('button', { name: 'Start over' }).click();

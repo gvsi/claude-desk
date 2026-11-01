@@ -5,7 +5,8 @@ and the bounded check print it). `explain_counterexample` turns it into one sent
 reads on the rules page.
 """
 
-from desk.kernel_service.explain import explain_counterexample
+from desk.contracts import BusinessToolDef
+from desk.kernel_service.explain import asked, explain_counterexample
 
 from .helpers import context as cedar_context
 
@@ -35,6 +36,28 @@ def raw(action: str, *, kind: str = "Visitor", verified: bool = False, person_id
 def test_refund_counterexample_reads_like_the_owner_would_say_it():
     refund = raw("payments.create_refund", verified=True, person_id="person-dana", amount_cents=50_000)
     assert explain_counterexample("auto_within_cards", refund, PEOPLE) == "Dana could get a $500 refund without asking you."
+
+
+def test_business_requests_use_fixed_block_phrases_and_quote_the_title():
+    title = 'Client “request”\nform'
+    quoted_title = '“Client "request" form”'
+    cases = [
+        ({'block': 'intake', 'questions': ['What do you need?']}, f'leave their details through {quoted_title}'),
+        ({'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30}, f'book {quoted_title}'),
+        ({'block': 'purpose_payment', 'purpose': 'Consult', 'amount_cents': 5000}, f'pay for {quoted_title}'),
+        ({'block': 'urgent', 'urgent_when': 'A leak'}, f'report something urgent through {quoted_title}'),
+    ]
+    for config, phrase in cases:
+        definition = BusinessToolDef(title=title, description='Owner data.', config=config)
+        assert asked('A stranger', 'asked', 'desk.request', None, None, business=definition) == (
+            f'A stranger asked to {phrase}.')
+        assert asked('A stranger', 'asks', 'desk.request', None, None, business=definition) == (
+            f'A stranger asks to {phrase}.')
+        if config['block'] == 'purpose_payment':
+            assert asked('A stranger', 'asked', 'desk.request', 5000, None, business=definition) == (
+                f'A stranger asked to pay $50 for {quoted_title}.')
+    assert asked('A stranger', 'asked', 'desk.missing', None, None) == (
+        "A stranger asked for something this Desk can't do.")
 
 
 def test_subjects():

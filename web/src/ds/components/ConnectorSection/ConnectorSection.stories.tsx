@@ -172,7 +172,7 @@ const addedPayments: ConnectorSectionProps = {
     {
       key: 'native.payment_link',
       name: 'Payment link',
-      description: 'Makes a one-time link for an invoice. Charges money. Can be undone.',
+      description: "Makes a one-time link for an invoice. Charges money. Can't be undone.",
       summary: 'No rule yet',
       mode: 'ask',
       status: 'enabled',
@@ -181,7 +181,7 @@ const addedPayments: ConnectorSectionProps = {
     {
       key: 'native.charge_mandate',
       name: 'Charge within a signed limit',
-      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
       summary: 'No rule yet',
       mode: 'ask',
       status: 'disabled',
@@ -288,5 +288,50 @@ export const LineAboveTools: Story = {
     const [header, firstTool] = canvas.getAllByRole('link');
     await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual((header as HTMLElement).getBoundingClientRect().bottom);
     await expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual((firstTool as HTMLElement).closest('li')?.getBoundingClientRect().top ?? 0);
+  },
+};
+
+/** Quotes just after "Stop quoting on weekends" was confirmed: the Quote row landed, with its new words. */
+const quotesLanded: ConnectorSectionProps = {
+  ...quotes,
+  tools: quotes.tools.map((tool) => ({ ...tool, summary: 'Anyone · No discounts · Weekdays, all day', landed: 1 })),
+};
+
+export const Landed: Story = {
+  args: quotesLanded,
+  parameters: {
+    canvasNote:
+      'The signed board draws the hub at rest; the review board UXC-P701-After draws the Quote row just after the change was confirmed: lit in the selected fill, then let go, keeping "Updated". Storybook shows the motion your system asks for: under reduced motion the row is at its end state at once.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const row = canvasElement.querySelector<HTMLElement>('.cd-connector-section__tool');
+    if (!row) throw new Error('no tool row');
+    // "Updated" after the name, 8 px from it, centered on it: a Pill, never filled.
+    const name = canvas.getByText('Quote');
+    const pill = canvas.getByText('Updated', { exact: true });
+    await expect(pill).toHaveClass('cd-pill');
+    await Promise.all((pill.parentElement ?? pill).getAnimations().map((arrival) => arrival.finished));
+    const gap = pill.getBoundingClientRect().left - name.getBoundingClientRect().right;
+    await expect(Math.round(gap)).toBe(8);
+    const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
+    await expect(Math.abs(middle(pill) - middle(name))).toBeLessThan(1);
+    // The link's name starts with the words it shows, says the row was updated, and has its new words.
+    await expect(canvas.getByRole('link', { name: 'Quote, updated: Anyone · No discounts · Weekdays, all day, Automatic. Open' })).toBeVisible();
+    await expect(row).toHaveAttribute('data-landed', '1');
+    const glow = row.querySelector<HTMLElement>('.cd-landed-glow');
+    if (!glow) throw new Error('no glow behind the landed row');
+    await expect(glow).toHaveAttribute('aria-hidden', 'true');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // The end state at once: no fill, and "Updated" already there.
+      expectComputed(glow, { display: 'none' });
+      expectComputed(pill.parentElement ?? pill, { animationName: 'none' });
+      return;
+    }
+    // Lit in the selected fill behind its words, on motion-fast, then let go on motion-base after a 1.6 s hold.
+    expectComputed(glow, {
+      animationName: 'cd-landed-light, cd-landed-let-go',
+      animationDuration: '0.12s, 0.2s',
+      animationDelay: '0s, 1.72s',
+    });
   },
 };

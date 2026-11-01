@@ -14,6 +14,7 @@ from desk.contracts import AgentAuth, LedgerPage, PolicyVersion, SessionCreated,
 from desk.kernel_api import (
     CreateCopyRequest,
     CreateSessionRequest,
+    DeskCharterRequest,
     DeskAnsweringRequest,
     DeskUpdated,
     Health,
@@ -92,6 +93,39 @@ async def test_session_client_sends_only_the_session_token():
     assert [request.url.path for request in kernel.requests] == ["/whoami", "/verify/check"]
     for request in kernel.requests:
         assert credentials(request) == {"x-session-token": "session-token-1"}
+
+
+async def test_public_policy_refusal_detail_reaches_the_caller():
+    kernel = ScriptedKernel()
+    fields = {"policy:pricing": ["digit", "percent_sign"], "policy:about": ["lex.en.promise"]}
+    kernel.fail(httpx.Response(422, json={"code": "invalid", "detail": fields}))
+    async with kernel.client() as http:
+        with pytest.raises(KernelFailed) as refused:
+            await http.owner("owner-token").call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[]),
+                                                path={"id": "d1"})
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", fields)
+    assert str(refused.value) == "kernel answered 422 invalid"
+
+
+@pytest.mark.parametrize("body", [{"code": "invalid"}, {"code": "invalid", "detail": None}],
+                         ids=["no-detail", "null-detail"])
+async def test_a_refusal_without_detail_reaches_the_caller_with_an_empty_detail(body):
+    kernel = ScriptedKernel()
+    kernel.fail(httpx.Response(422, json=body))
+    async with kernel.client() as http:
+        with pytest.raises(KernelFailed) as refused:
+            await http.owner("owner-token").call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[]),
+                                                path={"id": "d1"})
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", {})
+
+
+def test_kernel_failed_takes_detail_by_keyword_and_never_holds_none():
+    assert KernelFailed(409, "conflict").detail == {}
+    assert KernelFailed(422, "invalid", detail=None).detail == {}
+    detail = {"contact": ["contact_format"]}
+    assert KernelFailed(422, "invalid", detail=detail).detail == detail
+    with pytest.raises(TypeError):
+        KernelFailed(422, "invalid", {"contact": ["contact_format"]})
 
 
 async def test_owner_client_sends_only_the_owner_token():
@@ -269,6 +303,33 @@ async def test_proving_routes_get_60_s():
         kernel.fail(lambda request: asyncio.sleep(0.2, httpx.Response(200, json=[])))
         assert await http.owner("owner-token-1").call(
             "POST /policy/{version}/probe", PolicyProbeRequest(desk_id="d1", probes=[]), path={"version": 3}) == []
+
+
+async def test_reply_check_gets_10_s_without_changing_other_routes(monkeypatch):
+    from desk.api import kernel_client
+    from desk.contracts import ReplyDraft
+    from desk.kernel_api import CheckReplyRequest
+
+    assert kernel_client.REPLY_CHECK_TIMEOUT_S == 12.0
+    kernel = ScriptedKernel()
+    # An unusable answer still records the request's transport timeout.
+    kernel.fail(httpx.Response(503))
+    async with kernel.client() as http:
+        for route, body in [("POST /check_reply", CheckReplyRequest(
+                draft=ReplyDraft(session_id="s1", generation=0, prose="Hello.", clauses=[]))),
+                            ("GET /whoami", None)]:
+            with pytest.raises(KernelUnavailable):
+                await http.session("session-token-1").call(route, body)
+    assert [request.extensions["timeout"]["read"] for request in kernel.requests] == [12.0, 6.0]
+
+    # Exercise the outer deadline over an in-process transport too, without a ten-second sleep.
+    monkeypatch.setattr(kernel_client, "REPLY_CHECK_TIMEOUT_S", 0.02)
+    kernel.fail(lambda request: asyncio.sleep(0.1, httpx.Response(503)))
+    async with kernel.client(timeout_s=1) as http:
+        with pytest.raises(KernelUnavailable) as caught:
+            await http.session("session-token-1").call("POST /check_reply", CheckReplyRequest(
+                draft=ReplyDraft(session_id="s1", generation=0, prose="Hello.", clauses=[])))
+    assert caught.value.status is None
 
 
 async def asgi_kernel(scope, receive, send):

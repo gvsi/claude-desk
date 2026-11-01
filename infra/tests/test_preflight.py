@@ -308,7 +308,9 @@ def test_cdk_lookup_cache_leaves_the_tree_clean():
 
 
 def test_owner_secret_ids_match_set_secret():
-    assert load_script("preflight").OWNER_SECRETS == load_script("set_secret").OWNER_SECRETS == OWNER_SECRETS
+    # Jev is optional; deploy still requires the Anthropic key and passcode hash alone.
+    assert load_script("preflight").OWNER_SECRETS == OWNER_SECRETS
+    assert set(load_script("set_secret").OWNER_SECRETS) == set(OWNER_SECRETS) | {"desk/typesafe-api-key"}
 
 
 def test_data_only_skips_the_owner_secrets_and_the_web_build(env, secrets, capsys):
