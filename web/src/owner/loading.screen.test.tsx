@@ -23,6 +23,7 @@ import { holdReads } from '../test/holdReads.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
+import { SUGGESTION_EXAMPLE } from './rules/copy.ts';
 import { settled } from '../ds/test/settled.ts';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
@@ -1371,7 +1372,7 @@ const RULES_READ = ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId);
 /** The fresh copy's approval suggestion; as with recorded conversations, the mock adds it explicitly. */
 const FRESH_SUGGESTION: Suggestion = {
   tool: 'payments.create_refund', count: 3,
-  text: 'You approved 3 refunds for Dana Whitfield under $50 this month. Let these go through without asking?',
+  text: SUGGESTION_EXAMPLE,
   card: { ...rivera.ruleCards['rv-refund'], card_id: 'card-dana-refunds', mode: 'auto', who: 'person', person_id: rivera.people.dana.personId, max_amount_cents: 5_000 },
 };
 function withFreshRules() {

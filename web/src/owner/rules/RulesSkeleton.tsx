@@ -4,6 +4,7 @@ import { Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } from '../../
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CONNECTOR_PAGES_BUILT } from '../connectors/pages.ts';
+import { SUGGESTION_EXAMPLE } from './copy.ts';
 
 import './RulesPage.css';
 
@@ -212,7 +213,7 @@ function Body() {
         <SkeletonCard anchor="rules-suggestion-0">
           <div className="cd-rules__suggestion">
             <Lines
-              words="You approved 3 refunds for Dana Whitfield under $50 this month. Let these go through without asking?"
+              words={SUGGESTION_EXAMPLE}
               className="cd-rules__suggestion-text cd-type-body"
             />
             <div>
