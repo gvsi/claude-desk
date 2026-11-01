@@ -123,3 +123,20 @@ export const Spanish: Story = {
     for (const message of [signed, unsigned]) await expect(message).toHaveAttribute('lang', 'es');
   },
 };
+
+/** The built-in agent's English words on the agents page in Spanish: `lang` on the quote alone. */
+export const SpanishPageEnglishText: Story = {
+  args: { language: 'es', textLanguage: 'en', title: 'Reserva la primera visita', meta: 'Solicitud 1', time: undefined },
+  parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-04-Run’s signed requests on the agents page in Spanish, each quoting the agent’s English words.' },
+  play: async ({ canvasElement }) => {
+    const message = canvasElement.querySelector<HTMLElement>('.cd-agent-message');
+    const text = canvasElement.querySelector<HTMLElement>('.cd-agent-message__text');
+    await expect(message).toHaveAttribute('lang', 'es');
+    await expect(text).toHaveAttribute('lang', 'en');
+    await expect(text?.textContent).toBe(firstRequest);
+    // Only the quote: the title and meta line are the page's, in Spanish.
+    for (const own of canvasElement.querySelectorAll('.cd-agent-message__title, .cd-agent-message__meta')) {
+      await expect(own.closest('[lang]')).toBe(message);
+    }
+  },
+};

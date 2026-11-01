@@ -61,10 +61,10 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
-from desk.contracts import AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, PolicyVersion, RuleCard, money_tools_of
+from desk.contracts import AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard, money_tools_of
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, auto_money, lower_to_cap
-from desk.presets import PRESETS, PresetName
+from desk.presets import PRESETS, PresetName, preset_cards
 
 # The language the owner reads the rules in, for the rule copy code writes (a lowered card's reason). The owner app
 # renders rules copy in English today (its rules chat shows Claude's answers with language "en"), and `kernel_ro`
@@ -117,20 +117,35 @@ def card_diff(before: list[RuleCard], after: list[RuleCard]) -> CardDiff:
                              if card.card_id in old and old[card.card_id] != card])
 
 
-def preset_of(cards: Iterable[RuleCard]) -> PresetName | None:
-    """The preset the owner cards are, exactly (default asks aside, in any order), else None."""
+def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow]) -> PresetName | None:
+    """The preset the owner cards are, exactly (default asks aside, in any order), as a Desk with these opening hours
+    drafts it (`preset_cards`), else None."""
     owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
-    for name, preset in PRESETS.items():
-        if owned == sorted(preset, key=lambda card: card.card_id):
+    for name in PRESETS:
+        if owned == sorted(preset_cards(name, hours), key=lambda card: card.card_id):
             return name
     return None
+
+
+async def desk_hours(owner: OwnerCtx, desk_id: str) -> list[HoursWindow]:
+    """The Desk's opening hours, as its `kernel_ro.desks` row keeps them. None without a row, and none when the row's
+    hours aren't a list of windows that each read as one, so the Rules page still loads and a preset's draft takes
+    the shipped cards (`preset_cards`); a failed read still raises."""
+    desk = await owner.ro.one("desks", desk_id=desk_id)
+    stored = None if desk is None else desk.get("hours")
+    if not isinstance(stored, list):
+        return []
+    try:
+        return [HoursWindow.model_validate(window) for window in stored]
+    except ValidationError:
+        return []
 
 
 async def rules_view(owner: OwnerCtx, desk_id: str) -> RulesView:
     """The Rules page: the active version, each tool with the cards that cover it, and its preset, if any."""
     active = version_from_row(await active_row(owner, desk_id))
     return RulesView(active=active, tools=await tool_rows(owner, desk_id, active.cards),
-                     preset=preset_of(active.cards))
+                     preset=preset_of(active.cards, await desk_hours(owner, desk_id)))
 
 
 def _money_tools(rows: Iterable[Mapping[str, Any]]) -> frozenset[str]:
@@ -223,10 +238,12 @@ async def draft_added(owner: OwnerCtx, desk_id: str, add: list[RuleCard]) -> Rul
 
 
 async def draft_preset(owner: OwnerCtx, desk_id: str, name: PresetName) -> RulesDraft:
-    """The preset's cards in place of every owner card, cards for one person and "never" cards included, so the
-    draft's diff lists each card it removes. The cards go as they are, so a new Desk's draft hits the proofs shipped
-    for them; presets carry no auto money card."""
-    return await draft(owner, desk_id, list(PRESETS[name]))
+    """The preset's cards for the Desk's opening hours (`preset_cards`: "Recommended rules" books weekdays in them) in
+    place of every owner card, cards for one person and "never" cards included, so the draft's diff lists each card it
+    removes. A Desk with no hours, or with Monday to Friday 09:00 to 17:00, drafts the preset's cards as they are,
+    which hit the proofs shipped for them; one whose hours have no weekday gets no booking card. Presets carry no auto
+    money card."""
+    return await draft(owner, desk_id, preset_cards(name, await desk_hours(owner, desk_id)))
 
 
 async def confirm(owner: OwnerCtx, engine: AsyncEngine, desk_id: str, version: int) -> PolicyVersion:

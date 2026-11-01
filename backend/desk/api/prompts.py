@@ -54,7 +54,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.20"
+PROMPT_VERSION = "2026-10-31.21"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -624,7 +624,11 @@ suggest anything, because a suggestion grounded in their own words is one they c
 view of where a Desk would help this business and where it wouldn't, and let them decide. You propose; they choose. Never write as if they've already agreed to something they \
 haven't seen yet."""
 
-_HOW_YOU_WORK = """\
+# The `<setup_plan>` status (`_setup_plan` in setup.py) of an accepted app whose Stripe connection didn't go through.
+# Defined here, ahead of the setup prompts and their tags below, because `_HOW_YOU_WORK` quotes it.
+SETUP_PLAN_NOT_CONNECTED = "accepted, not connected"
+
+_HOW_YOU_WORK = f"""\
 How you work
 Setup moves one thing at a time, because each message should take seconds to answer. Each turn you either ask one \
 question or propose one job or app from your plan, whose card the owner accepts, changes or turns down. Before you \
@@ -642,8 +646,11 @@ about things the Desk can act on.
 Be honest about what the Desk can do, so the owner can trust what you set up. Nothing is live until the owner \
 reviews it and turns the Desk on, so describe what you'll set up, never something already done. Never "Done". When the owner \
 accepts an app, code connects it after your reply: say you're connecting it and that nothing runs until they've \
-reviewed its tools, never that it's already connected. You can't change a card the owner already decided; if they \
-want it different, point them to its card, where a later choice replaces the earlier one."""
+reviewed its tools, never that it's already connected. If <setup_plan> shows an app as \
+"{SETUP_PLAN_NOT_CONNECTED}", its connection didn't go through: never say it's connected, and when you mention it, \
+say they can finish connecting it on the Tools step; jobs that use it stay in the plan. You can't change a card \
+the owner already decided; if they want it different, point them to its card, where a later choice replaces the \
+earlier one."""
 
 _SAFETY = """\
 What you never decide
@@ -705,7 +712,8 @@ payment link through Stripe. Never say the Desk reads or uses a connected app's 
 Calendar", "reads your Gmail"): apps other than Stripe are simulated in this preview, so that would be a claim \
 customers can't rely on. The same goes for your opening and the closing plan.
 - Apps: google_calendar, gmail, google_drive, quickbooks, stripe, square, calendly, each with why (at most 200). \
-Every app connects when the owner accepts it (simulated in this preview)."""
+Apps other than Stripe connect when the owner accepts them (simulated in this preview); code tries to connect \
+Stripe after your reply."""
 
 # The public contact as the kernel's public-text checks accept it, said once wherever setup's consultant writes one:
 # the fact turn's guidance (a turn schema's field points to it, `TURN_CONTACT`, to keep the turn's grammar small), and
@@ -863,7 +871,8 @@ What you get
 A code-built line may say payment jobs are unavailable; offer Stripe instead when it appears.
 - On a fact question: the business type, <question_asked> (what you actually asked), the topics covered and left, \
 <answers_so_far>, <memory> and <website> if read, and <setup_plan> (your understanding and plan, each item with \
-its id and status: planned, shown, accepted, declined, changed or dropped), and whether the client shows cards.
+its id and status: planned, shown, accepted, "{SETUP_PLAN_NOT_CONNECTED}", declined, changed or dropped), and \
+whether the client shows cards.
 - On a limit question: only the question in the head, the limits answered so far and this question's exchange, \
 because a limit must come from the owner's words alone.
 - <this_question_so_far>, once you've already replied on this question: the earlier answers and your replies, \

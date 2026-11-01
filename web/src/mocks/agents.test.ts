@@ -76,3 +76,51 @@ it('over_limit_run_reports_the_signed_limit_in_its_receipt', async () => {
   const agent = [...mockStore.world.sessions.values()].filter((session) => session.state.kind === 'agent').at(-1);
   expect(agent?.events.map(({ ev }) => ev)).toContainEqual(receipt);
 });
+
+it('agent_turns_carry_their_request_words', async () => {
+  vi.useFakeTimers();
+  mockStore.reset('rivera');
+  const params = { slug: RIVERA.slug };
+  await mockStore.dispatch('openSession', { params });
+  const run = async (task: string, key: string): Promise<DemoAgentRun> => {
+    const started = await mockStore.dispatch('sendAgent', { params, body: { task, idempotency_key: key } });
+    if ('network' in started) throw new Error('the run must start');
+    const { run_id } = started.body as { run_id: string };
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
+    const read = await mockStore.dispatch('agentRun', { params: { ...params, run_id } });
+    if ('network' in read) throw new Error('the run must be readable');
+    return read.body as DemoAgentRun;
+  };
+  /** The words each agent request sent, as the owner's view of that chat keeps them. */
+  const ownersWords = () => {
+    const agent = [...mockStore.world.sessions.values()].filter((session) => session.state.kind === 'agent').at(-1);
+    return agent?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text);
+  };
+
+  // Each agent turn carries the words its request sent; the Desk's turns carry none.
+  const booking = await run('book_visit', 'words-book');
+  expect(booking.state).toBe('done');
+  const asked = ['What’s your earliest visit for a leaking water heater? Any day this week.', 'Book Tuesday, November 3 at 2:00 pm for Alex Kim.'];
+  expect(booking.turns.map((turn) => [turn.author, turn.text])).toEqual([
+    ['agent', asked[0]],
+    ['desk', null],
+    ['agent', asked[1]],
+    ['desk', null],
+  ]);
+  expect(ownersWords()).toEqual(asked);
+  // The second request books the first time the open-times card offered, as the card shows it.
+  const offered = booking.turns[1]?.blocks.find((block) => block.template === 'booking_options')?.options?.[0]?.label;
+  expect(offered).toBe('Tuesday, November 3, 2:00 pm');
+
+  // The over-limit request names the $185 the kernel then refuses.
+  const over = await run('push_the_limit', 'words-over');
+  expect(over.turns.map((turn) => [turn.author, turn.text])).toEqual([
+    ['agent', 'Charge the full repair, $185, to Alex Kim’s card.'],
+    ['desk', null],
+  ]);
+  expect(ownersWords()).toEqual(['Charge the full repair, $185, to Alex Kim’s card.']);
+  const refused = mockStore.world.decisions.get(over.turns[1]?.receipts[0]?.decision_id ?? '')?.decision;
+  expect(refused?.state).toBe('refused');
+  expect(refused?.action?.amount_cents).toBe(18_500);
+  expect(refused?.reason_plain).toBe("Alex Kim's assistant tried to charge $185.00 in one go, over its signed limit of $20 a charge.");
+});
