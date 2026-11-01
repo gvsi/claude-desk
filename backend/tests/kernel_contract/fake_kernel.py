@@ -103,7 +103,8 @@ contract test, before the task that first uses them.
   writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
   route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
   `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
-  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
+  specificity order between overlapping cards but a purpose payment's (the compiler's, which the contract suite
+  checks), and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -2715,13 +2716,18 @@ class FakeKernelState:
         if never:
             return 'refuse', [card.card_id for card in never], None
         asks = [card for card in covering if card.mode == 'ask' and not card.is_default]
-        autos = [card for card in covering if card.mode == 'auto'
-                 and card.max_amount_cents is not None and action.amount_cents <= card.max_amount_cents
-                 and action.amount_cents <= desk.auto_money_cap_cents
-                 and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
-        if autos and not asks and not any(card.review for card in autos):
-            return 'allow', [card.card_id for card in autos], None
-        holds = asks or autos or [card for card in covering if card.mode in ('ask', 'auto')]
+        autos = [card for card in covering if card.mode == 'auto']
+        # The compiler's precedence: an auto card decides only where no ask card at its specificity or above, and no
+        # more specific auto card, covers the call; its limits, hours and review come after.
+        ranked = [card for card in autos if all(_specificity(ask) < _specificity(card) for ask in asks)
+                  and all(_specificity(other) <= _specificity(card) for other in autos)]
+        within = [card for card in ranked
+                  if card.max_amount_cents is not None and action.amount_cents <= card.max_amount_cents
+                  and action.amount_cents <= desk.auto_money_cap_cents
+                  and (card.hours is None or in_hours(self.now, [card.hours], ZoneInfo(desk.timezone)) is not None)]
+        if within and not any(card.review for card in within):
+            return 'allow', [card.card_id for card in within], None
+        holds = asks or within or autos
         return 'hold', [card.card_id for card in holds] or [f'default-{action.tool}'], None
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,

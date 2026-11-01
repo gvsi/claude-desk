@@ -418,3 +418,53 @@ async def test_reviewed_purpose_payment_obeys_fixed_price_baseline_and_cap(kerne
     held = await decide(caller, visitor.state.session_id, 0, 'above-new-cap', tool.tool, {})
     assert held.outcome == 'hold' and held.action.amount_cents == 5000
     assert len(ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.quotes')) == 1
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('rules', ['tighter for dana', 'shipped charge ask'])
+async def test_reviewed_purpose_payment_rules_rank_by_specificity(kernel, ro_read, rules):
+    """The most specific card decides a purpose payment, as the compiler ranks cards: Dana's own $10 auto card holds
+    her $50 deposit though a $50 card for anyone covers it (and still allows anyone else), and an auto card on the
+    tool outranks the shipped ask on its charge effect."""
+    from desk.presets import PRESETS
+    from tests.kernel_contract.test_contract import DANA, code_in, session_inbox, verify_check, verify_start
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.deposit', title='Consultation deposit', description='Take the deposit.',
+                        config={'block': 'purpose_payment', 'purpose': 'Consultation deposit', 'amount_cents': 5000})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    enabled = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    active = await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=enabled.draft.version))
+    anyone = RuleCard(card_id='deposit-auto', applies_to=tool.tool, mode='auto', who='anyone', max_amount_cents=5000,
+                      reason='Take the deposit.')
+    if rules == 'tighter for dana':
+        [dana] = ro_read(schema, copy.copy_id, "SELECT person_id FROM {ro}.people WHERE desk_id = %s"
+                                               " AND display_name = 'Dana Whitfield'", (desk_id,))
+        cards = [anyone, RuleCard(card_id='deposit-dana', applies_to=tool.tool, mode='auto', who='person',
+                                  person_id=dana['person_id'], max_amount_cents=1000, reason="Dana's deposits to $10.")]
+    else:
+        [charge_ask] = [card for card in PRESETS['auto'] if card.card_id == 'preset-charge-ask']
+        cards = [anyone, charge_ask]
+    draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
+        desk_id=desk_id, expected_parent=active.version, cards=cards, auto_money_cap_cents=5000))
+    assert draft.status == 'proved'
+    await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    slug = desk_slug(ro_read, schema, copy)
+    visitor = await new_visitor(http, slug)
+    caller, session_id = http.session(visitor.session_token), visitor.state.session_id
+    if rules == 'tighter for dana':
+        stranger = await new_visitor(http, slug)
+        allowed = await decide(http.session(stranger.session_token), stranger.state.session_id, 0, 'stranger',
+                               tool.tool, {})
+        assert allowed.outcome == 'allow', allowed.reason_plain
+        started = await verify_start(caller, session_id, DANA)
+        await verify_check(caller, session_id, code_in(await session_inbox(caller, session_id),
+                                                       started.inbox[0].entry_id))
+    decided = await decide(caller, session_id, 0, 'ranked', tool.tool, {})
+    assert decided.action.amount_cents == 5000
+    assert decided.outcome == ('hold' if rules == 'tighter for dana' else 'allow'), decided.reason_plain
