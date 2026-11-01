@@ -879,7 +879,7 @@ async def test_preview_session_gets_visitor_tools_with_answering_off(app, client
     previewed = await context_of(client, owner_preview.session_id, owner_preview.headers)
     answering_off = await context_of(client, stranger.session_id, stranger.headers)
     assert tools(previewed.tools) == visitor_tools
-    assert tools(answering_off.tools) == ["native.capture_lead", "native.request_callback"]
+    assert tools(answering_off.tools) == ["desk.emergency-callback", "native.capture_lead", "native.request_callback"]
     assert tools(answering_off.tools_declared) == tools(previewed.tools_declared)
     args = {"items": [{"item_id": "drain", "qty": 1}]}
     assert (await decided(client, owner_preview, "native.quote", args)).outcome == "allow"

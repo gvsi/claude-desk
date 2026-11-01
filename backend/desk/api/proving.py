@@ -25,9 +25,11 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+
+from desk.api.owner_streaming import Display, displaying, failure
 
 PROVING_WAIT_S = 25           # the most a proving request waits for its work before answering 202
 RESULT_KEPT_S = 600           # how long a finished answer stays for a re-post to take
@@ -54,6 +56,7 @@ class _Entry:
     result: Any = None
     error: BaseException | None = None
     done_at: float | None = None
+    display: Display | None = None
 
 
 class Proving:
@@ -67,20 +70,12 @@ class Proving:
         self._entries: dict[Key, _Entry] = {}
 
     async def run(self, key: Key, work: Callable[[], Awaitable[Any]], *, deadline: float,
-                  admit: Callable[[], Awaitable[None]]) -> Any:
+                  admit: Callable[[], Awaitable[None]], display: bool = False) -> Any:
         """The work's answer, or `PENDING` once the clock passes `deadline` with it still running. A key with work
         running is joined and a key with a kept answer takes it; otherwise `admit` runs first (the route's limits,
         which a re-post that joins never counts again), then the work starts. The work's error is raised here and
         taken: whoever hears it first, no later re-post hears it again."""
-        self._forget_old()
-        entry = self._entries.get(key)
-        if entry is None:
-            await admit()
-            entry = self._entries.get(key)                # another request may have started it meanwhile
-            if entry is None:
-                entry = _Entry(task=asyncio.create_task(work(), name="desk-proving"))
-                self._entries[key] = entry
-                entry.task.add_done_callback(lambda task: self._settled(key, entry, task))
+        entry = await self._start(key, work, admit=admit, display=display)
         if entry.task is None:                            # a kept answer
             return self._take(key, entry, entry.result, entry.error)
         task = entry.task
@@ -91,6 +86,35 @@ class Proving:
         if error is not None:
             return self._take(key, entry, None, error)
         return task.result()                              # raises CancelledError when the lifespan cancelled it
+
+    async def _start(self, key: Key, work: Callable[[], Awaitable[Any]], *,
+                     admit: Callable[[], Awaitable[None]], display: bool = False) -> _Entry:
+        self._forget_old()
+        entry = self._entries.get(key)
+        if entry is None:
+            await admit()
+            entry = self._entries.get(key)                # another request may have started it meanwhile
+            if entry is None:
+                channel = Display() if display else None
+                with displaying(channel):
+                    entry = _Entry(task=asyncio.create_task(work(), name="desk-proving"), display=channel)
+                self._entries[key] = entry
+                entry.task.add_done_callback(lambda task: self._settled(key, entry, task))
+        return entry
+
+    async def stream(self, key: Key, work: Callable[[], Awaitable[Any]], *,
+                     admit: Callable[[], Awaitable[None]]) -> AsyncIterator[dict]:
+        """Admit before HTTP starts; subscribe to the same work a JSON re-post joins."""
+        entry = await self._start(key, work, admit=admit, display=True)
+        assert entry.display is not None
+
+        async def events():
+            async for item in entry.display.events():
+                yield item
+                if item["event"] == "error" and self._entries.get(key) is entry:
+                    del self._entries[key]  # an error is heard once, as on the JSON path
+
+        return events()
 
     def _take(self, key: Key, entry: _Entry, result: Any, error: BaseException | None) -> Any:
         if error is None:
@@ -103,6 +127,8 @@ class Proving:
         if task.cancelled():
             if self._entries.get(key) is entry:
                 del self._entries[key]
+            if entry.display is not None:                 # its subscribers stop waiting
+                entry.display.finish("error", failure(asyncio.CancelledError()))
             return
         error = task.exception()                          # reading the error marks it retrieved
         if error is None:
@@ -112,6 +138,11 @@ class Proving:
             if not isinstance(error, self._answers):      # handling, whose messages may carry what its frames held
                 logger.error("proving work on %s failed", key[1], exc_info=(type(error), error, error.__traceback__))
             entry.error = error.with_traceback(None)      # kept without the frames: they hold the owner's credential
+        if entry.display is not None:
+            if error is None:
+                entry.display.finish("final", entry.result.model_dump(mode="json"))
+            else:
+                entry.display.finish("error", failure(error))
         entry.task, entry.done_at = None, self._clock()
 
     def forget(self, desk_id: str) -> None:

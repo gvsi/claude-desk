@@ -34,11 +34,14 @@ from desk.api.prompts import (
     ProposalCard,
     PlannedOutcome,
     DemoTask,
+    DemoTaskSet,
     QuestionKey,
     SituationWho,
     Triage,
 )
 from desk.contracts import (
+    ToolName,
+    BusinessToolDef,
     AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
     ApprovalAnswer,
@@ -60,7 +63,6 @@ from desk.contracts import (
     SeedDocument,
     SessionMode,
     SessionState,
-    ToolName,
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
@@ -254,13 +256,28 @@ class AgentRunStarted(BaseModel):
     run_id: str
 
 
+class AgentTasks(BaseModel):
+    """Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+    the business type setup stored for it (`other` without one). A key, never words: the page holds every word."""
+
+    task_set: DemoTaskSet
+
+
 class AgentTurn(BaseModel):
-    """One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
-    the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
-    signed statuses the kernel checked and the Desk showed the agent."""
+    """One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
+    with the blocks and signed statuses the kernel checked and the Desk showed the agent.
+
+    An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
+    2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
+    (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+    templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
+    replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
+    Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
+    blocks and statuses."""
 
     author: Literal["agent", "desk"]
     n: int                                # the exchange: the agent's n-th request and the Desk's answer to it
+    text: str | None
     blocks: list[RenderedBlock]
     receipts: list[Annotated[EvReceipt | EvHeld | EvResolved, Field(discriminator="type")]]
 
@@ -364,8 +381,13 @@ class Handoff(BaseModel):
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
-    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
-    thing they wrote (untrusted)."""
+    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
+    wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
+    characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
+    AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
+    shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+    request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
+    AI-written text: a visitor could steer a summary to sway an approval."""
 
     decision: Decision | None
     held_by: str | None
@@ -373,6 +395,7 @@ class NeedsYouItem(BaseModel):
     handoff: Handoff | None
     session: NeedsYouSession
     from_the_visitor: str | None
+    claude_summary: str | None
 
     @model_validator(mode="after")
     def _one_of(self) -> "NeedsYouItem":
@@ -388,7 +411,10 @@ class NeedsYouItem(BaseModel):
 class ConversationSummary(BaseModel):
     """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
     anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
-    preview."""
+    preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+    whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
+    never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
+    written yet."""
 
     session_id: str
     kind: ActorKind
@@ -398,6 +424,7 @@ class ConversationSummary(BaseModel):
     last_activity: AwareDatetime
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
+    latest_visitor_text: str | None
 
 
 class OwnerTranscript(BaseModel):
@@ -466,14 +493,16 @@ class BriefingNewest(BaseModel):
 
 
 class Briefing(BaseModel):
-    """"Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
-    the full list (`BriefingList`)."""
+    """"Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the
+    list's `answer` items, the conversations Claude answered alone; `total` is the length of the full list
+    (`BriefingList`)."""
 
     since: AwareDatetime
     conversations: int
     bookings: int
     leads: int
     turned_down: int
+    answers: int
     total: int
     newest: BriefingNewest
 
@@ -581,6 +610,11 @@ class PaymentConflict(BaseModel):
 # Plan 01a's owner name pattern, which the kernel checks every owner name against: ^[A-Za-zÀ-ÿ' -]{1,40}$
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
+# What setup can wait on: a topic (`QuestionKey`), then, once the plan is closed, whether to add the owner as a test
+# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads its answer with no model turn, so it is no topic and
+# no structured output names it.
+TestClientQuestion = Literal["test_client"]
+SetupQuestion = Literal[QuestionKey, TestClientQuestion]
 
 
 @cache
@@ -625,7 +659,7 @@ class SetupAnswerIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey | None = None
+    question: SetupQuestion | None = None
     card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
@@ -737,16 +771,16 @@ class SetupPublicLinesConfirmIn(BaseModel):
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
-    before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
-    conversation so far. Its messages start at Claude's consent
-    question: the owner's opening description isn't shown back to them."""
+    before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+    waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+    consent question: the owner's opening description isn't shown back to them."""
 
     interview_id: str
     desk_id: str
     slug: str
     step: SetupStep
     consent: bool | None
-    question: QuestionKey | None
+    question: SetupQuestion | None
     pending_card: str | None = None
     busy: bool = False
     held_policy_keys: list[str] = Field(description="Charter claim keys, such as a policy line or the public contact, "
@@ -775,7 +809,7 @@ class ToolRow(BaseModel):
     active rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."""
 
     tool: str
-    source: Literal["native", "mcp"]
+    source: Literal["native", "mcp", "business"]
     effects: list[str]
     reversible: bool
     status: Literal["enabled", "needs_review", "disabled"]
@@ -784,6 +818,7 @@ class ToolRow(BaseModel):
     pending_definition_text: str | None   # a changed definition, untrusted text to show as quoted
     pending_sha256: str | None
     cards: list[CoveringCard]
+    business: BusinessToolDef | None = None
 
 
 class SetupTools(BaseModel):

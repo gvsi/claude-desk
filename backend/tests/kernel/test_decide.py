@@ -1179,7 +1179,7 @@ async def test_the_owners_rule_is_quoted_whole(app, client, registry):
 ])
 def test_a_baseline_refusal_names_the_deciding_rule(baseline_id, said):
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
-                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={}, adapter=None)
     if baseline_id == "agent_charge_within_mandate":
         call.principal = SimpleNamespace(kind="agent")
         call.mandate_remaining_cents = 1_000
@@ -1192,7 +1192,7 @@ def test_a_baseline_refusal_names_the_deciding_rule(baseline_id, said):
 
 def test_a_refusal_without_a_deciding_policy_does_not_blame_the_baseline():
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
-                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={}, adapter=None)
     evaluation = decide.Evaluation("refuse", [], [], None, None, strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation) == (
         "A stranger asked to book a visit. None of your rules covers this yet, so it was refused.")
@@ -1202,7 +1202,7 @@ def test_a_refusal_without_a_deciding_policy_does_not_blame_the_baseline():
 def test_a_mandate_refusal_without_an_exceeded_limit_keeps_the_generic_line(remaining):
     call = SimpleNamespace(subject="An agent", req=SimpleNamespace(call=SimpleNamespace(tool="native.charge_mandate")),
                            action=SimpleNamespace(amount_cents=2_000, discount_bp=0), mandate_remaining_cents=remaining,
-                           principal=SimpleNamespace(kind="agent"), version_row=SimpleNamespace(cards=[]), quotes={})
+                           principal=SimpleNamespace(kind="agent"), version_row=SimpleNamespace(cards=[]), quotes={}, adapter=None)
     evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate"], [], None, None,
                                  strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation).endswith(decide.BASELINE_PLAIN)
@@ -1213,7 +1213,7 @@ def test_a_mandate_refusal_without_an_exceeded_limit_keeps_the_generic_line(rema
 def test_an_owner_never_card_keeps_its_reason(policy_ids):
     never = rule("no-quotes", "never", "No quotes in chat.")
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.quote")),
-                           action=None, version_row=SimpleNamespace(cards=[never]), quotes={})
+                           action=None, version_row=SimpleNamespace(cards=[never]), quotes={}, adapter=None)
     evaluation = decide.Evaluation("refuse", policy_ids, [never.card_id], None, None,
                                  strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation) == (
@@ -1230,7 +1230,7 @@ def test_every_baseline_rule_that_can_refuse_shares_its_owner_explanation_with_p
 
 def test_two_deciding_baseline_rules_keep_the_generic_explanation():
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
-                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={}, adapter=None)
     evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate", "B.money_has_amount"], [], None, None,
                                  strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation) == (
@@ -1313,7 +1313,7 @@ async def test_deciding_checks_what_it_relies_on_and_fails_closed():
     with pytest.raises(RuntimeError, match="^review_without_action$"):
         await decide._review(None, SimpleNamespace(action=None), [])
     call = SimpleNamespace(subject="A visitor", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
-                           action=None, version_row=None, quotes={})
+                           action=None, version_row=None, quotes={}, adapter=None)
     with pytest.raises(RuntimeError, match="^reason_without_evaluation$"):
         decide._reason_plain(call, "allow", None, None)
     evaluation = decide.Evaluation("allow", [], [], None, None, strike=False, needed_review=False)

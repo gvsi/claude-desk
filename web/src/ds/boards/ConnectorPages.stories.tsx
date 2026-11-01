@@ -76,7 +76,7 @@ export const Payments: Story = {
         <PageSection title="Tools" caption={TOOLS_CAPTION}>
           <ToolRulesCard
             label="Payment link"
-            tool={{ name: 'Payment link', description: 'Makes a one-time link for a quote. Charges money. Can be undone.', href: '#payment-link' }}
+            tool={{ name: 'Payment link', description: "Makes a one-time link for a quote. Charges money. Can't be undone.", href: '#payment-link' }}
             rules={riveraRulesFor('native.payment_link', ['charge'])}
             onAddRule={fn()}
           />
@@ -84,7 +84,7 @@ export const Payments: Story = {
             label="Charge within a signed limit"
             tool={{
               name: 'Charge within a signed limit',
-              description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+              description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
               href: '#charge-within-a-signed-limit',
             }}
             rules={riveraRulesFor('native.charge_mandate', ['charge'])}

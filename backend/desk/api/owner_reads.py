@@ -14,8 +14,9 @@ call (the web never makes Desks outside setup), and the kernel's clock does not 
 An outside Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live.
 Identifying the exact Desk without those assumptions requires a kernel request tag on the Desk.
 
-Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
-untrusted text; nothing here reaches a visitor or a model.
+Names, notes, reasons and texts a visitor typed are passed on as they are (a conversation's glimpse of the visitor's
+latest message only has its whitespace collapsed and its length cut: `visitor_line`), for the owner's screens to show
+as untrusted text; nothing here reaches a visitor or a model.
 
 Recorded history (Plan 01d): a copy may open on a night the kernel replayed into it. Today flags each section that
 counts any of it, and the reports flag themselves when they do (`recorded_history`), from what the API's reads carry:
@@ -58,13 +59,14 @@ from desk.api.schemas import (
 )
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
-from desk.api.store import MESSAGES, WITH_EVENTS, triaged
+from desk.api.store import MESSAGES, WITH_EVENTS, newest_triage, triaged
 from desk.contracts import Decision, DecisionState
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
 OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity
 LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activity this recent
+VISITOR_LINE_MAX = 200                             # a conversation's glimpse of the visitor's words, in characters
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
 KIND_ORDER = {"turned_down": 0, "booking": 1, "lead": 2, "answer": 3}
@@ -138,17 +140,57 @@ async def people(ctx: OwnerCtx, desk_id: str) -> People:
                   await ctx.ro.rows("leads", desk_id=desk_id))
 
 
-async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str]) -> dict[str, str]:
-    """What each session's visitor (or visiting agent) wrote last."""
+async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str],
+                     kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, str]:
+    """What each session's visitor (or visiting agent) wrote last: its newest row of `kinds`, read for every session
+    in one query."""
     wanted = sorted(set(session_ids))
     if not wanted:
         return {}
-    rows = await ctx.ro.conn.execute(
-        select(MESSAGES.c.session_id, MESSAGES.c.text)
-        .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
-               MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(VISITOR_TEXT))
-        .order_by(MESSAGES.c.n))
-    return {session_id: text for session_id, text in rows}          # the last row of each session stays
+    newest = (select(func.max(MESSAGES.c.n))
+              .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                     MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(kinds))
+              .group_by(MESSAGES.c.session_id))
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.n.in_(newest)))
+    return dict(rows.all())
+
+
+async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], count: int = 2,
+                       kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str]]:
+    """What each session's visitor (or visiting agent) wrote most recently: its newest `count` rows of `kinds`, oldest
+    first, read for every session in one query."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    ranked = (select(MESSAGES.c.session_id, MESSAGES.c.text, MESSAGES.c.n,
+                     func.row_number().over(partition_by=MESSAGES.c.session_id,
+                                            order_by=MESSAGES.c.n.desc()).label("newest"))
+              .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                     MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(kinds))
+              .subquery())
+    rows = await ctx.ro.conn.execute(select(ranked.c.session_id, ranked.c.text)
+                                     .where(ranked.c.newest <= count).order_by(ranked.c.session_id, ranked.c.n))
+    found: dict[str, list[str]] = {}
+    for session_id, text in rows:
+        found.setdefault(session_id, []).append(text)
+    return found
+
+
+def visitor_lines(texts: Iterable[str | None]) -> str | None:
+    """Several of a visitor's messages as one owner-facing line: each a glimpse (`visitor_line`), oldest first, joined
+    with " · ", the separator a call-back note uses. None when nothing is left."""
+    return " · ".join(line for text in texts if (line := visitor_line(text)) is not None) or None
+
+
+def visitor_line(text: str | None) -> str | None:
+    """A visitor's message as the owner's one-line glimpse of it: whitespace runs collapsed to single spaces and
+    trimmed, and past `VISITOR_LINE_MAX` characters cut to the first 199, trimmed again, and "…". Nothing else is
+    changed: it stays the visitor's untrusted text. None when nothing is left."""
+    line = " ".join((text or "").split())
+    if len(line) > VISITOR_LINE_MAX:
+        return line[:VISITOR_LINE_MAX - 1].rstrip() + "…"
+    return line or None
 
 
 async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state: DecisionState,
@@ -214,21 +256,28 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
             if decision.state == "held" and decision.decision_id == row["decision_id"]]
     handoffs = [row for row in await ctx.ro.rows("handoffs", desk_id=desk_id, status="open", order_by=("handoff_id",))
                 if row["session_id"] in who.sessions]
-    texts = await last_texts(ctx, desk_id, [decision.session_id for _, decision in held]
-                             + [row["session_id"] for row in handoffs])
+    asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
+    texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
+    # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
+    # for no decision, and not while the same session has a held request awaiting them.
+    waiting = {decision.session_id for _, decision in held}
+    handed = [row["session_id"] for row in handoffs if row["session_id"] not in waiting]
+    summaries = {session_id: triage.summary
+                 for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
     items = []
     for row, decision in held:
         if (session := who.brief(decision.session_id)) is not None:
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
-                                      from_the_visitor=texts.get(decision.session_id)))
+                                      from_the_visitor=texts.get(decision.session_id), claude_summary=None))
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
                               callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
-                                      from_the_visitor=texts.get(row["session_id"])))
+                                      from_the_visitor=texts.get(row["session_id"]),
+                                      claude_summary=summaries.get(row["session_id"])))
     return items
 
 
@@ -307,6 +356,8 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
     "evaluation_error": "rules_unchecked",
 }
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
+    "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
+    "note_canary": "incomplete_request",  # A booking note holding private document text is refused at normalization.
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -345,6 +396,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
+      answer_count, note_canary                      incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)
@@ -423,7 +475,7 @@ class Activity:
     entries at `entry_time`, the API's transcript rows at their `created_at`."""
 
     people: People
-    bookings: list[Timed]                      # native.book executed, at its ledger entry
+    bookings: list[Timed]                      # native or configured typed booking executed, at its ledger entry
     booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
@@ -528,10 +580,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
 
-    def executed(tool: str) -> list[Timed]:
+    def executed(*tools: str) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
                       line=row["reason_plain"], replayed=decision_replayed(row, entry))
-                for row in decisions if row["tool"] == tool and row["state"] == "executed"
+                for row in decisions if row["tool"] in tools and row["state"] == "executed"
                 and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
@@ -557,7 +609,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
                 handoffs.append(at)
             else:
                 replies.append(at)
-    bookings = executed("native.book")
+    tools = await ctx.ro.rows("tools", desk_id=desk_id, source="business")
+    typed_bookings = [row["tool"] for row in tools if row.get("business") is not None
+                      and row["business"]["config"]["block"] == "typed_booking"]
+    bookings = executed("native.book", *typed_bookings)
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
         callbacks=executed("native.request_callback"),
@@ -641,7 +696,8 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
     return Briefing(
         since=frame.since, conversations=len(_sessions(_within(done.texts, frame.since, frame.now))),
         bookings=sum(item.kind == "booking" for item in items), leads=sum(item.kind == "lead" for item in items),
-        turned_down=sum(item.kind == "turned_down" for item in items), total=len(items),
+        turned_down=sum(item.kind == "turned_down" for item in items),
+        answers=sum(item.kind == "answer" for item in items), total=len(items),
         newest=BriefingNewest(turned_down=first("turned_down"), booking=first("booking"),
                               lead_or_answer=first("lead", "answer")))
 
@@ -802,7 +858,8 @@ async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Repo
 
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
-    activity first."""
+    activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
+    visitor typed (`visitor_line`); an agent's carries none."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -815,6 +872,9 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         decided = utc(row["created_at"])
         if row["session_id"] not in latest or utc(latest[row["session_id"]]) < decided:
             latest[row["session_id"]] = decided
+    visitors = [session_id for session_id, row in who.sessions.items()
+                if session_id in latest and row["kind"] == "visitor" and not row["preview"]]
+    said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -822,7 +882,8 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
             mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
-            outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"]))
+            outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
+            latest_visitor_text=visitor_line(said.get(session_id))))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

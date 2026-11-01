@@ -31,7 +31,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 | `quote`, `charges` | `title`, `lines` |
 | `link_cancelled` | `title` (the link's amount), `lines` (what the link was for, then the kernel's line) |
 | `booking_options` | `title`, then one line and one option per open time |
-| `booking_confirmed` | `title` (the date), `lines` ("Arriving {start} to {end}", "With {owner}"; no booking ID) |
+| `booking_confirmed` | `title` (the date), `lines` ("{start} to {end}", "With {owner}"; no booking ID) |
 | `hours` | `title` (the first window), `lines` (any more windows) |
 | `handoff` | `title`, `lines` |
 | `payment_link`, `document_link` | `title`, `href` |

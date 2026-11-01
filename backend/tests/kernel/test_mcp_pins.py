@@ -239,7 +239,7 @@ async def test_unreachable_server_is_unavailable(app, client, monkeypatch):
     response = await client.post("/tools/connect", headers=copy.owner,
                                  json={"desk_id": copy.desk_id, "server": "mock_payments"})
     assert (response.status_code, response.json()) == (503, {"code": "internal"})
-    assert [e["event"] for e in await pin_entries(app, copy)] == ["connected", "connected"]
+    assert [e["event"] for e in await pin_entries(app, copy)] == ["connected", "connected", "enabled"]   # seeded
 
 
 async def test_relist_past_deadline_is_unavailable(app, client, mockpay):

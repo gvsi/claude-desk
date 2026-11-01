@@ -158,6 +158,7 @@ describe('Safety copy', () => {
     }
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: 'callback' }))).toBe('Desk details changed');
     expect(entryCopy(deskData({ part: 'handoffs', refs: ['handoff-1'], kind: null }))).toBe('Desk details changed');
+    expect(entryCopy({ kind: 'business_tools', summary: { tools: [] } })).toBe("Your Desk's jobs changed");
     // Another kind of entry keeps its own name, whatever its summary says.
     expect(entryCopy({ kind: 'reply', summary: { part: 'handoffs', refs: ['handoff-1'], kind: 'card' } })).toBe('Reply checked');
     expect(entryCopy({ kind: 'execute', summary: { part: 'handoffs', refs: ['handoff-1'] } })).toBe('Action ran');

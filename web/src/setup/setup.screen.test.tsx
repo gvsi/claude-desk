@@ -1716,11 +1716,14 @@ describe('setup', () => {
     await expect.element(review.getByText('Refund', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
-    // Connected is not on: back on the list, Stripe doesn't read "On", and opening it again connects nothing more.
+    // Connected is not on: back on the list, Stripe doesn't read "On" but "Needs review", it can't
+    // be connected again, and reviewing it again connects nothing more.
     await screen.getByRole('button', { name: 'Cancel' }).click();
     await expect.element(connectorRow(screen, 'Stripe')).toBeVisible();
     expect(connectorRow(screen, 'Stripe').getByText('On', { exact: true }).elements()).toHaveLength(0);
-    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(connectorRow(screen, 'Stripe').getByText('Needs review', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Connect Stripe' }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Review Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
     expect(requests('setupConnect', mark)).toHaveLength(1);
 
@@ -1741,7 +1744,7 @@ describe('setup', () => {
     expect(requests('confirmRules', mark).map((r) => r.body)).toEqual([{ version: drafted }]);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Connect Stripe' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^(Connect|Review) Stripe$/ }).elements()).toHaveLength(0);
     expect(requests('confirmTool', mark)).toHaveLength(1);
   });
 

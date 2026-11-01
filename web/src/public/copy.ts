@@ -27,6 +27,11 @@ export interface PublicCopy {
   tooLong: string;
   tryAgain: string;
   cancelRequest: string;
+  /**
+   * Beside a request's own line above the composer, while its receipt is out of view: goes back to
+   * the request and its "Cancel this request".
+   */
+  viewRequest: string;
   /** The line once a demo code worked; the design system adds that the verification was simulated. */
   verified: string;
   /** The Demo inbox's place, named as the design system's panel titles it. */
@@ -52,6 +57,7 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     tooLong: "That's too long. Shorten it and try again.",
     tryAgain: 'Try again',
     cancelRequest: 'Cancel this request',
+    viewRequest: 'View request',
     verified: 'Verified with a code',
     demoInbox: 'Demo inbox',
     inboxFailed: 'Couldn’t open the Demo inbox, where your code arrives.',
@@ -71,6 +77,7 @@ export const PUBLIC_COPY: Readonly<Record<CopyLanguage, PublicCopy>> = {
     tooLong: 'Es demasiado largo. Acórtalo e inténtalo de nuevo.',
     tryAgain: 'Intentar de nuevo',
     cancelRequest: 'Cancelar esta solicitud',
+    viewRequest: 'Ver solicitud',
     verified: 'Verificado con un código',
     demoInbox: 'Bandeja de demostración',
     inboxFailed: 'No se pudo abrir la bandeja de demostración, donde llega tu código.',

@@ -11,6 +11,7 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { observeRequests, OWNER_ERROR_COPY, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
+import type { RuleCard } from '../../api/contracts.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
@@ -25,6 +26,7 @@ import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { watchTop } from '../../test/watch.ts';
+import { REVIEWER_LINE } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 
@@ -685,6 +687,35 @@ describe('rules page', () => {
     expect(desk().policy.version).toBe(7);
   });
 
+  it('confirming_a_suggested_rule_leaves_focus_on_the_row_it_landed_on', async () => {
+    desk().suggestions.push(DANA_REFUNDS);
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const card = screen.getByRole('region', { name: 'Suggested rule' });
+    await expect.element(card.getByText(DANA_REFUNDS.text, { exact: true })).toBeVisible();
+    card.getByRole('button', { name: 'Draft this rule' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
+    screen.getByRole('button', { name: 'Confirm change' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+
+    // Its rule confirmed, the suggestion that opened the review is done with, so focus goes to the
+    // row the change landed on: Refund, which has no control of its own while the Connectors pages
+    // aren't built, so the row itself takes focus, from a script only, never as a Tab stop.
+    const refund = () =>
+      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find(
+        (row) => row.querySelector('.cd-connector-section__tool-name')?.textContent === 'Refund',
+      );
+    await expect.poll(() => refund()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => document.activeElement === refund()).toBe(true);
+    expect(refund()?.getAttribute('tabindex')).toBe('-1');
+    // Tab goes on from there, and the row stops taking focus.
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBe(refund());
+    expect(refund()?.hasAttribute('tabindex')).toBe(false);
+  });
+
   it('unset_limit_copy_names_the_next_step', async () => {
     desk().policy = { ...desk().policy, auto_money_cap_cents: 0 };
     desk().suggestions.push(DANA_REFUNDS);
@@ -735,6 +766,40 @@ describe('rules page', () => {
     expect(main?.textContent).not.toMatch(/Do it|Ask me(?! first)/);
     await expect.element(screen.getByRole('region', { name: 'Always on' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('all_rules_says_once_under_its_subtitle_what_the_reviewer_is', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Under the subtitle, in the header's text: one quieter line.
+    const lines = [...screen.container.querySelectorAll<HTMLElement>('.cd-house-rules__header .cd-page-header__text > p')];
+    expect(lines.map((line) => line.textContent)).toEqual(['Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules.', REVIEWER_LINE]);
+    const line = lines[1]!;
+    expect(line.classList.contains('cd-type-meta')).toBe(true);
+    const style = getComputedStyle(line);
+    expect(style.color).toBe(getComputedStyle(lines[0]!).color);
+    expect(style.marginTop).toBe('8px');
+    expect(parseFloat(style.maxWidth)).toBeGreaterThan(0);
+    // Once on the page.
+    expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
+  });
+
+  it('always_on_ends_with_a_link_to_safety_where_every_attempt_is_shown', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const always = screen.getByRole('region', { name: 'Always on' });
+    await expect.element(always).toBeVisible();
+    const link = screen.getByRole('link', { name: 'Open Safety' });
+    await expect.element(link).toHaveAttribute('href', `${DESK}/safety`);
+    // Under Always on's rules, in meta type, as the lower "See all rules" is above them.
+    const line = link.element().closest('p');
+    expect(line?.classList.contains('cd-type-meta')).toBe(true);
+    expect(always.element().compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const list = always.element().querySelector('.cd-always-on__list')!;
+    expect(Math.round(line!.getBoundingClientRect().top - list.getBoundingClientRect().bottom)).toBe(12);
+    // It opens this Desk's Safety.
+    await userEvent.click(link.element());
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/safety`);
   });
 
   it('money_cap_shows_and_changes_through_a_draft', async () => {
@@ -895,8 +960,67 @@ describe('rules page', () => {
     await expect.poll(() => main.scrollTop).toBe(end);
   });
 
-  it('rules_page_matches_its_board', async () => {
+  it.each(['before', 'after'] as const)('going_back_keeps_the_place_when_the_hold_question_comes_in_above_it_%s_the_shapes_show', async (when) => {
+    // Acme's Rules waits for Needs you, whose held quote puts a question under Ask Claude, above the
+    // connectors. A short window, with Payments' limit in its middle: a place halfway down Rules,
+    // which its shapes can hold while it reads.
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const main = screen.getByRole('main').element();
+    const limit = () => screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true }).element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
+    limit().scrollIntoView({ block: 'center' });
+    await heard;
+    const place = main.scrollTop;
+    expect(place).toBeGreaterThan(0);
+    const shows = limit().getBoundingClientRect().top;
+    expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
+
+    // Back from All rules: the question comes in with the page, above the place, at once or once
+    // Needs you, held, comes after the shapes have shown. Rules reads Needs you as it opens, and a
+    // read already out when it opens is the one it waits for; tests poll often, so one may be. So
+    // every read is held from while Rules is still open: once one is held, none sent before it is
+    // still out (a query has one read out at a time), and the read Rules waits for on Back is held.
+    const reads = when === 'after' ? holdNeedsYou() : null;
+    if (reads !== null) await expect.poll(reads.held, { timeout: 2_000 }).toBeGreaterThan(0);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(-1);
+    if (reads !== null) {
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
+      reads.release();
+    }
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await settled(screen.container);
+    expect(main.scrollTop).toBe(place);
+    expect(limit().getBoundingClientRect().top, "Payments' limit where the owner left it").toBe(shows);
+  });
+
+  it.each(['at once', 'after its shapes show'] as const)('rules_page_matches_its_board_drawn_%s', async (when) => {
+    // Rules waits for its suggestions: held until its shapes have shown, they fade as the page draws,
+    // here for as long as a busy browser can keep them (the fade's one-second fallback).
+    let releaseSuggestions = () => {};
+    if (when === 'after its shapes show') {
+      const until = new Promise<void>((resolve) => {
+        releaseSuggestions = resolve;
+      });
+      onTestFinished(() => releaseSuggestions());
+      mockStore.inject({ route: 'suggestions', status: 200, body: desk().suggestions, until });
+      const slowFade = document.createElement('style');
+      slowFade.textContent = ".cd-skeleton-screen__layer[data-state='leaving'] { animation-duration: 10s !important; }";
+      document.head.append(slowFade);
+      onTestFinished(() => slowFade.remove());
+    }
     const { screen } = await renderRoute(`${DESK}/rules`);
+    if (when === 'after its shapes show') {
+      const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+      await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
+      releaseSuggestions();
+    }
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;
@@ -1412,5 +1536,299 @@ describe("Ask Claude's question about a hold", () => {
     expect(requests('ruleChat').map((r) => r.body)).toEqual([{ text: 'Why was this refund held?' }]);
     expect(log.getByText('Why was this refund held?', { exact: true }).elements()).toHaveLength(1);
     expect(desk().drafts.size).toBe(0);
+  });
+});
+
+describe("Rivera's fixed suggestions", () => {
+  type Screen = Awaited<ReturnType<typeof renderRoute>>['screen'];
+
+  /**
+   * On Rules, presses Rivera's suggestion `words`, confirms the change Claude drafts from it in Ask
+   * Claude beside the page, and waits for the receipt; returns the suggestions and the panel.
+   */
+  async function confirmSuggestion(screen: Screen, words: string) {
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await group.getByRole('button', { name: words, exact: true }).click();
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    const log = panel.getByRole('log');
+    const confirm = log.getByRole('button', { name: 'Confirm change' });
+    await expect.element(confirm).toBeEnabled();
+    const version = desk().lastVersion;
+    await confirm.click();
+    await expect.element(log.getByText(`Confirmed. Version ${version} of your rules, checked against the always-on rules.`, { exact: true })).toBeVisible();
+    expect(desk().policy.version).toBe(version);
+    return { group, panel };
+  }
+
+  /** Closes Ask Claude: focus can't go back to the suggestion that opened it, so the composer above the suggestions takes it. */
+  async function closeToTheComposer(screen: Screen, panel: Locator) {
+    await userEvent.keyboard('{Escape}');
+    await expect.element(panel).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Ask Claude to change a rule' })).toHaveFocus();
+  }
+
+  /**
+   * Rules with "Stop quoting on weekends" confirmed in Ask Claude, its suggestion gone, and the page
+   * scrolled down to Payments, the composer above out of view.
+   */
+  async function weekendsConfirmedAndScrolledDown() {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // The change has landed on its row before the page moves.
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const main = screen.getByRole('main').element();
+    screen.getByRole('region', { name: 'Payments' }).element().scrollIntoView({ block: 'start' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    expect(inView(composer.element(), main)).toBe(false);
+    return { panel, main, composer };
+  }
+
+  /**
+   * Holds every animation frame from here until `nextFrames()`, so a test can act before one runs.
+   * Until then the test waits with `until`: `expect.poll` and `expect.element` would advance the
+   * held frames as they poll.
+   */
+  function holdFrames(): { nextFrames: () => void } {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    return {
+      nextFrames: () => {
+        vi.advanceTimersToNextFrame();
+        vi.advanceTimersToNextFrame();
+      },
+    };
+  }
+
+  /** Waits in real time, without running held frames, until `check` holds. */
+  async function until(check: () => boolean, what: string): Promise<void> {
+    const deadline = performance.now() + 5_000;
+    while (!check()) {
+      if (performance.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  /** Ask Claude open beside the page, not the one sliding out as it closes. */
+  const openPanel = () => document.querySelector('.cd-app-shell__panel:not(.cd-app-shell__panel--leaving)');
+
+  it('the_weekends_suggestion_goes_once_its_change_is_in_effect', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    // Quotes no longer go out on their own at weekends, so it isn't offered again; the other stays.
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // Focus stays in Ask Claude, where the receipt landed.
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await closeToTheComposer(screen, panel);
+  });
+
+  it('the_water_heater_suggestion_goes_once_its_change_is_in_effect', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Quote water heater installs up to $600');
+    await expect.poll(() => chipWords(group)).toEqual(['Stop quoting on weekends']);
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await closeToTheComposer(screen, panel);
+  });
+
+  it('a_weekend_quote_rule_added_since_brings_the_weekends_suggestion_back_with_a_change_to_draft', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // The water heater rule quotes on its own every day, weekends too, so stopping that is on offer again.
+    await confirmSuggestion(screen, 'Quote water heater installs up to $600');
+    await expect.poll(() => chipWords(group)).toEqual(['Stop quoting on weekends']);
+    // It drafts a change to that rule, not "No rules change"; once confirmed, both changes are in effect.
+    await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.element(group).not.toBeInTheDocument();
+    const quotes = desk().policy.cards.filter((card) => card.applies_to === 'native.quote' && card.mode === 'auto' && card.who === 'anyone');
+    expect(quotes.map((card) => [card.max_amount_cents ?? null, card.hours?.days])).toEqual([
+      [null, ['mon', 'tue', 'wed', 'thu', 'fri']],
+      [60_000, ['mon', 'tue', 'wed', 'thu', 'fri']],
+    ]);
+  });
+
+  it('both_show_on_first_load_while_the_rules_are_read_and_after', async () => {
+    let releaseRules!: () => void;
+    const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
+    onTestFinished(() => releaseRules());
+    worker.use(http.get(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      await rulesHeld;
+      return undefined;
+    }));
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    // While the rules are read, both are offered, in order, as before.
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    // Rivera's rules have neither change, so both stay once they are drawn.
+    releaseRules();
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('the_composer_takes_focus_where_the_page_is', async () => {
+    const { main, composer } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, 'the composer above the suggestions').toBe(composer.element());
+    expect(main.scrollTop, 'the page stays where the owner left it').toBe(place);
+  });
+
+  it('focus_the_owner_moved_before_the_fallback_stays_where_they_put_it', async () => {
+    const { main } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    // A sidebar link takes focus before the frame in which the composer would.
+    const today = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).element() as HTMLElement;
+    today.focus();
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, 'the sidebar link keeps focus').toBe(today);
+    expect(main.scrollTop).toBe(place);
+  });
+
+  it('ask_claude_opened_again_before_the_fallback_keeps_focus', async () => {
+    const { main } = await weekendsConfirmedAndScrolledDown();
+    const frames = holdFrames();
+    await userEvent.keyboard('{Escape}');
+    await until(() => openPanel() === null, 'Ask Claude to close');
+    // The suggestion still on offer opens it again before the frame in which the composer would take focus.
+    const chip = page.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Quote water heater installs up to $600', exact: true });
+    (chip.element() as HTMLElement).click();
+    await until(() => document.activeElement instanceof HTMLTextAreaElement && openPanel()?.contains(document.activeElement) === true, "focus in Ask Claude's own composer");
+    const focused = document.activeElement;
+    const place = main.scrollTop;
+    frames.nextFrames();
+    expect(document.activeElement, "Ask Claude's composer keeps focus").toBe(focused);
+    expect(main.scrollTop).toBe(place);
+  });
+
+  /** Rivera's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
+  function bothChangesInEffect(): void {
+    const main = desk();
+    const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
+    main.policy = { ...main.policy, cards: main.policy.cards.map((card) => (card.card_id === 'rv-quote' ? { ...card, hours: weekdays } : card)) };
+    const waterHeaters = { ...rivera.ruleCards['rv-quote'], card_id: 'card-water-heater-quotes', max_amount_cents: 60_000, hours: weekdays, reason: 'Water heater installs quoted up to $600, on weekdays.' };
+    mockStore.world.addActiveRules(main, [waterHeaters]);
+  }
+
+  /** Holds every read of the main Desk's rules until `release()`. */
+  function holdRules(): { release: () => void } {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    worker.use(http.get(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      await held;
+      return undefined;
+    }));
+    return { release };
+  }
+
+  it('with_both_changes_in_effect_a_cold_load_waits_for_needs_you_and_draws_its_question_with_the_body', async () => {
+    bothChangesInEffect();
+    const reads = holdNeedsYou();
+    const rules = holdRules();
+    const finished = finishedReads();
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    // Suggestions are read first, while the rules and Needs you are still being read: both
+    // suggestions show meanwhile, but they can't end the opening wait.
+    await expect.poll(() => finished.has('suggestions') && reads.held() > 0).toBe(true);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0], exact: true })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    rules.release();
+    await expect.poll(() => finished.has('rules')).toBe(true);
+    // The rules leave no suggestion of Rivera's own, so the page waits for Needs you, as another business's does.
+    await expect.element(group).not.toBeInTheDocument();
+    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+
+    const drawnWithoutQuestion: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      const body = pagePart('.cd-connector-list', screen.container) !== null;
+      const question = pagePart('.cd-suggestion-chips', screen.container)?.textContent?.includes('Why was this quote held?') === true;
+      if (body && !question) drawnWithoutQuestion.push(true);
+    });
+    observer.observe(screen.container, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(chipWords(screen.getByRole('group', { name: 'Suggestions' }))).toEqual(['Why was this quote held?']);
+    expect(drawnWithoutQuestion, 'the body and its hold question land together').toEqual([]);
+  });
+
+  it('with_both_changes_in_effect_a_cold_load_caps_the_wait_and_a_later_hold_does_not_move_the_connectors', async () => {
+    bothChangesInEffect();
+    const reads = holdNeedsYou();
+    const rules = holdRules();
+    const finished = finishedReads();
+    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
+    const rulesRead = new Promise<void>((resolve) => {
+      onTestFinished(observeRequests((outcome) => {
+        if (outcome.key === 'rules' && outcome.ok) resolve();
+      }));
+    });
+    const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
+    await expect.poll(() => finished.has('suggestions') && reads.held() > 0).toBe(true);
+    expect(chipWords(screen.getByRole('group', { name: 'Suggestions' }))).toEqual([...FIXED_CHIPS]);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    rules.release();
+    await rulesRead;
+    await vi.advanceTimersByTimeAsync(0);
+    await new Promise(requestAnimationFrame);
+    await vi.advanceTimersByTimeAsync(2_999);
+    await new Promise(requestAnimationFrame);
+    // Three seconds after the rules, less a millisecond: still waiting for Needs you.
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await new Promise(requestAnimationFrame);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+
+    vi.useRealTimers();
+    await settled(screen.container);
+    const before = connectorTops();
+    expect(before).toHaveLength(1);
+    reads.release();
+    await expect.poll(() => finished.has('needsYou')).toBe(true);
+    await settled(screen.container);
+    // The hold that came after the cap waits for the next visit, so the connectors stay put.
+    expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
+    expect(connectorTops(), 'a late hold cannot move the connectors').toEqual(before);
+  });
+
+  it('with_both_changes_in_effect_back_returns_to_the_place_once_drawn', async () => {
+    bothChangesInEffect();
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const main = screen.getByRole('main').element();
+    main.scrollTop = main.scrollHeight;
+    const end = main.scrollTop;
+    expect(end).toBeGreaterThan(0);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+
+    // Back while Needs you is read again: the page waits for it, drawn short, then returns to its place.
+    const reads = holdNeedsYou();
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => reads.held()).toBeGreaterThan(0);
+    reads.release();
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(end);
   });
 });

@@ -290,7 +290,10 @@ async def test_unpinned_operation_refused(k: KernelHarness, records, monkeypatch
         connected = sorted((profile.tool, profile.status) for profile in profiles)
         expected = sorted([(LIST_CHARGES, "enabled"), (REFUND, "enabled")])
         assert connected == expected, f"connecting again gave {connected}"
-        known = set(get_args(ToolName))
+        # a tool an adapter has: a native or pinned one, or a business tool configured on this Desk
+        # (the Rivera seed's urgent callback)
+        known = set(get_args(ToolName)) | {row["tool"] for row in await records.tools(desk.copy.copy_id)
+                                           if row["desk_id"] == desk.desk_id and row["source"] == "business"}
         for whose, context in contexts.items():
             tools = {profile.tool for profile in (*context.tools, *context.tools_declared)}
             assert tools <= known, f"{whose} context holds tools no adapter has: {sorted(tools - known)}"

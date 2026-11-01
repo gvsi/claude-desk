@@ -48,6 +48,18 @@ def test_public_desk_starters_are_optional_with_an_empty_default():
         "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
 
 
+def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
+    schemas = export_openapi()["components"]["schemas"]
+    mapping = schemas["BusinessToolDef"]["properties"]["config"]["discriminator"]["mapping"]
+    assert mapping == {block: f"#/components/schemas/{name}" for block, name in (
+        ("intake", "IntakeConfig"), ("typed_booking", "TypedBookingConfig"),
+        ("purpose_payment", "PurposePaymentConfig"), ("urgent", "UrgentConfig"))}
+    # A proposal may still need the owner's amount; a configured business tool never does.
+    amount = schemas["PurposePaymentProposalConfig"]["properties"]["amount_cents"]
+    assert {"type": "null"} in amount["anyOf"]
+    assert schemas["PurposePaymentConfig"]["properties"]["amount_cents"]["type"] == "integer"
+
+
 def test_briefing_contract_counts_only_turned_down_requests():
     schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
     item = schemas["BriefingItem"]
@@ -188,7 +200,7 @@ def test_a2a_request_body_is_documented():
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
                    "id", "proposal_id", "key", "item_id"}
-SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
+SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/events", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
                "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
                "/api/owner/setup/{id}/public_lines", "/api/owner/setup/{id}/public_lines/confirm",

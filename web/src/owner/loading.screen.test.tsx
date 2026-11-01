@@ -323,6 +323,44 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place 
   expectNoWindowScroll();
 });
 
+it('today_night_line_lands_in_place_near_its_wrap', async () => {
+  // At 829 px the fresh copy's night line fits its card on two lines, and 16 px narrower it would
+  // need three: the shape measures the line at the paragraph's own width, so it reserves two lines,
+  // and the card lands where it was drawn.
+  const width = 829;
+  const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
+  onTestFinished(() => reads.forEach((read) => read.release()));
+  let before: DOMRect[] = [];
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_WIDTH_ANCHORS,
+    open: async () => { await renderRoute(TODAY, { viewport: { width, height: 900 }, pollScale: 100 }); },
+    release: () => {
+      before = TODAY_WIDTH_ANCHORS.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
+      reads.forEach((read) => read.release());
+    },
+  });
+  for (const [i, { name, page }] of TODAY_WIDTH_ANCHORS.entries()) {
+    const after = landedRect(page);
+    for (const edge of ['top', 'bottom'] as const) {
+      expect(Math.abs(before[i]![edge] - after[edge]), `${name} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+  // This width is near the wrap: the landed line's lines at its width, and at 16 px narrower.
+  const line = [...document.querySelectorAll<HTMLElement>('.cd-since__line')].find((el) => el.closest('.cd-skeleton-screen__layer') === null)!;
+  const style = getComputedStyle(line);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  const content = line.getBoundingClientRect().width - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+  const narrower = document.createElement('p');
+  narrower.className = 'cd-type-summary';
+  Object.assign(narrower.style, { position: 'absolute', visibility: 'hidden', margin: '0', width: `${content - 16}px` });
+  narrower.textContent = line.textContent;
+  line.after(narrower);
+  onTestFinished(() => narrower.remove());
+  expect(Math.round(line.getBoundingClientRect().height / lineHeight), 'the line at its own width').toBe(2);
+  expect(Math.round(narrower.getBoundingClientRect().height / lineHeight), 'the line 16 px narrower').toBe(3);
+});
+
 it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %s', async (viewport) => {
   // Width recipes are frozen from bd2dd10d3, before wrapping measurement changed the painting.
   const desks = holdReads(ROUTES.desks.path);
@@ -2086,7 +2124,7 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   ledger.release();
-  await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
   expect(headings()).toEqual([1]);
   await expectScreenBasics(document.body, { owner: true });
 });

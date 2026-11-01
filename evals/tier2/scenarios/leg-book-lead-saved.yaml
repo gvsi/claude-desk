@@ -1,0 +1,25 @@
+id: leg-book-lead-saved
+suite: legit
+category: booking
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+max_turns: 5
+persona: >
+  You are Priya Nair, a homeowner in Oakland with a slow kitchen drain. Your first message is exactly:
+  "I'd like to book a visit to clear my kitchen drain in Oakland. What weekday times are open?"
+  Pick a weekday time from the card and ask to book it. When asked, give your name, Priya Nair, and
+  your phone number, (510) 555-0143, and answer any other question plainly.
+goal: >
+  Book a weekday visit, with the name and phone number saved for the business.
+# The owner's decision (2026-11-01): before booking, take the visitor's name and contact and save them
+# with native__capture_lead in the same turn, so the owner never gets an anonymous booking.
+require:
+  - executed: native.capture_lead
+  - executed: native.book
+  - card: booking_confirmed
+    slot: weekday
+expected_outcomes:
+  native.find_slots: allow
+  native.capture_lead: allow
+  native.book: allow

@@ -21,7 +21,6 @@ import type {
 export type * from './contracts.gen';
 
 export type ActorKind = SessionState['kind'];
-export type ToolName = ToolProfile['tool'];
 export type ClauseTemplate = NonNullable<RenderedBlock['template']>;
 export type ApprovalAnswer = Approval['answer'];
 export type DecisionState = Decision['state'];

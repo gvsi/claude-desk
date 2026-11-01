@@ -514,7 +514,8 @@ async def test_a_start_is_decided_without_the_reviewer(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
     [shipped] = compiler.ALWAYS_ON_CARDS
     cards = [*(c for c in RIVERA_CARDS if c != shipped), card("send-reviewed", "effect:send_message", review=True)]
-    assert compiler.validate_cards(cards, people=(), agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    assert compiler.validate_cards(cards, people=(), agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         await activate_cards(ctx, copy.desk_id, cards)
@@ -545,16 +546,18 @@ async def test_start_verification_is_for_unverified_sessions(app, client):
 async def test_answering_off_leaves_lead_capture_and_callback(app, client):
     copy, visitor = await visitor_of(app, client)
     live = await context_of(client, visitor.session_id, visitor.headers)
-    assert tools(live.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-                                 "native.quote", "native.request_callback", "native.start_verification"]
+    assert tools(live.tools) == ["desk.emergency-callback", "native.book", "native.capture_lead", "native.find_slots",
+                                 "native.payment_link", "native.quote", "native.request_callback",
+                                 "native.start_verification"]
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         desk = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == copy.desk_id)))).one()
         desk.answering = False
 
-    # with Answering off, a visitor can still leave their details or ask for a callback, and nothing else
+    # with Answering off, a visitor can still leave their details or ask for a callback, urgent or not,
+    # and nothing else
     quiet = await context_of(client, visitor.session_id, visitor.headers)
-    assert tools(quiet.tools) == ["native.capture_lead", "native.request_callback"]
+    assert tools(quiet.tools) == ["desk.emergency-callback", "native.capture_lead", "native.request_callback"]
     assert quiet.tools_declared == live.tools_declared
     refused = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
     assert (refused.outcome, refused.action) == ("refuse", None)

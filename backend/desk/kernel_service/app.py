@@ -19,7 +19,9 @@ which runs in the background while the kernel serves (`activation.rebuild_in_bac
 `app.state.rebuilding`) and is cancelled at shutdown, and last reconciles the executions and the
 payment links a stopped kernel left behind (`execute.reconcile_at_startup`,
 `payments.reconcile_links_at_startup`), each within `STARTUP_RECONCILE_S`, since a read settles
-them too.
+them too, and last starts the pass that keeps setup-made Desks' calendars open from their hours,
+now and then daily, beside the kernel (`desks.keep_calendars_open`, `app.state.calendar_refresh`),
+which is cancelled at shutdown too.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -65,7 +67,7 @@ from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, Docume
                              OwnerMessageRequest, PaymentLinkActionRequest, PaymentLinkStateResult, PaymentLinkView,
                              PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed,
                              ToolsConfirmRequest, ToolsConnectRequest, ToolsSimulateChangeRequest)
-from desk.kernel_service import (activation, agents, approvals, auth, context, copies, decide, demo_inbox, desks,
+from desk.kernel_service import (activation, agents, approvals, auth, business_tools, context, copies, decide, demo_inbox, desks,
                                  execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions, turn,
                                  verification)
 from desk.kernel_service.adapters import release_document
@@ -290,6 +292,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
         rebuilding: asyncio.Task | None = None
+        refreshing: asyncio.Task | None = None
         app.state.mockpay = mockpay
         try:
             if mockpay is not None:
@@ -319,11 +322,16 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                     log.info("%s_cut_off", name)
                 except Exception as exc:
                     log_error(log, exc, "%s_failed", name)
+            # setup-made Desks' calendars kept open from their hours: a pass now, then one a day, beside
+            # the kernel, which doesn't wait for it
+            refreshing = asyncio.create_task(desks.keep_calendars_open(app.state.kernel), name="calendar-refresh")
+            app.state.calendar_refresh = refreshing
             yield
         finally:
-            if rebuilding is not None:
-                rebuilding.cancel()
-                await asyncio.gather(rebuilding, return_exceptions=True)
+            for task in (rebuilding, refreshing):
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
             if mockpay is not None:
                 await mockpay.stop()
             await engine.dispose()
@@ -331,6 +339,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.proof_mode = "bounded"   # until the startup selftest passes
     app.state.rebuilding = None        # the background rebuild of what startup left, if anything
+    app.state.calendar_refresh = None  # the daily pass that keeps setup-made Desks' calendars open
     app.state.mockpay = None           # the mock payments child, while the kernel runs one
     app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
@@ -349,6 +358,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(verification.router)
     app.include_router(agents.router)
     app.include_router(desk_router)
+    app.include_router(business_tools.router)
     app.include_router(document_link_router)
     app.include_router(payment_link_router)
     app.include_router(inbox_router)
@@ -384,7 +394,7 @@ async def post_desk(body: CreateDeskRequest, ctx: Ctx, request: Request) -> Desk
     if body.desk.auto_money_cap_cents != 0:
         raise KernelFailure(422, "invalid", "desk_money_cap")
     created = await desks.create_desk(ctx, owner.copy_id, body.business, body.desk)
-    await activation.activate_shipped(ctx, created.desk_id, "ask_first", 0)
+    await activation.activate_shipped(ctx, created.desk_id, desks.NEW_DESK_PRESET, 0)
     return created
 
 
@@ -742,6 +752,12 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if route_template(request) == "PUT /desks/{id}/business_tools":
+        try:
+            async with kernel_transaction(request.app.state.kernel) as ctx:
+                await business_tools.refuse_invalid_request(ctx, request)
+        except KernelFailure as failure:
+            return await _kernel_failure(request, failure)
     return error_response(422, "invalid")
 
 

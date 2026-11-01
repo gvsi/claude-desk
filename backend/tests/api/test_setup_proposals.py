@@ -10,7 +10,8 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import setup
-from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SetupAnswers
+from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SETUP_PLAN_NOT_CONNECTED, SetupAnswers
+from desk.kernel_service.adapters import blocks
 from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
@@ -452,7 +453,7 @@ def test_dotted_hour_ranges_are_the_owners_on_the_hours_question():
 @pytest.mark.parametrize("domain", ["attacker.example", "bobs-plumbing-booking.net"])
 async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(proposals, model, engine, fake, domain):
     from tests.api.test_setup_questions import answer, turn
-    from tests.api.test_setup_rules import settled, unparseable
+    from tests.api.test_setup_rules import say, settled, unparseable
 
     owner, state, _ = proposals
     interview_id = state["interview_id"]
@@ -466,6 +467,9 @@ async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(p
     assert "public_contact" not in said.get("owner_fields", [])
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
+    # The owner typed their own phone on the contact question, so the test-client offer waits: not now.
+    assert reply.json()["question"] == "test_client"
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
     model.add(unparseable(), unparseable())
     reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert reply.status_code == 200, reply.text
@@ -480,7 +484,7 @@ async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(p
 @pytest.mark.parametrize("topic", ["contact_and_after_hours", "hours_and_area"])
 async def test_contact_offer_words_stay_held_through_rules(proposals, model, engine, fake, topic):
     from tests.api.test_setup_questions import answer, turn
-    from tests.api.test_setup_rules import settled, unparseable
+    from tests.api.test_setup_rules import say, settled, unparseable
 
     owner, state, _ = proposals
     interview_id = state["interview_id"]
@@ -495,6 +499,10 @@ async def test_contact_offer_words_stay_held_through_rules(proposals, model, eng
     assert "public_contact" not in said.get("owner_fields", [])
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
+    # A phone typed on the contact question is the owner's own, so the test-client offer waits there: not now.
+    assert reply.json()["question"] == ("test_client" if topic == "contact_and_after_hours" else None)
+    if topic == "contact_and_after_hours":
+        assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
     model.add(unparseable(), unparseable())
     reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert reply.status_code == 200, reply.text
@@ -1593,6 +1601,30 @@ def test_only_stripe_reserves_a_real_attempt_regardless_of_connectable(app_key, 
     assert state.connected == []  # Reserving an attempt is not a completed connection.
 
 
+def test_setup_plan_shows_an_accepted_app_whose_connection_did_not_go_through():
+    calendar = ConnectorProposal(app="google_calendar", label="App", why="Book visits", connectable=False)
+    entries = proposal_entries([], [calendar, stripe()])
+    state = plan_state(entries)
+    calendar_id, stripe_id = (entry.card.proposal_id for entry in entries)
+
+    def status(proposal_id):
+        return next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == proposal_id)
+
+    setup.apply_decision(state, calendar_id, setup.SetupProposalIn(accept=True))
+    state.transcript.append(entries[1])
+    setup.apply_decision(state, stripe_id, setup.SetupProposalIn(accept=True))
+    # The decision turn itself: code connects Stripe only after Claude's reply.
+    assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
+    assert setup._claim_connector_connect(state, stripe_id) is True
+    # The one real attempt failed: Claude must not call it connected.
+    assert (status(stripe_id), status(calendar_id)) == (SETUP_PLAN_NOT_CONNECTED, "accepted")
+    # A simulated app is never attempted, even one stored without the connected flag from before it existed.
+    entries[0].card.connector.connected = False
+    assert (status(stripe_id), status(calendar_id)) == (SETUP_PLAN_NOT_CONNECTED, "accepted")
+    setup._mark_stripe_connected(state, {stripe_id})
+    assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
@@ -1759,6 +1791,79 @@ async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine, am
     assert shown(reply)[1]["job"]["config"]["amount_cents"] == amount
     assert (await owner.browser.post(path, json={"accept": False})).status_code == 409
     assert (await stored(engine, state["interview_id"]))["answers"]["auto_money_cap_cents"] == 0
+
+
+async def accept_owner_priced_payment(proposals, model, engine, fake):
+    """Accept the retainer at $80 on auto and finish setup; return the business tool sent and its stored profile."""
+    owner, state, ids = proposals
+    interview_id, desk_id = state["interview_id"], state["desk_id"]
+    await show_card(engine, interview_id, ids[1])
+    path = f"/api/owner/setup/{interview_id}"
+    accepted = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1",
+                                       json={"accept": True, "amount_cents": 8_000, "autonomy": "auto"})
+    payment = next(card["job"] for card in shown(accepted) if card["proposal_id"] == ids[1])
+    assert payment["config"]["amount_cents"] == 8_000
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk will help with requests."))
+    finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
+    assert finished.status_code == 200 and finished.json()["step"] == "tools", finished.text
+    writes = fake.called("PUT /desks/{id}/business_tools")
+    assert len(writes) == 1
+    sent = next(tool for tool in writes[0].body["tools"] if tool["config"]["block"] == "purpose_payment")
+    assert sent["config"] == {"block": "purpose_payment", "purpose": "Retainer", "amount_cents": 8_000}
+    profile = fake.desks[desk_id].tools[sent["tool"]]
+    assert profile.effects == ["charge"]
+    return owner, desk_id, sent, profile
+
+
+def assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem):
+    from desk.api.prompts import CARD_ERRORS, DraftedRules, RuleCardDraft
+
+    answers = SetupAnswers(summary="Retainers", payment_link_auto_max_cents=link_limit, auto_money_cap_cents=cap)
+    draft = RuleCardDraft(applies_to=sent["tool"], mode="auto", who="anyone", max_amount_cents=8_000,
+                         reason="Take the retainer within the owner's limit.")
+    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS[problem]))
+    draft.max_amount_cents = min(link_limit, cap)
+    assert setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+BOTH_LIMITS = pytest.mark.parametrize(("link_limit", "cap", "problem"), [
+    (5_000, 10_000, "link_limit"), (10_000, 5_000, "above_cap"),
+])
+
+
+@BOTH_LIMITS
+async def test_an_owner_priced_payment_becomes_a_tool_checked_against_both_limits(
+    proposals, model, engine, fake, link_limit, cap, problem,
+):
+    _, _, sent, profile = await accept_owner_priced_payment(proposals, model, engine, fake)
+    tools = [{"tool": sent["tool"], "effects": profile.effects}]
+    assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem)
+
+
+@pytest.mark.skipif("purpose_payment" not in blocks.SUPPORTED_BLOCKS,
+                    reason="the kernel's purpose payment block lands with its own change")
+@BOTH_LIMITS
+async def test_a_reviewed_payment_tool_reaches_the_rule_check_through_the_kernel(
+    proposals, app, model, engine, kernel_http, fake, link_limit, cap, problem,
+):
+    from types import SimpleNamespace
+
+    from desk.api.ro import KernelRO
+    from desk.kernel_api import PolicyConfirmRequest, ToolsConfirmRequest
+
+    owner, desk_id, sent, profile = await accept_owner_priced_payment(proposals, model, engine, fake)
+    # Review the actual pinned definition before asking setup to build its rule-check inputs.
+    kernel = kernel_http.owner(owner.token)
+    reviewed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest.model_validate({
+        "desk_id": desk_id, "tools": [{"tool": profile.tool, "definition_sha256": profile.definition_sha256}],
+        "enable": True}))
+    await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=reviewed.draft.version))
+    async with engine.connect() as conn:
+        tools = await setup._rule_tools(SimpleNamespace(ro=KernelRO(
+            conn, owner.copy_id, app.state.runtime.settings.kernel_ro_schema)), desk_id)
+    assert {"tool": sent["tool"], "effects": ["charge"]} in tools
+    assert_payment_card_held_to_both_limits(tools, sent, link_limit, cap, problem)
 
 
 @pytest.mark.parametrize("source", ["request", "stored", "typed"])
@@ -2083,7 +2188,7 @@ async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, 
     assert reloaded.json() == reply.json()
 
 
-async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engine, monkeypatch, caplog):
+async def test_a_failed_connector_accept_still_saves_and_answers(proposals, model, engine, monkeypatch, caplog):
     from desk.api.kernel_client import KernelFailed
 
     owner, state, ids = proposals
@@ -2111,6 +2216,16 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engi
     async with engine.connect() as conn:
         interview = await setup._load(conn, owner.copy_id, state["interview_id"])
     assert interview.connected == []
+    # The next setup turn tells Claude the connection didn't go through, so it never calls Stripe connected.
+    before = len(model.requests)
+    following = await owner.browser.post(
+        f"/api/owner/setup/{state['interview_id']}/proposals/{reply.json()['pending_card']}?cards=1",
+        json={"accept": False})
+    assert following.status_code == 200, following.text
+    request = next(request for request in model.requests[before:] if request.output_schema is setup.SetupNextStep)
+    text = request.messages[0]["content"][0]["text"]
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    assert next(item for item in plan["items"] if item["id"] == ids[2])["status"] == SETUP_PLAN_NOT_CONNECTED
 
 
 @pytest.mark.parametrize("conflicts", [1, 2])

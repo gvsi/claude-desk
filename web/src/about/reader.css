@@ -1,6 +1,10 @@
 /* The About this prototype reading pages: their figures, laid out as the reader boards draw them. Type comes
    from the type classes (the article styles included), and every color, space and size from a token; the only
-   raw lengths are line widths (hairlines, outlines, the chart's strokes) and proportions. */
+   raw lengths are line widths (hairlines, outlines, the chart's strokes) and proportions. The pages are drawn on
+   the About set's paper (paper.css), the Vision article's light palette, which points the app's color tokens at
+   it inside each page, so the rules here name the app's tokens and draw in ink on paper. A mark a reader needs to
+   read a figure (a point, a line of the chart, an arrow, a step of a scale) is in ink or secondary ink, which hold
+   3:1 on the paper; only structure (hairlines, gridlines, a track) is lighter. */
 
 /* Figures: a panel with a hairline edge, then "Figure 1" and the caption under it. */
 
@@ -127,7 +131,7 @@
 }
 
 .cd-about-chart__rule {
-  stroke: var(--line-control-hover);
+  stroke: var(--text-secondary);
   stroke-width: 1;
 }
 
@@ -352,7 +356,7 @@
 .cd-about-arch__connector {
   display: block;
   fill: none;
-  stroke: var(--line-control-hover);
+  stroke: var(--text-secondary);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -627,7 +631,7 @@
   height: var(--space-8);
   border-radius: var(--radius-full);
   background: var(--bg-app);
-  box-shadow: inset 0 0 0 1.5px var(--line-control-hover);
+  box-shadow: inset 0 0 0 1.5px var(--text-secondary);
 }
 
 .cd-about-readiness__stop--on {
@@ -773,7 +777,8 @@
    (ReaderPage's NARROW), one column: the contents list folds into a row and the details into a line under
    the summary. Every space is a token or a sum of tokens; the only raw lengths are hairlines. A rule that
    changes what a type class sets (a weight, a line height) is scoped under .cd-about-page, so it holds
-   whichever stylesheet loads first. */
+   whichever stylesheet loads first. The paper under the page, the window's height at least, and its ink are
+   the paper's (paper.css). */
 
 .cd-about-page {
   /* The page's side gutter and the gap between its columns. */
@@ -783,9 +788,6 @@
   --about-step: calc(var(--space-16) * 7);
   /* The top bar's height: the contents list and what scrolls into view stop below it. */
   --about-top: calc(var(--space-32) * 2);
-  min-height: 100dvh;
-  background: var(--bg-app);
-  color: var(--text-primary);
 }
 
 @media (max-width: 1335.98px) {
@@ -796,7 +798,8 @@
 }
 
 /* The top bar: the product's name, the document switch and the link into the prototype (PrototypeLink.css).
-   It stays at the top of the window while the page scrolls, over the page. */
+   It stays at the top of the window while the page scrolls, over the page, as the Vision article's bar does:
+   its paper, all but opaque, over a hairline. */
 
 .cd-about-top {
   position: sticky;
@@ -808,7 +811,12 @@
   height: var(--about-top);
   padding: 0 var(--about-gutter);
   border-bottom: 1px solid var(--line-hairline);
-  background: var(--bg-app);
+  background: var(--va-bar);
+}
+
+/* The link into the prototype keeps the hairline edge it has in the article's bar. On a phone it has none. */
+.cd-about-top .cd-about-try:not(.cd-about-try--compact) {
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
 }
 
 /* What keyboard focus scrolls to stops clear of the bar, as a section opened by its address does. */

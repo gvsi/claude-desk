@@ -83,6 +83,7 @@ On a short shell, pinning the brand header and the footer as well would leave th
 - below 520 px of shell height (a phone on its side, a short phone, a 640 px phone with its on-screen keyboard open), or
 - when the banner (if any), the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
 - It turns tall again only with 16 px more than that to spare, so it can't flap as a draft grows and shrinks at the edge.
+- While the page passes `keepComposerRoom`, the composer area counts at the tallest it has been since. The public chat passes it while a request is open, because the line it shows above the composer for that request comes and goes as the request's receipt leaves the view and comes back. Each switch between tall and short moves the conversation, which can bring that receipt into view or out of it again, so without kept room the line and the shell would answer each other for ever on a window at the edge. Once the page lets the room go, the shell fits itself again at once.
 
 The shell decides in a layout effect and sets `cd-public-shell--short` on its root itself (React's class for the shell leaves it out, and the shell puts it back after each render), so it is in place before the page's own layout effects run and the page scrolls the right element from the first render on, as when a chat is reopened.
 
@@ -170,6 +171,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
 | `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
+| `keepComposerRoom` | `boolean` | While true, the composer area counts at the tallest it has been since when the shell decides whether it is short, so a line the page shows above the composer and takes away again can't switch it (see "A short shell"). `false` by default. |
 | `banner` | `ReactNode` | Above the brand header, inside the window's height; pinned with the header, and scrolls with it on a short shell. |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 

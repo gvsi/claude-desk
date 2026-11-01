@@ -4,12 +4,14 @@
  * bodies carry no copy, session or Desk ID: the API takes identity from its cookies.
  *
  * Text a visitor typed (`TranscriptItem.text`, `display_name`, `Handoff.reason`,
- * `from_the_visitor`) is untrusted and renders as text only.
+ * `from_the_visitor`) is untrusted and renders as text only, as does AI-written text a visitor
+ * could steer (`claude_summary`, triage).
  */
 import type {
   ActorKind,
   ApprovalAnswer,
   Assurance,
+  BusinessToolDef,
   Decision,
   DecisionState,
   EvHeld,
@@ -77,6 +79,13 @@ export interface ConversationSummary {
   owner_preview: boolean;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /**
+   * The newest message the visitor typed in this chat, its whitespace collapsed to single spaces
+   * and cut to 199 characters and "…" past 200; null for an agent's or the owner's chat, the
+   * owner's preview, and before the visitor writes. Untrusted. The API always sends it; a reply
+   * without it draws the row as before.
+   */
+  latest_visitor_text?: string | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -108,6 +117,11 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
+  /**
+   * The conversations Claude answered on its own: the `answer` items in the window. The API always
+   * sends it; without it, Today's one line waits rather than say less.
+   */
+  answers?: number;
   /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
   turned_down: number;
   /** The full list's length (`BriefingList.items`). */
@@ -211,8 +225,19 @@ export interface NeedsYouSession {
 
 interface NeedsYouBase {
   session: NeedsYouSession;
-  /** The last thing the visitor wrote, labelled. Untrusted. */
+  /**
+   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
+   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
+   * joined with " · "; just the last when there's one. Untrusted.
+   */
   from_the_visitor: string | null;
+  /**
+   * On a handoff, the conversation's newest AI-written triage summary (what the person asked for
+   * and what the Desk did, at most 400 characters), for the owner alone and never quoted as the
+   * visitor's; null when it has none. A held request never carries one: a visitor could steer a
+   * summary to sway an approval. Optional until the API sends it; an item without it draws as before.
+   */
+  claude_summary?: string | null;
 }
 
 /**
@@ -281,8 +306,14 @@ export interface OwnerTranscript {
   replayed?: boolean;
 }
 
-/** Owner-only annotation beside the signed event, absent on older API responses. */
-export interface OwnerTranscriptItem extends TranscriptItem {
+/** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */
+export interface OwnerTranscriptItem extends Omit<TranscriptItem, 'kind'> {
+  /**
+   * A `stopped_draft` item stands where the check stopped Claude's draft, before the rewrite or the
+   * handoff that followed in the same turn; it has no `text` or `event` (openapi.json).
+   */
+  kind: TranscriptKind | 'stopped_draft';
+  /** Owner-only annotation beside the signed event, absent on older API responses. */
   owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
 }
 
@@ -340,38 +371,8 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
-/**
- * Business tool definitions, typed here until the kernel's business tools change (branch
- * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
- * The owner's title, description and configuration are untrusted text.
- */
-export interface BusinessToolDef {
-  title: string;
-  description: string;
-  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
-}
-
-export interface IntakeConfig {
-  block: 'intake';
-  questions: string[];
-}
-
-export interface TypedBookingConfig {
-  block: 'typed_booking';
-  appointment_type: string;
-  minutes: number;
-}
-
-export interface PurposePaymentConfig {
-  block: 'purpose_payment';
-  purpose: string;
-  amount_cents: number;
-}
-
-export interface UrgentConfig {
-  block: 'urgent';
-  urgent_when: string;
-}
+/** Owner configuration is untrusted text, with its shape from the kernel's generated contract. */
+export type { BusinessToolDef, IntakeConfig, TypedBookingConfig, PurposePaymentConfig, UrgentConfig } from './contracts.ts';
 
 /** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
 export type AnyToolName = ToolName | `desk.${string}`;
@@ -492,6 +493,12 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/**
+ * What setup can wait on: one of its questions, then, once its plan is closed, whether to add the
+ * owner as a test client (`test_client`), which the API asks and reads by code alone.
+ */
+export type SetupQuestion = QuestionKey | 'test_client';
+
 /** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
 export type Choice = { text: string; recommended: boolean };
 
@@ -565,8 +572,11 @@ export interface SetupState {
    * reply yet. Absent means false on older APIs.
    */
   busy?: boolean;
-  /** The question waiting for an answer; null before consent and after the last one. */
-  question: QuestionKey | null;
+  /**
+   * The question waiting for an answer, `test_client` while the test-client offer at the plan's
+   * end waits; null before consent and after the last one.
+   */
+  question: SetupQuestion | null;
   /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
   pending_card?: string | null;
 }
@@ -706,13 +716,33 @@ export interface AgentRunStarted {
   run_id: string;
 }
 
-/** One turn of a demo agent run. The agent's own words are never returned: its turns are empty. */
+/**
+ * Which words the built-in agent's tasks take on a Desk (plan 09, C2): `rivera` on the copy's own
+ * Desk, else the business type setup stored for it (`other` without one). A key, never words.
+ */
+export type DemoTaskSet = import('./openapi.gen.ts').AgentTasks['task_set'];
+
+/** `GET /api/public/desks/{slug}/agent_tasks`: the Desk's set, read with the visitor's chat. */
+export interface AgentTasks {
+  task_set: DemoTaskSet;
+}
+
+/**
+ * One turn of a demo agent run: the agent's request, with the words it sent (`text`), or the Desk's
+ * checked answer to it, with its blocks and receipts.
+ */
 export interface AgentTurn {
   author: 'agent' | 'desk';
   n: number;
   blocks: RenderedBlock[];
   /** A Desk turn's status events, as its `A2AResponse` carries them. */
   receipts: (EvReceipt | EvHeld | EvResolved)[];
+  /**
+   * An agent turn's request, as the agent sent it to the Desk; null for a Desk turn. Untrusted: on
+   * the hosted site these are a model's own words, at most 2,000 characters. The API always sends
+   * it; without it, the request draws as before.
+   */
+  text?: string | null;
 }
 
 export interface DemoAgentRun {
@@ -837,7 +867,7 @@ export interface StartSetupBody {
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
 export type SetupAnswerBody = { text: string } & (
-  | { question: QuestionKey; card?: never }
+  | { question: SetupQuestion; card?: never }
   | { question: null; card: string }
 );
 

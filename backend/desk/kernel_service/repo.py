@@ -16,8 +16,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 1. the session row: `FOR UPDATE` by a decision (`auth.lock_session`, held until it commits; the
    breaker's strike writes it under that lock), by a take-over or hand-back, by a verification
    route, in T2 by the execution of an adapter that writes the session's own rows
-   (`locks_session`: a verification start, and a call-back request, which keeps one open handoff
-   per session) on either path, and by the owner's writes that close
+   (`locks_session`: a verification start, a call-back request, which keeps one open handoff
+   per session, a purpose payment, which keeps one open link per tool in a session, and a booking,
+   which closes the session's card handoffs) on either path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
    Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
    nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
@@ -47,7 +48,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
    `POST /knowledge` upserts;
 10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
-    books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
+    books, which its T2 takes `FOR SHARE`, then the session's open card handoffs it closes, `FOR
+    UPDATE`; a handoff; Plan 01c's mandates), after whatever of steps
     4 to 9 the same transaction takes; and the handoffs of a session whose reply shows the
     handoff card, passed on an open one's card, or rechecks fact-backed cards: its open ones
     `FOR SHARE` before facts, including when losing the last checked card could require a handoff;
@@ -69,7 +71,12 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
 Every owner's write to a Desk's data holds the Desk row `FOR UPDATE` (`desks.owner_desk`) before
 any of these, and a write to the business its row after the Desk's. The calendar write then takes
 the Desk's slots `FOR UPDATE` in ID order (step 10) before it checks which are booked, so a booking
-of a slot it drops or moves either commits first or waits for it. Closing a handoff does too: it
+of a slot it drops or moves either commits first or waits for it. The kernel's daily calendar
+refresh holds the Desk row the same way, one Desk to a transaction (`desks.extend_calendar`), then
+only reads the Desk's slots and inserts new ones under fresh keys before it takes the ledger head:
+every write that changes or deletes a slot holds the Desk row first, so a booking holding its slot
+`FOR SHARE` and the refresh never wait on each other for a slot; like any two writes to one Desk,
+they take turns only at its ledger head. Closing a handoff holds a Desk row too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.
@@ -353,6 +360,13 @@ class KernelFailure(Exception):
         self.reason = reason or code
         self.persist = persist
         self.detail = detail
+
+
+async def limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
+    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
+    owner's write holds makes background work (the rebuild, the calendar pass) try that Desk again
+    later rather than stall the others."""
+    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
 
 
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:

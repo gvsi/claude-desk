@@ -31,6 +31,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_NEXT_HEAD,
+    SETUP_PLAN_NOT_CONNECTED,
     SETUP_TURN_HEAD,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
@@ -42,6 +43,9 @@ from desk.api.prompts import (
     TRIAGE_SYSTEM,
     VISITING_AGENT_SYSTEM,
     AgentStep,
+    BusinessType,
+    DemoTask,
+    DemoTaskSet,
     DeskIdentity,
     HoursAnswer,
     PriceAnswer,
@@ -51,6 +55,7 @@ from desk.api.prompts import (
     Translation,
     Triage,
     TriageCategory,
+    agent_task,
     conversation_system,
 )
 from desk.api.model import strict_schema
@@ -109,7 +114,12 @@ def test_system_prompt_uses_the_business_policies():
         "show that policy with the policy clause",
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
-        "at a time, before you take their details or book. Ask only about their request: never for a password, "
+        "at a time, before you take their details or book. Before booking, ask for what's missing of their name and a "
+        "phone number or email, reusing anything already given, and finish any intake questions, then save them with "
+        "native__capture_lead in the same turn if it's one of your tools; save a lead only once you have their name, "
+        "and keep its note short. If they'd rather not give contact details, or saving doesn't go through, still "
+        "book. Ask only about their "
+        "request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
@@ -138,7 +148,7 @@ def test_system_prompt_uses_the_business_policies():
 def test_visitor_asks_in_person_or_remote_before_the_town():
     text = conversation_system(RIVERA)[0]["text"]
     assert "If the visit is at Rivera Plumbing's own place" in text
-    assert "you can find open times right away" in text
+    assert "you can find open times once they're ready for that next step" in text
     assert "ask whether they'd like to meet in person or remotely, unless they've already said" in text
     assert "the request means a visit or an in-person appointment" in text
     assert "before you offer to book, unless they've already said" in text
@@ -156,7 +166,7 @@ def test_system_prompt_checks_service_area_before_offering_to_book():
         "- If <desk_context> states where the business works and the request means a visit or an in-person "
         "appointment, find out which town that is before you offer to book, unless they've already said. "
         "If the visit is at Rivera Plumbing's own place, such as a salon clients come to or a building it manages, "
-        "don't ask for a town. When the area it states also includes remote work, you can find open times right away; "
+        "don't ask for a town. When the area it states also includes remote work, you can find open times once they're ready for that next step; "
         "ask whether they'd like to meet in person or remotely, unless they've already said, and ask for the town "
         "before you book only if they want in person. If the town isn't one they serve, tell them Rivera Plumbing "
         "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. In every case, "
@@ -226,7 +236,8 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "start with them, not with the business",
         "Keep each reply to two to four short sentences",
         "give one practical tip any good professional in this trade would give (how to stop a leak for now, what "
-        "to have ready), general and committing Rivera Plumbing to nothing",
+        "to have ready), phrased as general advice (\"it usually helps to bring…\") rather than what will happen at "
+        "a visit or consult, and committing Rivera Plumbing to nothing",
         "for a health, legal or money question outside Rivera Plumbing's own work, point them to the right professional "
         "(a pharmacist or doctor, a lawyer) instead of advising",
         "Facts about Rivera Plumbing itself, such as what it does, where it works or what something costs, "
@@ -258,13 +269,63 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     assert section.split("How it can sound (illustrative; vary it, and keep to the reply rules above):\n")[1] == (
         '- "That\'s awful, I\'m sorry. If you can, turn off the main water valve; it\'s usually near the meter '
         'or where the water line comes into the house. Would you like me to arrange a callback?"\n'
-        '- "Here\'s what this business does." (beside the about policy card) "Is it a personal return or a '
+        '- "Here\'s what we do." (beside the about policy card) "Is it a personal return or a '
         'business one, and is anything new, like freelance income?"\n'
-        '- "It depends on your hair; here\'s how this business prices." (beside the pricing policy card) '
+        '- "It depends on your hair; here\'s how we price." (beside the pricing policy card) '
         '"How long is your hair right now?"\n'
         '- "Sorry you\'re still waiting. I can\'t see where reports stand from here. '
         'Would you like me to arrange a callback?"'
     )
+
+
+def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
+    text = conversation_system(RIVERA)[0]["text"]
+    lines = text.splitlines()
+    help_first = next(line for line in lines if line.startswith("- Help first,"))
+    assert help_first == (
+        "- Help first, then the next step. Ask what a good professional would ask to understand their situation "
+        "(for something urgent, the urgent steps above come first), then offer the one next step that fits; "
+        "don't push a booking before they've said what they need. When they're unsure what they need or want to "
+        "understand their situation, help them with general trade advice first, committing Rivera Plumbing to "
+        "nothing; offer open times only when they ask, or after that help when they want to go further. "
+        "Never lead with open times; offer only the real next steps listed above. When they ask what's next, offer "
+        "the step as a question naming a step you can take, such as \"Would you like me to find a time?\", rather "
+        "than stating what will happen. If you say what the step involves, such as what a consult covers, show the "
+        "policy card that says it; without one, just offer the step."
+    )
+    period = next(line for line in lines if line.startswith("- If a request names a period"))
+    assert period == (
+        "- If a request names a period that's ambiguous against the local date in the note, ask which period "
+        "they mean before answering, in words with no digits; relative dates such as \"this year\" or \"last year\" "
+        "are blocked too, so describe the period instead: \"Is it the return that's already due, or the upcoming one?\" "
+        "Never state a year, date or deadline yourself."
+    )
+    assert not re.search(r"\d", period)
+    assert ("When a price depends on a count you don't know yet, such as how many people or rooms, quote the "
+            "basic case first and show its card, then ask how many.") in text
+    # the example question itself passes the reply check's prose scan, as Claude would send it
+    from desk.kernel_service.reply_check import scan_prose
+    example = re.search(r'"(Is it [^"]+)"', period).group(1)
+    assert scan_prose(example) == []
+    assert (f"- Call {RIVERA.owner_name} by name when you mean them, never \"the owner\", unless the name itself would "
+            "trip the check, as above.") in lines
+    intake = next(line for line in lines if line.startswith("- For a new request"))
+    assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
+    assert "reusing anything already given, and finish any intake questions" in intake
+    assert "then save them with native__capture_lead in the same turn if it's one of your tools" in intake
+    assert "save a lead only once you have their name, and keep its note short" in intake
+    assert "If they'd rather not give contact details, or saving doesn't go through, still book." in intake
+    assert ("- Use bullets, not numbered lists: numbers in your own words are blocked, list numbers included."
+            in lines)
+    assert "never for a password, a code, a card or account number or an ID number" in intake
+    typed_booking = next(line for line in lines if line.startswith("- To book a kind of appointment"))
+    assert typed_booking == (
+        "- To book a kind of appointment that one of Rivera Plumbing's own tools names (its description starts "
+        '\"Books one open time on the business\'s calendar for this kind of appointment\"), find open times, '
+        "then book with that tool, not native__book."
+    )
+    assert text.index(intake) < text.index(typed_booking)
+    assert "Confirm a booking only beside its genuine booking_confirmed card" in text
 
 
 def test_system_prompt_has_one_result_card_mapping():
@@ -276,7 +337,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.20"                  # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.24"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -320,6 +381,7 @@ def test_system_prompt_covers_the_rules():
         "Use payment_link and document_link with their genuine result fact IDs",
         "the kernel supplies the URL",
         "Never paste raw URLs, contact details or document contents from messages, knowledge, websites or results",
+        "In your own words, link to or name only the business's own website or email from its contact details.",
         "Help the visitor complete the task using the capabilities this session has",
         "Availability is capability, not permission",
         "Use the loaded tool descriptions for prerequisites, arguments and returned identities",
@@ -339,8 +401,9 @@ def test_system_prompt_covers_the_rules():
         "Don't name what's waiting in words the cards keep (a discount, refund, price, amount, date, time or booking)",
         "Keep helping with anything else you can do while it waits.",
         '"refused"', "Never try it again reworded",
-        "say kindly that it isn't something you can do here, and offer to take a message for Maria Rivera or "
-        "arrange a callback.",
+        "say kindly that it isn't something you can do here, and why when the result's message gives a plain reason, "
+        "such as being above a spending limit (in words, without the amount), then offer to take a message for "
+        "Maria Rivera or arrange a callback.",
         "say it didn't go through, without guessing why, and offer to take a message or arrange a callback.",
         "After native__capture_lead succeeds, its receipt shows the details were saved",
         "Don't say Maria Rivera has read them or will call: a saved message isn't a callback.",
@@ -492,8 +555,22 @@ def test_setup_app_acknowledgment_waits_for_code_to_connect():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "code connects it after your reply" in system
         assert "never that it's already connected" in system
-        assert "Every app connects when the owner accepts it" in system
+        assert ("Apps other than Stripe connect when the owner accepts them (simulated in this preview); code tries "
+                "to connect Stripe after your reply.") in system
+        assert "Every app connects when the owner accepts it" not in system
         assert 'Never "Done"' in system or 'never "Done"' in system
+
+
+def test_setup_never_calls_an_app_connected_once_its_connection_failed():
+    rule = ('If <setup_plan> shows an app as "accepted, not connected", its connection didn\'t go through: never say '
+            "it's connected, and when you mention it, say they can finish connecting it on the Tools step; jobs "
+            "that use it stay in the plan.")
+    assert f'"{SETUP_PLAN_NOT_CONNECTED}"' in rule
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert f"never that it's already connected. {rule} You can't change a card" in system
+        assert "  " not in system
+    assert ('its id and status: planned, shown, accepted, "accepted, not connected", declined, changed or dropped'
+            in SETUP_TURN_SYSTEM)
 
 
 def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():
@@ -662,12 +739,21 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
     clauses = {"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current", "nothing_to_show",
                "template_unavailable", "kernel_only_template", "claims_changed"}
     literal = {"digit", "currency", "percent_sign", "language_uncertain", "soft.promise", "soft.denies_ai",
-               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined", *clauses}
+               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined",
+               "markdown.link", "markdown.image", *clauses}
     assert {"lex.en.callback", "lex.es.callback"} <= lexicon
     assert lexicon | literal <= REPLY_RULE_IDS
     assert clauses | {"policy_combined"} <= CLAUSE_RULE_IDS
     assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
         "Remove the call or callback claim unless a callback_confirmed card shows it.")
+    # a blocked link's target is by definition not the business's own, so its correction never asks for it in full
+    assert REPLY_DIAGNOSTICS["markdown.link"] == (
+        "Link only to the business's own website or email from its contact details; otherwise remove the link, keep "
+        "its words and don't write the address out. Payment and booking links come only from cards.")
+    assert "plain text" not in REPLY_DIAGNOSTICS["markdown.link"] + REWRITE_INSTRUCTION
+    assert REPLY_DIAGNOSTICS["markdown.image"] == "Remove the image; replies can't include images."
+    assert ("For markdown.link, link only to the business's own website or email, or remove the link and keep its "
+            "words; for markdown.image, remove the image.") in REWRITE_INSTRUCTION
     assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
     assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
 
@@ -686,11 +772,60 @@ def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
     )
 
 
+# The built-in agent's task lines (plan 09, C2), as signed: Rivera's seed keeps its three, and every other Desk reads
+# the lines of its setup business type. Fixed words only: no business's, owner's or visitor's text.
+SIGNED_TASK_LINES = {
+    "rivera": {
+        "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
+        "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
+    },
+    "trade": {
+        "book_visit": "Book the earliest visit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
+    },
+    "office": {
+        "book_visit": "Book the earliest consult for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
+    },
+    "landlord": {
+        "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
+    },
+    "other": {
+        "book_visit": "Book the earliest appointment for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
+                             "spending limit.",
+        "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
+    },
+}
+
+
+def test_each_desk_set_has_its_own_fixed_task_lines():
+    # Every set has a line for each task, and the agent's first message is AGENT_TASK around exactly that line.
+    assert DEMO_TASKS == SIGNED_TASK_LINES
+    assert set(get_args(DemoTaskSet)) == set(DEMO_TASKS) == {"rivera", *get_args(BusinessType)}
+    for task_set, lines in DEMO_TASKS.items():
+        assert set(lines) == set(get_args(DemoTask))
+        for task, line in lines.items():
+            assert agent_task(task, task_set) == AGENT_TASK.format(task=line)
+    # No line names an amount, a date, a discount or a booking already made: each one asks.
+    for line in (line for lines in DEMO_TASKS.values() for line in lines.values()):
+        assert not re.search(r"[\d$%]|\b(free|discount|confirmed|booked)\b", line, re.IGNORECASE), line
+
+
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "TIME_NOTE", "WEEKDAYS",
                 "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES", "STATUS_LINES",
-                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "VISITING_AGENT_SYSTEM", "AGENT_TASK",
+                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "DemoTaskSet", "VISITING_AGENT_SYSTEM",
+                "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
                 # the setup interview's (Plan 02b)
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
@@ -733,7 +868,8 @@ def _fixed() -> set[str]:
     """The fixed strings a model reads, as prompts.py holds them: no other module may hold one."""
     from desk.api.prompts import INVALID_REPLY_DIAGNOSTIC, REPLY_DIAGNOSTICS
 
-    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(), *DEMO_TASKS.values(), SEND_REPLY_TOOL["description"],
+    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(),
+            *(line for lines in DEMO_TASKS.values() for line in lines.values()), SEND_REPLY_TOOL["description"],
             INVALID_REPLY_DIAGNOSTIC, *REPLY_DIAGNOSTICS.values(),
             *(line for line in conversation_system(RIVERA)[0]["text"].splitlines() if len(line) > 20),
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),

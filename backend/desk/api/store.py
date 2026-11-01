@@ -58,7 +58,7 @@ labels (`SUMMARY_LABELS`, `SHOWN_LABELS`).
 import hashlib
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
@@ -326,6 +326,23 @@ async def triaged(conn: AsyncConnection, copy_id: str, **where: str) -> dict[str
     for ref_id, text in rows:
         if (triage := _read_triage(text)) is not None:
             found[ref_id] = triage
+    return found
+
+
+async def newest_triage(conn: AsyncConnection, copy_id: str, desk_id: str,
+                        session_ids: Iterable[str]) -> dict[str, Triage]:
+    """Each of the Desk's given sessions' newest triage row that reads back as its `Triage`, by `session_id`; a
+    session with none is left out."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    rows = await conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "triage",
+        MESSAGES.c.session_id.in_(wanted)).order_by(MESSAGES.c.n))
+    found = {}
+    for session_id, text in rows:
+        if (triage := _read_triage(text)) is not None:
+            found[session_id] = triage
     return found
 
 

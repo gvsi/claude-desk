@@ -1,5 +1,6 @@
 import { Navigate, type RouteObject } from 'react-router';
 
+import { AboutWait } from '../about/AboutWait.tsx';
 import { ReaderError } from '../about/ReaderError.tsx';
 import { ABOUT_PAGES, VISION_ARTICLE, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
@@ -27,11 +28,6 @@ import { TeamDeskPage } from '../vision/TeamDeskPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
 
-/** What an About page shows while its code loads on a first visit: the page's own background, briefly. */
-function ReaderLoading() {
-  return null;
-}
-
 /**
  * An About this prototype reading page. Its code, the two documents and their parser load only when the
  * page opens (`import()`), so a document that can't be parsed fails here and nowhere else: `ReaderError`,
@@ -41,7 +37,7 @@ function aboutRoute(id: AboutId): RouteObject {
   return {
     path: ABOUT_PAGES[id].route,
     errorElement: <ReaderError />,
-    HydrateFallback: ReaderLoading,
+    HydrateFallback: AboutWait,
     lazy: async () => {
       const { ReaderPage } = await import('../about/ReaderPage.tsx');
       return { element: <ReaderPage id={id} /> };
@@ -57,7 +53,7 @@ function aboutRoute(id: AboutId): RouteObject {
 const visionArticleRoute: RouteObject = {
   path: VISION_ARTICLE.route,
   errorElement: <ReaderError kind="page" />,
-  HydrateFallback: ReaderLoading,
+  HydrateFallback: AboutWait,
   lazy: async () => {
     const { VisionArticle } = await import('../about/vision/VisionArticle.tsx');
     return { element: <VisionArticle /> };

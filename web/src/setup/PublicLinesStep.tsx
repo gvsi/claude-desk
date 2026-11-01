@@ -1,17 +1,18 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '../api/views.ts';
-import { Button, Card, cardChrome, CHANGED_REFRESHED, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
+import { Button, Card, CHANGED_REFRESHED, Notice, PageHeader, SkeletonScreen, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 import { publicLineLimit } from './publicLineLimit.ts';
-import { formatPublicHours, formatPublicPrice } from './publicLinesFormat.ts';
+import { formatPublicHours, formatPublicPrice, publicLineLabel } from './publicLinesFormat.ts';
+import { PublicLinesSkeleton } from './StepSkeletons.tsx';
 
 import './PublicLinesStep.css';
 
 const copy = SETUP_COPY.publicLines;
-const labelOf = (line: SetupPublicLine) => cardChrome(line.key === 'contact' ? 'contact' : 'policy', 'en', `charter:${line.key}`)?.label;
+const labelOf = (line: SetupPublicLine) => publicLineLabel(line.key);
 
 const DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
@@ -344,49 +345,62 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
 
   if (empty && !firstReadHandled.current) return null;
 
+  let body: ReactNode = null;
+  if (lines.isError) {
+    body = (
+      <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>
+        {ownerErrorCopy(lines.error)}
+      </Notice>
+    );
+  } else if (lines.data !== undefined) {
+    body = (
+      <>
+        {hasSuggestions ? (
+          <Card padding={16}>
+            <div className="cd-public-lines-suggested">
+              <div ref={suggestedHeading} tabIndex={-1} className="cd-public-lines-suggested__heading cd-type-control">
+                <StatusDot tone="held" /><span>{copy.suggestedTitle}</span>
+              </div>
+              <p className="cd-public-lines-suggested__intro cd-type-meta">{copy.suggestedIntro}</p>
+              <div className="cd-public-lines">
+                {suggested.map(renderLine)}
+                {hours.length > 0 ? renderStructured('hours', 0, copy.hours, hours.map(formatPublicHours)) : null}
+                {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item), item.item_id))}
+              </div>
+            </div>
+          </Card>
+        ) : null}
+        {owned.length > 0 ? (
+          <Card padding={16}><div className="cd-public-lines cd-public-lines--owned">{owned.map(renderLine)}</div></Card>
+        ) : null}
+        <div className="cd-setup-step__actions">
+          {editingKey !== null || unknown ? (
+            <Button variant="primary" size="main" disabled buttonRef={looksRightButton}>{SETUP_COPY.situations.looksRight}</Button>
+          ) : (
+            <Button variant="primary" size="main" buttonRef={looksRightButton} waiting={busy !== null && busy !== 'confirm'} busy={busy === 'confirm'} onClick={() => void confirm()}>
+              {SETUP_COPY.situations.looksRight}
+            </Button>
+          )}
+        </div>
+      </>
+    );
+  }
+
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
       {error !== null || unknown ? (
         <div ref={notice}><Notice tone="error">{error ?? ownerErrorCopy(null)}</Notice></div>
       ) : null}
-      {lines.data === undefined || lines.isError ? (
-        lines.isError ? (
-          <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>
-            {ownerErrorCopy(lines.error)}
-          </Notice>
-        ) : <LoadingLine>{SETUP_COPY.questions.loading}</LoadingLine>
-      ) : (
-        <>
-          {hasSuggestions ? (
-            <Card padding={16}>
-              <div className="cd-public-lines-suggested">
-                <div ref={suggestedHeading} tabIndex={-1} className="cd-public-lines-suggested__heading cd-type-control">
-                  <StatusDot tone="held" /><span>{copy.suggestedTitle}</span>
-                </div>
-                <p className="cd-public-lines-suggested__intro cd-type-meta">{copy.suggestedIntro}</p>
-                <div className="cd-public-lines">
-                  {suggested.map(renderLine)}
-                  {hours.length > 0 ? renderStructured('hours', 0, copy.hours, hours.map(formatPublicHours)) : null}
-                  {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item), item.item_id))}
-                </div>
-              </div>
-            </Card>
-          ) : null}
-          {owned.length > 0 ? (
-            <Card padding={16}><div className="cd-public-lines cd-public-lines--owned">{owned.map(renderLine)}</div></Card>
-          ) : null}
-          <div className="cd-setup-step__actions">
-            {editingKey !== null || unknown ? (
-              <Button variant="primary" size="main" disabled buttonRef={looksRightButton}>{SETUP_COPY.situations.looksRight}</Button>
-            ) : (
-              <Button variant="primary" size="main" buttonRef={looksRightButton} waiting={busy !== null && busy !== 'confirm'} busy={busy === 'confirm'} onClick={() => void confirm()}>
-                {SETUP_COPY.situations.looksRight}
-              </Button>
-            )}
-          </div>
-        </>
-      )}
+      {/* While the lines are read, they draw as their shapes, then land where the shapes were. */}
+      <SkeletonScreen
+        loading={lines.data === undefined && !lines.isError}
+        status={SETUP_COPY.questions.loading}
+        skeleton={<PublicLinesSkeleton />}
+        className="cd-setup-step__region"
+      >
+        {body}
+      </SkeletonScreen>
     </div>
   );
 }

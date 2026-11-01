@@ -45,9 +45,11 @@ from .test_approvals import answered
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
 
+# A stranger's steps on a fresh Rivera copy, in tool-name order. The seed's urgent tool, first by
+# name, offers the native call-back's step, which is listed once, there.
 VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
-    "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
-    "native.quote", "native.request_callback", "native.start_verification")]
+    "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+    "native.quote", "native.start_verification")]
 
 ROUTE = "POST /check_reply"
 
@@ -1043,7 +1045,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     assert {template: (card.title, card.lines) for template, card in cards.items()} == {
         "quote": ("$153.00", ["Drain clearing", "Includes 15% off $180.00", "Good until Monday, November 2, 9:04 am"]),
         "booking_options": ("Times that are open", [label for _, label in open_times]),
-        "booking_confirmed": ("Monday, November 2", ["Arriving 10:00 am to 12:00 pm", "With Maria Rivera"]),
+        "booking_confirmed": ("Monday, November 2", ["10:00 am to 12:00 pm", "With Maria Rivera"]),
         "hours": ("Monday to Friday, 8:00 am to 6:00 pm", ["Saturday, 9:00 am to 1:00 pm"]),
         "policy": ("We work in Oakland, Berkeley, Alameda and Emeryville.", []),
         "contact": ("(510) 555-0142", []),
@@ -1064,7 +1066,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     spanish = await checked(client, visitor, "Aquí tiene los detalles.",
                             [clause("booking_confirmed", booking.fact_id)])
     assert (spanish.blocks[1].title, spanish.blocks[1].lines) == (
-        "lunes 2 de noviembre", ["Llegada de 10:00 a 12:00", "Con Maria Rivera"])
+        "lunes 2 de noviembre", ["De 10:00 a 12:00", "Con Maria Rivera"])
 
 
 # The soft-promise check flagging nothing, so a block below is the code's own.
@@ -2886,6 +2888,7 @@ CONSULTA_GRATUITA = ("Consulta gratuita",)
     ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, False, "lex.en.promise"),    # width and case
     ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, False, "lex.es.promise"),           # an accent
     ("We offer a Free consultation.", FREE_CONSULT, False, "lex.en.promise"),                   # the name, then more
+    ("Book a free intro call whenever suits you.", ("Book a free intro call",), False, "lex.en.promise"),
 ])
 def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, booking_card, rule_id):
     """The owner's decision of 2026-10-31: a free word in the name the owner gave an enabled business
@@ -2907,6 +2910,9 @@ def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, 
     ("I can book a Guaranteed free consult for you.", ("Guaranteed free consult",),
      [("lex.en.promise", "Guaranteed")]),
     ("I can book a free discount visit for you.", ("free discount visit",), [("lex.en.promise", "discount")]),
+    # Nor does a name lend the amenity allowance of a policy's text ("Free parking."): it lends free words alone.
+    ("Book a Consult with complimentary coffee while you wait.", ("Consult with complimentary coffee",),
+     [("lex.en.promise", "complimentary")]),
     # A name made only of free words backs no free word: it can't tell the name from the word.
     ("Consultations are free.", ("Free",), [("lex.en.promise", "free")]),
     ("Las consultas son gratis.", ("Gratis",), [("lex.es.promise", "gratis")]),

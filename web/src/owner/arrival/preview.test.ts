@@ -48,11 +48,20 @@ function drawn({ today: t, needsYou: held, inbox }: { today: Today; needsYou: Ne
   return {
     greeting_name: t.greeting_name,
     needs_you_count: t.needs_you_count,
-    live: t.live.map((s) => ({ kind: s.kind, display_name: s.display_name, verified: s.verified, mode: s.mode, last_activity: when(s.last_activity), outcome_counts: s.outcome_counts })),
+    live: t.live.map((s) => ({
+      kind: s.kind,
+      display_name: s.display_name,
+      verified: s.verified,
+      mode: s.mode,
+      last_activity: when(s.last_activity),
+      outcome_counts: s.outcome_counts,
+      latest_visitor_text: s.latest_visitor_text,
+    })),
     briefing: {
       conversations: t.briefing.conversations,
       bookings: t.briefing.bookings,
       leads: t.briefing.leads,
+      answers: t.briefing.answers,
       turned_down: t.briefing.turned_down,
       total: t.briefing.total,
       newest: {

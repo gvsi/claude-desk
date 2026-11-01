@@ -86,11 +86,19 @@ def _profile(row: Tool) -> ToolProfile:
 async def session_context(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
                           desk_row: Desk) -> SessionContext:
     """The kernel's local time, tools, facts and knowledge given to the authenticated session."""
+    from desk.kernel_service.adapters import blocks
+
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
     given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
+    valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
+                      and profile.status == "enabled"
+                      and profile.business is not None and profile.business.config.block in blocks.SUPPORTED_BLOCKS
+                      and await adapters.resolve(ctx, desk_id, tool) is not None}
+    if principal.kind in ("visitor", "agent"):
+        declared = declared | valid_business
 
     readers = labels.session_readers(session_row)
     # the owner reads the business's own text; a conversation is never given a document's canary
@@ -130,8 +138,32 @@ async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: Sess
     """The callable session tools, after adapter resolution; shared with the reply check."""
     enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
     given = decide.tools_given(principal, session_row, desk_row, enabled)
-    return [_profile(enabled[tool]) for tool in sorted(given)
-            if adapters.resolve(tool, enabled[tool]) is not None]
+    return [_profile(enabled[tool]) for tool in sorted(given) if await _resolves(ctx, desk_row.desk_id, enabled[tool])]
+
+
+async def _resolves(ctx: KernelCtx, desk_id: str, row: Tool) -> bool:
+    """An enabled row's profile still matches its pin, and its adapter resolves."""
+    return (adapters.profile_sha256(row.profile) == row.profile_sha256
+            and await adapters.resolve(ctx, desk_id, row.tool) is not None)
+
+
+async def business_free_names(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """The titles and appointment types (`blocks.free_name_fields`: never a payment's title) of the
+    Desk's enabled business tools that resolve, by the checks `resolved_tools` makes, in tool order:
+    the names inside whose repeat the reply check lets a free word stand in Claude's prose
+    (`reply_check.scan_prose`'s `approved_free_names`, the owner's decision of 2026-10-31).
+    Desk-wide, whichever tools the session is given."""
+    from desk.kernel_service.adapters import blocks
+
+    enabled = await decide.enabled_tools(ctx, desk_id)
+    names: list[str] = []
+    for tool in sorted(enabled):
+        row = enabled[tool]
+        if row.source == "business" and row.profile.business is not None and await _resolves(ctx, desk_id, row):
+            definition = row.profile.business
+            names += [getattr(definition if field == "title" else definition.config, field)
+                      for field in blocks.free_name_fields(definition.config.block)]
+    return names
 
 
 router = APIRouter()

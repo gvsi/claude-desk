@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -29,6 +29,7 @@ import type {
   Today,
   ToolRow,
   TranscriptKind,
+  Triage,
   VisitorTranscript,
 } from '../api/views.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
@@ -36,7 +37,7 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { AGENT_CARD_BLOCKS } from './agents.ts';
 import { refusalCause } from './causes.ts';
 import { VISITOR_PLAIN, type Language } from './script.ts';
-import { BUSINESS, PRESETS } from './seed.ts';
+import { BUSINESS, PRESETS, presetCards } from './seed.ts';
 import {
   LEDGER_KEY,
   MINUTE,
@@ -79,6 +80,45 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
+/** The most of one visitor message the owner's glimpse of it carries, "…" included. */
+const VISITOR_LINE_MAX = 200;
+
+/**
+ * A visitor's message as the owner's one-line glimpse of it (the API's `visitor_line`): whitespace
+ * collapsed to single spaces, and cut to 199 characters and "…" past 200, with no space left
+ * before the "…". Null when nothing is left.
+ */
+function visitorLine(text: string | null): string | null {
+  const chars = Array.from((text ?? '').split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return null;
+  return chars.length > VISITOR_LINE_MAX ? `${chars.slice(0, VISITOR_LINE_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it (`visitorLine`). Null
+ * for an agent's or the owner's chat, the owner's preview, before the visitor writes, and when
+ * what they wrote last is all whitespace.
+ */
+function latestVisitorText(session: SessionRecord): string | null {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  return visitorLine(session.items.findLast((item) => item.kind === 'visitor_text')?.text ?? null);
+}
+
+/** What a visitor, or a visiting agent, wrote in a chat (the API's `VISITOR_TEXT`). */
+const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']);
+
+/**
+ * What Needs you quotes from a chat, read as it stands, as the API's `recent_texts` and
+ * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
+ * first, each as its glimpse (`visitorLine`), joined with " · ". Just the last when there's one,
+ * and null when nothing is left.
+ */
+function fromTheVisitor(session: SessionRecord | undefined): string | null {
+  const said = (session?.items ?? []).filter((item) => SAID.has(item.kind)).slice(-2);
+  const lines = said.map((item) => visitorLine(item.text)).filter((line) => line !== null);
+  return lines.length > 0 ? lines.join(' · ') : null;
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -93,6 +133,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    latest_visitor_text: latestVisitorText(session),
   };
 }
 
@@ -106,22 +147,31 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
   };
 }
 
+/**
+ * Every held request and open handoff, oldest first. Each quotes what its visitor wrote most
+ * recently, as of this read (`fromTheVisitor`). A handoff also carries its chat's newest triage
+ * summary (`newestTriageSummary`); a held request never does, as the API sends it, since a visitor
+ * could steer a summary to sway an approval.
+ */
 export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
   const deskId = desk.summary.desk_id;
   const held = decisionsOf(world, deskId)
     .filter((d) => d.decision.state === 'held')
-    .map((d) => ({
-      at: d.createdAt,
-      item: {
-        decision: d.decision,
-        handoff: null,
-        held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
-        held_at: isoTime(d.createdAt),
-        session: needsYouSession(world.sessions.get(d.decision.session_id), d.decision.session_id),
-        from_the_visitor: d.fromTheVisitor,
-      } satisfies NeedsYouItem,
-    }));
-  // An open handoff quotes what its visitor wrote last, as of this read (the API's `last_texts`).
+    .map((d) => {
+      const session = world.sessions.get(d.decision.session_id);
+      return {
+        at: d.createdAt,
+        item: {
+          decision: d.decision,
+          handoff: null,
+          held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
+          held_at: isoTime(d.createdAt),
+          session: needsYouSession(session, d.decision.session_id),
+          from_the_visitor: fromTheVisitor(session),
+          claude_summary: null,
+        } satisfies NeedsYouItem,
+      };
+    });
   const callbacks = [...world.handoffs.values()]
     .filter((h) => h.deskId === deskId && h.handoff.status === 'open')
     .map((h) => {
@@ -134,7 +184,8 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
           held_by: null,
           held_at: null,
           session: needsYouSession(session, h.handoff.session_id),
-          from_the_visitor: session?.lastVisitorText ?? null,
+          from_the_visitor: fromTheVisitor(session),
+          claude_summary: newestTriageSummary(world, desk, h.handoff.session_id),
         } satisfies NeedsYouItem,
       };
     });
@@ -436,6 +487,7 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
+    answers: items.filter((i) => i.kind === 'answer').length,
     turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
     newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },
@@ -531,8 +583,7 @@ export function reports(world: MockWorld, desk: DeskRecord, days: number = REPOR
  * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
-  const stopped: Attempt[] = decisionsOf(world, desk.summary.desk_id)
-    .filter((d) => d.decision.outcome === 'refuse')
+  const stopped: Attempt[] = refusals(world, desk)
     .map((d) => ({
       ref_id: d.decision.decision_id,
       kind: 'refused',
@@ -540,13 +591,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       card_ids: [...d.decision.card_ids],
       origin: 'kernel',
       created_at: isoTime(d.createdAt),
-      // The scripted agent's over-limit receipt identifies this subject in either language.
-      triage: Object.values(VISITOR_PLAIN).some((words) => words.refused_over_mandate === d.decision.visitor_plain)
-        ? {
-            category: 'limits',
-            summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.',
-          }
-        : null,
+      triage: refusalTriage(d),
       ledger_seq: d.decision.ledger_seq,
       cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
         verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
@@ -559,14 +604,54 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     card_ids: [],
     origin: entry.event.origin,
     created_at: entry.created_at,
-    triage: {
-      category: 'wording',
-      summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
-    },
+    triage: stoppedReplyTriage(),
     ledger_seq: entry.seq,
     cause: null,
   }));
   return [...stopped, ...replies].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** The requests the kernel refused at decide time on `desk`. */
+function refusals(world: MockWorld, desk: DeskRecord): DecisionRecord[] {
+  return decisionsOf(world, desk.summary.desk_id).filter((d) => d.decision.outcome === 'refuse');
+}
+
+/**
+ * The AI-written triage of a refused request, as Safety shows it: the scripted agent's over-limit
+ * charge, whose receipt identifies it in either language, and none for any other.
+ */
+function refusalTriage(d: DecisionRecord): Triage | null {
+  if (!Object.values(VISITOR_PLAIN).some((words) => words.refused_over_mandate === d.decision.visitor_plain)) return null;
+  return { category: 'limits', summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.' };
+}
+
+/** The AI-written triage of a draft of Claude's the reply check stopped, as Safety shows it. */
+function stoppedReplyTriage(): Triage {
+  return {
+    category: 'wording',
+    summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
+  };
+}
+
+/**
+ * The newest AI-written triage summary of a chat's stopped attempts, the one Safety shows for it,
+ * or null when nothing in it was triaged: what Needs you sends on a handoff (the API's
+ * `newest_triage`). Here the ledger's order says which is newest. The API keeps the summary
+ * written last, and its summaries are written by background jobs that can finish out of order, so
+ * with two triaged attempts in one chat the two can pick differently. The mock writes no summary
+ * late, so it doesn't model that.
+ */
+function newestTriageSummary(world: MockWorld, desk: DeskRecord, sessionId: string): string | null {
+  const triaged = [
+    ...refusals(world, desk)
+      .filter((d) => d.decision.session_id === sessionId)
+      .map((d) => ({ seq: d.decision.ledger_seq, triage: refusalTriage(d) })),
+    ...stoppedReplies(desk)
+      .filter((entry) => entry.event.session_id === sessionId)
+      .map((entry) => ({ seq: entry.seq, triage: stoppedReplyTriage() })),
+  ];
+  const newest = triaged.filter((t) => t.triage !== null).sort((a, b) => a.seq - b.seq).at(-1);
+  return newest?.triage?.summary ?? null;
 }
 
 export function ledgerPage(desk: DeskRecord): LedgerPage {
@@ -635,13 +720,14 @@ export const HEALTH: HealthOut = {
 };
 
 /**
- * The preset the owner cards came from: the one whose cards they are, exactly, else null. It is
- * provenance only, and Rivera's own rules match neither.
+ * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
+ * opening hours drafts it (`presetCards`), else null. It is provenance only, and Rivera's own rules
+ * match neither.
  */
-function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
+function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {
   const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
   const owned = set(cards);
-  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(PRESETS[preset]) === owned);
+  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(presetCards(preset, hours)) === owned);
   return match ?? null;
 }
 
@@ -653,9 +739,9 @@ function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
 export function rulesView(desk: DeskRecord): RulesView {
   const cards = desk.policy.cards;
   const tools = desk.tools.map((tool): ToolRow => {
-    const covering = new Set(rulesForTool({ tool: tool.tool, effects: tool.effects }, cards).map((card) => card.card_id));
+    const covering = new Set(rulesForTool({ tool: tool.tool as ToolName, effects: tool.effects }, cards).map((card) => card.card_id));
     return {
-      tool: tool.tool,
+      tool: tool.tool as ToolName,
       source: tool.source,
       ...(tool.business === undefined ? {} : { business: structuredClone(tool.business) }),
       effects: [...tool.effects],
@@ -671,7 +757,7 @@ export function rulesView(desk: DeskRecord): RulesView {
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
     };
   });
-  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards) };
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours) };
 }
 
 /**

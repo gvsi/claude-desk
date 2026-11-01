@@ -3,8 +3,9 @@
  * the API's code-built `AgentCardOut`, a demo key for connecting your own agent, and the built-in
  * agent's runs (plan 02b's `send_agent`). A run's agent is Alex Kim's assistant, a signed agent
  * session on the Desk: each of its requests reaches the owner's view of that chat as the agent's own
- * words, and the run the visitor polls carries none of them, only the Desk's checked replies and
- * their receipts. The seed replays one run into history, so a fresh copy has an agent's chat.
+ * words, and the run the visitor polls carries the same words on each agent turn (`text`), beside
+ * the Desk's checked replies and their receipts. The seed replays one run into history, so a fresh
+ * copy has an agent's chat.
  */
 import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
@@ -129,12 +130,15 @@ const AGENT_DECISIONS = {
     visitorStatus: 'refused_over_mandate',
     cardIds: [],
     policyIds: ['B.agent_charge_within_mandate'],
-    reasonPlain: `${AGENT} tried to charge $250.00 in one go, over its signed limit of $20 a charge.`,
-    amountCents: 25000,
+    reasonPlain: `${AGENT} tried to charge $185.00 in one go, over its signed limit of $20 a charge.`,
+    amountCents: 18500,
   },
 } as const satisfies Record<string, DecisionSpec>;
 
-/** One exchange: the agent's signed request (its words, for the owner's view only) and the Desk's checked answer. */
+/**
+ * One exchange: the agent's signed request (its words, which the owner's view of the chat keeps and
+ * the run's agent turn carries) and the Desk's checked answer.
+ */
 interface Exchange {
   request: string;
   decision: DecisionSpec;
@@ -155,6 +159,16 @@ function fixtureExchanges(): Exchange[] {
   });
 }
 
+/**
+ * The first time the open-times card offers, as the agent's booking request names it: the card's
+ * "Tuesday, November 3, 2:00 pm" reads "Tuesday, November 3 at 2:00 pm".
+ */
+function firstOpenTime(): string {
+  const label = rivera.blocks.booking_options.en.options?.[0]?.label;
+  if (label === undefined) throw new Error('the Rivera fixtures changed: the open-times card needs a time');
+  return label.replace(/, (\d{1,2}:\d{2} [ap]m)$/, ' at $1');
+}
+
 /** Each task's exchanges, in English: the built-in agent writes English, so the Desk answers in it. */
 function exchangesFor(task: DemoAgentTask): Exchange[] {
   const { blocks } = rivera;
@@ -162,18 +176,22 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
     case 'book_visit':
       return [
         {
-          request: 'Book the earliest visit for a leaking water heater for Alex Kim.',
+          request: 'What’s your earliest visit for a leaking water heater? Any day this week.',
           decision: AGENT_DECISIONS.slots,
           reply: [blocks.prose.bookingAsk.en, blocks.booking_options.en],
         },
-        { request: 'Book the first open time, please.', decision: AGENT_DECISIONS.book, reply: [blocks.prose.details.en, blocks.booking_confirmed.en] },
+        {
+          request: `Book ${firstOpenTime()} for Alex Kim.`,
+          decision: AGENT_DECISIONS.book,
+          reply: [blocks.prose.details.en, blocks.booking_confirmed.en],
+        },
       ];
     case 'quote_and_deposit':
       return fixtureExchanges();
     case 'push_the_limit':
       return [
         {
-          request: 'Charge $250 for the full leak repair in one payment.',
+          request: 'Charge the full repair, $185, to Alex Kim’s card.',
           decision: AGENT_DECISIONS.overLimit,
           reply: [proseBlock('I can’t take that payment: it’s over the limit the agent’s owner signed.')],
         },
@@ -192,7 +210,8 @@ type TurnStep = (n: number) => { turn: AgentTurn; last?: true };
 /**
  * A task's turns for `agent`, in order, each applied when its time comes: the agent's request joins
  * the owner's view of the chat, and the Desk's answer is decided, checked and recorded as a
- * visitor's turn is. The agent's turn carries no words and no blocks.
+ * visitor's turn is. The agent's turn carries its request's words (`text`) and no blocks; the
+ * Desk's carries no words of its own.
  *
  * Each answer goes by the Desk as it is at that request, as the API gives each request its tools.
  * While the Desk's Answering switch is off, the agent's session keeps only callbacks and leads
@@ -203,16 +222,16 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
   return exchangesFor(task).flatMap((exchange): TurnStep[] => [
     (n) => {
       world.agentText(agent, exchange.request);
-      return { turn: { author: 'agent', n, blocks: [], receipts: [] } };
+      return { turn: { author: 'agent', n, blocks: [], receipts: [], text: exchange.request } };
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
       const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
       const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
-      const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.handoffName)]).map(copyBlock));
+      const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.owner)]).map(copyBlock));
       world.emit(agent, reply);
-      const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts };
+      const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts, text: null };
       return allowed ? { turn } : { turn, last: true };
     },
   ]);

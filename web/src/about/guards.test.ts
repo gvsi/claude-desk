@@ -69,8 +69,9 @@ function importsOf(file: string, text: string, files: ReadonlySet<string>): Impo
 // registry with it.
 const READER_ONLY = ['about/documents.ts', 'about/markdown.ts', 'about/ReaderPage.tsx'];
 const READER = (file: string) => file === 'about/ReaderPage.tsx' || /^about\/figures\/[^/]+\.tsx$/.test(file);
-// The page's chrome, which renders when the reader can't: never the registry or the page, even on demand.
-const CHROME = ['about/ReaderError.tsx', 'about/PrototypeLink.tsx', 'about/links.ts'];
+// The page's chrome, which renders when the reader can't (or hasn't yet: the wait while it loads): never the
+// registry or the page, even on demand.
+const CHROME = ['about/ReaderError.tsx', 'about/AboutWait.tsx', 'about/PrototypeLink.tsx', 'about/links.ts'];
 // The one `import()` that may load the reader: the router's, of the page itself.
 const ON_DEMAND = { from: 'app/routes.tsx', to: 'about/ReaderPage.tsx' };
 
@@ -291,6 +292,7 @@ describe('About page source guards', () => {
       ['about/ReaderPage.tsx', "import { parseDocument } from './markdown.ts';", 'only documents.ts may'],
       ['about/links.ts', "import md from '../../../docs/product-proposal.md?raw';", 'only documents.ts may'],
       ['about/ReaderError.tsx', "import {\n  ABOUT_DOCUMENTS,\n} from './documents.ts';", 'chrome never loads'],
+      ['about/AboutWait.tsx', "import { ReaderPage } from './ReaderPage.tsx';", 'chrome never loads'],
       ['about/PrototypeLink.tsx', "const page = () => import('./ReaderPage.tsx');", 'chrome never loads'],
       ['about/links.ts', "export * from './documents';", 'chrome never loads'],
       ['owner/OwnerLayout.tsx', "import { ABOUT_DOCUMENTS } from '../about/documents.ts';", 'not through import()'],

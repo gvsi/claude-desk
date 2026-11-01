@@ -51,6 +51,85 @@ from .test_verification import api_rows
 
 BACKEND = Path(__file__).resolve().parents[2]
 
+
+def test_business_money_predicate_needs_the_desks_money_tools():
+    card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone", reason="Deposits.")
+    assert not contracts.moves_money(card)
+    assert contracts.moves_money(card, frozenset({"desk.deposit"}))
+
+
+def test_money_tools_of_pairs_uses_effects_for_every_source_and_status():
+    from .test_compiler import profile
+
+    profiles = [profile("native.payment_link", ["charge"], "desk"),
+                profile("payments.create_refund", ["pay_out"], "charge", "mcp"),
+                profile("desk.deposit", ["charge"], "desk", "business").model_copy(
+                    update={"status": "needs_review"}),
+                profile("desk.old-deposit", ["charge"], "desk", "business").model_copy(
+                    update={"status": "disabled"}),
+                profile("desk.intake", ["change"], "desk", "business")]
+    assert contracts.money_tools_of((p.tool, iter(p.effects)) for p in profiles) == frozenset({
+        "native.payment_link", "payments.create_refund", "desk.deposit", "desk.old-deposit"})
+
+
+async def test_business_money_cards_need_an_amount_within_the_cap(app, client):
+    from .test_business_tools import business_rows, intake, put
+
+    desk = await rivera(app, client)
+    assert (await put(client, desk, [intake(), intake(tool="desk.deposit", config={
+        "block": "purpose_payment", "purpose": "Deposit", "amount_cents": 5000})])).status_code == 200
+    rows = await business_rows(app, desk)
+    assert rows["desk.deposit"].status == "needs_review"
+    money_tools = contracts.money_tools_of((row.profile.tool, row.profile.effects) for row in rows.values())
+    card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone", reason="Deposits.")
+    for maximum in (None, 2001, 2000, 1999):
+        candidate = card.model_copy(update={"max_amount_cents": maximum})
+        errors = compiler.validate_cards([candidate], people=(), agent_keys=(), auto_money_cap_cents=2000,
+                                         money_tools=money_tools)
+        assert bool(errors) == (maximum is None or maximum > 2000)
+        assert all("above_money_cap" in error for error in errors)
+    nonmoney = card.model_copy(update={"applies_to": "desk.new-enquiry"})
+    assert compiler.validate_cards([nonmoney], people=(), agent_keys=(), auto_money_cap_cents=0,
+                                   money_tools=money_tools) == []
+
+
+def test_lowering_a_business_money_card_uses_the_desks_money_tools():
+    card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone",
+                    max_amount_cents=5000, review=True, max_discount_bp=100, reason="Deposits up to $50.")
+    money_tools = frozenset({"desk.deposit"})
+    assert lower_to_cap([card], [card], 2000, "en") == [card]
+    assert money_cap.auto_money(card, money_tools)
+    [lowered] = lower_to_cap([card], [card], 2000, "en", money_tools=money_tools)
+    assert lowered == card.model_copy(update={"max_amount_cents": 2000,
+                                              "reason": "Up to $20, your payment limit."})
+    [zero] = lower_to_cap([card], [card], 0, "en", money_tools=money_tools)
+    assert zero == card.model_copy(update={"mode": "ask", "max_amount_cents": None, "review": False,
+                                           "max_discount_bp": 0, "reason": "Your payment limit is $0."})
+    assert lower_to_cap([card], [], 2000, "en", money_tools=money_tools) == [card]
+
+
+@pytest.mark.parametrize("status", ["needs_review", "disabled"])
+async def test_draft_checks_business_money_before_the_tool_is_enabled(app, client, caplog, status):
+    from .test_business_tools import intake, put
+
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await rivera(app, client)
+    assert (await put(client, desk, [intake(tool="desk.deposit", config={
+        "block": "purpose_payment", "purpose": "Deposit", "amount_cents": 5000})])).status_code == 200
+    if status == "disabled":
+        assert (await put(client, desk, [])).status_code == 200
+    card = RuleCard(card_id="deposit", applies_to="desk.deposit", mode="auto", who="anyone", reason="Deposits.")
+    for maximum in (None, 2001):
+        response = await post_draft(client, desk, [card.model_copy(update={"max_amount_cents": maximum})], 1,
+                                    auto_money_cap_cents=2000)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert draft_refusals(caplog) == ["above_money_cap", "above_money_cap"]
+    assert sorted(await versions_of(app, desk)) == [1]
+    response = await post_draft(client, desk, [card.model_copy(update={"max_amount_cents": 2000})], 1,
+                                auto_money_cap_cents=2000)
+    assert response.status_code == 200, response.text
+    assert response.json()["auto_money_cap_cents"] == 2000
+
 # A test-only auto set that permits everything, annotated so it lints; its @applies_to names every
 # money effect, so decision step 5 counts it as an owner card for money (as in test_cedar.py).
 PERMIT_ALL = ('@id("test_permit_all") @card("test-permit-all") @tier("auto") '
@@ -541,7 +620,7 @@ def test_one_predicate_says_which_cards_the_cap_bounds():
                       reason="Quotes from the price list.")
     for card in (charge_card("links", 30_000), charge_card("small", 5_000), asks, refunds, quotes):
         lowered = lower_to_cap([card], [card], 10_000, "en") != [card]
-        assert lowered == bool(compiler.above_money_cap([card], 10_000)), card.card_id
+        assert lowered == bool(compiler.above_money_cap([card], 10_000, money_tools=frozenset())), card.card_id
 
 
 def test_one_set_says_which_effects_move_money(monkeypatch):
@@ -558,7 +637,7 @@ def test_one_set_says_which_effects_move_money(monkeypatch):
     changes = RuleCard(card_id="changes", applies_to="effect:change", mode="auto", who="anyone",
                        max_amount_cents=90_000, reason="Changes.")
     assert contracts.moves_money(changes) and money_cap.auto_money(changes)
-    assert compiler.above_money_cap([changes], 50_000) == [changes]
+    assert compiler.above_money_cap([changes], 50_000, money_tools=frozenset()) == [changes]
     # an auto card on a tool with the effect: the amount is required and bounded by the cap
     book = RuleCard(card_id="book", applies_to="native.book", mode="auto", who="anyone", reason="Bookings.")
     [permit] = [text for text in compile_at([book], NATIVE, cap=8_000).A.split("\n\n") if '@id("auto.book")' in text]

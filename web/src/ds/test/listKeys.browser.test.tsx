@@ -83,7 +83,7 @@ it('connector_review_coverage_keeps_a_key_each', () => {
           {
             key: 'native.payment_link',
             name: 'Payment link',
-            description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+            description: "Makes a one-time link for a quote. Charges money. Can't be undone.",
             mode: 'ask',
             coveredBy: [
               { text, mode: 'always_on' },

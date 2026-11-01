@@ -99,9 +99,11 @@ function isSetupJob(row: ToolRow): row is ToolRow & { tool: `desk.${string}`; bu
 /**
  * The new Desk's connectors as the design system's setup tools list draws them (N-R2-Setup-05),
  * each row read through `toolState`: Verification "Always on"; a connector with a tool on, or
- * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for Stripe once
- * it can be connected, its tool count and "Connect". A built-in connector with no tools listed, and
- * Google Calendar, which has none, aren't shown.
+ * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for an app
+ * already connected (Stripe once the setup chat or this step has connected it, so it can't be
+ * connected again), its tool count, "Needs review" and "Review" (N-Live-REV-560); Stripe while it
+ * can still be connected, its tool count and "Connect". Both of Stripe's buttons open the same
+ * review. A built-in connector with no tools listed, and Google Calendar, which has none, aren't shown.
  */
 function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (key: ConnectorKey) => void) {
   const builtIn: SetupToolsRow[] = [];
@@ -109,10 +111,13 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
   for (const connector of CONNECTORS) {
     const outside = connector.view.source.kind === 'external';
     const listed = rows.some((row) => isCatalogTool(row.tool) && connector.tools.includes(row.tool));
+    const canConnect = connector.key === MOCK_PAYMENTS && connectable;
     let row: SetupToolsRow | null = null;
     if (connector.key === 'verification' && listed) row = { connector: connector.view, state: 'always_on' };
     else if (connectorOn(connector, rows)) row = { connector: connector.view, state: 'on' };
-    else if (listed || (connector.key === MOCK_PAYMENTS && connectable)) {
+    else if (outside && listed && !canConnect) {
+      row = { connector: connector.view, state: 'needs_review', tools: connector.tools.length, onReview: () => onChoose(connector.key) };
+    } else if (listed || canConnect) {
       row = { connector: connector.view, state: 'off', onChoose: () => onChoose(connector.key), ...(outside ? { tools: connector.tools.length } : {}) };
     }
     if (row !== null) (outside ? external : builtIn).push(row);
@@ -122,10 +127,11 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
 
 /**
  * "What Claude can use": the new Desk's connectors from `setupTools`, grouped by the catalog. A
- * built-in connector that isn't on, or the mock payments server (connected first), opens its review
- * (`ConnectorReview`); "Turn it on" sends one `confirmTool` for its tools, each at the hash it was
- * listed at, and its draft shows inline; "Confirm and turn on" confirms it, and only then, read
- * again, do the tools read "On". "Continue" goes on to the rules.
+ * built-in connector that isn't on, or the mock payments server (connected first while it can
+ * be, or already connected and waiting for review), opens its review (`ConnectorReview`); "Turn it
+ * on" sends one `confirmTool` for its tools, each at the hash it was listed at, and its draft shows
+ * inline; "Confirm and turn on" confirms it, and only then, read again, do the tools read "On".
+ * "Continue" goes on to the rules.
  */
 export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const queryClient = useQueryClient();
