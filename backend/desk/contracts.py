@@ -452,9 +452,9 @@ class RenderedBlock(BaseModel):           # every field is kernel-rendered and c
 class ReplyVerdict(BaseModel):
     ok: bool
     language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
-    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft keeps its checked cards
-                                          # alone when only its prose failed (desk.rewrites.PROSE_ONLY), else gives the handoff
-                                          # clause, but none on a first attempt the API rewrites (CheckReplyRequest.final false,
+    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft keeps its checked cards,
+                                          # then any drafted handoff, when only its prose failed (desk.rewrites.PROSE_ONLY),
+                                          # else gives the handoff clause, but none on a first attempt the API rewrites (CheckReplyRequest.final false,
                                           # every violation rewritable); a blocked owner say none
     violations: list[Violation]
     message_id: str

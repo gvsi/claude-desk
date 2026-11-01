@@ -27,8 +27,8 @@ def test_timeout_reply_waits_past_the_production_soft_check_deadline():
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 65
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 61, ("01b",): 1, ("01c",): 3}
+    assert len(rows) == len({row.id for row in rows}) == 66
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 62, ("01b",): 1, ("01c",): 3}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
@@ -204,14 +204,23 @@ def test_verdict_expect_states_each_block_and_its_fact():
 
 @pytest.mark.parametrize("kind", ["number_in_prose", "promise_word", "soft_promise", "uncertain_language",
                                   "check_unavailable"])
-def test_prose_failure_expects_checked_cards_without_prose_or_handoff(kind):
-    row = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE, {"template": "handoff"}],
-                                  "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
+    """A failure only of the prose keeps the checked cards, then a handoff clause Claude drafted
+    (the owner's ruling of 2026-11-01); without a drafted one, the cards alone."""
+    alone = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE],
+                                    "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+    assert alone.blocks == ["quote"]
+    with pytest.raises(ValueError):
+        ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}, QUOTE_CLAUSE],
+                                 "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
+    row = ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}, QUOTE_CLAUSE],
+                                  "expect": {"ok": False, "violations": [kind], "blocks": ["quote", "handoff"]}})
     expect = row.verdict_expect(0, {"own-quote": "quote:Q-1"})
-    assert match_expect(200, verdict([kind], [QUOTE_CARD]).model_dump(mode="json"), expect) == []
-    for blocks in ([PROSE, QUOTE_CARD], [QUOTE_CARD, HANDOFF], [HANDOFF], [],
-                   [QUOTE_CARD.model_copy(update={"fact_id": "quote:wrong"})],
-                   [QUOTE_CARD.model_copy(update={"title": None})], [QUOTE_CARD.model_copy(update={"lines": []})]):
+    assert match_expect(200, verdict([kind], [QUOTE_CARD, HANDOFF]).model_dump(mode="json"), expect) == []
+    for blocks in ([PROSE, QUOTE_CARD, HANDOFF], [QUOTE_CARD], [HANDOFF, QUOTE_CARD], [HANDOFF], [],
+                   [QUOTE_CARD.model_copy(update={"fact_id": "quote:wrong"}), HANDOFF],
+                   [QUOTE_CARD.model_copy(update={"title": None}), HANDOFF],
+                   [QUOTE_CARD.model_copy(update={"lines": []}), HANDOFF]):
         assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), expect)
     no_cards = ReplyRow.model_validate({**GOOD_ROW, "expect": {"ok": False, "violations": [kind]}})
     assert no_cards.blocks == ["handoff"]

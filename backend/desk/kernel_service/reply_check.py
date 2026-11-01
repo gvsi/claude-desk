@@ -55,7 +55,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
-   keeps checked cards alone, without a cited handoff; any other failure, or no card to keep,
+   keeps checked cards without the prose, then the handoff clause if Claude drafted one, which
+   opens the owner's handoff as the handoff card does; any other failure, or no card to keep,
    shows only the handoff clause. A first attempt the API rewrites (`final` false, every
    violation one a rewrite can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
@@ -597,11 +598,15 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
 
 def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
                    language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
-    """Keep checked cards alone for prose-only failures; all other failures hand off."""
+    """Keep checked cards for prose-only failures, without the prose, and after them the handoff
+    clause when Claude drafted one (the owner's ruling of 2026-11-01), rendered by the kernel in the
+    reply's language; `finalize` then opens the owner's handoff for it as for any shown handoff
+    card. All other failures, or no card to keep, show the handoff clause alone."""
     if violations and all(violation.kind in PROSE_ONLY for violation in violations):
         kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
         if kept:
-            return kept
+            drafted = any(card.kind == "card" and card.template == "handoff" for card in cards)
+            return kept + ([handoff(language, desk)] if drafted else [])
     return [handoff(language, desk)]
 
 
@@ -791,8 +796,9 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
-    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards alone; with
-    none to keep it substitutes the handoff card, which may open a new handoff.
+    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards, and a drafted
+    handoff after them; with none to keep it substitutes the handoff card, which may open a new
+    handoff.
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
     closed_at, person and assurance are read afresh, then all cited facts' readers, status and

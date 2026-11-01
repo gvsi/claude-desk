@@ -7,7 +7,8 @@ and the kernel to decide whether a blocked draft's handoff clause is one the vis
 (`CheckReplyRequest.final`), so the two can't disagree.
 
 `PROSE_ONLY` names the failures of Claude's own words: a shown verdict failing only for these keeps
-the draft's checked cards alone, without the prose; any other kind shows the handoff clause. The
+the draft's checked cards, without the prose, and a handoff clause after them if Claude drafted
+one; any other kind shows the handoff clause. The
 kernel, the fake kernel and the tier 1 reply rows all read it. Plain data, importing only the
 contracts.
 """

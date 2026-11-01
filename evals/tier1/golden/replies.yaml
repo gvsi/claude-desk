@@ -21,9 +21,9 @@
 #                  "maybe"); refusal. A flag is soft_promise; no verdict is check_unavailable.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
-#                  in order: "prose" or a card's template. A failed check shows its checked cards alone
-#                  when only the prose failed, else the handoff clause, and nothing on a first draft a
-#                  rewrite can fix; a passing one its prose when not empty, then a card per clause, each
+#                  in order: "prose" or a card's template. A failed check shows its checked cards, then
+#                  any drafted handoff, when only the prose failed, else the handoff clause, and nothing
+#                  on a first draft a rewrite can fix; a passing one its prose when not empty, then a card per clause, each
 #                  carrying its clause's fact and card data.
 #
 # On the real kernel every verdict also has its signature verified, its visible free text scanned by
@@ -422,3 +422,12 @@
   clauses: [{template: quote, fact: own-quote}]
   final: true
   expect: {ok: false, violations: [number_in_prose], blocks: [quote]}
+
+# A handoff clause Claude drafted beside the card follows the kept card (the owner's ruling of
+# 2026-11-01); the prose is still dropped.
+- id: c-final-prose-quote-drafted-handoff
+  requires: [01a]
+  prose: "Here is $20."
+  clauses: [{template: handoff}, {template: quote, fact: own-quote}]
+  final: true
+  expect: {ok: false, violations: [number_in_prose], blocks: [quote, handoff]}
