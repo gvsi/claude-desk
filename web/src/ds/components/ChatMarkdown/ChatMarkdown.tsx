@@ -86,10 +86,26 @@ function plain<Tag extends keyof JSX.IntrinsicElements>(tag: Tag) {
   return Plain;
 }
 
-/** A table in its hairline card, which scrolls sideways when the table is wider than the column. */
-function Table({ node: _node, ...props }: ElementProps<'table'>) {
+/** A table's header cells' words, as "Repair, Replace", or nothing when its header has none. */
+function headerWords(table: ExtraProps['node']): string {
+  const head = table?.children.find((child) => child.type === 'element' && child.tagName === 'thead');
+  const row = head?.type === 'element' ? head.children.find((child) => child.type === 'element' && child.tagName === 'tr') : undefined;
+  if (row?.type !== 'element') return '';
+  return row.children
+    .flatMap((cell) => (cell.type === 'element' ? [textOf(cell).trim()] : []))
+    .filter((words) => words !== '')
+    .join(', ');
+}
+
+/**
+ * A table in its hairline card, which scrolls sideways when the table is wider than the column. It
+ * takes focus, so a keyboard can scroll it (Safari scrolls only what has focus), and with header
+ * words it is a region named by them.
+ */
+function Table({ node, ...props }: ElementProps<'table'>) {
+  const label = headerWords(node);
   return (
-    <div className="cd-md__table">
+    <div className="cd-md__table" tabIndex={0} {...(label === '' ? {} : { role: 'region', 'aria-label': label })}>
       <table {...props} />
     </div>
   );

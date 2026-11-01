@@ -236,6 +236,15 @@ it('growing_text_that_stops_mid_table_shows_no_pipes_or_broken_rows', () => {
   ]);
 });
 
+it('a_tables_scroll_area_takes_the_keyboard_named_by_its_header', () => {
+  // A wide table scrolls sideways; Safari only scrolls it by keyboard when it can take focus.
+  const md = reply(mount(<ChatMarkdown text={`${HEAD}\n| What changes | One worn part | The whole tank |\n\n|  |  |\n| --- | --- |\n| a | b |`} />));
+  const [named, unnamed] = [...md.querySelectorAll<HTMLElement>('.cd-md__table')];
+  expect([named?.tabIndex, named?.getAttribute('role'), named?.getAttribute('aria-label')]).toEqual([0, 'region', 'Repair, Replace']);
+  // A header with no words names nothing, so that area is no region, but it still takes focus.
+  expect([unnamed?.tabIndex, unnamed?.getAttribute('role'), unnamed?.getAttribute('aria-label')]).toEqual([0, null, null]);
+});
+
 it('the_header_rows_line_and_fill_run_the_cards_full_width', () => {
   // The empty corner cell is a plain cell, but it draws as the header row: its fill and hairline.
   const md = reply(mount(<ChatMarkdown text={`${HEAD}\n| What changes | One worn part | The whole tank |`} />));
