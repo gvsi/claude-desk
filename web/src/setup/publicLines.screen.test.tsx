@@ -682,7 +682,11 @@ it('removes suggestions with one busy action, blocks other actions, and hides th
   await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeEnabled();
   expect(mockStore.requests.filter((request) => request.key === 'removePublicLine').map((request) => request.path.split('/').at(-1))).toEqual(['hours', 'contact']);
-  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['business-tax-return', 'tax-return-review', 'monthly-bookkeeping']);
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual([
+    'business-tax-return?title=Business+tax+return&unit_cents=60000',
+    'tax-return-review?title=Tax+return+review&unit_cents=25000',
+    'monthly-bookkeeping?title=Monthly+bookkeeping&unit_cents=15000',
+  ]);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
 });
@@ -787,7 +791,7 @@ it('keeps an edited suggestion open if a successful save does not make it owner-
 });
 
 
-it('refreshes a stale price id and uses ids from the latest response while other actions wait', async () => {
+it('sends encoded displayed prices and refreshes shifted duplicate ids while other actions wait', async () => {
   const state = await atSituations();
   const params = { id: state.interview_id };
   const response = await mockStore.dispatch('setupPublicLines', { params });
@@ -796,21 +800,21 @@ it('refreshes a stale price id and uses ids from the latest response while other
   storePublicState(mockStore.world, params.id, {
     lines: data.lines.filter((line) => line.source === 'owner'), hours: null,
     prices: { source: 'suggested', items: [
-      { item_id: 'review', title: 'Review', unit_cents: 25000 },
-      { item_id: 'review-2', title: 'Review', unit_cents: 60000 },
-      { item_id: 'review-3', title: 'Review', unit_cents: 15000 },
+      { item_id: 'review-cafe-intro', title: 'Review & café / intro?', unit_cents: 25000 },
+      { item_id: 'review-cafe-intro-2', title: 'Review & café / intro?', unit_cents: 60000 },
+      { item_id: 'review-cafe-intro-3', title: 'Review & café / intro?', unit_cents: 15000 },
     ] },
   });
   const { screen } = await renderRoute(`/app/setup/${params.id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  await expect.element(screen.getByText('Review, $150', { exact: true })).toBeVisible();
-  await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review-3' } });
-  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(2).click();
-  await expect.element(screen.getByText('Review, $150', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Review & café / intro?, $150', { exact: true })).toBeVisible();
+  await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review-cafe-intro' }, query: { title: 'Review & café / intro?', unit_cents: '25000' } });
+  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(1).click();
+  await expect.element(screen.getByText('Review & café / intro?, $250', { exact: true })).not.toBeInTheDocument();
   expect(mockStore.requests.filter((request) => request.key === 'setup').length).toBeGreaterThanOrEqual(2);
   expect(mockStore.requests.filter((request) => request.key === 'setupPublicLines').length).toBeGreaterThanOrEqual(3);
-  await expect.element(screen.getByText('Review, $250', { exact: true })).toBeVisible();
-  await expect.element(screen.getByText('Review, $600', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Review & café / intro?, $150', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Review & café / intro?, $600', { exact: true })).toBeVisible();
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   onTestFinished(release);
@@ -823,11 +827,16 @@ it('refreshes a stale price id and uses ids from the latest response while other
   (screen.getByRole('button', { name: 'Remove', exact: true }).nth(1).element() as HTMLButtonElement).click();
   expect(mockStore.requests.filter((request) => request.key === 'setupPublicLinesConfirm')).toHaveLength(0);
   release();
-  await expect.element(screen.getByText('Review, $250', { exact: true })).not.toBeInTheDocument();
-  await expect.element(screen.getByText('Review, $600', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Review & café / intro?, $600', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Review & café / intro?, $150', { exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
-  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['review-3', 'review-3', 'review', 'review-2']);
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual([
+    'review-cafe-intro?title=Review+%26+caf%C3%A9+%2F+intro%3F&unit_cents=25000',
+    'review-cafe-intro-2?title=Review+%26+caf%C3%A9+%2F+intro%3F&unit_cents=60000',
+    'review-cafe-intro?title=Review+%26+caf%C3%A9+%2F+intro%3F&unit_cents=60000',
+    'review-cafe-intro?title=Review+%26+caf%C3%A9+%2F+intro%3F&unit_cents=15000',
+  ]);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
 });

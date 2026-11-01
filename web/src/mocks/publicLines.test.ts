@@ -11,7 +11,7 @@ import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
-it('keeps duplicate-title price ids bound to their original items across removals', async () => {
+it('guards recomputed duplicate-title ids against stale displayed prices', async () => {
   const params = await atRules();
   const response = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in response) throw new Error('read failed');
@@ -21,61 +21,90 @@ it('keeps duplicate-title price ids bound to their original items across removal
     { item_id: 'review-2', title: 'Review', unit_cents: 60000 },
     { item_id: 'review-3', title: 'Review', unit_cents: 15000 },
   ] } });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review' } })).toMatchObject({ status: 200 });
-  // A different tab can still hold the original second id after the first item was removed.
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review-2' } })).toMatchObject({
-    status: 200, body: { prices: { source: 'suggested', items: [
-      { item_id: 'review-3', title: 'Review', unit_cents: 15000 },
-    ] } },
-  });
+  expect(await mockStore.dispatch('removePublicPrice', {
+    params: { ...params, item_id: 'review' }, query: { title: 'Review', unit_cents: '25000' },
+  })).toMatchObject({ status: 200, body: { prices: { items: [
+    { item_id: 'review', title: 'Review', unit_cents: 60000 },
+    { item_id: 'review-2', title: 'Review', unit_cents: 15000 },
+  ] } } });
   const remaining = await mockStore.dispatch('setupPublicLines', { params });
-  for (const item_id of ['review', 'review-2']) {
-    expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
-    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(remaining);
-  }
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review-3' } })).toMatchObject({ status: 200, body: { prices: null } });
+  // The old second id now names $150, so the original $600 guard must refuse it.
+  expect(await mockStore.dispatch('removePublicPrice', {
+    params: { ...params, item_id: 'review-2' }, query: { title: 'Review', unit_cents: '60000' },
+  })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(remaining);
+  expect(await mockStore.dispatch('removePublicPrice', {
+    params: { ...params, item_id: 'review' }, query: { title: 'Review', unit_cents: '60000' },
+  })).toMatchObject({ status: 200, body: { prices: { items: [
+    { item_id: 'review', title: 'Review', unit_cents: 15000 },
+  ] } } });
+  expect(await mockStore.dispatch('removePublicPrice', {
+    params: { ...params, item_id: 'review' }, query: { title: 'Review', unit_cents: '15000' },
+  })).toMatchObject({ status: 200, body: { prices: null } });
 });
 
-it('removes one suggested price, preserves duplicate ids and clears the last price', async () => {
+it('requires both displayed price query values and refuses any mismatch without mutation', async () => {
+  const params = await atRules();
+  const response = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in response) throw new Error('read failed');
+  const data = response.body as SetupPublicLines;
+  storePublicState(mockStore.world, params.id, { ...data, prices: { source: 'suggested', items: [
+    { item_id: 'review', title: 'Review & café / intro?', unit_cents: 0 },
+  ] } });
+  const before = await mockStore.dispatch('setupPublicLines', { params });
+  const priceParams = { ...params, item_id: 'review-cafe-intro' };
+  const invalidQueries: Record<string, string>[] = [{}, { title: 'Review & café / intro?' }, { unit_cents: '0' }, { title: 'Review & café / intro?', unit_cents: '' }, { title: 'Review & café / intro?', unit_cents: 'invalid' }];
+  for (const query of invalidQueries) {
+    expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query })).toMatchObject({ status: 422, body: { error: 'invalid' } });
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+  }
+  for (const query of [{ title: 'Review', unit_cents: '0' }, { title: 'Review & café / intro?', unit_cents: '1' }]) {
+    expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+  }
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query: { title: 'Review & café / intro?', unit_cents: '0' } })).toMatchObject({ status: 200, body: { prices: null } });
+});
+
+it('removes one suggested price, recomputes duplicate ids and clears the last price', async () => {
   const params = await atRules();
   const response = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in response) throw new Error('read failed');
   const data = response.body as SetupPublicLines;
   expect(data.prices!.items.map((item) => item.item_id)).toEqual(['tax-return-review', 'business-tax-return', 'monthly-bookkeeping']);
-  const removed = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' } });
+  const removed = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' }, query: { title: 'Business tax return', unit_cents: '60000' } });
   expect(removed).toMatchObject({ status: 200, body: { lines: data.lines, hours: data.hours, prices: { source: 'suggested', items: [
     data.prices!.items[0], data.prices!.items[2],
   ] } } });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
-  // IDs are assigned from titles once; duplicate-title suffixes stay bound to those prices.
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' }, query: { title: 'Business tax return', unit_cents: '60000' } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  // IDs are recomputed from the remaining titles, including duplicate suffixes.
   storePublicState(mockStore.world, params.id, { ...data, prices: { source: 'suggested', items: [
     { item_id: 'cafe-review', title: 'Café review!', unit_cents: 25000 },
     { item_id: 'cafe-review-2', title: 'Café review!', unit_cents: 60000 },
     { item_id: 'cafe-review-3', title: 'Café review!', unit_cents: 15000 },
   ] } });
-  const first = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' } });
+  const first = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' }, query: { title: 'Café review!', unit_cents: '25000' } });
   expect(first).toMatchObject({ status: 200, body: { prices: { source: 'suggested', items: [
-    { item_id: 'cafe-review-2', title: 'Café review!', unit_cents: 60000 },
-    { item_id: 'cafe-review-3', title: 'Café review!', unit_cents: 15000 },
+    { item_id: 'cafe-review', title: 'Café review!', unit_cents: 60000 },
+    { item_id: 'cafe-review-2', title: 'Café review!', unit_cents: 15000 },
   ] } } });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' } })).toMatchObject({ status: 409 });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review-2' } })).toMatchObject({ status: 200, body: { prices: { items: [
-    { item_id: 'cafe-review-3', title: 'Café review!', unit_cents: 15000 },
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' }, query: { title: 'Café review!', unit_cents: '25000' } })).toMatchObject({ status: 409 });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' }, query: { title: 'Café review!', unit_cents: '60000' } })).toMatchObject({ status: 200, body: { prices: { items: [
+    { item_id: 'cafe-review', title: 'Café review!', unit_cents: 15000 },
   ] } } });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review-3' } })).toMatchObject({ status: 200, body: { prices: null } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' }, query: { title: 'Café review!', unit_cents: '15000' } })).toMatchObject({ status: 200, body: { prices: null } });
 });
 
 it('refuses per-price removal for owner prices, wrong stages and another owner', async () => {
   const params = await atRules();
   const priceParams = { ...params, item_id: 'tax-return-review' };
   expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200 });
-  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 422, body: { error: 'not_suggested', key: 'prices' } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 422, body: { error: 'not_suggested', key: 'prices' } });
   expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({ body: { prices: { source: 'owner', items: expect.arrayContaining([expect.objectContaining({ item_id: priceParams.item_id })]) } } });
   await mockStore.dispatch('setupSafetyCheck', { params });
-  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 409, body: { error: 'conflict' } });
-  expect(await mockStore.dispatch('removePublicPrice', { params: { id: 'missing', item_id: priceParams.item_id } })).toMatchObject({ status: 404 });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { id: 'missing', item_id: priceParams.item_id }, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 404 });
   mockStore.reset('rivera', { signedIn: false });
-  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 401 });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 401 });
   const store = new MockStore({ cookies: 'real' });
   const owner = async () => {
     const copy = await store.dispatch('copies', { body: { passcode: 'demo' } });
@@ -88,8 +117,8 @@ it('refuses per-price removal for owner prices, wrong stages and another owner',
   const second = await owner();
   const started = await store.dispatch('startSetup', { cookies: first, body: { description: START_EXAMPLES.en.examples[3]!.description, timezone: 'UTC', idempotency_key: 'price-ownership' } });
   if ('network' in started) throw new Error('start failed');
-  expect(await store.dispatch('removePublicPrice', { cookies: first, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' } })).toMatchObject({ status: 409 });
-  expect(await store.dispatch('removePublicPrice', { cookies: second, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' } })).toMatchObject({ status: 404 });
+  expect(await store.dispatch('removePublicPrice', { cookies: first, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' }, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 409 });
+  expect(await store.dispatch('removePublicPrice', { cookies: second, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' }, query: { title: 'Tax return review', unit_cents: '25000' } })).toMatchObject({ status: 404 });
 });
 
 it('removes only suggested items and never publishes a removed item', async () => {

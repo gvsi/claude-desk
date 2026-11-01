@@ -251,7 +251,7 @@ interface RouteShapes {
   setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
   setupPublicLinesConfirm: { body: SetupPublicLinesConfirmIn; response: SetupPublicLines };
   removePublicLine: { body: undefined; response: SetupPublicLines };
-  removePublicPrice: { body: undefined; response: SetupPublicLines };
+  removePublicPrice: { query: { title: string; unit_cents: number }; body: undefined; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };
@@ -287,8 +287,10 @@ type ParamNames<P extends string> = P extends `${string}{${infer Name}}${infer R
 /** The path parameters a route needs, each a string. */
 export type RouteParams<K extends RouteKey> = { [Name in ParamNames<(typeof ROUTES)[K]['path']>]: string };
 
-/** Query values; `undefined` leaves the parameter out. */
-export type RouteQuery = Record<string, string | number | boolean | undefined>;
+/** Required query values where declared; otherwise `undefined` leaves a parameter out. */
+export type RouteQuery<K extends RouteKey = RouteKey> = RouteShapes[K] extends { query: infer Query }
+  ? Query
+  : Record<string, string | number | boolean | undefined>;
 
 /**
  * The path for `key` with each `{name}` filled from `params` through `encodeURIComponent`, and

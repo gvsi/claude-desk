@@ -153,10 +153,13 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     setRemoving(row);
     setError(null);
     try {
-      if (key === 'prices' && itemId === undefined) throw new Error('missing price id');
-      const saved = checkedLines(itemId === undefined
+      const price = lines.data?.prices?.items.find((item) => item.item_id === itemId);
+      if (key === 'prices' && price === undefined) throw new Error('missing price');
+      const saved = checkedLines(price === undefined
         ? await request('removePublicLine', { params: { id, key } })
-        : await request('removePublicPrice', { params: { id, item_id: itemId } }));
+        : await request('removePublicPrice', {
+          params: { id, item_id: price.item_id }, query: { title: price.title, unit_cents: price.unit_cents },
+        }));
       if (itemId !== undefined) {
         const remaining = lines.data?.prices?.items.filter((item) => item.item_id !== itemId);
         if (!remaining || remaining.length !== (saved.prices?.items.length ?? 0)
