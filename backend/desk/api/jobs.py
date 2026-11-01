@@ -191,16 +191,19 @@ async def defer_resume_after_answer(app: procrastinate.App, ids: Ids, decision: 
                                     approved: Decision | None = None, *,
                                     result_fact_ids: list[str] | None = None) -> None:
     """Queue IDs, the signed outcome, its optional approved snapshot and executed result fact IDs only.
-    Exclude the owner-only reason and key; result claims and model_view never enter the queue."""
+    Exclude the owner-only reason and key; result claims and model_view never enter the queue. The result fact IDs are
+    queued only when an executed outcome has some, so a job queued during a rolling deploy without them still runs on
+    an older worker whose resume job doesn't take them."""
     if decision.session_id != ids.session_id:
         raise ValueError("a decision resumes only its own session")
     decision = visitor_safe(decision)
     approved = visitor_safe(approved) if approved is not None else None
+    results = {"result_fact_ids": list(result_fact_ids)} if decision.state == "executed" and result_fact_ids else {}
     await app.configure_task(RESUME_AFTER_ANSWER).defer_async(
         copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id,
         decision=decision.model_dump(mode="json", exclude={"owner_plain"}),
         approved=approved.model_dump(mode="json", exclude={"owner_plain"}) if approved is not None else None,
-        result_fact_ids=(result_fact_ids or []) if decision.state == "executed" else [])
+        **results)
 
 
 async def defer_triage(app: procrastinate.App, ids: Ids, stopped: Stopped) -> None:

@@ -399,6 +399,7 @@ async def test_refusal_reason_stays_on_owner_reads(app, browser, fake, kernel_ht
     (job,) = await resume_jobs(jobs_connector)
     assert owner_line not in json.dumps(job["args"])
     assert "owner_plain" not in json.dumps(job["args"])
+    assert "result_fact_ids" not in job["args"]                       # a refused answer queues no result IDs
     assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
     visitor_read = await kernel_http.session(held.token).call("GET /decisions/{id}", path={"id": held.decision_id})
     assert visitor_read.owner_plain is None and owner_line not in visitor_read.model_dump_json()

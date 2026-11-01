@@ -378,6 +378,22 @@ async def test_resume_strips_owner_reason_from_approved_snapshot(copy, engine, m
     assert outcome.owner_plain == "Private outcome reason"
 
 
+@pytest.mark.parametrize("choice, given", [("deny_once", ["x"]), ("allow_once", [])])
+async def test_resume_job_queues_result_ids_only_when_there_are_some(copy, choice, given):
+    """A denied answer, or an executed one with no result facts, queues no result IDs at all, so a job queued during a
+    rolling deploy still runs on a worker whose resume job doesn't take them."""
+    caller = await copy.visitor()
+    outcome = await copy.answer(await copy.decide(caller, f"call-no-result-ids-{choice}", discount_bp=1500), choice)
+    assert outcome.state == ("denied" if choice == "deny_once" else "executed")
+    connector = InMemoryConnector()
+    app = jobs_app(connector, schedule=False)
+    async with app.open_async():
+        await jobs.defer_resume_after_answer(app, caller.ids, outcome, result_fact_ids=given)
+    (job,) = connector.jobs.values()
+    assert "result_fact_ids" not in job["args"]
+    assert set(job["args"]) == {"copy_id", "desk_id", "session_id", "decision", "approved"}
+
+
 async def test_direct_resume_clears_the_owner_reason(copy, engine, monkeypatch):
     caller = await copy.visitor()
     held = await copy.decide(caller, "call-private-reason", discount_bp=1500)
