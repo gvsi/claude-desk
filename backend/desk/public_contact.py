@@ -9,22 +9,25 @@ EMAIL = re.compile(r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_
                    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+")
 # A phone, optionally followed by a numeric extension ("ext. 2", "x12", "extension 4").
 PHONE = re.compile(r"(?P<phone>\+?[0-9 ().-]+?)(?:\s*(?:extension|ext\.?|x)\s*[0-9]{1,6})?", re.IGNORECASE)
-# The only words allowed before an endpoint, each optionally followed by a colon.
-LABEL = re.compile(r"(?:call\s+us\s+at|call|text\s+us\s+at|text|email\s+us\s+at|email|phone|"
-                   r"ll[aá]manos\s+al|escr[ií]benos\s+a|tel[eé]fono|correo)(?:\s*:\s*|\s+)", re.IGNORECASE)
+# The only words allowed before an endpoint, in any case, each optionally followed by a colon.
+LABEL = re.compile(r"(?:call\s+us\s+at|call\s+or\s+text|call|text\s+us\s+at|text|email\s+us\s+at|email|phone|tel|"
+                   r"mobile|office|website|web|ll[aá]manos\s+al|escr[ií]benos\s+a|tel[eé]fono|correo)(?:\s*:\s*|\s+)",
+                   re.IGNORECASE)
 # A whole https URL, up to whitespace, which may hold commas and semicolons; one at its end separates.
 URL = re.compile(r"https://\S*[^\s,;|·]", re.IGNORECASE)
-SEPARATOR = re.compile(r"\r\n| · |[,;|\r\n]|\s+/\s+|\s+(?:or|and|o|y)\s+", re.IGNORECASE)
+# " or " separates, except inside the label "Call or text".
+SEPARATOR = re.compile(r"\r\n| · |[,;|\r\n]|\s+/\s+|\s+(?:and|o|y)\s+|(?<!\bcall)\s+or\s+|\s+or\s+(?!text\b)",
+                       re.IGNORECASE)
 DOMAIN = re.compile(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}")
 HELD = re.compile("\x00([0-9]+)\x00")
 
 
 def valid_public_contact(value: str) -> bool:
     """Every part is an email, a 7–15 digit phone with an optional numeric extension, an HTTPS URL with a
-    host, or a bare domain ("www.example.com"), each optionally after one of a few fixed labels ("Call us
-    at", "Email:", "Teléfono:"). Parts are separated by " · ", ",", ";", "|", a line break, a spaced "/" or
-    " or ", " and ", " o ", " y "; whole https URLs are taken out first, so their own commas and semicolons
-    don't split them. A trailing separator is ignored."""
+    host, or a bare domain ("www.example.com"), each optionally after one of a few fixed labels in any case
+    ("Call us at", "Call or text", "Email:", "Website:", "Teléfono:"). Parts are separated by " · ", ",",
+    ";", "|", a line break, a spaced "/" or " or ", " and ", " o ", " y "; whole https URLs are taken out
+    first, so their own commas and semicolons don't split them. A trailing separator is ignored."""
     if any(unicodedata.category(ch).startswith("C") and ch not in "\r\n" for ch in value):
         return False
     urls: list[str] = []

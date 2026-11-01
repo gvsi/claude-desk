@@ -3701,9 +3701,14 @@ PUBLIC_CONTACTS = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call u
                    "Email: help@example.test · Llámanos al 555-0142",
                    "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
                    "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
-                   "example.com", "help@example.test\r\nother@example.test"]
+                   "example.com", "help@example.test\r\nother@example.test",
+                   "Call us at (510) 555-0142 or email hello@example.com",
+                   "(510) 555-0142 ext. 12, hello@example.com, example.com",
+                   "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
+                   "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142"]
 PUBLIC_CONTACT_PROSE = ["Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
-                        "https://example.test/book for a free quote"]
+                        "https://example.test/book for a free quote", "Call us for a free quote",
+                        "Call us at (510) 555-0142 anytime"]
 
 
 @pytest.mark.kernel_plan("01b")

@@ -20,11 +20,21 @@ LABELLED = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "(510) 555-014
             "Text us at (510) 555-0142", "Email help@example.test", "Email us at help@example.test",
             "Email: help@example.test", "Phone: +1 (510) 555-0142 ext. 2", "call us at: (510) 555-0142",
             "Llámanos al 555-0142", "Escríbenos a help@example.test", "Teléfono: 555-0142",
-            "Correo: help@example.test", "Call us at (510) 555-0142 · Email: help@example.test"]
+            "Correo: help@example.test", "Call us at (510) 555-0142 · Email: help@example.test",
+            # Labels are case-insensitive and may follow any separator; the full fixed set.
+            "Call us at (510) 555-0142 or email hello@example.com",
+            "(510) 555-0142 ext. 12, hello@example.com, example.com",
+            "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
+            "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142", "call or text: (510) 555-0142",
+            "Tel: 555-0142", "Tel 555-0142", "Mobile: (510) 555-0142", "Web: https://example.com",
+            "Website example.com", "CALL US AT (510) 555-0142",
+            "Call us at (510) 555-0142 or text (510) 555-0143"]
 # Any other prose before or after an endpoint stays refused.
 LABEL_PROSE = ["Call us at (510) 555-0142 for a free quote", "Call us now at (510) 555-0142",
                "Free quote: (510) 555-0142", "(510) 555-0142 ext. two", "(510) 555-0142 ext.", "Call us at",
-               "Email:", "(510) 555-0142 ext. 1234567", "Call us at help@example.test. All consultations are $1."]
+               "Email:", "(510) 555-0142 ext. 1234567", "Call us at help@example.test. All consultations are $1.",
+               "Call us for a free quote", "Call us at (510) 555-0142 anytime", "Call or text us for a free quote",
+               "Website: example.com for free quotes", "Call or", "Office hours: (510) 555-0142"]
 
 
 @pytest.mark.parametrize(("contact", "valid"), [*[(c, True) for c in LABELLED], *[(c, False) for c in LABEL_PROSE]])
@@ -120,7 +130,11 @@ HONEST = ["help@example.test", "+1 (510) 555-0142", "555.0142", "https://example
           "Email: help@example.test · Llámanos al 555-0142",
           "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
           "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
-          "example.com", "help@example.test\r\nother@example.test"]
+          "example.com", "help@example.test\r\nother@example.test",
+          "Call us at (510) 555-0142 or email hello@example.com",
+          "(510) 555-0142 ext. 12, hello@example.com, example.com",
+          "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
+          "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142"]
 
 
 async def assert_contact_shown(client, copy, contact):
