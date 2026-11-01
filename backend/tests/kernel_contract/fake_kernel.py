@@ -4005,9 +4005,9 @@ class FakeKernelState:
         from desk.kernel_api import BusinessToolsRequest
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
-        from desk.kernel_service.business_tools import (config_texts, free_allow_words, public_fields,
-                                                        payment_title_refused_fields, public_refusal_detail,
-                                                        unindexed_detail)
+        from desk.kernel_service import reply_check
+        from desk.kernel_service.business_tools import (card_refusal, config_texts, free_allow_words, hidden_fields,
+                                                        public_fields)
         from desk.kernel_service.repo import storable
 
         desk = self._owners_desk(request, request.path_params["id"])
@@ -4028,12 +4028,12 @@ class FakeKernelState:
         if "\x00" in text or any(document.canary in text for each in self.desks.values()
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
+        # The kernel's card-text check: hidden characters first, then one shared scan per tool in render order.
         detail = {}
         for tool in batch.tools:
-            errors = public_refusal_detail(public_fields(tool), allow_words=free_allow_words(tool))
-            if not errors:
-                errors = {field: ["public_promise"] for field in payment_title_refused_fields(tool)}
-            detail.update(unindexed_detail(errors))
+            values = public_fields(tool)
+            detail.update(hidden_fields(values) or card_refusal(
+                tool, reply_check.scan_public_policies(values, allow_words=free_allow_words(tool))))
         if detail:
             refuse("public_promise", detail=detail)
         # Build the entire batch before changing any row.

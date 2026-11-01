@@ -58,22 +58,29 @@ def test_intake_adapter_refuses_an_urgent_profile_even_when_urgent_is_supported(
         blocks.BlockAdapter(urgent)
 
 
-async def test_indexed_card_keys_preserve_render_order_and_return_unindexed_details():
-    from types import SimpleNamespace
+def test_indexed_card_keys_preserve_render_order_and_return_unindexed_details():
     from desk.contracts import BusinessTool
-    from desk.kernel_service import business_tools
-    from desk.kernel_service.repo import KernelFailure
+    from desk.kernel_service import business_tools, reply_check
+    from desk.kernel_service.adapters import blocks
 
+    # The shared scan reads keys sorted: one digit per index keeps that render order up to 10 fields.
+    assert all(len(fields) <= 10 for fields in blocks.CARD_FIELDS.values())
+    assert not hasattr(business_tools, 'refuse_public_promises')    # the shared check, not a copy of it
     tool = BusinessTool.model_validate(intake(tool='desk.retainer', title='Pay no', config={
         'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}))
     fields = business_tools.public_fields(tool)
     assert list(fields) == ['desk.retainer.0-title', 'desk.retainer.1-purpose']
     assert sorted(fields) == list(fields)
     assert business_tools.free_allow_words(tool) == {}
-    assert business_tools.public_promise_fields(fields) == list(fields)
-    with pytest.raises(KernelFailure) as refused:
-        await business_tools.check_public_fields(SimpleNamespace(copy_id='copy'), 'desk', tool)
-    assert refused.value.detail == {'desk.retainer.title': ['public_promise'], 'desk.retainer.purpose': ['public_promise']}
+    scanned = reply_check.scan_public_policies(fields, allow_words=business_tools.free_allow_words(tool))
+    assert set(scanned) == set(fields)                               # "no" + "charge" straddles both
+    detail = {'desk.retainer.title': ['public_promise'], 'desk.retainer.purpose': ['public_promise']}
+    assert business_tools.card_refusal(tool, scanned) == detail
+    # A key the scan wasn't given (a size limit's) refuses every card field, in the closed rule set.
+    assert business_tools.card_refusal(tool, {'charter': ['policy_count_limit']}) == detail
+    assert business_tools.unindexed_detail({'desk.x.0-title': ['lex.en.promise', 'format_control', 'digit'],
+                                            'desk.x.1-purpose': ['language']}) == {
+        'desk.x.title': ['format_control', 'public_promise'], 'desk.x.purpose': ['public_promise']}
 
 
 async def business_rows(app, copy):
@@ -553,7 +560,7 @@ async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client
     ('CHF 20 deposit', 422),
     ('USD', 422),
     ('EUR', 422),
-    ('GBP', 422),
+    ('Pay 20 GBP', 422),
     ('MXN', 422),
 ])
 async def test_ambiguous_currency_codes_need_an_adjacent_amount(app, client, title, status):
@@ -564,21 +571,23 @@ async def test_ambiguous_currency_codes_need_an_adjacent_amount(app, client, tit
 
 
 async def test_card_fields_refuse_hidden_characters_and_other_language_commitments(app, client):
-    from desk.kernel_service.business_tools import public_promise_fields
+    from desk.kernel_service import business_tools, reply_check
 
     copy = await rivera(app, client)
-    for title in ('Call \u202eyadot\u202c', 'guaran\u200bteed', 'Consultation gratuite', 'Kostenlose Beratung',
+    for title in ('Call ‮yadot‬', 'guaran​teed', 'Consultation gratuite', 'Kostenlose Beratung',
                   'Consultation offerte', 'sans frais', 'sem custo', 'grátis', 'senza costi', 'umsonst'):
-        assert public_promise_fields({'title': title, 'purpose': 'Retainer'}) == ['title', 'purpose']
         response = await put(client, copy, [intake(title=title)])
         assert response.status_code == 422, (title, response.text)
+        assert response.json()['detail'] == {'desk.new-enquiry.title': [
+            'format_control' if any(map(reply_check._unseen, title)) else 'public_promise']}
         assert await business_rows(app, copy) == {}
-    # Use exactly the reply check's unseen predicate, including ignorables beyond Cf.
-    from desk.kernel_service import reply_check
-    for char in ('\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068',
-                 '\u2069', '\u200d', '\u00ad', '\u034f', '\ufe0f'):
+    # Use exactly the reply check's unseen predicate, including ignorables beyond Cf, on the text as written.
+    for char in ('‪', '‫', '‬', '‭', '‮', '⁦', '⁧', '⁨',
+                 '⁩', '‍', '­', '͏', '️'):
         assert reply_check._unseen(char)
-        assert public_promise_fields({'title': 'Intake', 'purpose': 'Retainer' + char}) == ['title', 'purpose']
+        assert business_tools.hidden_fields({'desk.x.0-title': 'Intake', 'desk.x.1-purpose': 'Retainer' + char}) == {
+            'desk.x.title': ['format_control'], 'desk.x.purpose': ['format_control']}
+    assert business_tools.hidden_fields({'desk.x.0-title': 'Intake', 'desk.x.1-purpose': 'Retainer'}) == {}
 
 
 @pytest.mark.parametrize('title,config,status', [
@@ -603,46 +612,51 @@ async def test_free_word_exception_is_field_scoped_and_keeps_other_hits(app, cli
 
 
 async def test_card_text_has_one_combined_scan_per_tool_in_render_order(app, client, monkeypatch):
-    from desk.kernel_service import business_tools, reply_check
+    from desk.kernel_service import desks, reply_check
 
     copy = await rivera(app, client)
     scanned, checks = [], []
-    scan, check = reply_check.scan_prose, business_tools.refuse_public_promises
+    scan, check = reply_check.scan_public_policies, desks.refuse_public_promises
 
-    def record_scan(text, *args, **kwargs):
-        scanned.append(text)
-        return scan(text, *args, **kwargs)
+    def record_scan(values, allow_words={}):
+        scanned.append((sorted(values.items()), dict(allow_words)))
+        return scan(values, allow_words)
 
     async def record_check(ctx, part, values, desk_id=None, *, allow_words={}):
-        checks.append((list(values), set(allow_words)))
+        checks.append((part, list(values), set(allow_words)))
         return await check(ctx, part, values, desk_id, allow_words=allow_words)
 
-    monkeypatch.setattr(reply_check, 'scan_prose', record_scan)
-    monkeypatch.setattr(business_tools, 'refuse_public_promises', record_check)
+    monkeypatch.setattr(reply_check, 'scan_public_policies', record_scan)
+    monkeypatch.setattr(desks, 'refuse_public_promises', record_check)
     response = await put(client, copy, [
         intake(tool='desk.consult', title='Free consult', config={
             'block': 'typed_booking', 'appointment_type': 'Consultas gratuitas', 'minutes': 30}),
         intake(tool='desk.retainer', title='Retainer', config={
             'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000})])
     assert response.status_code == 200, response.text
-    assert scanned == ['Free consult\nConsultas gratuitas', 'Retainer\nInitial retainer']
-    assert checks == [(['desk.consult.0-title', 'desk.consult.1-appointment_type'],
+    # One shared scan per tool; it reads keys sorted, which is the card's render order.
+    assert scanned == [([('desk.consult.0-title', 'Free consult'),
+                         ('desk.consult.1-appointment_type', 'Consultas gratuitas')],
+                        {'desk.consult.0-title': reply_check.FREE_WORDS,
+                         'desk.consult.1-appointment_type': reply_check.FREE_WORDS}),
+                       ([('desk.retainer.0-title', 'Retainer'), ('desk.retainer.1-purpose', 'Initial retainer')], {})]
+    assert checks == [('business_tools', ['desk.consult.0-title', 'desk.consult.1-appointment_type'],
                        {'desk.consult.0-title', 'desk.consult.1-appointment_type'}),
-                      (['desk.retainer.0-title', 'desk.retainer.1-purpose'], set())]
+                      ('business_tools', ['desk.retainer.0-title', 'desk.retainer.1-purpose'], set())]
 
 
 async def test_card_fields_are_shared_ordered_and_keep_private_config_out_of_the_scan(app, client, monkeypatch):
-    from desk.kernel_service import business_tools
+    from desk.kernel_service import desks
     from desk.kernel_service.adapters import blocks
 
     assert blocks.CARD_FIELDS == {'intake': ('title',), 'typed_booking': ('title', 'appointment_type'),
                                   'purpose_payment': ('title', 'purpose'), 'urgent': ('title',)}
     copy = await rivera(app, client)
-    checks, original = [], business_tools.refuse_public_promises
+    checks, original = [], desks.refuse_public_promises
     async def record(ctx, part, values, desk_id=None, *, allow_words={}):
         checks.append((list(values.items()), set(allow_words)))
         return await original(ctx, part, values, desk_id, allow_words=allow_words)
-    monkeypatch.setattr(business_tools, 'refuse_public_promises', record)
+    monkeypatch.setattr(desks, 'refuse_public_promises', record)
     tools = [intake(title='Free intro call', config={'block': 'intake', 'questions': ['Pay $50?']}),
              intake(tool='desk.consult', title='Consult', config={
                  'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}),
@@ -672,7 +686,7 @@ async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(
 
     copy = await rivera(app, client)
     for title in ('Pay $twenty', 'twenty dollars', '20 percent', 'guaranteed', 'USD',
-                  '$', 'GBP', 'Tomorrow intake', 'Intake \u202edeetnaraug\u202c'):
+                  '$', '20 GBP', 'Tomorrow intake', 'Intake \u202edeetnaraug\u202c'):
         response = await put(client, copy, [intake(title=title)])
         assert response.status_code == 422, (title, response.text)
         assert await business_rows(app, copy) == {}
