@@ -965,8 +965,10 @@ describe('rules page', () => {
     expect(inView(limit(), main)).toBe(true);
 
     // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
-    // returns to the end of Rules.
+    // returns to the end of Rules. The place is kept as the scroll is heard: wait for it before leaving.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
@@ -1833,7 +1835,11 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);
