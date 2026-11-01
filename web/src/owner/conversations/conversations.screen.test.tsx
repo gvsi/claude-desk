@@ -196,6 +196,41 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it('open_conversation_fills_its_pane_at_1512', async () => {
+    // The open conversation takes the pane's width, inside its padding: the status, the transcript,
+    // the controls and the whisper box. Messages keep their own widths, the visitor's at the right.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width: 1512, height: 982 } });
+    const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(whisperBox).toBeVisible();
+    const chat = log(screen);
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
+    if (!pane) throw new Error('the conversation opens in its pane');
+    const style = getComputedStyle(pane);
+    const inner = {
+      left: pane.getBoundingClientRect().left + Number.parseFloat(style.paddingLeft),
+      right: pane.getBoundingClientRect().right - Number.parseFloat(style.paddingRight),
+    };
+    const fills = (el: Element, name: string) => {
+      const rect = el.getBoundingClientRect();
+      expect(Math.abs(rect.left - inner.left), `${name} left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(rect.right - inner.right), `${name} right`).toBeLessThanOrEqual(1);
+    };
+    expect(inner.right - inner.left).toBeGreaterThan(900);
+    const transcript = chat.element();
+    fills(transcript, 'transcript');
+    fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
+    // Her bubble ends at the transcript's right edge, at most 85% of its width.
+    const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
+    expect(Math.abs(bubble.right - transcript.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
+    expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
+    // Take over and its lines keep to their own reading column, from the left.
+    const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
+    expect(takeOver.left).toBeGreaterThanOrEqual(inner.left - 1);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['scroll', 'focus'] as const)('a_first_callback_on_a_later_poll_leaves_her_%s_in_place', async (place) => {
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
