@@ -1,6 +1,7 @@
 """Optional TypeSafe second reply checker. It can only add blocks to Sonnet's verdict."""
 
 import asyncio
+import contextlib
 import logging
 import math
 import time
@@ -97,7 +98,8 @@ _workers: set[asyncio.Task] = set()
 def _discard_worker(worker: asyncio.Task) -> None:
     _workers.discard(worker)
     if not worker.cancelled():
-        worker.exception()  # consume late failures without logging content or accepting a verdict
+        with contextlib.suppress(Exception):   # consume a late failure without logging it or accepting a verdict
+            worker.result()
 
 
 async def _scores(prose: str, cards: list[str], next_steps: list[str], api_key: str) -> dict[str, float]:
