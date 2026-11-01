@@ -162,6 +162,19 @@ export const TwoParagraphs: Story = {
   },
 };
 
+export const InertLink: Story = {
+  args: { blocks: [proseBlock('You can see our hours on [our website](https://riveraplumbing.example/hours).')] },
+  parameters: {
+    canvasNote:
+      "The board's replies carry no link; this is a reply with one Markdown link to the business's own site. Links in Claude's prose show inert, their text and then their address, until the kernel's reply check reads Markdown links.",
+  },
+  play: async ({ canvasElement }) => {
+    const prose = canvasElement.querySelector('.cd-claude-message__prose') as HTMLElement;
+    await expect(prose.querySelectorAll('a')).toHaveLength(0);
+    await expect(prose.textContent).toBe('You can see our hours on our website (https://riveraplumbing.example/hours).');
+  },
+};
+
 export const PlainProse: Story = {
   args: { blocks: [proseBlock('Text as written, **marks** and all.')], plainProse: true },
   parameters: {
