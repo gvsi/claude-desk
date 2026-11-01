@@ -43,6 +43,28 @@ from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 EVENT = TypeAdapter(SseEvent)
 
 
+@pytest.mark.parametrize("state, expected, error", [
+    ("executed", "done", False), ("denied", "refused", True), ("expired", "refused", True),
+    ("cancelled", "refused", True), ("refused_at_execution", "refused", True),
+    ("approved", "held_for_owner", False), ("unknown", "held_for_owner", False),
+])
+async def test_recovering_an_answered_hold_uses_current_state(api_conn, caller, visitor, fake,
+                                                            state, expected, error):
+    block = tool_use("native__quote", {**DRAIN, "requested_discount_bp": 1500})
+    held = await visitor.kernel.call("POST /decide", DecideRequest(
+        session_id=caller.session_id, generation=0,
+        call=ToolCall(call_id=block["id"], tool="native.quote", args=block["input"])))
+    record = fake.decisions[held.decision_id]
+    record.decision = held.model_copy(update={"state": state})
+    fake.calls.clear()
+
+    outcome = await recover_call(api_conn, caller, 0, block, made_at=0)
+
+    assert (outcome.result["outcome"], outcome.is_error) == (expected, error)
+    assert outcome.status is None             # the resume job publishes an answered hold
+    assert fake.called("POST /execute") == []
+
+
 def test_tool_names_round_trip():
     for tool in get_args(ToolName):
         name = to_api_name(tool)
