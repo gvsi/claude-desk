@@ -1,5 +1,6 @@
-/** Board 14's compact local hours and prices, built from structured values. */
+/** Board 14's compact local hours and prices, built from structured values, and the lines' labels. */
 import type { PublicHoursWindow } from '../api/views.ts';
+import { cardChrome } from '../ds/index.ts';
 import { formatCents } from '../lib/format.ts';
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
@@ -24,4 +25,9 @@ export function formatPublicHours(window: PublicHoursWindow): string {
 
 export function formatPublicPrice(item: { title: string; unit_cents: number }): string {
   return `${item.title}, ${formatCents(item.unit_cents)}`;
+}
+
+/** A public line's label, as the public About panel shows it: the app's own words, known before the lines are read. */
+export function publicLineLabel(key: string): string | undefined {
+  return cardChrome(key === 'contact' ? 'contact' : 'policy', 'en', `charter:${key}`)?.label;
 }

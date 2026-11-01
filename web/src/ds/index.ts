@@ -54,6 +54,7 @@ export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './c
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
+export { ACTING_SWITCH_COPY } from './components/Switch/copy.ts';
 export {
   SegmentedControl,
   type SegmentedControlProps,
@@ -319,6 +320,7 @@ export { ToolReviewCard, type ToolReviewCardProps, type ToolRowView } from './co
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
+export { chainLine } from './components/ChainStatus/chainLine.ts';
 export { AttemptRow, type AttemptRowProps } from './components/AttemptRow/AttemptRow.tsx';
 export {
   CheckpointMeter,

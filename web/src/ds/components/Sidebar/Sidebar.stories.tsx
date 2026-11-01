@@ -24,7 +24,7 @@ const hrefs = {
 } satisfies Record<NavKey, string>;
 
 /**
- * The sidebar as the owner layout holds it: the Answering switch and the Desk picker show what the
+ * The sidebar as the owner layout holds it: the Claude acts for you switch and the Desk picker show what the
  * screen passes back, and each change is reported to the story.
  */
 function Layout(props: SidebarProps) {
@@ -149,11 +149,12 @@ export const TwoDesks: Story = {
     await expect(canvas.queryByRole('list', { name: 'Desks in Rivera Plumbing' })).toBeNull();
     await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toHaveFocus();
 
-    // Answering is a switch at the bottom, with what "on" means.
-    const answering = canvas.getByRole('switch', { name: 'Answering' });
-    await expect(answering).toHaveAccessibleDescription('Claude answers under your rules');
+    // Claude acts for you is a switch at the bottom, with what "on" means.
+    const answering = canvas.getByRole('switch', { name: 'Claude acts for you' });
+    await expect(answering).toHaveAccessibleDescription('Within your rules');
     await userEvent.click(answering);
     await expect(args.onAnsweringChange).toHaveBeenLastCalledWith(false);
+    await expect(answering).toHaveAccessibleDescription('Taking messages only');
 
     // The owner row: the name and status in words, the initials avatar hidden beside them.
     await expect(canvas.getByText('Maria Rivera')).toBeVisible();
@@ -282,7 +283,7 @@ export const OnConnectors: Story = {
 
 const TEAM = { id: 'desk-rivera-team', name: 'Team' };
 
-/** A team Desk, as N-R2-Vision-TeamDesk draws it: its own people's word, and Answering in the team's words. */
+/** A team Desk, as N-R2-Vision-TeamDesk draws it: its own people's word, and Claude acts for you in the team's words. */
 export const TeamDesk: Story = {
   args: {
     desks: [MAIN_LINE, TEAM],
@@ -290,14 +291,14 @@ export const TeamDesk: Story = {
     current: 'conversations',
     peopleLabel: 'Teammates',
     counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
-    answeringDescription: 'Claude answers your team under your rules',
+    answeringDescription: 'Within your rules',
   },
   parameters: { canvas: 'N-R2-Vision-TeamDesk' },
   play: async ({ canvas, canvasElement }) => {
     // answering_line_from_the_desk: the switch's line is the one the Desk passes, as its description.
-    const answering = canvas.getByRole('switch', { name: 'Answering' });
-    await expect(answering).toHaveAccessibleDescription('Claude answers your team under your rules');
-    await expect(canvas.queryByText('Claude answers under your rules')).toBeNull();
+    const answering = canvas.getByRole('switch', { name: 'Claude acts for you' });
+    await expect(answering).toHaveAccessibleDescription('Within your rules');
+    await expect(canvas.getByText('Within your rules')).toBeVisible();
     await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
     await expect(navRows(canvasElement).map((row) => row.text)).toEqual([
       'Today',
@@ -312,11 +313,11 @@ export const TeamDesk: Story = {
   },
 };
 
-/** Without its own line, Answering keeps the owner app's. */
+/** Without its own line, Claude acts for you keeps the owner app's. */
 export const AnsweringLine: Story = {
-  parameters: { canvasNote: 'Only the Answering line is checked here; the rest is the board’s, as in TwoDesks.' },
+  parameters: { canvasNote: 'Only the Claude acts for you line is checked here; the rest is the board’s, as in TwoDesks.' },
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers under your rules');
+    await expect(canvas.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
   },
 };
 
@@ -391,7 +392,7 @@ export const AboutThisPrototype: Story = {
       await expect(Math.round(link.getBoundingClientRect().left)).toBe(Math.round(today.getBoundingClientRect().left));
     }
 
-    // Just above the Answering block, behind a hairline that spans the column's inner width.
+    // Just above the Claude acts for you block, behind a hairline that spans the column's inner width.
     const group = nav.closest('.cd-sidebar__about') as HTMLElement;
     const footer = canvasElement.querySelector('.cd-sidebar__footer') as HTMLElement;
     expectComputed(group, { borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
@@ -400,10 +401,10 @@ export const AboutThisPrototype: Story = {
     // The main page stays current in the main nav.
     await expect(navRows(canvasElement).filter((row) => row.link.hasAttribute('aria-current')).map((row) => row.text)).toEqual(['Today']);
 
-    // about_links_in_tab_order: the main nav, then the about links, then Answering.
+    // about_links_in_tab_order: the main nav, then the about links, then Claude acts for you.
     (document.activeElement as HTMLElement | null)?.blur();
     const main = navRows(canvasElement).map((row) => row.link);
-    const answering = canvas.getByRole('switch', { name: 'Answering' });
+    const answering = canvas.getByRole('switch', { name: 'Claude acts for you' });
     main[main.length - 1]?.focus();
     await userEvent.tab();
     await expect(rows[0]?.link).toHaveFocus();

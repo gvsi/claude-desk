@@ -152,7 +152,7 @@ export const OwnerToday: Story = {
     // nav_order_is_fixed: the board's seven pages, each to its own route (no Connectors page here).
     await expect(pageNames(nav)).toEqual(PAGES);
     await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
-    // It runs to the bottom of the window, so the Answering switch sits at the foot.
+    // It runs to the bottom of the window, so the Claude acts for you switch sits at the foot.
     await expect(column.getBoundingClientRect().bottom).toBe(window.innerHeight);
 
     // The page: padded 24/40/20, its content at most 960 px wide and centered in what's left.
@@ -224,7 +224,7 @@ export const FillsTheMain: Story = {
   },
   play: async ({ canvas }) => {
     // One sidebar look on every page (owner decision 2026-10-29): beside a filled page too, it is
-    // the panel with its seam, as tall as the window, its Answering switch and owner at the foot.
+    // the panel with its seam, as tall as the window, its Claude acts for you switch and owner at the foot.
     const sidebarColumn = canvas.getByRole('complementary', { name: 'Claude Desk' });
     expectComputed(sidebarColumn, { backgroundColor: 'rgb(34, 34, 32)', borderRightWidth: '1px' });
     const foot = sidebarColumn.querySelector('.cd-sidebar__footer') as HTMLElement;
@@ -380,11 +380,11 @@ export const CompactAbout: Story = {
   parameters: {
     canvas: 'N-Docs-Sidebar',
     canvasNote:
-      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Answering block.',
+      'The board draws the sidebar in its column; on a phone, Menu opens the same sidebar as a sheet, with the about group above the Claude acts for you block.',
   },
   play: async ({ canvas, userEvent }) => {
     // compact_sheet_shows_the_about_group: the sheet holds the same group, between the main nav
-    // and the Answering block, in that keyboard order.
+    // and the Claude acts for you block, in that keyboard order.
     const menu = canvas.getByRole('button', { name: 'Menu' });
     await userEvent.click(menu);
     const sheet = canvas.getByRole('dialog', { name: 'Menu' });
@@ -397,7 +397,7 @@ export const CompactAbout: Story = {
     await expect(links[0]).toHaveFocus();
     await userEvent.tab();
     await userEvent.tab();
-    await expect(within(sheet).getByRole('switch', { name: 'Answering' })).toHaveFocus();
+    await expect(within(sheet).getByRole('switch', { name: 'Claude acts for you' })).toHaveFocus();
 
     // Going to a document closes the sheet, like any page.
     await userEvent.click(links[0] as HTMLElement);
@@ -482,7 +482,7 @@ export const ShortWindow: Story = {
     await expect(business.getBoundingClientRect().top).toBe(businessTop);
     await expect(foot.getBoundingClientRect().top).toBe(footTop);
     await userEvent.tab();
-    await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveFocus();
+    await expect(canvas.getByRole('switch', { name: 'Claude acts for you' })).toHaveFocus();
   },
 };
 

@@ -4,7 +4,8 @@
  * bodies carry no copy, session or Desk ID: the API takes identity from its cookies.
  *
  * Text a visitor typed (`TranscriptItem.text`, `display_name`, `Handoff.reason`,
- * `from_the_visitor`) is untrusted and renders as text only.
+ * `from_the_visitor`) is untrusted and renders as text only, as does AI-written text a visitor
+ * could steer (`claude_summary`, triage).
  */
 import type {
   ActorKind,
@@ -224,8 +225,19 @@ export interface NeedsYouSession {
 
 interface NeedsYouBase {
   session: NeedsYouSession;
-  /** The last thing the visitor wrote, labelled. Untrusted. */
+  /**
+   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
+   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
+   * joined with " · "; just the last when there's one. Untrusted.
+   */
   from_the_visitor: string | null;
+  /**
+   * On a handoff, the conversation's newest AI-written triage summary (what the person asked for
+   * and what the Desk did, at most 400 characters), for the owner alone and never quoted as the
+   * visitor's; null when it has none. A held request never carries one: a visitor could steer a
+   * summary to sway an approval. Optional until the API sends it; an item without it draws as before.
+   */
+  claude_summary?: string | null;
 }
 
 /**
@@ -481,6 +493,12 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/**
+ * What setup can wait on: one of its questions, then, once its plan is closed, whether to add the
+ * owner as a test client (`test_client`), which the API asks and reads by code alone.
+ */
+export type SetupQuestion = QuestionKey | 'test_client';
+
 /** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
 export type Choice = { text: string; recommended: boolean };
 
@@ -554,8 +572,11 @@ export interface SetupState {
    * reply yet. Absent means false on older APIs.
    */
   busy?: boolean;
-  /** The question waiting for an answer; null before consent and after the last one. */
-  question: QuestionKey | null;
+  /**
+   * The question waiting for an answer, `test_client` while the test-client offer at the plan's
+   * end waits; null before consent and after the last one.
+   */
+  question: SetupQuestion | null;
   /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
   pending_card?: string | null;
 }
@@ -693,6 +714,17 @@ export interface AgentCardOut {
 
 export interface AgentRunStarted {
   run_id: string;
+}
+
+/**
+ * Which words the built-in agent's tasks take on a Desk (plan 09, C2): `rivera` on the copy's own
+ * Desk, else the business type setup stored for it (`other` without one). A key, never words.
+ */
+export type DemoTaskSet = import('./openapi.gen.ts').AgentTasks['task_set'];
+
+/** `GET /api/public/desks/{slug}/agent_tasks`: the Desk's set, read with the visitor's chat. */
+export interface AgentTasks {
+  task_set: DemoTaskSet;
 }
 
 /**
@@ -835,7 +867,7 @@ export interface StartSetupBody {
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
 export type SetupAnswerBody = { text: string } & (
-  | { question: QuestionKey; card?: never }
+  | { question: SetupQuestion; card?: never }
   | { question: null; card: string }
 );
 

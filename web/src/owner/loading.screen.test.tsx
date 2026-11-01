@@ -2139,7 +2139,7 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   ledger.release();
-  await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
   expect(headings()).toEqual([1]);
   await expectScreenBasics(document.body, { owner: true });
 });

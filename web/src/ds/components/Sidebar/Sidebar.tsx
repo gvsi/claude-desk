@@ -5,6 +5,7 @@ import { CountPill } from '../CountPill/CountPill.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { Switch } from '../Switch/Switch.tsx';
+import { ACTING_SWITCH_COPY } from '../Switch/copy.ts';
 
 import './Sidebar.css';
 
@@ -69,8 +70,7 @@ export interface SidebarProps {
   answering: boolean;
   onAnsweringChange: (answering: boolean) => void;
   /**
-   * The Answering switch's line, saying whom Claude answers under whose rules: "Claude answers your
-   * team under your rules" on a team Desk. "Claude answers under your rules" by default.
+   * The switch's line while on. "Within your rules" by default; off always says "Taking messages only".
    */
   answeringDescription?: string;
   /** The owner's name and one line of status: "Available for chats". */
@@ -135,7 +135,7 @@ export function Sidebar({
   counts,
   answering,
   onAnsweringChange,
-  answeringDescription = 'Claude answers under your rules',
+  answeringDescription = ACTING_SWITCH_COPY.on,
   owner,
   linkComponent: Link = PlainLink,
   about,
@@ -210,7 +210,7 @@ export function Sidebar({
         ) : null}
       </div>
       <div className="cd-sidebar__footer">
-        <Switch label="Answering" description={answeringDescription} checked={answering} onChange={onAnsweringChange} />
+        <Switch label={ACTING_SWITCH_COPY.label} description={answering ? answeringDescription : ACTING_SWITCH_COPY.off} checked={answering} onChange={onAnsweringChange} />
         <div className="cd-sidebar__owner">
           <span className="cd-sidebar__avatar cd-type-count" aria-hidden="true">
             {initialsOf(owner.name)}
