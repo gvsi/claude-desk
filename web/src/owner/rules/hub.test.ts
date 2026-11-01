@@ -63,6 +63,13 @@ beforeEach(() => {
 });
 
 describe('the Rules hub', () => {
+  it('says_the_payment_tools_cant_be_undone_as_the_kernels_profiles_do', () => {
+    // A charge can't be taken back: the kernel's payment link and signed-limit profiles say so.
+    const rules = view();
+    expect(hubTool(rules, 'native.payment_link').description).toBe("Makes a one-time link for a quote. Charges money. Can't be undone.");
+    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.");
+  });
+
   it('uses a business description followed by its effects', () => {
     for (const tool of chenBusinessTools) {
       expect(toolLine(tool)).toBe(`${tool.business?.description} ${describeEffects(tool.effects, tool.reversible)}`);
