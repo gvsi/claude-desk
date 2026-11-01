@@ -612,7 +612,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (free_reach is not None and free_reach[start] >= end
-                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS)
+                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=True)
                         and ("(?=" not in pattern.pattern or _Lookahead(
                             reading, origin, pattern, match.start(), match.end()).holds_at(free_reach[start]))):
                     continue
@@ -629,16 +629,19 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
     return sorted(hits, key=lambda hit: (hit[0], hit[2]))
 
 
-def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
+def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str], *,
+                        amenities: bool) -> bool:
     """A promise hit in public text passes only as a real word the owner allowed for this key, read across
-    case, width and accents without substituting lookalikes, or as an English or Spanish free-price
-    phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
-    "Consultations are complimentary." don't. `text` is the key's own text."""
+    case, width and accents without substituting lookalikes, or, with `amenities`, as an English or Spanish
+    free-price phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
+    "Consultations are complimentary." don't. `text` is the key's own text. `amenities` has no default, so
+    every caller states it: charter policy text keeps the amenity exception, while business tool card
+    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
     promise = rule.startswith("lex.") and rule.endswith(".promise")
     return ((promise and word in allow_words)
-            or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
+            or (amenities and (promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
 def markdown_reading(prose: str) -> markdown_text.MarkdownText | None:
@@ -786,7 +789,7 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
-                     policy_key: str | None = None) -> list[str]:
+                     policy_key: str | None = None, amenities: bool = True) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
     Both prose lexicons run, whatever the text's language. Policy-only phrases also refuse
@@ -795,13 +798,14 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
     Format controls are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
+    The amenity exception is for charter policy text only; any other caller passes `amenities=False`.
     """
     normalized = shown(text)
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
-             if not _allowed_public_hit(normalized, start, end, rule, allow_words)
+             if not _allowed_public_hit(normalized, start, end, rule, allow_words, amenities=amenities)
              and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
     rules.update(rule for start, end, rule in _policy_phrase_spans(normalized)
-                 if not _allowed_public_hit(normalized, start, end, rule, allow_words))
+                 if not _allowed_public_hit(normalized, start, end, rule, allow_words, amenities=amenities))
     if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
@@ -810,7 +814,8 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
 
 
 def scan_public_policies(values: Mapping[str, str],
-                         allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+                         allow_words: Mapping[str, frozenset[str]] = {}, *,
+                         amenities: bool = True) -> dict[str, list[str]]:
     """Scan policies individually and as adjacent paragraphs/cards, separated by a newline.
 
     Keys sort like their `charter:<key>` fact IDs on the public page (C collation). Offsets
@@ -818,12 +823,14 @@ def scan_public_policies(values: Mapping[str, str],
     Keep full match ranges for attribution, even when a violation's display span is truncated.
     Only contributing keys and rule IDs leave the scan. Allowed words apply to one key only;
     matches or their required right context crossing a key boundary remain refused.
+    The amenity exception is for charter policy text only; any other caller passes `amenities=False`.
     """
-    return _scan_public_parts(sorted(values.items()), allow_words)
+    return _scan_public_parts(sorted(values.items()), allow_words, amenities=amenities)
 
 
 def _scan_public_parts(values: Sequence[tuple[str | None, str]],
-                       allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+                       allow_words: Mapping[str, frozenset[str]] = {}, *,
+                       amenities: bool = True) -> dict[str, list[str]]:
     """The public-text rules in the supplied rendering order, attributed to policy IDs.
 
     A None key is reply prose: it supplies context, but its own refusals stay with the
@@ -833,7 +840,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     for key, value in values:
         if key is not None:
             fields.setdefault(key, set()).update(scan_public_text(
-                value, allow_words.get(key, frozenset()), policy_key=key))
+                value, allow_words.get(key, frozenset()), policy_key=key, amenities=amenities))
     ranges: list[tuple[str | None, int, int]] = []
     pieces: list[str] = []
     offset = 0
@@ -852,7 +859,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     for start, end, rule in _policy_phrase_spans(combined):
         if any(key is not None and low <= start and end <= high
                and _allowed_public_hit(combined[low:high], start - low, end - low, rule,
-                                       allow_words.get(key, frozenset()))
+                                       allow_words.get(key, frozenset()), amenities=amenities)
                for key, low, high in ranges):
             continue
         for key, low, high in ranges:
@@ -876,7 +883,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
                and (_allowed_public_hit(combined[low:high], start - low, match_end - low, rule,
-                                        allow_words.get(key, frozenset()))
+                                        allow_words.get(key, frozenset()), amenities=amenities)
                     or _allowed_service_area_hit(key, combined[low:high], start - low, match_end - low, rule))
                for key, low, high in contributors):
             continue

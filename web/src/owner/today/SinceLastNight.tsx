@@ -7,6 +7,7 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useToday } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { BriefingRow, isShown } from './BriefingRow.tsx';
+import { sinceLastNightLine } from './sinceLastNightLine.ts';
 
 /** The full briefing's page under the Desk. */
 export function briefingPath(deskId: string): string {
@@ -71,8 +72,17 @@ export interface SinceLastNightProps {
 }
 
 /**
- * Today's "Since last night", always shown: one row of each kind, and "See all {n}" when the night
- * has more than those rows, or a quiet night. Read with Today and polled with it.
+ * The night's one line in Claude's voice, from the briefing's counts, or null when it has nothing
+ * to say. Until the API sends the answers there is no line, rather than one that says less.
+ */
+function nightLine(briefing: Today['briefing']): string | null {
+  const { answers } = briefing;
+  return answers === undefined ? null : sinceLastNightLine({ ...briefing, answers });
+}
+
+/**
+ * Today's "Since last night", always shown: its one line, one row of each kind, and "See all {n}"
+ * when the night has more than those rows, or a quiet night. Read with Today and polled with it.
  */
 export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const { desk } = useOwnerDesk();
@@ -105,8 +115,10 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   } else if (briefing.total === 0) {
     body = <QuietNight since={briefing.since} />;
   } else {
+    const line = nightLine(briefing);
     body = (
       <>
+        {line !== null ? <p className="cd-since__line cd-type-summary">{line}</p> : null}
         {rows.length > 0 ? <BriefingRows items={rows} /> : null}
         {briefing.total > rows.length ? (
           <div className="cd-since__all cd-type-meta">

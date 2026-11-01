@@ -164,6 +164,73 @@ export const AfterTurningOn: Story = {
   },
 };
 
+const onReviewStripe = fn();
+
+/**
+ * Stripe's row once connected, its tools waiting: how many it brings, then "Needs review" beside a
+ * held dot, then "Review" named for Stripe, 14 px apart, with nothing offering to connect it again.
+ */
+async function reviewsStripe({ canvas, userEvent }: Parameters<NonNullable<Story['play']>>[0]): Promise<HTMLElement> {
+  onReviewStripe.mockClear();
+  await expect(rowsOf(canvas, 'Built in').map(endOf)).toEqual(['On', 'On', 'On', 'Always on', 'Add', 'Add']);
+  const [stripe] = rowsOf(canvas, 'Connect your own') as [HTMLElement];
+  await expect(endOf(stripe)).toBe('2 toolsNeeds reviewReview');
+  // An app's row, as before connecting: the tile, the name with its Mock badge, the line.
+  await expect(stripe.className).toBe('cd-setup-tools__row');
+  await expect(expectMockBesideExternalNames(stripe)).toBe(1);
+
+  const count = within(stripe).getByText('2 tools');
+  const status = within(stripe).getByText('Needs review');
+  await expect(status).toHaveClass('cd-setup-tools__job-status');
+  await expect(status.querySelector('.cd-status-dot')).toHaveClass('cd-status-dot--held');
+  expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: SECONDARY, columnGap: '6px' });
+  const review = within(stripe).getByRole('button', { name: 'Review Stripe' });
+  await expect(within(review).getByText('Review')).toHaveAttribute('aria-hidden', 'true');
+  await expect(Math.round(status.getBoundingClientRect().left - count.getBoundingClientRect().right)).toBe(14);
+  await expect(Math.round(review.getBoundingClientRect().left - status.getBoundingClientRect().right)).toBe(14);
+  // All three on one line.
+  for (const part of [count, status]) {
+    const box = part.getBoundingClientRect();
+    const button = review.getBoundingClientRect();
+    await expect(Math.abs(box.top + box.height / 2 - (button.top + button.height / 2))).toBeLessThanOrEqual(1);
+  }
+
+  await expect(canvas.queryByRole('button', { name: 'Connect Stripe' })).toBeNull();
+  await userEvent.click(review);
+  await expect(onReviewStripe).toHaveBeenCalledTimes(1);
+  return stripe;
+}
+
+export const ConnectedNeedsReview: Story = {
+  args: { external: [{ connector: views.stripe, state: 'needs_review', tools: 2, onReview: onReviewStripe }] },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Signed boards N-Live-REV-560-1512 and N-Live-REV-560-390, not yet in the reference registry: Stripe connected from the setup chat, its two tools listed and none on, so its row says they need review and its button opens that review instead of connecting it again.',
+  },
+  play: async (context) => {
+    const stripe = await reviewsStripe(context);
+    const review = within(stripe).getByRole('button', { name: 'Review Stripe' });
+    await expect(Math.round(review.getBoundingClientRect().right)).toBe(Math.round(stripe.getBoundingClientRect().right));
+  },
+};
+
+export const ConnectedNeedsReviewPhone: Story = {
+  ...ConnectedNeedsReview,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Signed board N-Live-REV-560-390, not yet in the reference registry: under 480 px the count, "Needs review" and "Review" go under the line together, still on one line.',
+  },
+  play: async (context) => {
+    const stripe = await reviewsStripe(context);
+    const text = stripe.querySelector<HTMLElement>('.cd-connector-summary')!;
+    const end = stripe.querySelector<HTMLElement>('.cd-setup-tools__end')!;
+    await expect(Math.round(end.getBoundingClientRect().left)).toBe(Math.round(text.getBoundingClientRect().left));
+    await expect(end.getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
 export const NoAppsToConnect: Story = {
   args: { external: [] },
   parameters: { canvasNote: 'The board lists Stripe to connect; with no app to connect, "Connect your own" is left out.' },

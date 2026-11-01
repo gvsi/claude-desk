@@ -31,6 +31,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_NEXT_HEAD,
+    SETUP_PLAN_NOT_CONNECTED,
     SETUP_TURN_HEAD,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
@@ -276,7 +277,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.19"                  # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.21"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -492,8 +493,22 @@ def test_setup_app_acknowledgment_waits_for_code_to_connect():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "code connects it after your reply" in system
         assert "never that it's already connected" in system
-        assert "Every app connects when the owner accepts it" in system
+        assert ("Apps other than Stripe connect when the owner accepts them (simulated in this preview); code tries "
+                "to connect Stripe after your reply.") in system
+        assert "Every app connects when the owner accepts it" not in system
         assert 'Never "Done"' in system or 'never "Done"' in system
+
+
+def test_setup_never_calls_an_app_connected_once_its_connection_failed():
+    rule = ('If <setup_plan> shows an app as "accepted, not connected", its connection didn\'t go through: never say '
+            "it's connected, and when you mention it, say they can finish connecting it on the Tools step; jobs "
+            "that use it stay in the plan.")
+    assert f'"{SETUP_PLAN_NOT_CONNECTED}"' in rule
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert f"never that it's already connected. {rule} You can't change a card" in system
+        assert "  " not in system
+    assert ('its id and status: planned, shown, accepted, "accepted, not connected", declined, changed or dropped'
+            in SETUP_TURN_SYSTEM)
 
 
 def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():

@@ -84,6 +84,8 @@ export function stillToday(now: Date): StillToday {
   const heldAt = iso(SEEDED.held);
   const visitorTurn = rivera.conversations.visitor.turns.find((t) => t.kind === 'visitor');
   const danaSession = rivera.conversations.danaLive.session.session_id;
+  // What Dana wrote last, which Live now quotes: her chat's newest message, as the seed replays it.
+  const danaSaid = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : [])).at(-1) ?? null;
   const agent = rivera.conversations.alexAgent;
   const today = localDate(at);
 
@@ -113,6 +115,7 @@ export function stillToday(now: Date): StillToday {
     last_activity: iso(SEEDED.danaLast),
     outcome_counts: { executed: 3 },
     owner_preview: false,
+    latest_visitor_text: danaSaid,
   };
 
   const todayRead: Today = {
@@ -127,6 +130,8 @@ export function stillToday(now: Date): StillToday {
       conversations: 3,
       bookings: 1,
       leads: 0,
+      // Claude answered Alex Kim's assistant's chat on its own, the night's one answer.
+      answers: 1,
       // The seed refused nothing. The reply the check stopped in the held visitor's chat stays on
       // Safety, and a chat with a hold isn't one Claude answered.
       turned_down: 0,

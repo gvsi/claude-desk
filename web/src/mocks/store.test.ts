@@ -879,7 +879,7 @@ describe('the scripted Desk', () => {
     expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
     const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
     expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
-      'Book the earliest visit for a leaking water heater for Alex Kim.',
+      'What’s your earliest visit for a leaking water heater? Any day this week.',
     ]);
     expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
 
@@ -1319,6 +1319,44 @@ describe('the scripted Desk', () => {
       [preview.state.session_id, again.state.session_id].sort(),
     );
   });
+
+  it('summary_carries_the_visitors_newest_words', async () => {
+    const latest = async (sessionId: string) =>
+      ((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).find((c) => c.session_id === sessionId)
+        ?.latest_visitor_text;
+    // Dana's seeded chat, by her newest message; the visiting agent's chat has none.
+    expect(await latest('ses-dana-web')).toBe('Tuesday at 2 works.');
+    expect(await latest('ses-alex-agent')).toBeNull();
+
+    // A new chat has none until the visitor writes, then their newest message, its whitespace
+    // collapsed to single spaces, and cut to 199 characters and "…" past 200.
+    const { session } = await openChat();
+    expect(await latest(session.session_id)).toBeNull();
+    await send('  Do you   work\n\nweekends?  ');
+    await drain();
+    expect(await latest(session.session_id)).toBe('Do you work weekends?');
+    const whole = 'w'.repeat(200);
+    await send(whole);
+    await drain();
+    expect(await latest(session.session_id)).toBe(whole);
+    await send(`${'a'.repeat(150)} ${'b'.repeat(100)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'a'.repeat(150)} ${'b'.repeat(48)}…`);
+    // A cut that falls just after a space ends on the word before it, with no space before the "…".
+    await send(`${'c'.repeat(198)} ${'d'.repeat(10)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'c'.repeat(198)}…`);
+    // A message that is all whitespace leaves none, as the API's null.
+    await send(' \n\t ');
+    await drain();
+    expect(await latest(session.session_id)).toBeNull();
+
+    // The owner's own preview has none, whatever she writes there.
+    const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    await send('Do you work weekends?');
+    await drain();
+    expect(await latest(preview.state.session_id)).toBeNull();
+  });
 });
 
 describe('taking over', () => {
@@ -1536,7 +1574,7 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
+      ['business', 'cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
     );
     // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
     const quote = rivera.ruleCards['rv-quote'];
@@ -2258,6 +2296,7 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
+      answers: 0,
       turned_down: 0,
       total: 0,
       newest: { turned_down: null, booking: null, lead_or_answer: null },
@@ -2291,7 +2330,7 @@ describe("Today's windows", () => {
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, answers: 1, turned_down: 0, total: 2 });
     expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
@@ -2324,7 +2363,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
+    expect(both.briefing).toMatchObject({ conversations: 5, answers: 3, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -2333,7 +2372,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, answers: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -2361,6 +2400,8 @@ describe("Today's windows", () => {
     const full = await list();
     expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
+    // The answers counted are the list's own.
+    expect(answered.briefing.answers).toBe(full.items.filter((item) => item.kind === 'answer').length);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 
