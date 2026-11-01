@@ -44,7 +44,7 @@ OTHER_FILES = {
     "backend/desk/api/loop.py": "# the agent loop\n",
     "backend/desk/api/kernel_client.py": "# the kernel client\n",
     "backend/desk/db/roles.sql": "-- the database roles and grants\n",
-    "backend/alembic/versions/0001_core.py": "# the first migration\n",
+    "backend/alembic/versions/0001_core.py": "revision = '0001_core'\ndown_revision = None\n",
     "evals/oracles/markers.py": "# an oracle\n",
     "evals/tier2/verdict.py": "# the verdict\n",
     "evals/tier2/schema.py": "# the scenario schema\n",

@@ -276,6 +276,7 @@ evals-tier1:
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
 # their merge base and a scenario can run under their combined landed plans or in their merge.
 # Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
+# It also requires exactly one Alembic head in the actual merge tree, regardless of results input changes.
 .PHONY: evals-tier2 evals-key evals-results-check evals-merge-ready
 RUNS ?= 1
 MAX_USD ?= 40
