@@ -1,0 +1,9 @@
+# Policy-only AI denials. Whole phrases, case-insensitive and accent-folded.
+folded	you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+human|a\s+(?:real|live)\s+person)
+folded	a\s+(?:human|real|live)\s+(?:receptionist|agent|assistant|person)
+folded	not\s+(?:a\s+(?:bot|robot)|(?:an?\s+)?AI)
+folded	I(?:\s+am|['’]m)\s+(?:a\s+human|a\s+real\s+person)
+folded	persona\s+real
+folded	(?:recepcionista|agente|asistente)\s+human[oa]
+folded	no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)
+folded	está\s+hablando\s+con\s+una\s+persona

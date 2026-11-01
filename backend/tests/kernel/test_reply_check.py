@@ -1790,6 +1790,71 @@ def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 
+POLICY_AI_DENIAL_CASES = [
+    f"{opening} {verb} {preposition} {person}."
+    for opening in ("You are", "You're")
+    for verb in ("chatting", "talking", "speaking")
+    for preposition in ("with", "to")
+    for person in ("a human", "a real person", "a live person")
+] + [f"A {adjective} {role}." for adjective in ("human", "real", "live")
+     for role in ("receptionist", "agent", "assistant", "person")] + [
+    "Not a bot.", "Not a robot.", "Not AI.", "Not an AI.",
+    "I am a human.", "I'm a human.", "I am a real person.", "I'm a real person.",
+    "I’m a human.", "You’re talking to a human.",
+    "Persona real.", "Recepcionista humano.", "Recepcionista humana.",
+    "Agente humano.", "Agente humana.", "Asistente humano.", "Asistente humana.",
+    "No soy un bot.", "No soy un robot.", "No soy una IA.",
+    "Está hablando con una persona.", "ESTA HABLANDO CON UNA PERSONA.",
+    "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
+]
+POLICY_FREE_PRICE_CASES = [
+    "Consultations cost nothing.", "It costs nothing.", "At no cost.", "No cost to you.",
+    "Nothing to pay.", "It won't cost you anything.", "It WON’T cost you anything.",
+    "No cuesta nada.", "No le cuesta nada.", "Nada que pagar.",
+    "It costs nothing to ask a question about our services?",
+]
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, ["policy.ai_denial"]) for text in POLICY_AI_DENIAL_CASES],
+    *[(text, (["lex.en.promise"] if text in {"At no cost.", "No cost to you."} else [])
+       + ["policy.free_price"]) for text in POLICY_FREE_PRICE_CASES],
+    ("Human resources consulting", []),
+    ("We treat every customer like a person", []),
+    ("Complimentary parking", []),
+    ("Free parking", ["lex.en.promise"]),
+    ("Our receptionist will greet you", []),
+    ("Atención personalizada", []),
+    ("A humanist receptionist", []),
+    ("A real personality", []),
+    ("Our mascot is not a botanical illustration", []),
+    ("Our sculpture costs nothingness", []),
+    ("Dinner is on the house", ["lex.en.promise"]),
+])
+def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert not any(hit.rule_id in {"policy.ai_denial", "policy.free_price"}
+                   for hit in reply_check.scan_prose(text))
+    if text == "Complimentary parking":
+        assert [hit.rule_id for hit in reply_check.scan_prose(text)] == ["lex.en.promise"]
+
+
+@pytest.mark.parametrize(("left", "right", "rule"), [
+    ("You are chatting with", "a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con", "una persona.", "policy.ai_denial"),
+    ("Consultations cost", "nothing.", "policy.free_price"),
+    ("No le cuesta", "nada.", "policy.free_price"),
+])
+def test_public_policy_phrase_attribution(left, right, rule):
+    assert reply_check.scan_public_policies({
+        "policy:a": left, "policy:b": right, "policy:c": "Ask about our services.",
+    }) == {"policy:a": [rule], "policy:b": [rule]}
+    # A denial wholly inside reply prose does not turn an honest policy into a refusal.
+    assert reply_check._scan_public_parts([
+        (None, f"{left} {right}"), ("policy:a", "Ask about our services."),
+    ]) == {}
+
+
 @pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
                                      "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
                                      "\u00ad", "\ufeff", "\U000e0001"])

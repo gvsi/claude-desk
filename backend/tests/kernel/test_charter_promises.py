@@ -22,6 +22,48 @@ from .test_reply_check import (PUBLIC_ALLOW_WORD_CASES, assert_handed_off, check
 POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urgent", "how_we_help", "custom")
 
 
+@pytest.mark.parametrize(("text", "rule"), [
+    ("You are chatting with a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con una persona.", "policy.ai_denial"),
+    ("Consultations cost nothing.", "policy.free_price"),
+    ("La consulta no le cuesta nada.", "policy.free_price"),
+])
+async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_reads(app, client, text, rule):
+    copy = await rivera(app, client)
+    claims = [{"key": key, "kind": "text", "value": value} for key, value in (
+        ("policy:about", "Ask about our services."),
+        ("policy:custom", text),
+        ("policy:parking", "Complimentary parking"),
+        ("contact", "(510) 555-0199"),
+    )]
+    response = await put_part(client, copy, "charter", {"charter": claims})
+    assert (response.status_code, response.json()) == (422, {
+        "code": "invalid", "detail": {"policy:custom": [rule]}})
+    # Setup drops exactly the detail's keys and retries the remaining charter lines.
+    kept = [claim for claim in claims if claim["key"] not in response.json()["detail"]]
+    response = await put_part(client, copy, "charter", {"charter": kept})
+    assert response.status_code == 200, response.text
+    assert "charter:policy:parking" in await facts_of(app, copy, "charter")
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:about")))).one()
+        row.claims = [Claim(key="policy:about", kind="text", value=text)]
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        assert all(block["template"] != "policy" for block in page.json()["charter"])
+        assert text not in page.text
+    visitor = await open_visitor(client, copy)
+    for prose in ("", "Here are the details."):
+        verdict = await checked(client, visitor, prose, [clause("policy", "charter:policy:about")])
+        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("policy_combined", ["charter:policy:about"])]
+        assert_handed_off(verdict)
+        verify_verdict(await public_key(client), visitor.session_id, verdict)
+        assert all(block.template != "policy" for block in verdict.blocks)
+
+
 @pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
 async def test_public_promise_refusal_passes_per_key_allow_words(app, client, values, fields):
     copy = await rivera(app, client)
@@ -205,6 +247,11 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
 
 
 @pytest.mark.parametrize("text", [
+    "Human resources consulting",
+    "We treat every customer like a person",
+    "Complimentary parking",
+    "Our receptionist will greet you",
+    "Atención personalizada",
     "We work with small businesses and families.",
     "Tell us what you need and we'll suggest next steps.",
     "Ask about our services.",

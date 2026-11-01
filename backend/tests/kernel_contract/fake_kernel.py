@@ -879,6 +879,13 @@ def money(cents: int) -> str:
 
 
 PUBLIC_POLICY_PATTERNS = (
+    ("policy.ai_denial", r"\b(?:you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+"
+     r"(?:a\s+human|a\s+(?:real|live)\s+person)|a\s+(?:human|real|live)\s+(?:receptionist|agent|assistant|person)|"
+     r"not\s+(?:a\s+(?:bot|robot)|(?:an?\s+)?AI)|I(?:\s+am|['’]m)\s+(?:a\s+human|a\s+real\s+person)|"
+     r"persona\s+real|(?:recepcionista|agente|asistente)\s+human[oa]|"
+     r"no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)|esta\s+hablando\s+con\s+una\s+persona)\b"),
+    ("policy.free_price", r"\b(?:costs?\s+nothing|at\s+no\s+cost|no\s+cost\s+to\s+you|nothing\s+to\s+pay|"
+     r"won['’]t\s+cost\s+you\s+anything|no\s+(?:le\s+)?cuesta\s+nada|nada\s+que\s+pagar)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
@@ -921,7 +928,8 @@ def public_policy_rules(text: str) -> list[str]:
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        if re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE):
+        if re.search(pattern, public_commitment_reading(text)[0]
+                     if rule == "language" or rule.startswith("policy.") else text, re.IGNORECASE):
             rules.add(rule)
     if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
         rules.add("language")
@@ -942,7 +950,8 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
         for key in fields:
             fields[key].add("language")
     for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
-        reading, origin = (public_commitment_reading(combined) if rule == "language" and "grátis" not in pattern
+        reading, origin = (public_commitment_reading(combined)
+                           if (rule == "language" and "grátis" not in pattern) or rule.startswith("policy.")
                            else (combined, list(range(len(combined)))))
         for match in re.finditer(pattern, reading, re.IGNORECASE):
             start, end = origin[match.start()], origin[match.end() - 1] + 1

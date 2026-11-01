@@ -2510,6 +2510,32 @@ def quote_card(**limits) -> RuleCard:
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rule"), [
+    ("You are chatting with a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con una persona.", "policy.ai_denial"),
+    ("Consultations cost nothing.", "policy.free_price"),
+    ("La consulta no le cuesta nada.", "policy.free_price"),
+])
+async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, text, rule):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    claims = [Claim(key=key, kind="text", value=value) for key, value in (
+        ("policy:about", "Human resources consulting"),
+        ("policy:custom", text),
+        ("policy:parking", "Complimentary parking"),
+        ("contact", "(510) 555-0199"),
+    )]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (
+        422, "invalid", {"policy:custom": [rule]})
+    # This is the setup pre-filter's contract: drop only named keys and keep all other lines.
+    kept = [claim for claim in claims if claim.key not in refused.value.detail]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=kept), path={"id": desk_id})
+
+
+@pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("free consultation", ["lex.en.promise"]),
