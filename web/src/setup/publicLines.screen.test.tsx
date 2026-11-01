@@ -237,7 +237,6 @@ it('uses existing error Notices and preserves the draft through service and netw
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
 
-
 it.each([
   'policy:pricing', 'policy:how_we_help', 'policy:unknown', null,
 ])('keeps a draft and shows the signed Notice when Save refuses %s', async (key) => {
@@ -254,7 +253,6 @@ it.each([
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
 
-
 it.each(['policy:how_we_help', 'policy:unknown', null])('shows the signed Notice when confirm refuses %s', async (key) => {
   const { screen } = await openLines();
   mockStore.inject({ route: 'setupPublicLinesConfirm', status: 422, body: { error: 'line_refused', ...(key === null ? {} : { key }), reason: ['INTERNAL refusal'] } });
@@ -266,7 +264,6 @@ it.each(['policy:how_we_help', 'policy:unknown', null])('shows the signed Notice
   expect(screen.container.textContent).not.toContain('INTERNAL refusal');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
-
 
 it.each([
   ['policy:about', 'About us', 1500], ['policy:pricing', 'Pricing', 500],
@@ -293,7 +290,6 @@ it.each([
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
 });
 
-
 it('disables Save for empty and whitespace-only text without sending a write', async () => {
   const { screen } = await openLines();
   await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
@@ -307,7 +303,6 @@ it('disables Save for empty and whitespace-only text without sending a write', a
   await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });
 
-
 it.each([true, false])('holds unknown public-line keys without confirming, alongside known rows: %s', async (withKnown) => {
   const state = await atSituations();
   const unknown = { key: 'policy:unknown', text: 'Hidden text.', editable: true, source: 'suggested' };
@@ -320,4 +315,25 @@ it.each([true, false])('holds unknown public-line keys without confirming, along
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
   expect(screen.getByText('Hidden text.', { exact: true }).elements()).toHaveLength(0);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+it('keeps a signed refusal visible while an unknown claim also holds confirmation', async () => {
+  const state = await atSituations();
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: [
+    { key: 'policy:about', text: 'We help local businesses.', source: 'owner', editable: true },
+    { key: 'policy:unknown', text: 'Hidden text.', source: 'suggested', editable: true },
+  ] } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).click();
+  const field = screen.getByRole('textbox', { name: 'About us', exact: true });
+  await field.fill('My draft stays here.');
+  mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', reason: ['INTERNAL refusal'] } });
+  const save = screen.getByRole('button', { name: 'Save', exact: true });
+  await save.click();
+  await expect.element(save).not.toHaveAttribute('aria-busy');
+  expect(screen.getByRole('alert').element().textContent).toBe(REFUSED_COPY);
+  await expect.element(field).toHaveValue('My draft stays here.');
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
 });

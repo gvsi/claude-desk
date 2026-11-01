@@ -133,7 +133,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      {error !== null || unknown ? <Notice tone="error">{unknown ? ownerErrorCopy(null) : error}</Notice> : null}
+      {error !== null || unknown ? <Notice tone="error">{error ?? ownerErrorCopy(null)}</Notice> : null}
       {lines.data === undefined ? (
         lines.isError ? (
           <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>
