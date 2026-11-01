@@ -10,10 +10,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
+import type { HandoffEntry } from '../../api/handoffEntry.ts';
 import type { Attempt, RefusalCause } from '../../api/views.ts';
+// The trace's line comes from its own module: the design system's index doesn't export it, and
+// tests are outside the screens' index-only import rule.
+import { traceLine } from '../../ds/components/FullTrace/traceLine.ts';
 import {
   CATEGORY_COPY,
   CAUSE_COPY,
+  HANDOFF_ENTRY_COPY,
   LEDGER_KIND_COPY,
   ORIGIN_COPY,
   anythingStoppedIn,
@@ -142,6 +147,25 @@ describe('Safety copy', () => {
     // Another kind of entry keeps its own name, whatever its summary says.
     expect(entryCopy({ kind: 'reply', summary: { part: 'handoffs', refs: ['handoff-1'], kind: 'card' } })).toBe('Reply checked');
     expect(entryCopy({ kind: 'execute', summary: { part: 'handoffs', refs: ['handoff-1'] } })).toBe('Action ran');
+  });
+
+  it('full_trace_reads_the_history_row_name_of_each_handoff_entry', () => {
+    // The design system's full trace and the owner's history rows name a handoff entry in the same
+    // signed words: the trace's line opens with the row's name as a sentence.
+    const details = {
+      opened: { kind: 'card' },
+      done: {},
+      replaced: { replaced_by: 'handoff-2' },
+      took_over: { closed_by: 'takeover' },
+      wrote: { closed_by: 'owner_message' },
+    } as const satisfies Record<HandoffEntry, Record<string, unknown>>;
+    for (const [handoff, more] of Object.entries(details) as [HandoffEntry, Record<string, unknown>][]) {
+      const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['handoff-1'], ...more } } as const;
+      const sentence = `${HANDOFF_ENTRY_COPY[handoff]}.`;
+      for (const origin of ['kernel', 'api'] as const) {
+        expect(traceLine({ ...event, origin }).slice(0, sentence.length), `${handoff} ${origin}`).toBe(sentence);
+      }
+    }
   });
 
   it('entry_for_matches_ledger_seq', () => {
