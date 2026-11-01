@@ -82,3 +82,42 @@ def test_cvc5_is_left_alone_otherwise(tmp_path: Path, target: str, case: str):
     environment = {"CVC5": str(other)} if case == "set in the environment" else {}
 
     assert "CVC5" not in planned(target, checkout, *variables, environment=environment)
+
+
+# db-throwaway, CI's setting for a job's own Postgres: it turns off durable commits for the whole instance.
+def throwaway(tmp_path: Path, ci: str | None) -> subprocess.CompletedProcess:
+    """`make db-throwaway` in an empty checkout, with a stand-in psql that records its arguments."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    psql = bin_dir / "psql"
+    psql.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path / "psql-args"}"\n')
+    psql.chmod(0o755)
+    env = {name: value for name, value in os.environ.items() if name not in OUTSIDE | {"CI"}}
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    if ci is not None:
+        env["CI"] = ci
+    return subprocess.run(["make", "--no-print-directory", "-C", str(tmp_path), "-f", str(MAKEFILE), "db-throwaway"],
+                          env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("ci", [None, ""])
+def test_db_throwaway_refuses_to_run_outside_ci(tmp_path: Path, ci: str | None):
+    """A developer's database is persistent and shared, so without CI set the target changes nothing."""
+    result = throwaway(tmp_path, ci)
+    assert result.returncode != 0
+    assert "CI" in result.stderr
+    assert not (tmp_path / "psql-args").exists()
+
+
+def test_db_throwaway_turns_off_durable_commits_in_ci(tmp_path: Path):
+    result = throwaway(tmp_path, "true")
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "psql-args").read_text().splitlines()
+    for setting in ("fsync", "synchronous_commit", "full_page_writes"):
+        assert f"ALTER SYSTEM SET {setting} = off" in args
+    assert "SELECT pg_reload_conf()" in args
+
+
+def test_waiver_review_target_is_local_and_names_its_pass(tmp_path):
+    command = planned("evals-waiver-review", tmp_path, "PASS=fixture-pass")
+    assert "python -m evals.run waiver-review --pass fixture-pass" in command

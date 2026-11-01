@@ -29,10 +29,11 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from urllib.parse import quote
 
 import httpx
+import psycopg
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from desk.contracts import CopyCreated, SessionCreated
-from desk.db.session import database_url
+from desk.db.session import database_url, libpq_url
 from desk.kernel_api import Health, KernelError
 from evals.fakes import FakeAnthropic, Json, LoopbackServer
 from evals.records import Records
@@ -57,9 +58,10 @@ from evals.tier1.harness import (
 )
 
 __all__ = [
-    "AFTER_INTENT", "API_IMPL", "DUMMY_KEY", "SYMCC_REQUIRED", "ApiTarget", "ApiUnavailable", "Crash", "KernelTarget",
-    "MakeApiTarget", "MockpayClient", "SimulatedCrash", "TargetError", "TravelClock",
-    "crash_after_intent", "crash_after_side_effect", "load_api_target", "refuse_real_models", "restart_kernel",
+    "AFTER_INTENT", "API_IMPL", "CASE_SCHEMAS", "DUMMY_KEY", "SYMCC_REQUIRED", "ApiTarget", "ApiUnavailable",
+    "Crash", "KernelTarget", "MakeApiTarget", "MockpayClient", "SimulatedCrash", "TargetError", "TravelClock",
+    "crash_after_intent", "crash_after_side_effect", "empty_database", "load_api_target", "refuse_real_models",
+    "restart_kernel",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -85,6 +87,29 @@ def refuse_real_models() -> None:
     """Make `KernelTarget(models="real")` refuse to start in this process: tier 1 makes no model calls."""
     global _real_models_refused
     _real_models_refused = True
+
+
+# Every schema a case can write to: the kernel's, the API's, the mock payments server's and the API's
+# job queue (the API target runs Procrastinate on this database).
+CASE_SCHEMAS = ("kernel", "app", "mockpay", "procrastinate")
+
+
+def empty_database() -> list[str]:
+    """Empty every table in `CASE_SCHEMAS`, as desk_admin (the kernel's role may not truncate the
+    ledger), and return their names, so a case finds only what it makes. A kernel's startup looks at
+    every copy in the database (`rebuild_at_startup`), so copies left by earlier cases made each
+    start slower than the last, and an API target's worker could take a job an earlier case queued.
+    It empties the database `.env` names, as the backend's tests do: give a run a database of its own."""
+    with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
+        tables = [name for (name,) in admin.execute(
+            "SELECT format('%%I.%%I', schemaname, tablename) FROM pg_tables WHERE schemaname = ANY(%s) ORDER BY 1",
+            (list(CASE_SCHEMAS),),
+        )]
+        # a transaction an earlier case left open fails this case within the minute instead of
+        # hanging the run until the job's timeout
+        admin.execute("SET lock_timeout = '30s'")
+        admin.execute("TRUNCATE " + ", ".join(tables))
+    return tables
 
 
 class TargetError(RuntimeError):

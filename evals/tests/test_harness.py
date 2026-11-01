@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
 import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -28,6 +29,8 @@ from pydantic import (
 )
 
 from desk.contracts import CopyCreated, Decision, ExecResult, ProbeResult, SessionCreated
+from desk.db.session import database_url, libpq_url
+from desk.db.tables import APP_TABLES, KERNEL_TABLES, MOCKPAY_TABLES
 from desk.kernel_api import KERNEL_RESPONSES, KERNEL_ROUTES, KernelError, VerifyStarted, WhoAmI
 from evals.tier1.harness import (
     LANDS,
@@ -44,7 +47,7 @@ from evals.tier1.harness import (
     unlisted_warning,
 )
 from evals.tier1.stub import ContractError, ContractStub, build
-from evals.tier1.targets import API_IMPL
+from evals.tier1.targets import API_IMPL, CASE_SCHEMAS, empty_database
 
 pytest_plugins = ("pytester",)
 
@@ -603,6 +606,44 @@ def test_pending_plans_skip_on_kernel_only(tier1):
         "SKIPPED [[]1[]] evals/tier1/test_needs_02.py:*: needs api",
         "SKIPPED [[]1[]] evals/tier1/test_white_box.py:*: needs kernel code",
     ])
+
+
+def test_empty_database_empties_every_table_a_case_can_write():
+    """Every table of the kernel, the API, the mock payments server and the API's job queue, each
+    table the code names among them, is emptied: no case can find a row an earlier case wrote."""
+    named = {*(f"kernel.{table}" for table in KERNEL_TABLES), *(f"app.{table}" for table in APP_TABLES),
+             *(f"mockpay.{table}" for table in MOCKPAY_TABLES)}
+    emptied = empty_database()
+    assert named <= set(emptied)
+    assert {table.split(".")[0] for table in emptied} == set(CASE_SCHEMAS)
+    with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
+        rows = {table: admin.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in emptied}
+    assert rows == dict.fromkeys(emptied, 0)
+
+
+def test_each_case_on_the_real_kernel_starts_on_an_empty_database(tier1):
+    """`k` empties every kernel, API, mock payments and job queue table before it starts the case's
+    kernel, so a case finds only what it makes: a kernel's startup looks at every copy in the
+    database, and copies that earlier cases left made each start slower than the last."""
+    run = tier1({"test_empty": '''
+        import psycopg
+
+        from desk.db.session import database_url, libpq_url
+
+        def copies():
+            with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
+                return admin.execute("SELECT count(*) FROM kernel.copies").fetchone()[0]
+
+        @pytest.mark.requires("01a")
+        async def test_a_case_leaves_a_copy(k):
+            await k.new_copy()
+            assert copies() >= 1
+
+        @pytest.mark.requires("01a")
+        async def test_the_next_case_finds_none(k):
+            assert copies() == 0
+    '''}, landed=("master", "01a", "01b", "01c"))
+    run("kernel", "--allow-bounded").assert_outcomes(passed=2)
 
 
 # A landed 02a case that takes the `api` fixture, over an unstarted kernel no stand-in API calls.

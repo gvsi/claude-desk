@@ -72,7 +72,7 @@ const DEMO_CODE_SHAPE = /^\d{6}$/;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import']);
+const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import', 'web_search']);
 
 /** A `KnowledgeItem` as the contracts have it: an id, a known source, a title, a text and readers. */
 function isKnowledgeItem(value: unknown): value is KnowledgeItem {
@@ -509,7 +509,7 @@ const SERVED: ServedRoutes = {
     }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
-    if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');
+    if (session) sv.runTurn(session, afterAnswer(given, decision, record.approved ?? null), session.language, '');
     const out: ApprovalAnswerOut = {
       decision,
       execution_state: allows(given) ? 'succeeded' : null,

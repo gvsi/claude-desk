@@ -166,6 +166,7 @@ class StoppedDraft(BaseModel):
 class OwnerTranscriptItem(TranscriptItem):
     """The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
     draft of Claude's the reply check stopped.
+    `owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.
 
     `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
     it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
@@ -180,6 +181,9 @@ class OwnerTranscriptItem(TranscriptItem):
     owner_translation: str | None
     triage: Triage | None
     stopped_draft: StoppedDraft | None
+    owner_plain: str | None = Field(description=(
+        "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; "
+        "never part of the stored or signed visitor event."))
 
 
 # The visitor's chat (Task 7) ---------------------------------------------------------------------------------
@@ -1007,7 +1011,7 @@ class KnowledgeRow(BaseModel):
     title: str | None
     text: str | None
     readers: list[str]
-    source: Literal["website", "upload", "setup", "memory_import"]
+    source: Literal["website", "upload", "setup", "memory_import", "web_search"]
     created_at: AwareDatetime | None
 
 
@@ -1042,6 +1046,8 @@ class ToolDecisionRow(BaseModel):
     outcome: Outcome
     state: DecisionState
     reason_plain: str
+    owner_plain: str | None = Field(description=(
+        "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."))
     created_at: AwareDatetime
     ledger_seq: int
     replayed: bool

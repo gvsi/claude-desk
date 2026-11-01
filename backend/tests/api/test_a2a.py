@@ -495,6 +495,47 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
         "Anything else I can help with?"]
 
 
+async def test_agent_never_receives_the_owner_refusal_reason(app, browser, fake, kernel_http, model, engine,
+                                                            jobs_connector):
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
+    (held,) = [record.decision for record in fake.decisions.values()
+               if record.decision.session_id == agent.session_id]
+    fake.never(fake.sessions[agent.session_id].desk_id, "native.quote")
+    owner = browser(app, ip="198.51.100.30")
+    owner.cookies.set("desk_owner", agent.owner_token, domain="desk.test", path="/api/owner")
+    answered = await owner.post(f"/api/owner/approvals/{held.decision_id}/answer", json={"answer": "allow_once"})
+    assert answered.status_code == 200
+    owner_line = answered.json()["decision"]["owner_plain"]
+    assert owner_line and answered.json()["decision"]["state"] == "refused_at_execution"
+    await resolved(engine, agent.session_id)
+    queued = await jobs_done(jobs_connector)
+
+    # A fresh signed credential reads the same final decision without the owner's field.
+    sent = agent.sign(agent.body("Any news?"))
+    view = kernel_http.agent(AgentAuth(agent_key_id=agent.issued.agent_key_id, ts=sent.headers["X-Agent-Ts"],
+                                      nonce=sent.headers["X-Agent-Nonce"], sig=sent.headers["X-Agent-Sig"]),
+                            hashlib.sha256(sent.raw).hexdigest())
+    read = await view.call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert read.owner_plain is None and owner_line not in read.model_dump_json()
+    model.add(say("That request couldn't go ahead. Can I help with something else?"))
+    later = await agent.post(sent)
+    assert later.status_code == 200, later.text
+    assert later.json()["receipts"][0]["state"] == "refused_at_execution"
+    assert (await agent.post(sent)).json() == later.json()       # the stored A2A answer is safe on replay too
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(a)::text FROM app.a2a_turns a WHERE session_id = :s"),
+            {"s": agent.session_id})).scalars().all()
+    for serialized in (later.text, json.dumps(rows), json.dumps([job["args"] for job in queued]),
+                       json.dumps(model.requests[-1].messages)):
+        assert owner_line not in serialized
+        assert "owner_plain" not in serialized
+
+
 async def test_agent_gets_a_pending_decisions_final_state_on_its_next_request(app, browser, fake, kernel_http, model,
                                                                               engine):
     agent = await new_agent(app, browser, fake, kernel_http)
