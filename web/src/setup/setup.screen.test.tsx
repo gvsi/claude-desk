@@ -2997,7 +2997,8 @@ describe('consultant setup', () => {
     proposal.connector!.connectable = false;
     proposal.state = decision;
     const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('unavailable app must not decide'); }} />);
-    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
+    if (decision === 'proposed') await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
+    else expect(screen.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
     await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(proposal.connector!.why, { exact: true })).toBeVisible();
     expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
@@ -3389,11 +3390,22 @@ describe('consultant setup', () => {
     expect(live.getByRole('list').getByRole('button').elements()).toHaveLength(4);
   });
 
+  it('shows_coming_later_only_until_a_job_is_decided', async () => {
+    const state = await consultantAt('status');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Answer “Where’s my return?”', exact: true });
+    await expect.element(card.getByText('Coming later', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(card.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
+  });
+
   it('shows_coming_later_jobs_and_simulated_connected_apps', async () => {
     const state = await consultantAt('money');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const status = screen.getByRole('article', { name: 'Answer “Where’s my return?”' });
-    await expect.element(status.getByText('Coming later', { exact: true })).toBeVisible();
+    expect(status.getByText('Coming later', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(status.getByText('Set up', { exact: true })).toBeVisible();
     expect(status.getByRole('button').elements()).toHaveLength(0);
     const calendar = screen.getByRole('article', { name: 'Google Calendar' });
     await expect.element(calendar.getByText('Connected', { exact: true })).toBeVisible();

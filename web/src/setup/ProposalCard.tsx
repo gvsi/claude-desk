@@ -56,7 +56,7 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
       <div className="cd-setup-c3__head">
         <ConnectorIcon icon={view.icon} size="section" />
         <div className="cd-setup-c3__titles">
-          <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable ? <Pill>{copy.later}</Pill> : null}</h3>
+          <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable && proposal.state === 'proposed' ? <Pill>{copy.later}</Pill> : null}</h3>
           {!connector.connectable || proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
         </div>
         {connected || proposal.state === 'declined' ? <DecisionLine accepted={connected} connector /> : null}
@@ -105,7 +105,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
       <div className="cd-setup-c3__head">
         <ConnectorIcon icon="quotes" glyph={JOB_GLYPH[job.job]} size="section" />
         <div className="cd-setup-c3__titles">
-          <h3 className="cd-setup-c3__title cd-type-body">{job.title}{!job.can_do_today && proposal.state !== 'declined' ? <Pill>{copy.later}</Pill> : null}</h3>
+          <h3 className="cd-setup-c3__title cd-type-body">{job.title}{!job.can_do_today && proposal.state === 'proposed' ? <Pill>{copy.later}</Pill> : null}</h3>
           {!collapsed ? <p className="cd-setup-c3__line cd-type-body">{job.how}</p> : null}
         </div>
         {proposal.state === 'accepted' || proposal.state === 'declined' ? <DecisionLine accepted={accepted} /> : null}
