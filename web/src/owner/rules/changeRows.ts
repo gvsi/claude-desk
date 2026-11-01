@@ -5,7 +5,7 @@
  */
 import type { Effect, RuleCard } from '../../api/contracts.ts';
 import type { AnyToolName, PeopleOut, ToolRow } from '../../api/views.ts';
-import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type ConnectorView, type RulesTool } from '../../ds/index.ts';
+import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type ConnectorView, type ReviewChange, type RulesTool } from '../../ds/index.ts';
 import { formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOf, isCatalogTool, type BusinessTools } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
@@ -157,17 +157,20 @@ function byPlace<T>(items: readonly T[], place: (item: T) => number): T[] {
   return [...items].sort((a, b) => place(a) - place(b));
 }
 
+/** A review's cards paired (`reviewChanges`), with the Desk's catalog in review order that its rows read by. */
+interface Pairing {
+  business: BusinessTools;
+  catalog: RulesTool[];
+  changes: ReviewChange[];
+}
+
 /**
- * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
- * side in words, then a `turned_on` row per tool the draft turns on, at the outcome Rules shows
- * for the draft's rules (`toolOutcome`: the most that runs on its own for some visitor), in the
- * words of the rule that gives it, else the default ask. The changed rows, then the
- * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`, or,
- * when it covers other tools after than before, by every tool either side covers (`coverageMove`).
- * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
- * govern it; the draft's own `turnedOn` rows count too.
+ * Pairs the draft's cards as every review does (`reviewChanges` over its before and after), with
+ * `tools`, this Desk's catalog, and the draft's own `turnedOn` rows giving each tool's effects. The
+ * draft's cards go as the draft has them, so neither which card governs a dropped one
+ * (`rulesForTool`'s order) nor the pairing depends on the review's order.
  */
-export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
+function pairCards(draft: RuleDraft, tools: ToolEffects): Pairing {
   const business = businessTools([...tools, ...draft.turnedOn]);
   const effects = new Map<AnyToolName, readonly Effect[]>();
   for (const row of [...tools, ...draft.turnedOn]) effects.set(row.tool, row.effects);
@@ -176,16 +179,51 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     [...effects].map(([tool, toolEffects]): RulesTool => ({ tool, effects: toolEffects })),
     (tool) => toolPlace(tool.tool),
   );
+  return { business, catalog, changes: reviewChanges(draft.before, draft.after, effectsOf) };
+}
+
+/**
+ * The tools a review's rows are about, from the same pairing its rows come from (`pairCards`), so
+ * Rules lands a confirmed change on exactly the rows its review listed: for each row, the tool each
+ * side's rule is for, or for a shared rule the tools it covers on its side of the draft (its
+ * title's tools, and the target a side names when the rule moves); then each tool the draft turns
+ * on. A card the draft replaces with one that differs only in its id has no row, so its tool is
+ * not among them. In the order of `tools`, then the turned-on tools; only tools among them.
+ */
+export function reviewedTools(draft: RuleDraft, tools: ToolEffects): AnyToolName[] {
+  const { catalog, changes } = pairCards(draft, tools);
+  const named = new Set<AnyToolName>(draft.turnedOn.map((row) => row.tool));
+  const sideTools = (card: RuleCard | null, side: readonly RuleCard[]): AnyToolName[] => {
+    if (card === null) return [];
+    return isEffectCard(card) ? coveredTools(card, side, catalog) : [card.applies_to as AnyToolName];
+  };
+  for (const { before, after } of changes) {
+    for (const tool of [...sideTools(before, draft.before), ...sideTools(after, draft.after)]) named.add(tool);
+  }
+  return [...new Set([...tools, ...draft.turnedOn].map((row) => row.tool))].filter((tool) => named.has(tool));
+}
+
+/**
+ * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
+ * side in words, then a `turned_on` row per tool the draft turns on, at the outcome Rules shows
+ * for the draft's rules (`toolOutcome`: the most that runs on its own for some visitor), in the
+ * words of the rule that gives it, else the default ask. Every card's row goes by connector and by
+ * tool within one, in one stable pass, so an added rule follows the changed rows of its own tool: a
+ * shared rule is placed by `rowLabel`, or, when it covers other tools after than before, by every
+ * tool either side covers (`coverageMove`).
+ * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
+ * govern it; the draft's own `turnedOn` rows count too.
+ */
+export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
+  const { business, catalog, changes } = pairCards(draft, tools);
   // Each side's labels, read once: a shared rule's coverage depends on the other shared rules beside it.
   const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog, business)]));
   const beforeLabels = labelsOf(draft.before);
   const afterLabels = labelsOf(draft.after);
   const labelOf = (card: RuleCard, labels: ReadonlyMap<RuleCard, RowLabel>) => labels.get(card) ?? rowLabel(card, [card], catalog, business);
 
-  // The draft's cards go to `reviewChanges` as the draft has them, so neither which card governs a
-  // dropped one (`rulesForTool`'s order) nor the pairing depends on the review's order; only the
-  // rows it returns are sorted.
-  const placed = reviewChanges(draft.before, draft.after, effectsOf).map((change) => {
+  // Only the rows the pairing returns are sorted.
+  const placed = changes.map((change) => {
     const { before, after } = change;
     const card = before ?? after;
     if (card === null) throw new Error('a review change with no card');
@@ -213,10 +251,9 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     };
     return { row, place };
   });
-  const rows: ChangeRowView[] = [
-    ...byPlace(placed.filter(({ row }) => row.change !== 'added'), ({ place }) => place),
-    ...byPlace(placed.filter(({ row }) => row.change === 'added'), ({ place }) => place),
-  ].map(({ row }) => row);
+  // One stable pass by place: rows at one place keep the pairing's order, so an added rule follows
+  // the changed rows of its own tool, and changes to one tool read together.
+  const rows: ChangeRowView[] = byPlace(placed, ({ place }) => place).map(({ row }) => row);
 
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
     const title = targetWords(row.tool, business);

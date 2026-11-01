@@ -63,6 +63,8 @@ export const TODAY_COPY = {
   publicDescription: 'Chats on it are real conversations with your Desk. They show up in Conversations.',
   handledTitle: 'Handled by Claude, or by you',
   turnedDownEmpty: 'Nothing turned down in the last 7 days.',
+  /** The link to the Desk's Safety page, under Turned down here and under Rules' always-on rules. */
+  openSafety: 'Open Safety',
   vision: 'Vision: where a Desk could go next',
 } as const;
 
