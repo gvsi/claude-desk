@@ -272,6 +272,9 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
   const taller = new Map(estimated.map((part) => [part.name, pageOf(part).height - shapeOf(part).height]));
   for (const [name, difference] of taller) {
     expect(Math.abs(difference), `${name} lands ${difference} px off its shape's height: more than one line`).toBeLessThanOrEqual(ONE_LINE_PX + SKELETON_TOLERANCE_PX);
+    // Every estimated row must change by wrapping, including rows above the last one in view.
+    const wholeLine = [0, ...LINE_HEIGHTS_PX].some((line) => Math.abs(Math.abs(difference) - line) <= SKELETON_TOLERANCE_PX);
+    expect(wholeLine, `${name} lands ${difference} px off its shape's height, which is not one whole line`).toBe(true);
   }
   for (const part of moved) {
     const places = records.get(part.name)!.places;
@@ -299,6 +302,42 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
     }
   }
 }
+
+it('accepted_moves_reject_a_10_px_spacing_error_in_an_earlier_estimated_row', () => {
+  const earlier: Part = { name: 'earlier-row', page: '#accepted-moves-earlier' };
+  const last: Part = { name: 'last-row', page: '#accepted-moves-last' };
+  const button: Part = { name: 'main-button', page: '#accepted-moves-button' };
+  const fixture = document.createElement('div');
+  fixture.style.width = '200px';
+  fixture.innerHTML = `
+    <div id="accepted-moves-earlier" style="height: 50px"></div>
+    <div id="accepted-moves-last" style="height: 40px"></div>
+    <div id="accepted-moves-button" style="height: 40px"></div>
+  `;
+  document.body.append(fixture);
+  onTestFinished(() => fixture.remove());
+  const parts = [earlier, last, last, button];
+  const shapes = parts.map((part) => onPage(part.page)!.getBoundingClientRect());
+  // Only the earlier shape has 10 px of extra space; no words wrap. Removing it shifts both
+  // moved parts by exactly 10 px, so the summed-height and last-row checks alone accept it.
+  fixture.querySelector<HTMLElement>(earlier.page)!.style.height = '40px';
+  const watched: ReturnType<typeof watchPlaces> = {
+    stop: () => {},
+    seen: parts.map((part, i) => {
+      const shape = shapes[i]!;
+      const page = onPage(part.page)!.getBoundingClientRect();
+      return {
+        shape,
+        places: [
+          { top: shape.top, left: shape.left, width: shape.width, height: shape.height, real: false },
+          { top: page.top, left: page.left, width: page.width, height: page.height, real: true },
+        ],
+      };
+    }),
+  };
+  const load: StepLoad = { ...STEPS.situations, estimated: [earlier, last], moved: () => [last, button] };
+  expect(() => expectAcceptedMoves(load, 'desktop', watched)).toThrow("earlier-row lands -10 px off its shape's height, which is not one whole line");
+});
 
 for (const viewport of ['desktop', 'phone'] as const) {
   for (const [step, load] of Object.entries(STEPS) as [Step, StepLoad][]) {
