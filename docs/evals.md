@@ -39,7 +39,8 @@ per check. Production gives it one 6 s try, without retries or fallback, and the
 `/check_reply` request has a 10 s API client deadline.
 
 The Jev tables below come from an uncommitted evaluation run using local scripts; neither the
-runner nor the per-case Jev scores is in this repository. TypeSafe's terms allow evaluation only.
+runner nor the per-case Jev scores is in this repository. Tier 2 runs measure Sonnet alone unless
+`TYPESAFE_API_KEY` is exported for the kernel, and a run doesn't record whether Jev was on.
 The run measured score-based fast-lane rates and additional blocks beside saved Sonnet results,
 not end-to-end task completion. These figures cannot be reproduced from the committed artifacts.
 

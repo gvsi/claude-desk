@@ -5,7 +5,7 @@
     uv run --project backend python backend/scripts/hash_passcode.py \\
       | uv run --project infra python infra/scripts/set_secret.py desk/passcode-hash --stdin
 
-DeskData creates these secrets with generated placeholders. This writes the owner's value (typed
+DeskData creates these secrets as placeholders: generated ones, and `unset` for the TypeSafe key. This writes the owner's value (typed
 without echo, or piped in with --stdin), then tags the secret `owner-set=<the version it wrote>`.
 For the required Anthropic key and passcode hash, deploy preflight requires that version to be
 current, so a value written since by anything else (CloudFormation generating the placeholder
