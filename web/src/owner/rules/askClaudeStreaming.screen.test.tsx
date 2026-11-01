@@ -132,6 +132,22 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
+  it('asks_nothing_it_had_queued_once_the_desk_closes', async () => {
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });
+    const { screen, panel } = await ask(viewport);
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
+    // A second question waits behind the first.
+    await panel.getByRole('textbox', { name: 'Ask Claude' }).fill('Why?');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(panel.getByText('Why?', { exact: true })).toBeVisible();
+    // The owner leaves the Desk while the first answer is written.
+    await screen.unmount();
+    held.release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('ruleChat')).toHaveLength(1);
+  });
+
   it('closes_the_stream_with_the_panel', async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });

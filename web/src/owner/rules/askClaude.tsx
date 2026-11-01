@@ -128,10 +128,13 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
     setGrowing(null);
   }, []);
 
-  // Leaving the Desk closes any answer still being written.
+  // Leaving the Desk ends the conversation: the answer being written closes, and nothing it had
+  // queued is asked.
   useEffect(
     () => () => {
+      conversation.current += 1;
       stream.current?.abort();
+      stream.current = null;
     },
     [],
   );
