@@ -105,8 +105,8 @@ Once any scenario can run, the check:
 - recomputes the inputs hash;
 - requires the file to come from a pass on the Claude API with the 5.5 models;
 - requires one row per scenario and repeat;
-- checks that the recorded-rate history only grew;
-- recomputes pass or fail from the rows, ignoring the verdict stored in the file.
+- checks that the recorded-rate and waiver histories only grew;
+- recomputes pass or fail from the rows and the head's committed waivers, ignoring the verdict stored in the file.
 
 Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`. It checks both sides' scenarios, retaining each side's requirements for a shared id, against the union of their landed plans. If both sides have empty recorded-rate histories, every scenario is pending under that union, and every scenario in the actual merge tree is pending too, the merge tree must also pass the checks that need no runs: its suite and splits load and agree, its rate history is empty, its rate and waiver histories preserve the base's entries unchanged, and it keeps the base's landed plans. Then it is ready regardless of results input changes; no results file is needed and none must be regenerated. Otherwise it refuses when both sides changed gated inputs, recorded rates, waivers or results files since their merge base. On refusal, rebase onto `origin/main`, regenerate results for the combined inputs (a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 

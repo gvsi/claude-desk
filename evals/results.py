@@ -45,9 +45,10 @@ exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated
 `recorded_rates.json`, `evals/waivers.json` and `evals/results/` alone (without renames, moving a gated file out lists its
 old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
 plan its committed `landed.toml` lacks (`unarmed`), no results file is needed or regenerated: the
-head's rate history must be empty, its history must still extend the base's unchanged, its landed
-plans must keep the base's, its splits must hold its suite, and any added or edited results JSON
-must validate. `merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
+head's rate history must be empty, its history must still extend the base's unchanged,
+its waiver history must extend the base's unchanged, its landed plans must keep the base's,
+its splits must hold its suite, and any added or edited results JSON must validate.
+`merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
 their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
 merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
 empty recorded-rate history, append-only rate and waiver histories, and kept landed plans.
@@ -55,8 +56,9 @@ Once any scenario can run, the strict check is unchanged: stopping at the first 
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
-lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged and
-its `landed.toml` keeps every plan the base lists, and the gate recomputed from the rows passes. The
+lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged,
+its waiver history must extend the base's unchanged, its `landed.toml` keeps every plan the base lists,
+and the gate recomputed from the rows and the head's committed waivers passes. The
 stored `gate` is never trusted. A passing line counts the runs that skipped checks while a plan hadn't
 landed, as the gate's summary line does (`gate.skipped_summary`), so such a file never reads as clean.
 Every file it reads is read from git at the head and the base, never from the working tree, so the
