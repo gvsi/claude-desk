@@ -867,7 +867,8 @@ async def test_an_emergency_offer_makes_no_call_and_the_yes_makes_one(api_conn, 
     assert await run_turn(api_conn, caller, offer) == "done"
     assert fake.called("/decide") == [] and fake.handoffs == {}
     system = offer.requests[0].system[0]["text"]
-    assert "Ask before you bring Maria Rivera in: if one of your tools is a business tool for urgent requests" in system
+    assert ('Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a callback?" / es: '
+            '"¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests.') in system
     assert "Only on their yes, ask for what's missing of their name, a phone number or email and the reason" in system
 
     await said(api_conn, caller, "Yes please")

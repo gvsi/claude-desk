@@ -110,17 +110,16 @@ def test_system_prompt_uses_the_business_policies():
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
         "at a time, before you take their details or book. Ask only about their request: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
-        "make that one call: the urgent tool, or native__request_callback. Beside its callback_confirmed card",
+        "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
         "(water spraying or flooding, a gas smell, no heat in freezing weather), that comes first: skip the intake "
         "questions and give the one practical safety step a good professional would give. If anyone could be in "
         "danger (gas, water near electrics, an injury), suggest they call their local emergency number, in words, "
-        "never the number itself. Ask before you bring Maria Rivera in: if one of your tools is a business tool "
-        'for urgent requests (its description starts "Saves an urgent callback request"), offer it by its title as '
-        "a way to arrange a callback, asking whether they'd like you to arrange one with it; otherwise ask en: "
-        '"Would you like me to arrange a callback?" / es: "¿Quiere que solicite una llamada?". Only on their yes, '
-        "ask for what's missing of their name, a phone number or "
-        "email and the reason, reusing what they've already given, and make that one call: the urgent tool, or "
+        'never the number itself. Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a '
+        'callback?" / es: "¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests. '
+        "Only on their yes, ask for what's missing of their name, a phone number or email and the reason, reusing "
+        "what they've already given, and make that one call: the business tool for urgent requests (its "
+        'description starts "Saves an urgent callback request") if one of your tools is one, otherwise '
         "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in and the "
         "card shows when to expect the call. Never present a callback window as help on the way, and never say "
         "how soon. If they'd rather book, find open times instead.",
@@ -171,20 +170,17 @@ def test_urgent_requests_get_a_safety_step_then_ask_before_involving_the_owner()
     assert "that comes first: skip the intake questions and give the one practical safety step" in urgent
     assert ("If anyone could be in danger (gas, water near electrics, an injury), suggest they call their local "
             "emergency number, in words, never the number itself.") in urgent
-    # it asks first: the business tool for urgent requests by its title, as a way to arrange a callback, when there
-    # is one, else the approved offer. The title and the kernel's receipt carry the urgency, never Claude's words,
-    # since the soft-promise check reads a priority no card backs as a promise.
-    ask = urgent.index("Ask before you bring Maria Rivera in:")
-    assert ('if one of your tools is a business tool for urgent requests (its description starts "Saves an urgent '
-            "callback request\"), offer it by its title as a way to arrange a callback, asking whether they'd like "
-            "you to arrange one with it;") in urgent
-    assert "as urgent;" not in urgent and "send this to" not in urgent
-    assert ('otherwise ask en: "Would you like me to arrange a callback?" / es: "¿Quiere que solicite una '
-            'llamada?"') in urgent
-    # only on their yes does it ask for what's missing and make the call
+    # it asks first, always with the approved callback offer: neither a priority nor the urgent tool's title is
+    # Claude's to say, since the soft-promise check reads a priority no card backs as a promise, and the kernel's
+    # receipt names the tool once it has run
+    ask = urgent.index('Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a callback?" / '
+                       'es: "¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests.')
+    assert "title" not in urgent and "as urgent" not in urgent.split("that comes first")[1]
+    # only on their yes does it ask for what's missing and make the call, choosing the urgent tool then
     yes = urgent.index("Only on their yes, ask for what's missing")
-    assert ask < yes < urgent.index("native__request_callback")
-    assert "make that one call: the urgent tool, or native__request_callback." in urgent
+    assert ask < yes < urgent.index('"Saves an urgent callback request"') < urgent.index("native__request_callback")
+    assert ('make that one call: the business tool for urgent requests (its description starts "Saves an urgent '
+            'callback request") if one of your tools is one, otherwise native__request_callback.') in urgent
     # honest about timing, and nothing the soft-promise check reads as a promise
     assert "say plainly that the request is in and the card shows when to expect the call" in urgent
     assert "Never present a callback window as help on the way, and never say how soon." in urgent
