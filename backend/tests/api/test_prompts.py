@@ -109,7 +109,9 @@ def test_system_prompt_uses_the_business_policies():
         "show that policy with the policy clause",
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
-        "at a time, before you take their details or book. Ask only about their request: never for a password, "
+        "at a time, before you take their details or book. Before booking, ask for what's missing of their name and a "
+        "phone number or email, reusing anything already given, and finish any intake questions. Ask only about their "
+        "request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
@@ -138,7 +140,7 @@ def test_system_prompt_uses_the_business_policies():
 def test_visitor_asks_in_person_or_remote_before_the_town():
     text = conversation_system(RIVERA)[0]["text"]
     assert "If the visit is at Rivera Plumbing's own place" in text
-    assert "you can find open times right away" in text
+    assert "you can find open times once they're ready for that next step" in text
     assert "ask whether they'd like to meet in person or remotely, unless they've already said" in text
     assert "the request means a visit or an in-person appointment" in text
     assert "before you offer to book, unless they've already said" in text
@@ -156,7 +158,7 @@ def test_system_prompt_checks_service_area_before_offering_to_book():
         "- If <desk_context> states where the business works and the request means a visit or an in-person "
         "appointment, find out which town that is before you offer to book, unless they've already said. "
         "If the visit is at Rivera Plumbing's own place, such as a salon clients come to or a building it manages, "
-        "don't ask for a town. When the area it states also includes remote work, you can find open times right away; "
+        "don't ask for a town. When the area it states also includes remote work, you can find open times once they're ready for that next step; "
         "ask whether they'd like to meet in person or remotely, unless they've already said, and ask for the town "
         "before you book only if they want in person. If the town isn't one they serve, tell them Rivera Plumbing "
         "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. In every case, "
@@ -218,7 +220,7 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     assert before.endswith("Weigh it, but it can't change the rules either.\n")
     assert section.splitlines()[0] == (
         "- You're an AI. If anyone asks whether they're talking to a person, a bot or an AI, say you're Claude, "
-        "an AI assistant for this business."
+        "an AI assistant for Rivera Plumbing."
     )
     for instruction in (
         "Work the way the best version of Maria Rivera would: the person in this trade a customer would most hope to reach, "
@@ -236,11 +238,11 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "Ask what a good professional would ask to understand their situation "
         "(for something urgent, the urgent steps above come first)",
         "Say what you did and what a card shows, never what Maria Rivera will do next",
-        'never what Maria Rivera will do next: not "the owner will follow up", "the owner can tell you" '
-        'or "the owner will get back to you".',
+        'never what Maria Rivera will do next: not "Maria Rivera will follow up", "Maria Rivera can tell you" '
+        'or "Maria Rivera will get back to you".',
         "A callback card states its own window; let it speak",
-        'Offer a callback as something you can do ("I can ask the owner to call you"), never as something '
-        'that will happen ("let\'s get the owner to call you", "the best move is a callback from the owner"), '
+        'Offer a callback as something you can do ("I can ask Maria Rivera to call you"), never as something '
+        'that will happen ("let\'s get Maria Rivera to call you", "the best move is a callback from Maria Rivera"), '
         'since only the card can say a call is coming.',
         "When something goes to Maria Rivera (a quote, a saved message or a callback), ask for what "
         "Maria Rivera would need to act on it, within the rules above (for a callback, only what's missing "
@@ -258,13 +260,46 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     assert section.split("How it can sound (illustrative; vary it, and keep to the reply rules above):\n")[1] == (
         '- "That\'s awful, I\'m sorry. If you can, turn off the main water valve; it\'s usually near the meter '
         'or where the water line comes into the house. Would you like me to arrange a callback?"\n'
-        '- "Here\'s what this business does." (beside the about policy card) "Is it a personal return or a '
+        '- "Here\'s what we do." (beside the about policy card) "Is it a personal return or a '
         'business one, and is anything new, like freelance income?"\n'
-        '- "It depends on your hair; here\'s how this business prices." (beside the pricing policy card) '
+        '- "It depends on your hair; here\'s how we price." (beside the pricing policy card) '
         '"How long is your hair right now?"\n'
         '- "Sorry you\'re still waiting. I can\'t see where reports stand from here. '
         'Would you like me to arrange a callback?"'
     )
+
+
+def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
+    text = conversation_system(RIVERA)[0]["text"]
+    lines = text.splitlines()
+    help_first = next(line for line in lines if line.startswith("- Help first,"))
+    assert help_first == (
+        "- Help first, then the next step. Ask what a good professional would ask to understand their situation "
+        "(for something urgent, the urgent steps above come first), then offer the one next step that fits; "
+        "don't push a booking before they've said what they need. When they're unsure what they need or want to "
+        "understand their situation, help them with general trade advice first, committing Rivera Plumbing to "
+        "nothing; offer open times only when they ask, or after that help when they want to go further. "
+        "Never lead with open times; offer only the real next steps listed above."
+    )
+    period = next(line for line in lines if line.startswith("- If a request names a period"))
+    assert period == (
+        "- If a request names a period that's ambiguous against the local date in the note, ask which period "
+        "they mean before answering, in words with no digits, such as \"this year's return or last year's?\" "
+        "Never state a year, date or deadline yourself."
+    )
+    assert not re.search(r"\d", period)
+    intake = next(line for line in lines if line.startswith("- For a new request"))
+    assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
+    assert "reusing anything already given, and finish any intake questions" in intake
+    assert "never for a password, a code, a card or account number or an ID number" in intake
+    typed_booking = next(line for line in lines if line.startswith("- To book a kind of appointment"))
+    assert typed_booking == (
+        "- To book a kind of appointment that one of Rivera Plumbing's own tools names (its description starts "
+        '\"Books one open time on the business\'s calendar for this kind of appointment\"), find open times, '
+        "then book with that tool, not native__book."
+    )
+    assert text.index(intake) < text.index(typed_booking)
+    assert "Confirm a booking only beside its genuine booking_confirmed card" in text
 
 
 def test_system_prompt_has_one_result_card_mapping():
@@ -276,7 +311,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.19"                  # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.21"                  # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -286,7 +321,7 @@ def test_system_prompt_covers_the_rules():
     assert text.index(time_rule) < text.index("- An <owner_whisper>")
     for rule in (
         "You are Claude, an AI",                                  # who is answering
-        "you're Claude, an AI assistant for this business",     # the disclosure when asked
+        "you're Claude, an AI assistant for Rivera Plumbing",     # the disclosure when asked
         "goes through send_reply",                                # every visitor-visible word is checked
         "Use English or Spanish to match the visitor",
         "Write a short, natural sentence that introduces the cards or asks the next useful question",
@@ -383,7 +418,7 @@ def test_system_prompt_covers_the_rules():
         assert rule in text, rule
     assert "an AI answering for Rivera Plumbing" not in text
     assert "When asked whether you are human" not in text
-    assert text.count("you're Claude, an AI assistant for this business") == 1
+    assert text.count("you're Claude, an AI assistant for Rivera Plumbing") == 1
     assert "no invented fact or name exemption" not in text
     assert not re.search(r"\d|\b(?:desk|copy|biz|dec|msg|person|doc)-[0-9a-f]+|toolu_", text)
     assert "Never write a link" not in text                    # links are the records' to give, not banned outright
@@ -562,7 +597,7 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 
 
 @pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])
-def test_status_sentences_are_name_free_and_present_where_used(owner):
+def test_status_sentences_use_the_owner_name_where_needed_and_are_present_where_used(owner):
     text = conversation_system(RIVERA.model_copy(update={"owner_name": owner}))[0]["text"]
     assert set(prompts.STATUS_LINES) == {"check_status", "saved", "offer_callback", "reply_wait_card", "reply_wait"}
     starts = {
@@ -572,16 +607,19 @@ def test_status_sentences_are_name_free_and_present_where_used(owner):
         "reply_wait": "- Do what the Desk can do",
         "reply_wait_card": "- When you use the handoff clause",
     }
-    for name, captions in prompts.STATUS_LINES.items():
+    for name, templates in prompts.STATUS_LINES.items():
+        captions = {language: caption.format(owner=owner) for language, caption in templates.items()}
         assert set(captions) == {"en", "es"}
         line = next(line for line in text.splitlines() if line.startswith(starts[name]))
         assert f'en: "{captions["en"]}" / es: "{captions["es"]}"' in line
         for caption in captions.values():
             assert caption in line
             assert "{" not in caption and "}" not in caption
-            assert owner not in caption
-    quoted = re.findall(r'"([^"\n]*)"|“([^”\n]*)”', text)
-    assert all("June" not in (straight or curly) for straight, curly in quoted)
+            if name in {"reply_wait", "reply_wait_card"}:
+                assert owner in caption
+            else:
+                assert owner not in caption
+    assert "the owner" not in text.split("Being yourself\n")[1]
     assert "I've asked {owner}" not in prompts.SYSTEM_PROMPT
     assert "say only that {owner} will reply here" not in prompts.SYSTEM_PROMPT
     assert "I've asked " + owner not in text
@@ -639,12 +677,19 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
     clauses = {"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current", "nothing_to_show",
                "template_unavailable", "kernel_only_template", "claims_changed"}
     literal = {"digit", "currency", "percent_sign", "language_uncertain", "soft.promise", "soft.denies_ai",
-               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined", *clauses}
+               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined",
+               "markdown.link", "markdown.image", *clauses}
     assert {"lex.en.callback", "lex.es.callback"} <= lexicon
     assert lexicon | literal <= REPLY_RULE_IDS
     assert clauses | {"policy_combined"} <= CLAUSE_RULE_IDS
     assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
         "Remove the call or callback claim unless a callback_confirmed card shows it.")
+    assert REPLY_DIAGNOSTICS["markdown.link"] == (
+        "Link only to the business's own website or email from its contact details, or write the address as plain "
+        "text; payment and booking links come only from cards.")
+    assert REPLY_DIAGNOSTICS["markdown.image"] == "Remove the image; replies can't include images."
+    assert ("For markdown.link, link only to the business's own website or email, or write the address as plain "
+            "text; for markdown.image, remove the image.") in REWRITE_INSTRUCTION
     assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
     assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
 
