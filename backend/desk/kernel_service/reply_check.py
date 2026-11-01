@@ -505,7 +505,21 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
 
 
-def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:
+SERVICE_AREA_RULES = frozenset({"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"})
+SERVICE_AREA_DISTANCE = re.compile(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", re.IGNORECASE)
+
+
+def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
+    """Area claims may name distances, years and weekly availability, but no promises."""
+    if key not in {"policy:service_area", "charter:policy:service_area"}:
+        return False
+    return rule in SERVICE_AREA_RULES or (rule == "digit" and (
+        re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
+        or SERVICE_AREA_DISTANCE.match(text, end) is not None))
+
+
+def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
+                     policy_key: str | None = None) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
     Both prose lexicons run, whatever the text's language. Positive language evidence or
@@ -516,7 +530,8 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> li
     """
     normalized = shown(text)
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
-             if not _allowed_public_hit(normalized, start, end, rule, allow_words)}
+             if not _allowed_public_hit(normalized, start, end, rule, allow_words)
+             and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
     if lang.positive_other_language(normalized) or _other_promise_spans(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
@@ -547,7 +562,8 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     fields: dict[str, set[str]] = {}
     for key, value in values:
         if key is not None:
-            fields.setdefault(key, set()).update(scan_public_text(value, allow_words.get(key, frozenset())))
+            fields.setdefault(key, set()).update(scan_public_text(
+                value, allow_words.get(key, frozenset()), policy_key=key))
     ranges: list[tuple[str | None, int, int]] = []
     pieces: list[str] = []
     offset = 0
@@ -584,7 +600,8 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                     break
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
-               and _allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               and (_allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+                    or _allowed_service_area_hit(key, combined[low:high], start - low, match_end - low, rule))
                for key, low, high in contributors):
             continue
         for key, low, high in contributors:

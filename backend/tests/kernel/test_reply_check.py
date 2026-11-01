@@ -1790,6 +1790,38 @@ def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
 
 
+@pytest.mark.parametrize("text", [
+    "Within 25 miles of Oakland.", "Within 25 mi of Oakland.", "Within 25 km of Oakland.",
+    "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
+    "We drive a few miles past Oakland.", "The East Bay, seven days a week.",
+    "Serving the East Bay since 1998.", "We do evenings and weekends.", "Trabajamos fines de semana.",
+])
+def test_public_service_area_allowance_stays_with_its_key(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
+    assert reply_check.scan_public_policies({"policy:pricing": text})
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles, $50 trip fee.", "Within 25 miles, 10% off.",
+    "Guaranteed same-day service across the East Bay.", "Within 25 miles, free consultation.",
+    "Within 25 miles, fifty dollars.", "Within 25 miles, ten percent off.",
+    "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
+    "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
+    "Trip fee: 50.",
+])
+def test_public_service_area_keeps_price_promise_and_language_refusals(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text})
+
+
+def test_public_service_area_allowance_cannot_cross_into_other_policies_or_prose():
+    assert reply_check.scan_public_policies({"policy:service_area": "Within 25", "policy:z": "miles."}) == {
+        "policy:service_area": ["digit"], "policy:z": ["lex.es.number"]}
+    cards = [RenderedBlock(kind="card", template="policy", fact_id="charter:policy:service_area",
+                           text="Within 25 miles.")]
+    assert reply_check.policy_card_violations("", cards) == []
+    assert reply_check.policy_card_violations("No charge for consultations.", cards) == []
+
+
 @pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
                                      "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
                                      "\u00ad", "\ufeff", "\U000e0001"])
