@@ -30,6 +30,7 @@ import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -1431,7 +1432,7 @@ describe('setup', () => {
     await expect.element(notice).not.toBeInTheDocument();
   });
 
-  it('async_consent_gives_up_at_90_seconds_and_try_again_reads_the_landed_work', async () => {
+  it('async_consent_that_lands_after_90_seconds_is_picked_up_without_try_again', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1442,7 +1443,36 @@ describe('setup', () => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
-    await vi.advanceTimersByTimeAsync(89999);
+    // A turn may run to the API's 110 s run deadline, well past the old 90 s give-up.
+    await vi.advanceTimersByTimeAsync(108000);
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    finish('landed');
+    await vi.advanceTimersByTimeAsync(2000);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect((box.element() as HTMLTextAreaElement).disabled).toBe(false);
+    });
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
+    vi.useRealTimers();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(requests('setupConsent')).toHaveLength(1);
+  });
+
+  it('async_consent_gives_up_once_a_turn_can_no_longer_be_running_and_try_again_reads_the_landed_work', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
+    });
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS - 1);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
     await until(() => {
@@ -1561,7 +1591,7 @@ describe('setup', () => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
-    await vi.advanceTimersByTimeAsync(90000);
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);

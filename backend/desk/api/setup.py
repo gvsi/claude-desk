@@ -346,7 +346,8 @@ TURN_RUN_TIMEOUT_S = HOMEWORK_BUDGET_S + UNDERSTAND_TIMEOUT_S + TURN_FINISH_S + 
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
 TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
 # Recover only when this process holds no run, and only once a run and its cleanup have ended, with 10 s to spare
-# for the clocks of a deploy's two tasks and the database's (`updated_at` is the database's time): 130 s.
+# for the clocks of a deploy's two tasks and the database's (`updated_at` is the database's time): 130 s. The web's
+# polling (`SETUP_WORK_GIVE_UP_MS` in web/src/setup/useSetupWork.ts) must outlast it.
 TURN_ABANDONED_S = TURN_RUN_TIMEOUT_S + TURN_ROLLBACK_TIMEOUT_S + 10
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
