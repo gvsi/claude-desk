@@ -60,9 +60,12 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    ledger floats.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
    keeps checked cards without the prose, then the handoff clause if Claude drafted one, which
-   opens the owner's handoff as the handoff card does; any other failure, or no card to keep,
-   shows only the handoff clause. A first attempt the API rewrites (`final` false, every
-   violation one a rewrite can fix) has no blocks and is never shown.
+   opens the owner's handoff as the handoff card does. With no card to keep, it asks the visitor
+   before involving the owner when the session's tools offer a call back (`offers_call_back`):
+   the kernel's call-back offer alone, as prose, which opens nothing (the owner's decision of
+   2026-11-01). Any other failure, or no card to keep and no call back to offer, shows only the
+   handoff clause. A first attempt the API rewrites (`final` false, every violation one a rewrite
+   can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while the
    model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
@@ -118,7 +121,7 @@ from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
-from desk.next_steps import next_steps
+from desk.next_steps import NEXT_STEPS, next_steps
 from desk.rewrites import PROSE_ONLY, REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -962,17 +965,38 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
+def call_back_offer(language: render.Language) -> RenderedBlock:
+    """The call-back offer: "Would you like me to arrange a callback?" in the reply's language, as
+    prose the kernel writes (the API's signed `STATUS_LINES["offer_callback"]`)."""
+    return RenderedBlock(kind="prose", text=render.status("offer_callback", language))
+
+
+async def offers_call_back(ctx: KernelCtx, session_row: SessionRow) -> bool:
+    """Whether the session's resolved tools offer the visitor a call back (`desk.next_steps`:
+    `native.request_callback`, or a business tool of block `urgent`)."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    return NEXT_STEPS["native.request_callback"] in next_steps(tools)
+
+
 def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
-                   language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
+                   language: render.Language, desk: DeskInfo, *, call_back: bool) -> list[RenderedBlock]:
     """Keep checked cards for prose-only failures, without the prose, and after them the handoff
     clause when Claude drafted one (the owner's ruling of 2026-11-01), rendered by the kernel in the
     reply's language; `finalize` then opens the owner's handoff for it as for any shown handoff
-    card. All other failures, or no card to keep, show the handoff clause alone."""
+    card. A prose-only failure with no card to keep asks the visitor before involving the owner
+    when the session is offered a call back (`call_back`, from `offers_call_back`; the owner's
+    decision of 2026-11-01): the kernel's call-back offer alone (`call_back_offer`), in place of
+    the handoff clause and of one Claude drafted, so no owner handoff opens. All other failures,
+    or no card to keep and no call back to offer, show the handoff clause alone."""
     if violations and all(violation.kind in PROSE_ONLY for violation in violations):
         kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
         if kept:
             drafted = any(card.kind == "card" and card.template == "handoff" for card in cards)
             return kept + ([handoff(language, desk)] if drafted else [])
+        if call_back:
+            return [call_back_offer(language)]
     return [handoff(language, desk)]
 
 
@@ -1068,7 +1092,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
-        blocks = blocked_blocks(cards, violations, language, desk)
+        blocks = blocked_blocks(cards, violations, language, desk, call_back=await offers_call_back(ctx, session_row))
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
@@ -1144,10 +1168,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the
     status line `visitor_plain_key`, or for a shown reply `reply_handed_off` exactly when its blocks
     include the handoff clause (template `handoff`), otherwise `reply_checked`, so checked cards
-    kept alone after a prose-only failure carry the reply receipt. A blocked first attempt with no
-    shown blocks keeps `reply_handed_off`. The owner's say ends here too, with its own receipts and
-    the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
-    holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
+    kept alone after a prose-only failure, and the call-back offer, carry the reply receipt. A
+    blocked first attempt with no shown blocks keeps `reply_handed_off`. The owner's say ends here
+    too, with its own receipts and the message ID its fact is named after (`message_id`; a new one
+    otherwise). A cited fact ID holding one of `canaries` is ledgered only as a marker of its hash
+    (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
     now (`last_seen_at`) and, when its prose was English or Spanish, `detected` kept as its
@@ -1165,8 +1190,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
     (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards, and a drafted
-    handoff after them; with none to keep it substitutes the handoff card, which may open a new
-    handoff.
+    handoff after them; with none to keep it shows the call-back offer when the session is offered
+    a call back, and otherwise substitutes the handoff card, which may open a new handoff.
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
     closed_at, person and assurance are read afresh, then all cited facts' readers, status and
@@ -1196,7 +1221,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     if handoff_backed and not violations and not await handoff_still_open(ctx, session_row):
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
-        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id),
+                                call_back=await offers_call_back(ctx, session_row))
     dropped: list[Violation] = []      # cards refused at signing, whether or not the prose had passed
     if author == "claude":
         blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
@@ -1206,7 +1232,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
             # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
             if not violations:
                 violations = refused
-            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id),
+                                    call_back=await offers_call_back(ctx, session_row))
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
     if author == "claude" and not shown:
         blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
