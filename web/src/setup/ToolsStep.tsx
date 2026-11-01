@@ -12,6 +12,7 @@ import {
   Notice,
   PageHeader,
   SetupToolsList,
+  SkeletonScreen,
   describeEffects,
   rulesForTool,
   type ReviewToolView,
@@ -26,6 +27,7 @@ import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY } from './copy.ts';
 import { aroundBusiness } from './shared.ts';
+import { ToolsListSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.tools;
 
@@ -289,9 +291,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       >
         {ownerErrorCopy(tools.error)}
       </Notice>
-    ) : (
-      <LoadingLine>{copy.loading}</LoadingLine>
-    );
+    ) : null;
   } else if (rows.length === 0 && tools.data.connectable.length === 0) {
     list = <EmptyState title={copy.empty} body={copy.emptyBody} />;
   } else {
@@ -314,7 +314,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={aroundBusiness(copy.subtitle, business)} />
-      {list}
+      {/* While the tools are read, the list draws as its shapes; "Continue" stays real under it. */}
+      <SkeletonScreen loading={tools.data === undefined && !tools.isError} status={copy.loading} skeleton={<ToolsListSkeleton />} className="cd-setup-step__region">
+        {list}
+      </SkeletonScreen>
       {connecting ? <LoadingLine>{copy.connecting}</LoadingLine> : null}
       {listError === null ? null : <Notice tone="error">{listError}</Notice>}
       <div className="cd-setup-step__actions">

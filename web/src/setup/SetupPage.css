@@ -149,6 +149,59 @@
   }
 }
 
+/* A step's part that waits on a read (StepSkeletons): its parts keep the step's 20 px rhythm
+   inside the region, as its shapes do in the layer, so the part lands where its shapes were. */
+.cd-setup-step__region > .cd-skeleton-screen__body,
+.cd-setup-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+/* Lines the words take at one width only: a phone's wrap onto more of them. */
+.cd-skeleton-line.cd-setup-skeleton__phone-line {
+  display: none;
+}
+
+@media (max-width: 639.98px) {
+  .cd-skeleton-line.cd-setup-skeleton__phone-line {
+    display: flex;
+  }
+
+  .cd-skeleton-line.cd-setup-skeleton__wide-line {
+    display: none;
+  }
+}
+
+/* A shape set on a line of words' middle, as a name and its badge are: the line is as deep as the
+   tallest of them, as it is under the words. */
+.cd-skeleton.cd-setup-skeleton__inline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.cd-setup-skeleton__badge {
+  margin-left: var(--space-4);
+}
+
+/* The always-on rules' lock, on the middle of its rule's first line, and the rule's lines beside it. */
+.cd-setup-skeleton__lock {
+  display: flex;
+  align-items: center;
+}
+
+.cd-setup-skeleton__fill {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* "Not what we planned" as a line where the words go, 6 px under who is asking, without the held
+   bar beside it: a skeleton draws no status. */
+.cd-setup-skeleton__flag {
+  margin-top: var(--space-6);
+}
+
 .cd-setup-step__actions {
   display: flex;
   flex-wrap: wrap;
