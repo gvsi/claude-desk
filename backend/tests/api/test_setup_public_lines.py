@@ -164,6 +164,22 @@ async def test_confirm_stale_revision_conflicts_without_writing(lines_setup, eng
     assert calls == []
 
 
+@pytest.mark.parametrize("keys", [["hours"], ["contact", "hours"]])
+async def test_confirm_stale_revision_naming_a_removed_key_conflicts(lines_setup, engine, monkeypatch, keys):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    shown = (await owner.browser.get(path)).json()
+    removed = await owner.browser.delete(f"{path}/hours")
+    assert removed.status_code == 200, removed.text
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={"keys": keys, "revision": shown["revision"]})
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
 @pytest.mark.parametrize("keys", [["unknown"], ["hours"], ["prices"], ["policy:intake"], ["contact"]])
 async def test_confirm_unknown_or_unlisted_key_is_invalid(lines_setup, engine, monkeypatch, keys):
     owner, state, path = lines_setup

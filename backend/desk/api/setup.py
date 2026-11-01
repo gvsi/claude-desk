@@ -2898,10 +2898,12 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
         public = _public_lines(interview.answers)
         listed = {line.key for line in public.lines}
         listed.update(key for key in ("hours", "prices") if getattr(public, key) is not None)
-        if not keys or not revision.strip() or not set(keys) <= listed:
+        if not keys or not revision.strip():
             raise ApiProblem(422, "invalid")
-        if revision != public.revision:
+        if revision != public.revision:                 # a stale view first: a key it named may have gone since
             raise ApiProblem(409, "conflict")
+        if not set(keys) <= listed:
+            raise ApiProblem(422, "invalid")
         confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in keys}
         confirmed.update(field for key, field in (("hours", "hours"), ("prices", "price_items")) if key in keys)
         republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))
