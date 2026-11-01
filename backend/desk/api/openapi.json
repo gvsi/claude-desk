@@ -12389,7 +12389,7 @@
             },
             "type": "array",
             "title": "Held Policy Keys",
-            "description": "Charter claim keys withheld by the kernel's policy-text check; empty when nothing was held at the latest charter write."
+            "description": "Charter claim keys, such as a policy line or the public contact, withheld by the kernel's public-text checks; empty when nothing was held at the latest charter write."
           },
           "messages": {
             "items": {
