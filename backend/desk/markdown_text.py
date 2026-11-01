@@ -1,9 +1,9 @@
 """What a visitor sees of Claude's prose, which the chats render as Markdown (the owner's decision of
 2026-11-01: CommonMark with GFM tables and strikethrough, no raw HTML, links clickable by their text).
 
-`read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, HTML left
-as the text it is) and returns what a reader sees of it: the text of every block, a newline after
-each, with entities and escapes decoded, emphasis joined to the letters around it, code as written,
+`read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, raw HTML
+recognised) and returns what a reader sees of it: the text of every block, a newline after each,
+with entities and escapes decoded, emphasis joined to the letters around it, code as written,
 table cells, link and image text, link titles, and each ordered list item's number as its list
 renders it ("N. ", counted from its start), so formatting can hide no number or word from the reply
 check's scan. Every link a reader can click, with its text and target, for the reply check to judge
@@ -20,6 +20,10 @@ visible reading and its markers in the raw text: one that starts at another numb
 "0. a"), one of ten items or more, and any digit the parser doesn't read as a list marker.
 `blank_list_markers` is the same blanking for the evals' oracles, so the two can't disagree: plain
 code shared by the kernel and the evals, as `desk.rewrites` is, so judging imports no kernel code.
+
+Raw HTML: the visible reading drops it, as a renderer without raw HTML does; the raw reading is what
+an escaping renderer shows; the scan reads both. So a tag inside a word joins its letters ("fr<b></b>ee"
+reads "free"), and a link or an image written in HTML is neither.
 
 Prose nested deeper than markdown-it follows (`MAX_NESTING`) is dropped from its token stream, so
 it raises `TooDeep`, which the reply check refuses rather than trust a reading with text missing.
@@ -65,7 +69,8 @@ class MarkdownText:
 
 
 def _parser() -> MarkdownIt:
-    parser = MarkdownIt("commonmark", {"html": False, "maxNesting": MAX_NESTING}).enable(["table", "strikethrough"])
+    # Raw HTML is recognised so the visible reading can leave it out: its tokens add nothing to `visible`.
+    parser = MarkdownIt("commonmark", {"html": True, "maxNesting": MAX_NESTING}).enable(["table", "strikethrough"])
     # markdown-it leaves "javascript:" and other unsafe targets unlinked, but the browser's parser links
     # them (then strips the target): every target is tokenized here, for the reply check to judge.
     parser.validateLink = lambda url: True

@@ -69,6 +69,18 @@ def test_a_new_delimiter_starts_a_list_judged_on_its_own():
     assert (read.visible, read.list_markers) == ("a\n10. b\n", ((0, 2),))
 
 
+def test_raw_html_is_left_out_of_the_visible_reading_as_a_renderer_without_it_drops_it():
+    """A renderer without raw HTML drops it, so a tag inside a word joins its letters, a comment
+    shows nothing, an HTML block shows nothing, and a link or image written in HTML is neither. The
+    raw reading, what an escaping renderer shows, still scans every character."""
+    assert markdown_text.read("fr<b></b>ee").visible == "free\n"
+    assert markdown_text.read("Call <!-- note --> us").visible == "Call  us\n"
+    assert markdown_text.read("<div>\n$100\n</div>").visible == ""
+    html_link = markdown_text.read('<a href="https://elsewhere.example">Our reviews</a> are kind.')
+    assert (html_link.visible, html_link.links) == ("Our reviews are kind.\n", ())
+    assert markdown_text.read('<img src="https://elsewhere.example/a.png"> Here.').images is False
+
+
 ELEVEN_STEPS = "\n".join(f"{n}. Check the next fitting" for n in range(1, 12))
 TEN_ONES = "\n".join("1. Check the next fitting" for _ in range(10))     # renders 1 to 10
 NINE_STEPS = "\n".join(f"{n}. Check the next fitting" for n in range(1, 10))
@@ -137,6 +149,10 @@ async def test_every_other_number_stays_blocked(app, client, prose, span):
     ("You get a fr&#101;e inspection.", {"lex.en.promise"}),
     ("Save 10&percnt; on it.", {"digit", "percent_sign"}),
     ("&#xbd; the deposit comes back.", {"digit"}),
+    ("You get a fr<b></b>ee inspection.", {"lex.en.promise"}),        # a renderer may drop the tags
+    # what the raw text shows inside a tag the chats drop
+    ("<span>$100</span> for the visit.", {"currency", "digit"}),
+    ("<div>\n$100 for the visit\n</div>", {"currency", "digit"}),
 ])
 async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_ids):
     copy, visitor = await visitor_of(app, client)
@@ -144,6 +160,18 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
+
+
+async def test_html_an_escaping_renderer_shows_is_caught_by_the_raw_reading(app, client):
+    """A renderer that escapes raw HTML shows the prose as written, tags and all: that is the raw
+    reading, so its number is the raw scan's."""
+    copy, visitor = await visitor_of(app, client)
+    prose = "Call <b>us</b> for <i>$100</i>"
+    verdict = await checked(client, visitor, prose)
+    raw = reply_check.scan_prose(prose)
+    assert verdict.ok is False and {"currency", "digit"} <= {violation.rule_id for violation in raw}
+    assert [v for v in verdict.violations if v.kind == "number_in_prose"] == [
+        v for v in raw if v.kind == "number_in_prose"]
 
 
 @pytest.mark.parametrize(("prose", "span"), [
@@ -214,6 +242,8 @@ async def test_every_clickable_link_must_go_to_the_business_contact(app, client,
     "You can write to MARIA@RiveraPlumbing.example about it.",
     "The forms are on irs.gov if you need them.",                    # no scheme or www.: no link
     "Pay for it at riveraplumbing.example/pay when you're ready.",
+    "Call <!-- note --> us about it.",
+    "Turn off the main valve.<br>Keep the area dry until Maria gets there.",
 ])
 async def test_honest_formatting_and_the_business_own_links_pass(app, client, prose):
     copy, visitor = await visitor_of(app, client)
