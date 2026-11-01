@@ -11,6 +11,7 @@ import pytest
 import rfc8785
 
 from desk.contracts import RenderedBlock, ReplyVerdict, Violation
+from desk.markdown_text import blank_list_markers
 from evals.fakes import FakeAnthropic
 from evals.oracles import denies_ai, scan_visible
 from evals.tier1 import test_reply_golden as reply_golden
@@ -27,21 +28,22 @@ def test_timeout_reply_waits_past_the_production_soft_check_deadline():
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 70
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 64, ("01b",): 1, ("01c",): 5}
+    assert len(rows) == len({row.id for row in rows}) == 75
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 69, ("01b",): 1, ("01c",): 5}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
 def test_rows_show_the_blocks_the_table_states():
-    """Prose-only failures keep checked cards; other failures show the handoff. Passing drafts
-    show their prose (when not empty), then a card per clause."""
+    """Prose-only failures keep checked cards, or with none to keep show the call-back offer as
+    prose; other failures show the handoff. Passing drafts show their prose (when not empty), then a
+    card per clause."""
     rows = {row.id: row for row in load_rows()}
     assert rows["r-en-clean"].blocks == ["prose"]
     assert rows["c-own-quote"].blocks == ["prose", "quote"]
     assert rows["c-empty-prose-falls-back"].blocks == ["quote"]
     assert rows["c-hours"].blocks == ["prose", "hours"]
     assert rows["c-other-session-quote"].blocks == ["handoff"]
-    assert rows["r-en-dollar"].blocks == ["handoff"]
+    assert rows["r-en-dollar"].blocks == ["prose"]                  # the call-back offer
     assert rows["c-final-prose-quote"].blocks == ["quote"]
     assert rows["c-digit-quote-payment"].blocks == ["quote", "payment_link"]
 
@@ -89,22 +91,24 @@ def test_rows_pin_the_owners_decision_on_restating_a_card():
 def test_rows_agree_with_the_scanner():
     """Prose the table expects to fail for an amount or a date is flagged by the evals' own scanner
     too, and every other row's prose is clean by it, so the kind a row expects is the only reason
-    it can fail and a passing row's prose is clean by a reading other than the kernel's."""
+    it can fail and a passing row's prose is clean by a reading other than the kernel's. A numbered
+    list's markers are no number (`blank_list_markers`, the owner's decision of 2026-11-01)."""
     for row in load_rows():
-        hits = scan_visible(row.prose)
+        hits = scan_visible(blank_list_markers(row.prose))
         assert bool(hits) == ("number_in_prose" in row.expect.kinds), (row.id, hits)
 
 
 def test_denies_ai_rows_really_deny_being_an_ai():
     """Each `denies_ai` row's prose denies being an AI by the evals' own oracle, independent of the
     kernel, so the row tests the soft-promise check's AI-denial flag and not an empty reply; both
-    the English and the Spanish twin are present, each a lone `soft_promise` handoff."""
+    the English and the Spanish twin are present, each a lone `soft_promise`, shown as the call-back
+    offer."""
     rows = {row.id: row for row in load_rows()}
     denies = [row for row in rows.values() if row.soft_promise == "denies_ai"]
     assert {row.id for row in denies} == {"r-soft-promise-denies-ai", "r-soft-promise-denies-ai-es"}
     for row in denies:
         assert denies_ai(row.prose), f"{row.id}'s prose doesn't deny being an AI: {row.prose!r}"
-        assert row.expect.violations == ["soft_promise"] and row.blocks == ["handoff"], row.id
+        assert row.expect.violations == ["soft_promise"] and row.blocks == ["prose"], row.id
 
 
 def test_invisible_and_non_ascii_digits_are_written_as_escapes():
@@ -138,7 +142,7 @@ QUOTE_CLAUSE = {"template": "quote", "fact": "own-quote"}
     {"expect": {"ok": False, "violations": ["promise_word", "promise_word"]}},
     {"expect": {"ok": False, "violations": ["promise_word"], "violations_any": ["promise_word"]}},
     {"expect": {"ok": False, "violations": ["typo_in_prose"]}},
-    {"expect": {"ok": False, "violations": ["promise_word"], "blocks": ["prose"]}},   # only the handoff shows
+    {"expect": {"ok": False, "violations": ["promise_word"], "blocks": ["handoff"]}},   # the call-back offer shows
     {"expect": {"ok": True, "blocks": ["prose", "quote"]}},                     # a card no clause cites
     {"clauses": [QUOTE_CLAUSE], "expect": {"ok": True, "blocks": ["quote", "prose"]}},   # prose comes first
     {"expect": {"ok": True, "blocks": ["banner"]}},
@@ -181,6 +185,7 @@ QUOTE_CARD = RenderedBlock(kind="card", template="quote", text="$180.00\nDrain c
                            title="$180.00", lines=["Drain clearing"])
 HANDOFF = RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.",
                         title="Let me check with Maria Rivera.")
+OFFER = RenderedBlock(kind="prose", text="Would you like me to arrange a callback?")
 
 
 def test_verdict_expect_states_each_block_and_its_fact():
@@ -206,7 +211,9 @@ def test_verdict_expect_states_each_block_and_its_fact():
                                   "check_unavailable"])
 def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
     """A failure only of the prose keeps the checked cards, then a handoff clause Claude drafted
-    (the owner's ruling of 2026-11-01); without a drafted one, the cards alone."""
+    (the owner's ruling of 2026-11-01); without a drafted one, the cards alone. With no card to
+    keep and none drafted, the call-back offer the golden Desk has (the owner's decision of
+    2026-11-01), but for a checker outage, which hands off; a drafted handoff is honoured."""
     alone = ReplyRow.model_validate({**GOOD_ROW, "clauses": [QUOTE_CLAUSE],
                                     "expect": {"ok": False, "violations": [kind], "blocks": ["quote"]}})
     assert alone.blocks == ["quote"]
@@ -222,8 +229,20 @@ def test_prose_failure_expects_checked_cards_then_the_drafted_handoff(kind):
                    [QUOTE_CARD.model_copy(update={"title": None}), HANDOFF],
                    [QUOTE_CARD.model_copy(update={"lines": []}), HANDOFF]):
         assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), expect)
+    drafted = ReplyRow.model_validate({**GOOD_ROW, "clauses": [{"template": "handoff"}],
+                                      "expect": {"ok": False, "violations": [kind]}})
+    assert drafted.blocks == ["handoff"]                     # a drafted handoff with nothing to keep is honoured
     no_cards = ReplyRow.model_validate({**GOOD_ROW, "expect": {"ok": False, "violations": [kind]}})
-    assert no_cards.blocks == ["handoff"]
+    if kind == "check_unavailable":                          # a checker outage hands off
+        assert no_cards.blocks == ["handoff"]
+        return
+    assert no_cards.blocks == ["prose"]
+    offered = no_cards.verdict_expect(0, {})
+    assert match_expect(200, verdict([kind], [OFFER]).model_dump(mode="json"), offered) == []
+    spanish = OFFER.model_copy(update={"text": "¿Quiere que solicite una llamada?"})
+    assert match_expect(200, verdict([kind], [spanish], language="es").model_dump(mode="json"), offered) == []
+    for blocks in ([HANDOFF], [PROSE], [OFFER, HANDOFF], []):
+        assert match_expect(200, verdict([kind], blocks).model_dump(mode="json"), offered), blocks
 
 
 @pytest.mark.parametrize("kind", ["canary", "unknown_fact", "stale_fact", "unentitled_fact", "unsupported_language",

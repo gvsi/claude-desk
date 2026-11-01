@@ -7,10 +7,12 @@ import type { QueryClient } from '@tanstack/react-query';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 import type { RenderedBlock } from '../../api/contracts.ts';
-import { ApiError, RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
+import { ApiError, RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { askRuleChat } from '../../api/ruleChatStream.ts';
 import type { RuleChatOut, RulesDraft } from '../../api/views.ts';
 import { AskClaudePanel, ClaudeMessage, Notice, VisitorMessage, type NoticeTone } from '../../ds/index.ts';
 import { aboveMoneyCapCopy } from '../../lib/format.ts';
+import { GrowingReply, settledWords } from '../../lib/GrowingReply.tsx';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { land } from './landing.ts';
 import { RuleDraftReview, rulesQuery } from './RuleDraftReview.tsx';
@@ -46,17 +48,27 @@ function isRulesDraft(out: RuleChatOut | RulesDraft): out is RulesDraft {
   return 'version' in out && 'cards' in out;
 }
 
+/** How a turn shows its answer as it is written, and closes its stream. */
+export interface ChatTurnOptions {
+  /** The answer so far, as it grows; `''` when it starts again. Only Claude's words: never a draft. */
+  onText?: (text: string) => void;
+  /** Closes the stream: the turn then says nothing. */
+  signal?: AbortSignal;
+}
+
 /**
  * Asks Claude about `text` and says what came back: its answer, with the change it drafted built
  * against the active rules (read now, so the review compares with what applies); or why it
- * couldn't. Never throws.
+ * couldn't. The answer shows as it is written through `onText`; what came back is only ever the
+ * final answer. Never throws.
  */
-export async function chatTurn(deskId: string, text: string, queryClient: QueryClient): Promise<NewTurn[]> {
+export async function chatTurn(deskId: string, text: string, queryClient: QueryClient, { onText = () => {}, signal }: ChatTurnOptions = {}): Promise<NewTurn[]> {
   let out: RuleChatOut;
   try {
-    const answered: RuleChatOut | RulesDraft = await request('ruleChat', { params: { desk_id: deskId }, body: { text } });
+    const answered: RuleChatOut | RulesDraft = await askRuleChat(deskId, text, { onText, signal });
     out = isRulesDraft(answered) ? { answer: '', draft: answered } : answered;
   } catch (err) {
+    if (signal?.aborted) return [];
     const failure = draftFailure(err);
     return failure === null ? [] : [{ kind: 'notice', ...failure }];
   }
@@ -78,6 +90,8 @@ export interface RuleChatProps {
   turns: readonly ChatTurn[];
   /** A request is out: "Claude is writing". */
   busy: boolean;
+  /** Claude's answer so far, while it is written; null or empty before its first word. */
+  growing?: string | null;
   /** Another change, from the panel's composer. */
   onSend: (text: string) => void;
   /** "Close" or Escape. */
@@ -98,36 +112,45 @@ function scrollMargin(turn: Element, side: 'top' | 'bottom'): number {
  * when both can't show, the owner's words win. Words too long to be whole give their place to the
  * newest turn's start. Each keeps its turn's scroll margin from the log's edge.
  */
-function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, end: Element): void {
+function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, end: Element, { upward = true } = {}): void {
   const port = log.getBoundingClientRect();
   const whole = (el: HTMLElement) => el.getBoundingClientRect().height + scrollMargin(el, 'top') + scrollMargin(el, 'bottom') <= port.height;
   const start = whole(lead) ? lead : turn;
   // How far down the log may go before the start passes its top, and how far it must go to show the end.
   const room = start.getBoundingClientRect().top - scrollMargin(start, 'top') - port.top;
   const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - port.bottom;
-  log.scrollTop += Math.min(Math.max(0, short), room);
+  const by = Math.min(Math.max(0, short), room);
+  if (by < 0 && !upward) return;
+  log.scrollTop += by;
 }
 
 /**
  * Brings the newest exchange into view as each turn is added: from the owner's words that lead it
  * to the newest turn, and, for a change Claude drafted, to the review's buttons once they show (the
  * review may read the rules first). The owner's words come first, so a new turn opens with them
- * whole, never cut under the panel's header: when the whole exchange doesn't fit, "Confirm change"
- * and "Keep my rules" are a scroll away below them. Only a new turn scrolls, and only the
- * conversation: the owner's own scrolling is left alone.
+ * whole, never cut under the panel's header, except that a drafted change's "Confirm change" and
+ * "Keep my rules" always show whole: when the whole exchange doesn't fit, the buttons win. Only a
+ * new turn scrolls, and only the conversation: the owner's own scrolling is left alone.
  */
-function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[]): void {
+function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], follow: { current: Follow }): void {
   const last = turns.at(-1);
   const lastId = last?.id;
   const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
   const drafted = last?.kind === 'claude' && last.draft !== null;
   useEffect(() => {
+    // The owner scrolled away while this exchange's answer was written: its final turn leaves them there.
+    if (follow.current.lead === leadId && follow.current.mode === 'off') return undefined;
     const turnOf = (id: number | undefined) => (id === undefined ? null : (root.current?.querySelector<HTMLElement>(`[data-turn="${id}"]`) ?? null));
     const turn = turnOf(lastId);
     const log = turn?.closest<HTMLElement>('[role="log"]');
     if (!turn || !log) return undefined;
     const lead = turnOf(leadId) ?? turn;
-    revealExchange(log, lead, turn, turn);
+    // Where its own scrolling leaves the conversation, so it is never read as the owner's.
+    const reveal = (end: Element) => {
+      revealExchange(log, lead, turn, end);
+      follow.current.at = log.scrollTop;
+    };
+    reveal(turn);
     if (!drafted) return undefined;
     // The review's last button ("Keep my rules", or "Try again" when the rules couldn't be read)
     // closes it, and the exchange.
@@ -135,7 +158,14 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
       const buttons = turn.querySelectorAll('.cd-rule-draft button');
       const end = buttons[buttons.length - 1];
       if (end === undefined) return false;
-      revealExchange(log, lead, turn, end);
+      reveal(end);
+      // The review's buttons are the one action that applies the change: when they and the owner's
+      // words don't both fit, the buttons win, wholly in view.
+      const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - log.getBoundingClientRect().bottom;
+      if (short > 0) {
+        log.scrollTop += short;
+        follow.current.at = log.scrollTop;
+      }
       return true;
     };
     if (revealActions()) return undefined;
@@ -144,7 +174,64 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
     });
     observer.observe(turn, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [root, lastId, leadId, drafted]);
+  }, [root, lastId, leadId, drafted, follow]);
+}
+
+/**
+ * How the answer being written is followed: for which question (the owner's turn that leads it),
+ * and whether it follows the exchange, keeps to the conversation's end, or stays where the owner
+ * scrolled; `at` is where it last left the conversation.
+ */
+interface Follow {
+  lead: number | undefined;
+  mode: 'reveal' | 'end' | 'off';
+  at: number | null;
+}
+
+/**
+ * Keeps the end of the answer being written in view as it grows, as a new turn is brought into
+ * view, never taking the owner's words that lead the exchange above the conversation's top, and
+ * never scrolling up. Once the owner scrolls the conversation themselves, it stays where they put
+ * it, the final answer's turn included, until they scroll back to its end (from then it keeps to
+ * the end) or ask something new.
+ */
+function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], growing: string | null, follow: { current: Follow }): void {
+  const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
+
+  useEffect(() => {
+    const log = root.current?.querySelector<HTMLElement>('[role="log"]');
+    if (!log) return undefined;
+    const onScroll = () => {
+      const now = follow.current;
+      // Its own scrolling lands where it left the conversation; anything else is the owner's.
+      if (now.at !== null && Math.abs(log.scrollTop - now.at) <= 1) return;
+      now.at = null;
+      now.mode = log.scrollHeight - log.clientHeight - log.scrollTop <= 1 ? 'end' : 'off';
+    };
+    log.addEventListener('scroll', onScroll, { passive: true });
+    return () => log.removeEventListener('scroll', onScroll);
+  }, [root, follow]);
+
+  useEffect(() => {
+    const now = follow.current;
+    if (now.lead !== leadId) {
+      // A new question: its answer is followed from the start.
+      // Where the new question was brought into view stays recorded, so that scroll isn't the owner's.
+      now.lead = leadId;
+      now.mode = 'reveal';
+    }
+    if (growing === null || now.mode === 'off') return;
+    const answer = root.current?.querySelector<HTMLElement>('.cd-rule-chat__growing');
+    const log = answer?.closest<HTMLElement>('[role="log"]');
+    if (!answer || !log) return;
+    if (now.mode === 'end') {
+      log.scrollTop = log.scrollHeight - log.clientHeight;
+    } else {
+      const lead = leadId === undefined ? answer : (root.current?.querySelector<HTMLElement>(`[data-turn="${leadId}"]`) ?? answer);
+      revealExchange(log, lead, answer, answer, { upward: false });
+    }
+    now.at = log.scrollTop;
+  }, [root, leadId, growing, follow]);
 }
 
 /**
@@ -152,10 +239,15 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
  * in serif and the change it drafted as an inline review, and any line on what went wrong. Once a
  * change is confirmed, its receipt takes the review's place, and Rules shows where it landed.
  */
-export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, onSend, onClose, onSettled }, ref) {
+export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, growing = null, onSend, onClose, onSettled }, ref) {
   const root = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLDivElement, []);
-  useRevealNewTurns(root, turns);
+  // Shared by the growing answer and the turn that ends it, so the final answer keeps the owner's place.
+  const follow = useRef<Follow>({ lead: undefined, mode: 'reveal', at: null });
+  useRevealNewTurns(root, turns, follow);
+  // The answer's words, once one is whole, take the writing dots' place.
+  const writing = growing !== null && settledWords(growing) !== '' ? growing : null;
+  useRevealGrowing(root, turns, writing, follow);
   return (
     <div ref={root} className="cd-rule-chat">
       <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy}>
@@ -198,6 +290,15 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
             </div>
           );
         })}
+        {writing === null ? null : (
+          // Claude's answer as it is written: its words only. What it drafts shows once the answer is
+          // final. Screen readers hear "Claude is writing" until then, and the final answer once.
+          <div className="cd-rule-chat__turn cd-rule-chat__answer cd-rule-chat__growing" aria-hidden="true">
+            <div className="cd-claude-message" lang="en">
+              <GrowingReply text={writing} streaming />
+            </div>
+          </div>
+        )}
       </AskClaudePanel>
     </div>
   );

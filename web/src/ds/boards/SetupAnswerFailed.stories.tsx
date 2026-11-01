@@ -19,7 +19,7 @@ const FAILED_LINE = 'I couldn’t answer just now. Your answer is still here; tr
 function SetupAnswerFailed() {
   return (
     <SetupFrame business={rivera.business.name}>
-      <PageHeader title="A few questions" subtitle="Question 3 of 7" />
+      <PageHeader title="Let's set up your Desk" subtitle="Question 3 of 7" />
       <div className="board-setup__stack">
         <Transcript label="Setup questions">
           <TranscriptRow>
@@ -68,7 +68,7 @@ export const Board: Story = {
     const bell = one(brand, '.cd-mark').getBoundingClientRect();
     await expect([Math.round(bell.width), Math.round(bell.height)]).toEqual([20, 20]);
     await expect(Math.round(one(brand, '.cd-wordmark').getBoundingClientRect().left - bell.right)).toBe(10);
-    expectComputed(canvas.getByRole('heading', { level: 1, name: 'A few questions' }), SPEC.pageTitle);
+    expectComputed(canvas.getByRole('heading', { level: 1, name: "Let's set up your Desk" }), SPEC.pageTitle);
     await expect(canvas.getByText('Question 3 of 7')).toBeVisible();
     expectConversationType(canvasElement);
     await expect(canvas.getByRole('log', { name: 'Setup questions' })).toHaveTextContent(QUESTION);

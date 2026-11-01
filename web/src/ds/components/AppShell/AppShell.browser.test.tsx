@@ -134,7 +134,7 @@ it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
     expect([layout, box.left < 24, box.top < 24]).toEqual([layout, true, true]);
     expect(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('a')).toBe(skip);
     const ring = getComputedStyle(skip);
-    expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor]).toEqual(['solid', '2px', 'rgb(126, 174, 218)']);
+    expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor]).toEqual(['solid', '2px', 'rgba(250, 249, 245, 0.64)']);
 
     // Enter moves focus to the page, leaving the address as it is, and the next Tab is inside it.
     const address = window.location.href;

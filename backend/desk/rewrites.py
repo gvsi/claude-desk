@@ -8,7 +8,8 @@ blocked draft is one the visitor will see (`CheckReplyRequest.final`), so the tw
 
 `PROSE_ONLY` names the failures of Claude's own words: a shown verdict failing only for these keeps
 the draft's checked cards, without the prose, and a handoff clause after them if Claude drafted
-one; any other kind shows the handoff clause. The kernel, the fake kernel and the tier 1 reply
+one; with no card to keep it shows the kernel's call-back offer when the session is offered a call
+back; any other kind shows the handoff clause. The kernel, the fake kernel and the tier 1 reply
 rows all read it. Plain data, importing only the contracts.
 """
 

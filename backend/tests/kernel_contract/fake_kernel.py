@@ -31,6 +31,9 @@ contract test, before the task that first uses them.
   owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
   ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
   non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
+  shown draft blocked only for its prose, with no card at all (none to keep, no drafted handoff) and no checker
+  outage, asks first: the kernel's call-back offer, as prose, when the session's tools offer a call back and it has
+  no open handoff, and no handoff card, so it opens none. A
   call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
   owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
@@ -254,6 +257,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
+from desk.next_steps import NEXT_STEPS, next_steps
 from desk.rewrites import PROSE_ONLY, REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
@@ -856,18 +860,23 @@ ENGLISH_WORDS = frozenset("""
     now until after before than too
 """.split())
 # The cards the fake renders plainly, and a verdict's status lines in the kernel's own words (its `reply_checked`,
-# `reply_handed_off`, `owner_said` and `owner_say_blocked` lines).
+# `reply_handed_off`, `owner_said` and `owner_say_blocked` lines), and its call-back offer.
 REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply checked against {owner}'s rules",
                      "handed_off": "Passed to {owner} to answer",
                      "verify": "Enter the code sent to the contact on record.", "hours": "Opening hours",
                      "owner_said": "Written by {owner}",
-                     "owner_say_blocked": "Not sent: it included text from a private document"},
+                     "owner_say_blocked": "Not sent: it included text from a private document",
+                     "offer_callback": "Would you like me to arrange a callback?"},
               "es": {"handoff": "Déjame consultarlo con {owner}.",
                      "checked": "Respuesta revisada con las reglas de {owner}",
                      "handed_off": "Pasado a {owner} para responder",
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
-                     "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+                     "owner_say_blocked": "No se envió: incluía texto de un documento privado",
+                     "offer_callback": "¿Quiere que solicite una llamada?"}}
+# A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
+# of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
+CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]
 # The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
 CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
@@ -2629,7 +2638,8 @@ class FakeKernelState:
                 raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
-            document = desk.documents.get(args["document_id"])
+            # named bare or by its fact ID, as Claude's context shows it (`adapters.base.fact_ref`)
+            document = desk.documents.get(args["document_id"].removeprefix("document:"))
             if document is None:
                 raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
@@ -2640,8 +2650,9 @@ class FakeKernelState:
         elif tool == "payments.list_charges":
             resource = ResourceRef(kind="charge", id=f"person:{session.person_id}", owner_person_id=session.person_id)
         elif tool in ("native.payment_link", "native.charge_mandate"):
-            quote = self.quotes.get(args["quote_id"])
-            fact = desk.facts.get(f"quote:{args['quote_id']}")
+            quote_id = args["quote_id"].removeprefix("quote:")     # bare or by its fact ID, as for documents
+            quote = self.quotes.get(quote_id)
+            fact = desk.facts.get(f"quote:{quote_id}")
             # this conversation's own quote, unpaid: a quote is paid once (Plan 01c)
             if (quote is None or quote["desk_id"] != desk.desk_id or quote["session_id"] != session.session_id
                     or quote["status"] != "available" or fact is None or not self._current(fact)
@@ -2754,8 +2765,12 @@ class FakeKernelState:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
+        # every decide entry names the rules version and its money cap, a refusal before any action too (the
+        # kernel's `decide._store`)
         summary = {"decision_id": decision_id, "action_id": action.action_id if action else None, "tool": tool,
-                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
+                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version,
+                   "auto_money_cap_cents": min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS),
+                   "reviewed": False}
         if why is not None:
             summary["reason"] = why
         if check is not None:
@@ -3506,7 +3521,8 @@ class FakeKernelState:
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
         """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
-        clause when the draft has one, else the handoff alone, ledgered and signed. An
+        clause when the draft has one; with no card at all, the kernel's call-back offer as prose when
+        `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3519,9 +3535,12 @@ class FakeKernelState:
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
-            if kept and all(violation.kind in PROSE_ONLY for violation in violations):
+            prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
+            if kept and prose_only:
                 drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
                 blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
+            elif prose_only and self._offers_call_back(session, desk, blocks, violations):
+                blocks = [RenderedBlock(kind="prose", text=REPLY_TEXT[language]["offer_callback"])]   # ask first
             else:
                 blocks = [handoff]
         shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
@@ -3549,6 +3568,17 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _offers_call_back(self, session: Session, desk: Desk, blocks: list[RenderedBlock],
+                          violations: list[Violation]) -> bool:
+        """Whether a draft blocked only for its prose shows the kernel's call-back offer, as the kernel's
+        `reply_check.call_back_offered` decides: no card at all (no checked card to keep, and no handoff clause Claude
+        drafted, which is honoured), no checker outage (`check_unavailable`, which hands off), no open handoff of
+        either kind on the session, and a call back among the session's tools' next steps."""
+        return (not any(block.kind == "card" for block in blocks)
+                and not any(violation.kind == "check_unavailable" for violation in violations)
+                and self._open_handoff(session) is None
+                and CALL_BACK_STEP in next_steps(desk.tools[tool] for tool in self.tools_given(session, desk)))
 
     def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
         """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's

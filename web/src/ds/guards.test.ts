@@ -713,6 +713,16 @@ describe('design system source guards', () => {
     expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
   });
 
+  it('focus_rings_are_never_the_link_blue', () => {
+    // The owner, 2026-11-01: no blue focus border anywhere. A ring is the warm `ring-focus`, drawn as an
+    // outline or a shadow; neither may use the link blue, with or without a fallback.
+    const src = path.join(DS, '..');
+    const blue = filesUnder(src)
+      .filter((file) => file.endsWith('.css'))
+      .flatMap((file) => [...withoutComments(readFileSync(path.join(src, file), 'utf8')).matchAll(/\b(?:outline(?:-color)?|box-shadow)\s*:[^;{}]*var\(\s*--(?:accent-blue|va-link)\s*(?:,[^)]*)?\)/g)].map((m) => `${file}: ${m[0]}`));
+    expect(blue).toEqual([]);
+  });
+
   // Importing the index transforms every component on first use. When the whole suite runs, the
   // browser projects compete for the same CPU, so this import gets more than the default 5 s.
   it('index_exports_every_component', { timeout: 60_000 }, async () => {

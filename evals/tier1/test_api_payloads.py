@@ -7,7 +7,8 @@ the kernel target's fake model server. Until Plan 02a's Task 9 adds `02a` to `la
 
 The payload cases play one conversation. Claude quotes a drain clearing and replies "Here is your
 quote." with the quote card; then it twice answers in plain text with "It costs $89,
-eighty-nine dollars.", which the kernel blocks, so the second turn ends in the handoff. Each case
+eighty-nine dollars.", which the kernel blocks, so the second turn ends in the kernel's call-back offer
+(a Rivera copy offers call backs, so the visitor is asked before the owner is involved). Each case
 then judges one part with the evals' own oracles: the visitor's stream and `app.run_events`
 show no digit, currency or percent outside cards; every signed event verifies against the
 kernel's key; "Claude is writing" comes first and carries nothing; the usage stored is the usage
@@ -34,6 +35,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from desk.api.prompts import STATUS_LINES
 from desk.contracts import Decision, DemoAgentIssued, LedgerPage
 from desk.events import A2AResponse, SseEvent
 from desk.kernel_api import Health
@@ -342,7 +344,7 @@ class Chat:
 
 async def scripted_chat(k: KernelTarget, api: ApiTarget, fake: FakeAnthropic) -> Chat:
     """A new copy and a visitor's chat on its Desk, in two turns: the quote and its card, then the
-    blocked amounts and the handoff. A conversation that didn't go as scripted fails the case."""
+    blocked amounts and the kernel's call-back offer. A conversation that didn't go as scripted fails the case."""
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))   # the reviewer passes, if the kernel asks it
     # Scripted for the soft-promise check alone: the API's owner translations and triage run on the same model.
     fake.script(SOFT_PROMISE_MODEL, Json(SOFT_PROMISE_PASS, usage=SOFT_PROMISE_USAGE), schema=SOFT_PROMISE_SCHEMA)
@@ -357,12 +359,14 @@ async def scripted_chat(k: KernelTarget, api: ApiTarget, fake: FakeAnthropic) ->
         second = await chat_turn(visitor, SECOND_MESSAGE, last_id(first))
     assert script.fact_id is not None, "the quote's result never reached Claude, so the reply was never scripted"
     chat = Chat(copy=copy, desk=desk, session_id=state["session_id"], fact_id=script.fact_id, turns=[first, second])
-    quoted, handed_off = chat.messages(0), chat.messages(1)
+    quoted, offered = chat.messages(0), chat.messages(1)
     assert len(quoted) == 1 and any(
         block.get("template") == "quote" and block.get("fact_id") == chat.fact_id
         for block in quoted[0].data["blocks"]), f"turn 1 shows no one quote card for {chat.fact_id}: {quoted}"
-    assert len(handed_off) == 1 and handed_off[0].data["handoff"] is True, (
-        f"turn 2 isn't the one handoff after two blocked replies: {handed_off}")
+    offer = [{"kind": "prose", "text": STATUS_LINES["offer_callback"]["en"]}]
+    assert len(offered) == 1 and offered[0].data["handoff"] is False and [
+        {"kind": block["kind"], "text": block["text"]} for block in offered[0].data["blocks"]] == offer, (
+        f"turn 2 isn't the one call-back offer after two blocked replies: {offered}")
     return chat
 
 

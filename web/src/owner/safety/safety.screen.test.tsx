@@ -453,6 +453,34 @@ describe('Safety', () => {
     expect(trace.getByText(/Chain verified/).elements()).toHaveLength(0);
   });
 
+  it('a_long_trace_scrolls_in_its_column_and_the_page_stays_put', async () => {
+    // A trace taller than the window, in a window short enough for it (owner comment, 2026-11-01:
+    // "long trace column makes the whole page jump"). Opening it leaves the page where it was, and
+    // the trace scrolls inside its own column beside the list.
+    const checks = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
+    const entries = threeEntries();
+    entries[2] = entry(3, '2026-10-20T16:52:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
+    injectLedger(ledgerPage(entries));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: { width: 1440, height: 700 } });
+    await expect.element(recordRow(screen, 3)).toBeVisible();
+    const main = recordRow(screen, 3).element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    const before = main.scrollTop;
+
+    await recordRow(screen, 3).click();
+    const trace = region(screen, 'Full trace of entry 3');
+    await expect.element(trace).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(main.scrollTop).toBe(before);
+    const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
+    if (!beside) throw new Error('the trace sits in the column beside the list');
+    expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
+    // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
+    // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
+    expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
+  });
+
   it('dev_key_is_labelled', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);

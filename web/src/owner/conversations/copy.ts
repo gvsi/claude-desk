@@ -6,3 +6,6 @@ export const LATEST_VISIT_BOOKED = 'Visit booked';
 
 /** The head's "Latest" line once a deposit was paid and its charge or payment card was shown. */
 export const LATEST_DEPOSIT_PAID = 'Deposit paid';
+
+/** A recorded refusal, using the same words as Today and Safety. */
+export const TURNED_DOWN = 'Turned down';

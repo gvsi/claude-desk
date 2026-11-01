@@ -8,7 +8,8 @@ code sent), code-free; a decision's own notices are owner alerts and never reach
 `/check_reply`, and only the kernel's checked blocks reach the visitor, through `deliver()`. A
 check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite. A blocked
 final check shows the checked cards when only the prose failed (with Claude's drafted handoff clause after them,
-when it drafted one), else the handoff clause; the kernel opens the owner's handoff whenever the shown blocks include
+when it drafted one); with no card to keep, the kernel's call-back offer when the session is offered a call back,
+else the handoff clause; the kernel opens the owner's handoff whenever the shown blocks include
 that clause, and the API shows the verdict's blocks at once, so what the kernel opens is what the session sees. The
 kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel reads too.
 
@@ -51,7 +52,7 @@ from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.prompts import (
     INVALID_REPLY_DIAGNOSTIC, INVALID_REPLY_SHAPES, KERNEL_ONLY_TEMPLATES, REPLY_DIAGNOSTICS,
-    REPLY_RULE_IDS, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL,
+    REPLY_RULE_IDS, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL, STATUS_LINES,
 )
 from desk.api.ro import KERNEL_RO
 from desk.api.schemas import CheckedDraft, StoppedDraft
@@ -63,6 +64,7 @@ from desk.contracts import (
     Clause,
     Decision,
     ExecResult,
+    RenderedBlock,
     ReplyDraft,
     ReplyVerdict,
     ToolCall,
@@ -187,6 +189,8 @@ NOT_RUN = {"outcome": "not_run"}
 UNAVAILABLE = {"outcome": "unavailable"}
 REFUSED = {"outcome": "refused"}
 DELIVERED_HANDOFF = {"outcome": "delivered_handoff"}
+# The kernel's call-back offer, shown as prose in place of a draft blocked only for its prose with no card to keep.
+CALL_BACK_OFFERS = frozenset(STATUS_LINES["offer_callback"].values())
 
 
 @dataclass(frozen=True)
@@ -633,19 +637,40 @@ async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clau
         return _unavailable()
 
 
-def prose_unshown(tool_input: Any, kinds: Iterable[str | None]) -> bool:
-    """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
-    shown blocks (their `kinds`) holds: the check failed and showed the kept cards or a handoff in its place."""
+def _drafted_prose(tool_input: Any) -> str | None:
+    """The prose Claude drafted (`tool_input`, its `send_reply` input, a nonempty string `prose`), stripped, if any."""
     prose = tool_input.get("prose") if isinstance(tool_input, dict) else None
-    return isinstance(prose, str) and bool(prose.strip()) and "prose" not in kinds
+    return prose.strip() if isinstance(prose, str) and prose.strip() else None
 
 
-def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True) -> dict:
+def prose_unshown(tool_input: Any, blocks: Iterable[RenderedBlock]) -> bool:
+    """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
+    shown `blocks` holds: the check failed and showed the kept cards, a handoff or the kernel's call-back offer in its
+    place. The offer is the one prose block the kernel writes, in the signed words (`CALL_BACK_OFFERS`), so a prose
+    block holding them is Claude's only when Claude drafted those words."""
+    prose = _drafted_prose(tool_input)
+    return prose is not None and not any(
+        block.kind == "prose" and (block.text not in CALL_BACK_OFFERS or block.text == prose) for block in blocks)
+
+
+def offer_shown_instead(tool_input: Any, blocks: Iterable[RenderedBlock]) -> str | None:
+    """The kernel's call-back offer when it was shown in place of Claude's own prose (`tool_input`, its `send_reply`
+    input): the offer's words, so Claude reads the question the visitor's next message answers; else None."""
+    prose = _drafted_prose(tool_input)
+    return next((block.text for block in blocks if block.kind == "prose" and block.text in CALL_BACK_OFFERS
+                 and block.text != prose), None)
+
+
+def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True,
+                     shown_instead: str | None = None) -> dict:
     """What Claude reads for a shown reply: `delivered_handoff` when it showed the handoff clause, else `delivered`
-    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown."""
+    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown, and the kernel's
+    call-back offer, when that was shown in its place, as `shown_instead`."""
     result = dict(DELIVERED_HANDOFF) if handoff else {"outcome": "delivered", "message_id": message_id}
     if not prose_shown:
         result["prose_shown"] = False
+    if shown_instead is not None:
+        result["shown_instead"] = shown_instead
     return result
 
 
@@ -659,8 +684,9 @@ async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, ca
     await conn.commit()
     if seq is None:
         return ToolOutcome(dict(NOT_RUN), True, fenced=True, **timing)
-    result = delivered_result(reply.handoff, verdict.message_id, prose_shown=not prose_unshown(
-        tool_input, [block.kind for block in verdict.blocks]))
+    result = delivered_result(reply.handoff, verdict.message_id,
+                              prose_shown=not prose_unshown(tool_input, verdict.blocks),
+                              shown_instead=offer_shown_instead(tool_input, verdict.blocks))
     return ToolOutcome(result, reply.handoff, delivered="handoff" if reply.handoff else "reply",
                        message_id=verdict.message_id, **timing)
 
@@ -688,10 +714,12 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     `REWRITE_INSTRUCTION`; a soft check that gave no verdict (`check_unavailable`) is one of them, and the final
     check makes its own try. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
     `session_paused`) or a final check's, shows the verdict's blocks with no further kernel call: the checked cards
-    when they survive (with Claude's drafted handoff clause after them, when it drafted one), otherwise the handoff
-    the kernel opened for the owner. Any shown handoff clause ends the turn as `delivered_handoff`, even when the
-    draft passed. Either outcome carries `prose_shown` false when the prose Claude drafted wasn't shown (the kept
-    cards, or a handoff in its place), so Claude never refers to it.
+    when they survive (with Claude's drafted handoff clause after them, when it drafted one), otherwise, when only
+    the prose failed and the session is offered a call back, the kernel's call-back offer, delivered as a reply as
+    kept cards are, and otherwise the handoff the kernel opened for the owner. Any shown handoff clause ends the turn
+    as `delivered_handoff`, even when the draft passed. Either outcome carries `prose_shown` false when the prose
+    Claude drafted wasn't shown (the kept cards, the offer or a handoff in its place), so Claude never refers to it,
+    and the offer's words as `shown_instead` when the offer was shown, so Claude reads the question it asked.
     Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.

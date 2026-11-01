@@ -62,7 +62,7 @@ it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async
   expect(kept.scrollHeight).toBeGreaterThan(kept.clientHeight);
   await userEvent.keyboard('{Tab}');
   await expect.element(region).toHaveFocus();
-  expect(getComputedStyle(kept).outlineColor).toBe('rgb(126, 174, 218)');
+  expect(getComputedStyle(kept).outlineColor).toBe('rgba(250, 249, 245, 0.64)');
   expect(getComputedStyle(kept).outlineWidth).toBe('2px');
   expect(getComputedStyle(kept).outlineOffset).toBe('2px');
   const before = kept.scrollTop;

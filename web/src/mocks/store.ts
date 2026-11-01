@@ -26,7 +26,9 @@ import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
 import { DOCUMENT_TOKEN, lookAtDocument, openDocument, type DocumentAnswer, type DocumentLink } from './documents.ts';
 import { PAYMENT_TOKEN } from './script.ts';
+import { MODEL_PACE, TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
 import type { MockSeed } from './seed.ts';
+import { followSetupTurn, type SetupFollower } from './setup.ts';
 import {
   Server,
   failWith,
@@ -38,6 +40,7 @@ import {
   type CopyNaming,
   type Cookies,
   type Failure,
+  type OwnerStreamKind,
 } from './served.ts';
 import type { MockWorld, SessionRecord } from './world.ts';
 
@@ -93,6 +96,11 @@ export interface ResetOptions {
 export interface MockStoreOptions {
   /** How the store keeps cookies (default `simulated`); see the file's header. */
   cookies?: 'simulated' | 'real';
+  /**
+   * How its copies' owner-chat streams are written: a model's pace with every setup turn streamed
+   * on the dev server (`real`), quick with setup's turns landing in their requests in tests.
+   */
+  streams?: StreamSettings;
 }
 
 /** The `{error}` body a planted status answers with when it names none. */
@@ -325,6 +333,7 @@ const NO_COOKIES: Cookies = {
 
 export class MockStore {
   private readonly mode: 'simulated' | 'real';
+  private readonly streams: StreamSettings;
   private one: { server: Server; cookies: SimulatedCookies } | null = null;
   private readonly many = new CookieCopies();
   private injections: (Injection & { left: number })[] = [];
@@ -334,7 +343,8 @@ export class MockStore {
 
   constructor(opts: MockStoreOptions = {}) {
     this.mode = opts.cookies ?? 'simulated';
-    if (this.mode === 'simulated') this.one = { server: new Server('rivera', seedNaming()), cookies: new SimulatedCookies(true) };
+    this.streams = opts.streams ?? (this.mode === 'real' ? MODEL_PACE : TEST_PACE);
+    if (this.mode === 'simulated') this.one = { server: new Server('rivera', seedNaming(), this.streams), cookies: new SimulatedCookies(true) };
   }
 
   /** The one copy and this browser's cookies; only a `simulated` store has them. */
@@ -380,7 +390,7 @@ export class MockStore {
   /** A fresh copy of `seed`: no visitor cookies, no faults, nothing recorded, no turn in flight. */
   reset(seed: MockSeed, opts: ResetOptions = {}): void {
     this.oneCopy().server.stopTurns();
-    this.one = { server: new Server(seed, seedNaming()), cookies: new SimulatedCookies(opts.signedIn ?? true) };
+    this.one = { server: new Server(seed, seedNaming(), this.streams), cookies: new SimulatedCookies(opts.signedIn ?? true) };
     this.injections = [];
     this.log.length = 0;
     this.unhandledPaths.length = 0;
@@ -430,7 +440,7 @@ export class MockStore {
         return { server: null, cookies: NO_COOKIES, setCookie: [] };
       case 'passcode':
         // A new copy, kept only if the passcode opens it (`setOwner`).
-        return reached(new Server('rivera', this.many.naming));
+        return reached(new Server('rivera', this.many.naming, this.streams));
       case 'owner_cookie': {
         const value = sent[OWNER_COOKIE.name];
         const server = value === undefined ? undefined : this.many.owners.get(value);
@@ -479,6 +489,12 @@ export class MockStore {
       if (answered === null) this.recordUnhandled(ROUTES[key].path);
       served = answered ?? failWith(501, 'not_mocked');
       if (reached !== null && !isFailure(reached)) setCookie = reached.setCookie;
+      // A route that holds its answer (a streamed setup turn) answers once its turn lands.
+      const later = (served as { later?: Promise<AnyServed> }).later;
+      if (later !== undefined && injection === null) {
+        served = await later;
+        if (!this.admits(epoch)) return { network: true };
+      }
     }
     if (injection !== null) {
       if (injection.status === 'network') return { network: true };
@@ -519,6 +535,51 @@ export class MockStore {
     const session = this.visitorSession(slug);
     if (!session) throw new Error(`this browser has no session for ${slug}`);
     return this.world.emit(session, ev);
+  }
+
+  /**
+   * For tests: the next stream of `kind` goes as planned (paused, started again, failed or broken
+   * off). Ask Claude's answers always stream when asked to; setup's turns only once `streamSetupTurns`.
+   */
+  planStream(kind: OwnerStreamKind, plan: OwnerStreamPlan): void {
+    this.oneCopy().server.planStream(kind, plan);
+  }
+
+  /**
+   * For tests: setup's answers, decisions, consent and suggestions run as streamed turns, or land in
+   * their requests again. An answer's or a decision's request waits for its turn and answers 200,
+   * unless `answersAtOnce` has it answer 202 busy at once, as consent's does.
+   */
+  streamSetupTurns(on = true, { answersAtOnce = false } = {}): void {
+    const { streams } = this.oneCopy().server;
+    streams.setupTurns = on;
+    streams.answersAtOnce = answersAtOnce;
+  }
+
+  /**
+   * The pace and any planned stream for Ask Claude's answer in the copy the owner cookie names, and
+   * the answer written before its change was refused for the payment limit, if it was.
+   */
+  ruleChatStream(cookies: Record<string, string> = {}): { wordMs: number; plan: OwnerStreamPlan | null; refusedAnswer: string | null } {
+    const reached = this.reach('ruleChat', {}, cookies);
+    if (isFailure(reached) || reached.server === null) return { wordMs: this.streams.wordMs, plan: null, refusedAnswer: null };
+    const { server } = reached;
+    const refusedAnswer = server.refusedAnswer;
+    server.refusedAnswer = null;
+    return { wordMs: server.streams.wordMs, plan: server.takePlan('ruleChat'), refusedAnswer };
+  }
+
+  /**
+   * Follows setup interview `id`'s running turn in the copy the owner cookie names (this browser's,
+   * for a `simulated` store). Returns the function that stops it.
+   */
+  followSetup(id: string, follower: SetupFollower, cookies: Record<string, string> = {}): () => void {
+    const reached = this.reach('setupEvents', { id }, cookies);
+    if (isFailure(reached) || reached.server === null) {
+      follower.close();
+      return () => {};
+    }
+    return followSetupTurn(reached.server.world, id, follower);
   }
 
   /**
