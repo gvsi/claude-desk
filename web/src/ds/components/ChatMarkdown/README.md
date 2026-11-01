@@ -20,7 +20,7 @@
 
 As the signed Markdown boards (N-MD-01 to N-MD-06) draw it, in the reply type (`cd-type-reply`, serif 15/23):
 
-- Paragraphs `space-10` apart, keeping Claude's line breaks inside a paragraph.
+- Paragraphs `space-10` apart, keeping Claude's line breaks inside a paragraph. A Markdown hard break (two trailing spaces or a backslash) starts one new line, as a line break does.
 - Headings at the reply's size, weight 600: 15/23, with `h1` and `h2` at 17/25, `space-16` below what is above them, so a chat reply never gets page-size titles.
 - Bold at 600 and italic.
 - Lists indented 22 px, items `space-4` apart, their markers in `text-secondary`, `space-4` under the paragraph that leads into them.
@@ -35,6 +35,7 @@ As the signed Markdown boards (N-MD-01 to N-MD-06) draw it, in the reply type (`
 - Links only to whole `http:`, `https:` and `mailto:` URLs, opening in a new tab with `rel="noopener noreferrer"`. A link anywhere else, a path on this site included, renders as its link text, unlinked.
 - With `links="inert"`, a link renders as its text, then its URL in brackets, and nothing is clickable. A bare URL or email address shows once.
 - No code highlighting, math or diagrams: Streamdown's plugins for them aren't installed, so their bundles never ship.
+- No footnotes: `[^note]` and `[^note]: …` stay as the words written, in place. Rendered, a footnote would move its note to the end under a label and a back link the reply never had.
 
 ## Streaming and the reveal
 

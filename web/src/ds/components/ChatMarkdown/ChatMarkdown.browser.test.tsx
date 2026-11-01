@@ -141,6 +141,35 @@ it('inert_links_show_their_text_then_their_url_and_link_nowhere', () => {
   expect(md.textContent).toBe('Pay at this page (https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not this.');
 });
 
+it('footnote_syntax_stays_as_its_own_words_in_place', () => {
+  // Footnotes aren't a chat format: rendered, they would move a note to the end under a label and
+  // a back link the reply never had.
+  const md = reply(mount(<ChatMarkdown text={'First.[^note]\n\n[^note]: A **checked** note.\n\nLast.'} />));
+  expect(md.querySelectorAll('section, sup, a')).toHaveLength(0);
+  expect([...md.children].map((block) => [block.tagName.toLowerCase(), block.textContent])).toEqual([
+    ['p', 'First.[^note]'],
+    ['p', '[^note]: A checked note.'],
+    ['p', 'Last.'],
+  ]);
+  expect(md.querySelector('strong')?.textContent).toBe('checked');
+  expect(md.textContent).not.toMatch(/Footnotes|↩/);
+});
+
+it('the_rest_of_github_markdown_still_renders', () => {
+  const md = reply(mount(<ChatMarkdown text={'The ~~old~~ new tank, see www.example.com or https://example.com/tank.'} />));
+  expect(md.querySelector('del')?.textContent).toBe('old');
+  expect([...md.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['http://www.example.com/', 'https://example.com/tank']);
+});
+
+it('a_hard_break_starts_one_new_line', () => {
+  // Two trailing spaces or a backslash end a line in Markdown, as Claude's own line break does.
+  const md = reply(mount(<ChatMarkdown text={'Line one  \nLine two\n\nLine three\\\nLine four\n\nLine five\nLine six'} />));
+  const paragraphs = [...md.querySelectorAll('p')];
+  expect(paragraphs.map((paragraph) => paragraph.querySelectorAll('br').length)).toEqual([1, 1, 0]);
+  const line = Number.parseFloat(getComputedStyle(md).lineHeight);
+  for (const paragraph of paragraphs) expect(paragraph.getBoundingClientRect().height, paragraph.textContent ?? '').toBe(2 * line);
+});
+
 it('switching_links_redraws_the_same_reply', () => {
   const text = 'See [the guide](https://example.com/guide).';
   const host = mount(<ChatMarkdown text={text} />);

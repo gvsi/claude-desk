@@ -1,8 +1,9 @@
 import { createElement, type JSX, useLayoutEffect, useRef } from 'react';
 import { harden } from 'rehype-harden';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { type Components, type ExtraProps, Streamdown, type StreamdownProps } from 'streamdown';
+import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown, type StreamdownProps } from 'streamdown';
 
+import { footnotesAsText } from './footnotesAsText.ts';
 import { useReducedMotion } from './useReducedMotion.ts';
 import { useReveal } from './useReveal.ts';
 
@@ -27,6 +28,17 @@ const REHYPE_PLUGINS: StreamdownProps['rehypePlugins'] = [
     },
   ],
 ];
+
+/** Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes back to their words. */
+const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [...Object.values(defaultRemarkPlugins), footnotesAsText];
+
+/**
+ * A hard break is one `<br>`. By default a newline follows it too, which the paragraph's
+ * `pre-line`, there to keep Claude's own line breaks, would draw as a second, blank line.
+ */
+const TO_HTML: StreamdownProps['remarkRehypeOptions'] = {
+  handlers: { break: () => ({ type: 'element', tagName: 'br', properties: {}, children: [] }) },
+};
 
 export interface ChatMarkdownProps {
   /** Claude's reply as Markdown: the whole text so far. It may grow between renders and may stop mid-token. */
@@ -195,6 +207,8 @@ export function ChatMarkdown({ text, streaming = false, reveal = false, onReveal
       key={links}
       className="cd-md cd-type-reply"
       components={COMPONENTS[links]}
+      remarkPlugins={REMARK_PLUGINS}
+      remarkRehypeOptions={TO_HTML}
       rehypePlugins={REHYPE_PLUGINS}
       parseIncompleteMarkdown={streaming || !whole}
       remend={CLOSE_UNFINISHED}
