@@ -273,6 +273,44 @@ describe('public chat page', () => {
     await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
   });
 
+  it.each([true, false])('fading_first_view_stays_in_place_under_a_transformed_shell_with_starters_%s', async (withStarters) => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(false);
+    onTestFinished(() => reduceMotion(reduced));
+    if (!withStarters) mockStore.inject({ route: 'publicDesk', status: 200, body: { ...rivera.publicDesk.en, starters: [] } });
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const shell = document.querySelector<HTMLElement>('.cd-public-shell')!;
+    shell.style.transform = 'translate(23px, 41px)';
+    // A visual viewport fit also changes the shell's height; let its ResizeObserver place the group.
+    shell.style.height = '840px';
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const welcome = shell.querySelector('.cd-public-shell__welcome')!;
+    const composer = shell.querySelector('.cd-composer')!.getBoundingClientRect();
+    expect(Math.round(composer.top - welcome.getBoundingClientRect().bottom)).toBe(20);
+    if (!withStarters) expect(shell.querySelector('.cd-public-shell__invitation')).toBeNull();
+    const drawn = new Map([...shell.querySelectorAll('.cd-public-shell__welcome, .cd-public-shell__starters')]
+      .map((element) => [element, element.getBoundingClientRect()]));
+    const fading: { before: DOMRect; after: DOMRect }[] = [];
+    const original = Element.prototype.animate;
+    const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, ...args) {
+      const before = drawn.get(this);
+      if (before) fading.push({ before, after: this.getBoundingClientRect() });
+      return original.apply(this, args);
+    });
+    onTestFinished(() => animate.mockRestore());
+    await type(screen, 'How much is drain clearing?');
+    expect(fading).toHaveLength(withStarters ? 2 : 1);
+    for (const { before, after } of fading) {
+      expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
+    }
+    expect(animate.mock.contexts.filter((target) => target instanceof Element && target.matches('.cd-public-shell__composer-lift'))).toHaveLength(1);
+    await turnEnded(0);
+    await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
+  });
+
   it('phone_first_send_fades_without_animating_the_composer_lift', async () => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     await reduceMotion(false);

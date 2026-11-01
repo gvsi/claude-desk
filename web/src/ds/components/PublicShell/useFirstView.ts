@@ -27,11 +27,15 @@ export function useFirstView(shellRef: RefObject<HTMLDivElement>, firstView: boo
         setInvitationShown(false);
         return;
       }
+      // A visual viewport fit translates the shell, making it the fixed elements' containing block.
+      const shellBounds = tokens.transform === 'none' ? null : shell.getBoundingClientRect();
+      const originTop = shellBounds ? shellBounds.top + shell.clientTop : 0;
+      const originLeft = shellBounds ? shellBounds.left + shell.clientLeft : 0;
       const animations: Animation[] = [];
       for (const [element, rect] of [[welcome, old.welcome], [chips, old.chips]] as const) {
         if (!element || !rect) continue;
         // Keep the invitation where it was, outside the new transcript's layout, as it fades.
-        Object.assign(element.style, { position: 'fixed', top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px`, margin: '0', transform: 'none' });
+        Object.assign(element.style, { position: 'fixed', top: `${rect.top - originTop}px`, left: `${rect.left - originLeft}px`, width: `${rect.width}px`, margin: '0', transform: 'none' });
         animations.push(element.animate([{ opacity: 1 }, { opacity: 0 }], {
           duration: token('--motion-fast'), easing: tokens.getPropertyValue('--motion-ease').trim(), fill: 'forwards',
         }));
