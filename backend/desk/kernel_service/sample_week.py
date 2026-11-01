@@ -11,7 +11,9 @@ written conversations instead of a recording:
   model and no outbound HTTP. It uses the kernel's pure helpers alone: the quote adapter's `price` and
   `discounted` for amounts, `decide`'s own text functions (`_reason_plain`, `status_line`) and `sign_decision`,
   `render.render_clause` and `reply_check.sign_verdict`, `reply_check.scan_prose` (each reply's prose must pass),
-  and `desks.next_open_window` and `desks.mask_contact`.
+  and `desks.next_open_window` and `desks.mask_contact`. Since no model ran, a sample booking, whose cards send it to
+  the reviewer, carries a fixed reviewer result (`SAMPLE_REVIEW`) and no `review` ledger entry, which a live
+  decision gets only for a reviewer call it made.
 - **Terminal states only.** Sessions are closed at generation 0. Decisions are `executed`, `refused` or `denied`
   (the denied hold's approval row answered `deny_once` and used up). Quotes and their facts are `expired`, the
   callback's handoff is `done` with its fact expired, and bookings are `confirmed` on past slots: a slot ID in
