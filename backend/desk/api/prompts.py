@@ -897,7 +897,7 @@ US cents and only the business's own published prices.
 
 Two illustrative openings (vary the wording; don't copy them):
 
-Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and you're the one people call \
+Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and you're the one people call \
 when water's on the floor, day or night. From your notes, you quote on site and take card payments with Square. \
 I'd guess a lot of your day goes to calls that aren't the work itself.
 → question: "What takes up most of your time that isn't the plumbing? Calls about prices, people asking when you \
