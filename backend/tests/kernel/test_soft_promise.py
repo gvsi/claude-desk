@@ -355,6 +355,23 @@ async def test_signing_rechecks_claims_after_an_owner_replacement(app, client, r
     assert entry.event.summary["dropped"] == ([{"fact_id": fact_id, "rule_id": "claims_changed"}] if changed else [])
 
 
+async def test_a_soft_check_that_answers_logs_its_status_and_latency(caplog):
+    """Each answered soft check logs one INFO line with its status, latency and token counts, so the
+    live latency spread can be read; never the reply, the cards or anything the model wrote."""
+    data = SoftPromiseInput(language="en", prose=f"Here is your quote ({MARKER}).", cards=["$180.00\nDrain clearing"],
+                            next_steps=VISITOR_NEXT_STEPS)
+    client = FakeAnthropicClient(model_message(PASSES, model=SONNET, input_tokens=900, cached_tokens=0,
+                                               output_tokens=12))
+    caplog.set_level(logging.INFO, logger="desk.kernel_service.decisions")
+
+    await AnthropicDecisions(client).soft_promise(data)
+
+    [line] = [record.getMessage() for record in caplog.records if record.name == "desk.kernel_service.decisions"]
+    assert line.split()[0] == "soft_promise_done" and "status=ok" in line and "latency_ms=" in line
+    assert "input_tokens=900" in line and "output_tokens=12" in line
+    assert MARKER not in caplog.text and "Drain" not in caplog.text
+
+
 async def test_soft_promise_request_shape():
     data = SoftPromiseInput(language="en", prose="Here is your quote.", cards=["$180.00\nDrain clearing"], next_steps=VISITOR_NEXT_STEPS)
     client = FakeAnthropicClient(model_message(PASSES, model=SONNET, input_tokens=900, cached_tokens=0,
@@ -364,7 +381,7 @@ async def test_soft_promise_request_shape():
     assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
     assert (usage.model, usage.status, usage.input_tokens, usage.output_tokens) == (SONNET, "ok", 900, 12)
     [request] = client.requests
-    assert request["timeout"] == 6.0                                           # one try, inside the 6 s budget
+    assert request["timeout"] == 8.0                                           # one try, inside the 8 s budget
     assert request["model"] == SONNET
     assert request["max_tokens"] == 1024
     assert request["system"] == SOFT_PROMISE_SYSTEM

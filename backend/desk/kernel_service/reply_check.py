@@ -37,8 +37,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
    "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
-   fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
+   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
+   fallback (the owner's decision of 2026-10-31), inside the API's 12 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
    (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
    of 2026-11-01); the final check makes its own try. While the session has an open handoff the
@@ -51,7 +51,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
    each check one pooled connection, across the try. A reply that passes with the handoff's
    card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled
-   cards and fixed next steps concurrently, within three seconds of Sonnet's six-second window.
+   cards and fixed next steps concurrently, within three seconds of Sonnet's eight-second window.
    Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
