@@ -1,13 +1,12 @@
 """The same urgent callback and immediate owner delivery against fake and real kernels."""
 
-from datetime import datetime
 
 import pytest
 
 from desk.contracts import BusinessTool, NotificationDefaults, RuleCard
 from desk.kernel_api import (BusinessToolsRequest, CreateSessionRequest, DeskNotificationsRequest, PolicyConfirmRequest, PolicyDraftRequest,
                              ToolPin, ToolsConfirmRequest)
-from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body
+from desk.kernel_service.adapters.base import claudes_note
 from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision
 
 
@@ -51,13 +50,13 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
                         (result.model_view['handoff_id'],))
     assert handoff['kind'] == 'callback' and handoff['status'] == ('done' if preview else 'open')
     assert handoff['reason'] == 'Sam Lee · (510) 555-0100 · The water heater is leaking'
-    window = tuple(map(datetime.fromisoformat, handoff['callback_window'].split('/'))) if handoff['callback_window'] else None
+    assert handoff['callback_window'] is None              # urgent: no next-open-hour window, no time promised
     [fact] = result.facts
     assert fact.fact_id == result.model_view['fact_id'] and fact.kind == 'handoff'
-    assert {claim.key for claim in fact.claims} == ({'window_start', 'window_end'} if window else set())
+    assert fact.claims == []
     receipt = await read_decision(session, allowed.decision_id)
     assert receipt.visitor_plain == '“Urgent help”: urgent request sent to Maria Rivera'
-    expected_body = 'Reported as urgent through “Urgent help”. ' + alert_body(window, RequestCallbackArgs(**args))
+    expected_body = 'Reported as urgent through “Urgent help”. ' + claudes_note((args['name'], args['contact'], args['reason']))
     inbox = await owner.call('GET /demo_inbox')
     assert len([entry for entry in inbox if entry.body == expected_body and entry.to == 'owner' and entry.kind == 'alert']) == (0 if preview else 1)
     assert await session.call('GET /demo_inbox?session_id=', query={'session_id': visitor.state.session_id}) == []

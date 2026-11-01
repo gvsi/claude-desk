@@ -3001,12 +3001,11 @@ class FakeKernelState:
                                           source='kernel', claims=claims, label=Label(readers=['owner'])))
         elif ((urgent := self._business_profile(desk, tool)) is not None
               and urgent.business.config.block == 'urgent'):
-            from desk.kernel_service import desks
-            from desk.kernel_service.adapters.base import quoted
-            from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body, window_claims
+            from desk.kernel_service.adapters.base import claudes_note, quoted
+            from desk.kernel_service.adapters.request_callback import window_claims
 
-            window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
-            start, end = window or (None, None)
+            window = None                     # urgent: unscheduled, no next-open-hour window, as the kernel
+            start, end = None, None
             handoff_id = new_id('handoff')
             closed = [] if session.preview else [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
                       and row['session_id'] == session.session_id and row['status'] == 'open']
@@ -3034,7 +3033,7 @@ class FakeKernelState:
                 self.inbox.append((desk.copy_id, DemoInboxEntry(
                     entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
                     body=f'Reported as urgent through {quoted(urgent.business.title)}. '
-                         + alert_body(window, RequestCallbackArgs(**args)))))
+                         + claudes_note((args['name'], args['contact'], args['reason'])))))
         elif tool == "native.request_callback":
             # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")

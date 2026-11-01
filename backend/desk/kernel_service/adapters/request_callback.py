@@ -98,11 +98,15 @@ async def close_open(ctx: KernelCtx, desk_id: str, session_id: str) -> list[Hand
 
 
 async def open_callback(xctx: ExecCtx, action: NormalizedAction, args: RequestCallbackArgs, *,
-                        alert: Callable[[tuple[datetime, datetime] | None], Awaitable[None]]) -> AdapterResult:
-    """Open the native callback once; the caller chooses the owner alert in the same transaction."""
+                        alert: Callable[[tuple[datetime, datetime] | None], Awaitable[None]],
+                        scheduled: bool = True) -> AdapterResult:
+    """Open the native callback once; the caller chooses the owner alert in the same transaction. With
+    `scheduled` false (an urgent request) the callback gets no next-open-hour window, so the visitor's
+    card promises no time and the owner is alerted to call back now."""
     ctx = xctx.ctx
     now = ctx.clock.now()
-    window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
+    window = (desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
+              if scheduled else None)
     session_id = xctx.session_row.session_id
     start, end = window or (None, None)
     preview = xctx.session_row.preview

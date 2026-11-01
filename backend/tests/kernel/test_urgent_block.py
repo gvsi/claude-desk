@@ -86,21 +86,22 @@ async def test_urgent_opens_native_callback_and_alerts_without_notification_pref
     result = await executed(client, visitor, decision)
     assert result.state == 'succeeded'
     [handoff] = await rows_of(app, copy.copy_id, select(Handoff))
-    start, end = datetime(2026, 11, 2, 8, tzinfo=TZ), datetime(2026, 11, 2, 9, tzinfo=TZ)
+    # urgent: no next-open-hour window (it's Saturday evening; the next open hour is Monday at 8), so the
+    # visitor's card reads "<owner> will call you back" while the owner is alerted at once
     assert (handoff.kind, handoff.status, handoff.window_start, handoff.window_end, handoff.action_id) == (
-        'callback', 'open', start, end, decision.action.action_id)
-    assert handoff.callback_window == f'{start.isoformat()}/{end.isoformat()}'
+        'callback', 'open', None, None, decision.action.action_id)
+    assert handoff.callback_window is None
     [fact] = result.facts
     assert (fact.fact_id, fact.kind, fact.status, fact.expires_at, fact.claims) == (
-        f'handoff:{handoff.handoff_id}', 'handoff', 'committed', end, request_callback.window_claims((start, end)))
+        f'handoff:{handoff.handoff_id}', 'handoff', 'committed', None, request_callback.window_claims(None))
     assert fact.label.readers == ['owner', f'session:{visitor.session_id}']
     assert result.model_view == {'fact_id': fact.fact_id, 'handoff_id': handoff.handoff_id}
     assert result.inbox == []
     [alert] = await alerts(app, copy)
     assert (alert.to, alert.kind, alert.decision_id, alert.body) == (
         'owner', 'alert', None,
-        'Reported as urgent through “Urgent help”. ' + request_callback.alert_body(
-            (start, end), request_callback.RequestCallbackArgs(**CALLBACK)))
+        'Reported as urgent through “Urgent help”. ' + request_callback.claudes_note(
+            (CALLBACK['name'], CALLBACK['contact'], CALLBACK['reason'])))
     settings = await rows_of(app, copy.copy_id, select(NotificationPref))
     assert len(settings) == (0 if prefs is None else 1)
     assert not settings or settings[0].now == []
@@ -119,7 +120,7 @@ async def test_urgent_opens_native_callback_and_alerts_without_notification_pref
     verdict = await checked(client, visitor, 'I passed your request on.', [clause('callback_confirmed', fact.fact_id)])
     assert verdict.ok, verdict.violations
     assert verdict.blocks[-1].template == 'callback_confirmed'
-    assert 'Monday, November 2' in verdict.blocks[-1].text
+    assert verdict.blocks[-1].text == 'Maria Rivera will call you back'      # no time promised for an urgent call
 
 
 async def test_urgent_and_native_callback_each_alert_once_and_replace_the_open_handoff(app, client):
@@ -139,9 +140,11 @@ async def test_urgent_and_native_callback_each_alert_once_and_replace_the_open_h
     assert await executed(client, visitor, native_decision) == second
     new_alerts = [row for row in await rows_of(app, copy.copy_id, select(DemoInboxRow)) if row.entry_id not in before]
     assert sorted(row.preview for row in new_alerts) == ['Callback requested', 'Urgent callback requested']
-    assert next(row.body for row in new_alerts if row.preview == 'Callback requested') == (
-        next(row.body for row in new_alerts if row.preview == 'Urgent callback requested')
-        .removeprefix('Reported as urgent through “Urgent help”. '))
+    # the native call-back gives its next open hour; the urgent one gives no time, only who and why
+    native_body = next(row.body for row in new_alerts if row.preview == 'Callback requested')
+    urgent_body = next(row.body for row in new_alerts if row.preview == 'Urgent callback requested')
+    assert native_body.startswith('Call back on ')
+    assert urgent_body == 'Reported as urgent through “Urgent help”. ' + native_body[native_body.index("Claude's note"):]
     handoffs = {row.handoff_id: row for row in await rows_of(app, copy.copy_id, select(Handoff))}
     assert handoffs[first.model_view['handoff_id']].status == 'done'
     assert handoffs[second.model_view['handoff_id']].status == 'open'
