@@ -27,9 +27,9 @@ describe('selectText', () => {
     const input = document.createElement('input');
     input.value = 'desk.example/rivera';
     const area = document.createElement('textarea');
-    area.value = 'Ask Rivera Plumbing’s Desk at desk.example/rivera';
+    area.value = 'Ask Turner Plumbing’s Desk at desk.example/rivera';
     const words = document.createElement('p');
-    words.textContent = 'Chat with Rivera Plumbing’s Desk anytime.';
+    words.textContent = 'Chat with Turner Plumbing’s Desk anytime.';
     document.body.append(input, area, words);
 
     selectText(input);
@@ -38,7 +38,7 @@ describe('selectText', () => {
     expect([area.selectionStart, area.selectionEnd]).toEqual([0, area.value.length]);
     // Any other element: its text, through the document's selection.
     selectText(words);
-    expect(document.getSelection()?.toString()).toBe('Chat with Rivera Plumbing’s Desk anytime.');
+    expect(document.getSelection()?.toString()).toBe('Chat with Turner Plumbing’s Desk anytime.');
     words.remove();
     input.remove();
     area.remove();

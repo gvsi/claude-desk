@@ -404,7 +404,7 @@ def test_the_written_week_names_no_one():
     """The sample's own words name no seeded person, and neither the owner nor the business, whose names come from
     the seed's own values (so renaming the seed renames them); its replies pass the reply check's prose scan."""
     business, _ = seed.rivera_seed(datetime(2026, 10, 30, tzinfo=UTC))
-    banned = (*SEEDED_PEOPLE, *business.owner_display_name.split(), *business.name.split(), "Maria", "Rivera",
+    banned = (*SEEDED_PEOPLE, *business.owner_display_name.split(), *business.name.split(), "Mike", "Turner",
               "Mike", "Turner")
     for sample in seed.RIVERA_SAMPLE_WEEK:
         texts = [sample.said, sample.prose, *(str(call.args) for call in sample.calls)]

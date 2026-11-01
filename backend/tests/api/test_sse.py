@@ -94,11 +94,11 @@ async def test_emit_rejects_signed_event_types(api_conn):
 async def test_emit_takes_owner_typing_as_unsigned(api_conn):
     # The dots after a take-over: emit() publishes the name and how long they show, and nothing else is stored.
     until = datetime(2026, 10, 29, 15, 4, 30, tzinfo=UTC)
-    assert await emit(api_conn, SESSION_A, EvOwnerTyping(type="owner_typing", name="Maria Rivera", until=until)) == 1
+    assert await emit(api_conn, SESSION_A, EvOwnerTyping(type="owner_typing", name="Mike Turner", until=until)) == 1
     stored = (await api_conn.execute(text("SELECT type, payload FROM app.run_events WHERE session_id = :s"),
                                      {"s": SESSION_A.session_id})).one()
     assert stored.type == "owner_typing"
-    assert stored.payload == {"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T15:04:30Z"}
+    assert stored.payload == {"type": "owner_typing", "name": "Mike Turner", "until": "2026-10-29T15:04:30Z"}
 
 
 async def test_control_rows_are_claimed_once(engine):

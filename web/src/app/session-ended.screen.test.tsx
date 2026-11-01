@@ -12,7 +12,7 @@ import { renderRoute } from '../test/renderRoute.tsx';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
-  'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.';
+  'You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it.';
 const ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
 const TODAY = `/app/${RIVERA.deskId}/today`;
 
@@ -26,7 +26,7 @@ function introDialog(screen: RenderResult) {
  * answer the page a reload opens, as nothing can be after a real reload.
  */
 async function everyFirstReadIsIn(screen: RenderResult): Promise<void> {
-  await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+  await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
   await expect.element(screen.getByRole('article', { name: /^Held for you: / })).toBeVisible();
   await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
 }

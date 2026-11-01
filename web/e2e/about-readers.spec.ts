@@ -145,7 +145,7 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
   // The link into the prototype returns to Today.
   await back.click();
   await page.waitForURL(`**${today}`);
-  await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Maria$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Mike$/ })).toBeVisible();
   await expect(about).toBeVisible();
   expect(await page.evaluate(() => (window as Window & { aboutStayedInTheApp?: boolean }).aboutStayedInTheApp), 'no move reloaded the page').toBe(true);
 });

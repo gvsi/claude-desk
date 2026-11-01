@@ -1,4 +1,4 @@
-"""Copies: each visitor's own Rivera Plumbing, seeded through the one Desk seed path."""
+"""Copies: each visitor's own Turner Plumbing, seeded through the one Desk seed path."""
 
 import ast
 import json
@@ -53,7 +53,7 @@ async def test_copy_returns_seeded_chat(client):
     assert chat["session_id"] == decision.session_id
     assert chat["visitor_line"] == seed.HELD_REQUEST_VISITOR_LINE
     assert (decision.outcome, decision.state, decision.visitor_plain) == (
-        "hold", "held", "Waiting for Maria Rivera to approve")
+        "hold", "held", "Waiting for Mike Turner to approve")
     verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
 
     # The owner's pending approvals name this same hold, in this same visitor session.
@@ -91,11 +91,11 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert created["owner_session"] == {"session_id": created["owner_session"]["session_id"], "kind": "owner",
                                         "verified": True, "assurance": "owner_session", "mode": "ai", "generation": 0}
     [desk] = await rows_of(app, copy_id, select(Desk))
-    assert re.fullmatch(r"rivera-plumbing-[a-z0-9]{6}", desk.slug)
+    assert re.fullmatch(r"turner-plumbing-[a-z0-9]{6}", desk.slug)
     assert (desk.desk_id, desk.name, desk.answering) == (desk_id, "Main line", True)   # the demo Desk is live
     [business] = await rows_of(app, copy_id, select(Business))
     assert (business.business_id, business.name, business.owner_display_name, business.timezone, business.brand) == (
-        desk.business_id, "Rivera Plumbing", "Maria Rivera", "America/Los_Angeles",
+        desk.business_id, "Turner Plumbing", "Mike Turner", "America/Los_Angeles",
         {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"})   # teal picked, so Settings shows it
     [owner] = await rows_of(app, copy_id, select(ActorSession).where(ActorSession.kind == "owner"))
     assert (owner.session_id, owner.kind, owner.desk_id, owner.assurance) == (
@@ -155,7 +155,7 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
          "auto_money_cap_cents": 50_000},
         {"tool": "desk.emergency-callback", "event": "enabled", "version": 1,
          "definition_sha256": urgent.definition_sha256}]
-    # the seed's cards: the starter preset's utility cards plus Rivera's own
+    # the seed's cards: the starter preset's utility cards plus Turner's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)
     assert [card.card_id for card in seed.RIVERA_CARDS] == [card.card_id for card in ask_first] + [
@@ -183,7 +183,7 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
 
 
 SEEDED_KNOWLEDGE = [  # (item ID, source, title), as Settings › Knowledge lists them on a new copy
-    ("kn-website", "website", "Your website, rivera-plumbing.example, read during setup"),
+    ("kn-website", "website", "Your website, turner-plumbing.example, read during setup"),
     ("kn-price-list", "setup", "Price list, from your answers in setup"),
 ]
 
@@ -228,7 +228,7 @@ def test_seeded_knowledge_states_no_amount(frozen_clock):
     [area] = [claim.value for claim in desk.charter if claim.key == "policy:service_area"]
     assert area in website.text                                                  # as the charter states it
     assert website.text == (
-        "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+        "Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
         "water heater flushes. " + area)
 
 
@@ -247,7 +247,7 @@ def test_the_price_list_knowledge_says_when_the_short_notice_fee_applies():
     reaches a visitor only on a quote card."""
     from desk.kernel_service import seed
     [price_list] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-price-list"]
-    assert "The short-notice fee is added to an urgent visit that Maria fits in at short notice." in price_list.text
+    assert "The short-notice fee is added to an urgent visit that Mike fits in at short notice." in price_list.text
 
 
 async def test_copies_are_isolated(app, client):
@@ -327,7 +327,7 @@ async def test_seed_rejects_an_hours_claim_and_a_bad_owner_name(app, frozen_cloc
     bad_seeds = [
         (business, desk.model_copy(update={"charter": [*desk.charter, hours]})),
         *((business.model_copy(update={"owner_display_name": name}), desk)
-          for name in ("M4ria", "", "Maria\nRivera", "M" * 41, "Maria <Rivera>", "   ")),
+          for name in ("M4ria", "", "Mike\nTurner", "M" * 41, "Mike <Turner>", "   ")),
         # and what would leave the Desk unusable: a time zone Cedar's hours can't use, a document
         # owned by nobody on record, a contact no code could reach
         (business.model_copy(update={"timezone": "Pacific/Atlantis"}), desk),
@@ -377,7 +377,7 @@ async def test_two_desks_in_one_copy_each_get_charter_facts(app, client, frozen_
         "name": "Ignored when reusing", "existing_business_id": business.business_id})
     async with kernel_ctx(app) as ctx:
         second = await desks.create_desk(ctx, copy_id, second_business, emergencies)
-    assert re.fullmatch(r"rivera-plumbing-[a-z0-9]{6}", second.slug)            # named after the stored business
+    assert re.fullmatch(r"turner-plumbing-[a-z0-9]{6}", second.slug)            # named after the stored business
     desks_now = {d.desk_id: d for d in await rows_of(app, copy_id, select(Desk))}
     assert set(desks_now) == {main_line, second.desk_id}
     assert {d.business_id for d in desks_now.values()} == {business.business_id}

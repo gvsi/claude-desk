@@ -38,16 +38,16 @@ const FIGURES = [
   {
     label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
     lead: 'Luis, between jobs.',
-    ai: 'Claude, an AI, answers the team under Maria’s rules.',
+    ai: 'Claude, an AI, answers the team under Mike’s rules.',
   },
   {
     label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
     lead: 'Dana comes back for her invoice.',
-    ai: 'You’re chatting with Claude, an AI answering for Rivera Plumbing.',
+    ai: 'You’re chatting with Claude, an AI answering for Turner Plumbing.',
   },
   {
-    label: 'The owner’s phone: a held discount request waits for her answer, with Allow this time and Deny this time.',
-    lead: 'A request waits for Maria.',
+    label: 'The owner’s phone: a held discount request waits for his answer, with Allow this time and Deny this time.',
+    lead: 'A request waits for Mike.',
     ai: null,
   },
 ] as const;
@@ -57,9 +57,9 @@ const CARDS_HEADING = 'See each one up close';
 const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
 const CARDS = [
   { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
-  { name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'A Desk for the team', line: 'Turner Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
   { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
-  { name: 'In your pocket', line: 'Maria’s requests on her phone', href: '/vision/phone' },
+  { name: 'In your pocket', line: 'Mike’s requests on his phone', href: '/vision/phone' },
 ] as const;
 
 /**

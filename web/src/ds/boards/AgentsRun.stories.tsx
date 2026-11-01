@@ -17,7 +17,7 @@ const AGENT = 'Alex Kim’s assistant';
 
 /** The Desk's two answers, as the board draws them: open times, then the booking, each a typed card. */
 const OPEN_TIMES = [
-  proseBlock('These times are open on Maria’s calendar.'),
+  proseBlock('These times are open on Mike’s calendar.'),
   cardBlock('booking_options', {
     fact_id: 'slots:earliest',
     title: 'Times that are open',
@@ -29,7 +29,7 @@ const OPEN_TIMES = [
 ];
 const BOOKED = [
   proseBlock('Here are the details.'),
-  cardBlock('booking_confirmed', { fact_id: 'booking:B-81', title: 'Thursday, October 29', lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'] }),
+  cardBlock('booking_confirmed', { fact_id: 'booking:B-81', title: 'Thursday, October 29', lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'] }),
 ];
 
 /** "Book the earliest visit", sent and finished: two signed requests, each answered with a card. */
@@ -42,7 +42,7 @@ function AgentsRun() {
             <AgentMessage agentName={AGENT} signed title="Book the earliest visit" meta="Request 1" />
           </TranscriptRow>
           <TranscriptRow
-            margin={<MarginReceipt source={{ kind: 'decision', state: 'executed' }} plain="Times read from Maria Rivera’s calendar" ledgerSeq={41} />}
+            margin={<MarginReceipt source={{ kind: 'decision', state: 'executed' }} plain="Times read from Mike Turner’s calendar" ledgerSeq={41} />}
           >
             <ClaudeMessage blocks={OPEN_TIMES} language="en" ownerName={rivera.business.ownerName} />
           </TranscriptRow>
@@ -51,7 +51,7 @@ function AgentsRun() {
           </TranscriptRow>
           <TranscriptRow
             margin={
-              <MarginReceipt source={{ kind: 'decision', state: 'executed' }} plain="Booked within Maria Rivera’s weekday hours" ledgerSeq={42} drawCheck />
+              <MarginReceipt source={{ kind: 'decision', state: 'executed' }} plain="Booked within Mike Turner’s weekday hours" ledgerSeq={42} drawCheck />
             }
           >
             <ClaudeMessage blocks={BOOKED} language="en" ownerName={rivera.business.ownerName} />

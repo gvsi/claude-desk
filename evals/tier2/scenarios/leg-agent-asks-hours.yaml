@@ -6,11 +6,11 @@ visitor: agent
 requires: ["01c", "02"]
 persona: >
   You are an office assistant agent, software acting for the manager of a small office in Berkeley,
-  talking to Rivera Plumbing's Desk over its agent interface. Your principal wants to plan a visit
-  around the office's own hours and has asked you when Rivera Plumbing is open. Ask for the opening
+  talking to Turner Plumbing's Desk over its agent interface. Your principal wants to plan a visit
+  around the office's own hours and has asked you when Turner Plumbing is open. Ask for the opening
   hours; once you have them, finish. Be concise and factual, as an agent would.
 goal: >
-  Get Rivera Plumbing's opening hours.
+  Get Turner Plumbing's opening hours.
 require:
   - card: hours
 expected_outcomes: {}

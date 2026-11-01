@@ -139,14 +139,14 @@ async def test_draft_is_proved_with_every_obligation(desk_prove, app, client):
 
 @pytest.mark.solver
 async def test_recommended_rules_in_a_desks_own_hours_prove(desk_prove, app, client):
-    """"Recommended rules" as the API drafts it for Rivera's Desk (`desk.presets.preset_cards`): its weekday
-    booking card in Rivera's 08:00 to 18:00 weekday hours, not the shipped 09:00 to 17:00, misses the shipped proof,
+    """"Recommended rules" as the API drafts it for Turner's Desk (`desk.presets.preset_cards`): its weekday
+    booking card in Turner's 08:00 to 18:00 weekday hours, not the shipped 09:00 to 17:00, misses the shipped proof,
     so the kernel compiles and proves it like any owner draft, every obligation holding, and it activates."""
     copy = await rivera(app, client)
     cards = preset_cards("auto", [WEEKDAY_HOURS, SATURDAY_HOURS])
     [booking] = [c for c in cards if c.applies_to == "native.book"]
     assert cards != PRESETS["auto"] and (booking.card_id, booking.hours) == ("preset-book-weekday", WEEKDAY_HOURS)
-    # It is Rivera's own weekday rule in everything but its ID, reason included.
+    # It is Turner's own weekday rule in everything but its ID, reason included.
     [own] = [c for c in RIVERA_CARDS if c.card_id == "rv-book-wk"]
     assert booking == own.model_copy(update={"card_id": "preset-book-weekday"})
     confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, cards)

@@ -62,7 +62,7 @@ class Copy:
 
 
 async def rivera_copy(app: FastAPI, client: httpx.AsyncClient) -> Copy:
-    """A Rivera Plumbing copy in which Dana's contact on record is a phone number."""
+    """A Turner Plumbing copy in which Dana's contact on record is a phone number."""
     copy = await rivera(app, client)
     async with kernel_ctx(app) as ctx:
         repo = ctx.bind(copy.copy_id)
@@ -121,7 +121,7 @@ async def test_code_goes_only_to_the_contact_on_record(app, client):
     [entry] = await session_inbox(client, visitor)
     assert (entry.entry_id, entry.to, entry.kind) == (notice.entry_id, mask_contact(DANA_PHONE), "verification_code")
     code = code_in(entry)
-    assert entry.body == (f"Your Rivera Plumbing code is {code}. It expires in ten minutes. "
+    assert entry.body == (f"Your Turner Plumbing code is {code}. It expires in ten minutes. "
                           "If you didn't ask for it, ignore this message.")
     [row] = await rows_of(app, copy.copy_id, select(DemoInboxRow).where(DemoInboxRow.entry_id == entry.entry_id))
     assert row.person_id == copy.people["dana"]
@@ -139,7 +139,7 @@ async def test_code_goes_only_to_the_contact_on_record(app, client):
     [notice] = answer.inbox
     assert notice.preview == "Nuevo código de verificación"
     code = code_in(entry := await entry_of(client, spanish, notice))
-    assert entry.body == (f"Tu código de Rivera Plumbing es {code}. Vence en diez minutos. "
+    assert entry.body == (f"Tu código de Turner Plumbing es {code}. Vence en diez minutos. "
                           "Si no lo pediste, ignora este mensaje.")
 
 
@@ -510,7 +510,7 @@ async def test_verify_routes_answer_session_states(app, client, frozen_clock):
 @pytest.mark.parametrize("route", ["start", "check"])
 async def test_a_desk_deleted_while_a_verify_route_waits_answers_closed(app, client, frozen_clock, monkeypatch,
                                                                          route):
-    """Maria deletes the Desk after a verify route has checked the session and its Desk and before
+    """Mike deletes the Desk after a verify route has checked the session and its Desk and before
     it holds the session row. The route checks both again on the row it holds, so it answers 409
     `closed`, ledgered, as it would had the deletion come first: a start makes no challenge and
     sends no code, and a check verifies no one. (The clock stands still, so the route writes no
@@ -760,7 +760,7 @@ async def test_attempt_and_ledger_share_a_transaction(app, client, monkeypatch):
 
 
 async def quoted(client: httpx.AsyncClient, visitor: Visitor, call_id: str) -> Fact:
-    """A drain clearing quote, decided and executed in the visitor's session (Rivera quotes are automatic)."""
+    """A drain clearing quote, decided and executed in the visitor's session (Turner quotes are automatic)."""
     decision = await decided(client, visitor, "native.quote", quote_args(("drain", 1)), call_id=call_id)
     assert decision.outcome == "allow", decision.reason_plain
     [fact] = (await executed(client, visitor, decision)).facts

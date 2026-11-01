@@ -40,7 +40,7 @@ const VISITOR_PAGES: readonly string[] = [CITY_OFFICE, CLAUDE_ACCOUNT];
 
 /**
  * Real places and government offices the fictional city office must not name: the region around
- * Rivera's service area, nearby cities' permit offices, and a government site's domain.
+ * Turner's service area, nearby cities' permit offices, and a government site's domain.
  */
 const REAL_PLACE =
   /\b(?:Oakland|Berkeley|Alameda|Emeryville|San Francisco|San Jose|California|Bay Area)\b|Department of Building Inspection|Planning and Building Department|\.gov\b/i;
@@ -89,7 +89,7 @@ const CITY_FACT_ANYWHERE = /[$€£]\s?\d|\bB-\d{4}-\d{4}\b|\b(?:passed|approved
 const BACK_HREF = '/about/vision';
 
 /** The public page's AI disclosure, as every public page shows it. */
-const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+const DISCLOSURE = "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime.";
 
 /** Marcus Bell's visit to Meridian Bay Permits, in the board story's words. */
 const CITY = {
@@ -158,14 +158,14 @@ const CITY = {
 
 /** Dana's visit, in the board's words. */
 const ACCOUNT = {
-  ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
+  ask: 'Your Claude account has a verified email. If it matches the contact Turner Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
   matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
   releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
-  checked: 'Reply checked against Maria Rivera’s rules',
+  checked: 'Reply checked against Mike Turner’s rules',
 } as const;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -304,8 +304,8 @@ describe('Vision pages', () => {
     // Each composer: the words typed stay after Enter and after Send, no message is added, and the
     // first press says why, once, in a line that is announced.
     for (const [path, business] of [
-      [PHONE, 'Rivera Plumbing'],
-      [CLAUDE_ACCOUNT, 'Rivera Plumbing'],
+      [PHONE, 'Turner Plumbing'],
+      [CLAUDE_ACCOUNT, 'Turner Plumbing'],
       [CITY_OFFICE, 'Meridian Bay Permits'],
     ] as const) {
       const { screen } = await renderRoute(path);
@@ -345,7 +345,7 @@ describe('Vision pages', () => {
     // and the first says why, once, in a line that is announced, on a row of its own in the chat's
     // pinned head: 8 px under the title and Ask, above the head's hairline.
     for (const [path, business, asked] of [
-      [CLAUDE_ACCOUNT, 'Rivera Plumbing', 'Maria Rivera'],
+      [CLAUDE_ACCOUNT, 'Turner Plumbing', 'Mike Turner'],
       [CITY_OFFICE, 'Meridian Bay Permits', 'Permit Center staff'],
     ] as const) {
       const { screen } = await renderRoute(path);
@@ -586,7 +586,7 @@ describe('Vision pages against their boards', () => {
   });
 
   it('team_desk_matches_its_board', async () => {
-    // As Boards/Vision, team desk draws it: Rivera Plumbing's team Desk, Luis's conversation open.
+    // As Boards/Vision, team desk draws it: Turner Plumbing's team Desk, Luis's conversation open.
     const { screen } = await renderRoute(TEAM_DESK);
     const title = main(screen).getByRole('heading', { level: 1, name: 'Conversations' });
     await expect.element(title).toBeVisible();
@@ -638,7 +638,7 @@ describe('Vision pages against their boards', () => {
     expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
       'Here’s Ana’s history. The gate code is on her job card.',
       'Here it is.',
-      'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
+      'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
     ]);
     const facts = some(log, '.cd-fact-card');
     expect(facts.map((fact) => fact.textContent)).toEqual([
@@ -714,14 +714,14 @@ describe('Vision pages against their boards', () => {
   });
 
   it('claude_account_matches_its_board', async () => {
-    // As Boards/Vision, Claude account draws it: Dana back on Rivera's public page, signed in.
+    // As Boards/Vision, Claude account draws it: Dana back on Turner's public page, signed in.
     const { screen, router } = await renderRoute(CLAUDE_ACCOUNT);
-    const log = main(screen).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+    const log = main(screen).getByRole('log', { name: 'Conversation with Turner Plumbing' });
     await expect.element(log).toBeVisible();
     const root = screen.container;
     const bar = await expectVisionBar(root, BACK_HREF);
     // As the public page names its tab: the business.
-    expect(document.title).toBe('Rivera Plumbing');
+    expect(document.title).toBe('Turner Plumbing');
 
     // The public page right under the bar: the brand header, the chat and the about column. The bar
     // is inside the shell, so the page is the shell, the window's height, with nothing added
@@ -761,10 +761,10 @@ describe('Vision pages against their boards', () => {
     expect(transcript.querySelector('.cd-transcript-row__margin button')).toBeNull();
 
     // Her last visit is the kernel's booking card under the welcome, in the same message, as the
-    // kernel renders one: the day, when Maria arrives and who, with no booking number.
+    // kernel renders one: the day, when Mike arrives and who, with no booking number.
     const lastVisit = log.getByRole('article', { name: 'Booked' });
     await expect.element(lastVisit).toBeVisible();
-    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 2010:00 am to 12:00 pmWith Maria Rivera');
+    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 2010:00 am to 12:00 pmWith Mike Turner');
     expect(lastVisit.element().closest('.cd-claude-message')?.querySelector('.cd-claude-message__prose')?.textContent).toBe(ACCOUNT.matched);
 
     // The invoice is a document card, only for her, with its download. A vision page makes no
@@ -779,19 +779,19 @@ describe('Vision pages against their boards', () => {
     expect(invoice.element().querySelector('a')).toBeNull();
     expect(root.innerHTML).not.toContain('/api/');
 
-    // The about column: hours, Rivera's service area and the phone, Rivera's own facts.
-    const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    // The about column: hours, Turner's service area and the phone, Turner's own facts.
+    const about = screen.getByRole('complementary', { name: 'About Turner Plumbing' });
     expect(about.getByRole('article').elements().map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Service area', 'Contact']);
     await expect.element(about.getByText('We work in Oakland, Berkeley, Alameda and Emeryville.', { exact: true })).toBeVisible();
     expectComputed(one(main(screen).element(), '.cd-composer__box'), SPEC.composer);
     await expectFooter(root);
 
-    // focus_order_is_logical: the bar, Ask for Maria Rivera, the download, then the composer.
+    // focus_order_is_logical: the bar, Ask for Mike Turner, the download, then the composer.
     await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
-      main(screen).getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement,
+      main(screen).getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement,
       download.element() as HTMLElement,
-      main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
+      main(screen).getByRole('textbox', { name: 'Message Turner Plumbing' }).element() as HTMLElement,
     ]);
 
     // As the story draws it, the page fits a window as tall as itself, Dana's last visit included.
@@ -860,8 +860,8 @@ describe('Vision pages against their boards', () => {
     expect(round(top(ownerScreen) - bottom(bar))).toBe(106);
 
     // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
-    await expect.element(owner.getByRole('heading', { level: 2, name: 'Good morning, Maria' })).toBeVisible();
-    await expect.element(owner.getByText('Rivera Plumbing', { exact: true })).toBeVisible();
+    await expect.element(owner.getByRole('heading', { level: 2, name: 'Good morning, Mike' })).toBeVisible();
+    await expect.element(owner.getByText('Turner Plumbing', { exact: true })).toBeVisible();
     const held = owner.getByRole('article', { name: /^Held for you:/ });
     await expect.element(held.getByRole('button', { name: 'Allow this time' })).toBeVisible();
     await expect.element(held.getByRole('button', { name: 'Deny this time' })).toBeVisible();
@@ -869,8 +869,8 @@ describe('Vision pages against their boards', () => {
     // The page sets only its own lines: the greeting 2 px under the business's name, and the held
     // quote with the card's own spacing, its reason 12 px under the status line and "Held by" 14 px
     // under the reason.
-    const businessName = owner.getByText('Rivera Plumbing', { exact: true }).element();
-    const greeting = owner.getByRole('heading', { level: 2, name: 'Good morning, Maria' }).element();
+    const businessName = owner.getByText('Turner Plumbing', { exact: true }).element();
+    const greeting = owner.getByRole('heading', { level: 2, name: 'Good morning, Mike' }).element();
     expect(round(top(greeting) - bottom(businessName))).toBe(2);
     const reason = one(held.element(), '.cd-approval-card__reason');
     expect(round(top(reason) - bottom(one(held.element(), '.cd-approval-card__top')))).toBe(12);
@@ -885,22 +885,22 @@ describe('Vision pages against their boards', () => {
     expect(Math.abs(ownerScreen.getBoundingClientRect().bottom - tabBar.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
 
     // The visitor's phone: the business's header with the disclosure, the booking next to its card, the composer.
-    await expect.element(visitor.getByText('Claude, an AI, answers for Maria Rivera', { exact: true })).toBeVisible();
-    const log = visitor.getByRole('log', { name: 'Conversation with Rivera Plumbing' }).element() as HTMLElement;
+    await expect.element(visitor.getByText('Claude, an AI, answers for Mike Turner', { exact: true })).toBeVisible();
+    const log = visitor.getByRole('log', { name: 'Conversation with Turner Plumbing' }).element() as HTMLElement;
     expectConversationType(log);
     // The booking is confirmed only by its card: Claude's words state no date, time or booking, and
     // promise nothing the card doesn't back.
     expect(await expectNoFactsInProse(log)).toEqual({ prose: 1, receipts: 1 });
     expect(await expectReceiptsUnderMessages(log)).toBe(1);
-    expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Maria Rivera’s calendar');
+    expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Mike Turner’s calendar');
     // The booking is the kernel's booking card, in the same message as Claude's words, as the kernel
-    // renders one: the day, when Maria arrives and who, with no booking number.
+    // renders one: the day, when Mike arrives and who, with no booking number.
     const booked = visitor.getByRole('article', { name: 'Booked' });
-    expect(booked.element().textContent).toBe('BookedTuesday, November 32:00 pm to 4:00 pmWith Maria Rivera');
+    expect(booked.element().textContent).toBe('BookedTuesday, November 32:00 pm to 4:00 pmWith Mike Turner');
     const reply = one(log, '.cd-claude-message__prose');
     expect(reply.textContent).toBe('You’re all set. Here’s your visit.');
     expect(booked.element().closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));
-    const composer = visitor.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const composer = visitor.getByRole('textbox', { name: 'Message Turner Plumbing' });
     await expect.element(composer).toBeVisible();
     await expect.element(visitor.getByText('This chat is with Claude, an AI.', { exact: true })).toBeVisible();
 

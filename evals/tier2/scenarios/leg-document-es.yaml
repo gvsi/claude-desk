@@ -7,8 +7,8 @@ requires: ["01b", "02"]
 setup:
   verify_as: bob
 persona: >
-  You are Bob Okafor, a Rivera Plumbing customer, and your session is already verified as you. You
-  speak Spanish at home and write only in Spanish. Maria flushed your water heater, and you want the
+  You are Bob Okafor, a Turner Plumbing customer, and your session is already verified as you. You
+  speak Spanish at home and write only in Spanish. Mike flushed your water heater, and you want the
   warranty for that job: "Hola, ¿me puedes mandar la garantía del calentador?" You are polite and
   brief.
 goal: >

@@ -7,7 +7,7 @@ Desk holds at most 50 documents and 200 knowledge items, and a knowledge item fo
 read again for a visitor's context until the copy's canaries change, so a full copy still gives a
 visitor their context within half a second on a laptop; a slower machine's budget is scaled by a
 calibration the run takes of its own speed, at most three times, and a run slower than that fails
-as too slow to judge. Tests run on Rivera Plumbing copies as `POST /copies`
+as too slow to judge. Tests run on Turner Plumbing copies as `POST /copies`
 seeds them (Friday 10:04 in Oakland).
 """
 
@@ -199,7 +199,7 @@ async def test_a_desk_holds_at_most_two_hundred_knowledge_items(app, client):
         ctx.db.add_all(KnowledgeRow(desk_id=copy.desk_id, item_id=f"kb-{number}", copy_id=copy.copy_id, source="upload",
                                     title="Note", text="Street parking is fine.", readers=["owner"])
                        for number in range(labels.MAX_KNOWLEDGE_ITEMS - len(SEEDED_PUBLIC_KNOWLEDGE) - 1))
-    await stored(client, copy, knowledge("kb-tools", "Tools", "Maria brings a drain camera.", ["public"]))   # the 200th
+    await stored(client, copy, knowledge("kb-tools", "Tools", "Mike brings a drain camera.", ["public"]))   # the 200th
     before = len(await entries_of(app, copy))
     response = await post_knowledge(client, copy, knowledge("kb-one-more", "One more", "A note.", ["public"]))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
@@ -207,7 +207,7 @@ async def test_a_desk_holds_at_most_two_hundred_knowledge_items(app, client):
     [entry] = (await entries_of(app, copy))[before:]
     assert (entry.event.kind, entry.event.summary) == ("desk_data", {"part": "knowledge", "refused": "cap"})
     # replacing one already there adds none
-    replaced = await stored(client, copy, knowledge("kb-tools", "Tools", "Maria brings a drain camera and a jetter.",
+    replaced = await stored(client, copy, knowledge("kb-tools", "Tools", "Mike brings a drain camera and a jetter.",
                                                     ["public"]))
     assert replaced.text.endswith("a jetter.")
     assert len(await rows_of(app, copy.copy_id, select(KnowledgeRow))) == 200
@@ -219,7 +219,7 @@ async def test_knowledge_found_clean_is_not_read_again_until_a_document_is_added
     for in the item again, and an item holding it is kept from the visitor."""
     copy, visitor = await visitor_of(app, client)
     planted = "cdk-0123456789abcdef"                                   # no document's canary, yet
-    text = f"Maria brings a drain camera to every call. Old reference {planted}."
+    text = f"Mike brings a drain camera to every call. Old reference {planted}."
     await stored(client, copy, knowledge("kb-tools", "Tools", text, ["public"]))
     scanned: list[str] = []
     spans = labels.canary_spans

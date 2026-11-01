@@ -4,11 +4,11 @@ The public chat's first view shows up to three starter chips, and a chip sends i
 visitor's own message. The kernel serves them on the public read (`PublicDesk.starters`) from the
 Desk's seed-only charter facts `charter:starter:<n>:<lang>` (n from 1 to 3, lang `en` or `es`),
 in the language asked for, each trimmed and at most 80 characters, and `[]` for a Desk without
-them or when reading them fails. Only the Rivera seed writes them: an owner's or setup's charter
+them or when reading them fails. Only the Turner seed writes them: an owner's or setup's charter
 write, or a new Desk, naming a `starter:` key is refused (422 `invalid`, `starter_seed_only`), and
 an owner's charter write keeps the seed's starters, as it keeps the hours. They are words for a
 visitor to send, not facts about the business, so neither Claude's context nor the reviewer is
-given them. Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in
+given them. Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in
 Oakland).
 """
 
@@ -30,7 +30,7 @@ from .test_desk_writes import desks_of, facts_of, new_desk, post_desk, put_part,
 from .test_labels_hardening import documents
 from .test_public_header import public_page
 
-# The owner's signed starters for Rivera Plumbing, in the order the chips show them.
+# The owner's signed starters for Turner Plumbing, in the order the chips show them.
 RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
@@ -124,7 +124,7 @@ async def test_a_failing_starters_read_is_empty_and_logged(app, client, monkeypa
     whole = await public_page(client, copy)
 
     def broken(*args, **kwargs):
-        raise RuntimeError("How much is drain clearing at Rivera Plumbing?")
+        raise RuntimeError("How much is drain clearing at Turner Plumbing?")
 
     monkeypatch.setattr(public, "starters", broken)
     with caplog.at_level(logging.INFO):
@@ -133,7 +133,7 @@ async def test_a_failing_starters_read_is_empty_and_logged(app, client, monkeypa
     assert [record.getMessage() for record in caplog.records if "starters" in record.getMessage()] == [
         "starters_failed error=RuntimeError"]
     kernel_log = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith("desk"))
-    for desk_data in ("drain", "Rivera", copy.slug, copy.desk_id, copy.copy_id):
+    for desk_data in ("drain", "Turner", copy.slug, copy.desk_id, copy.copy_id):
         assert desk_data not in kernel_log
 
 

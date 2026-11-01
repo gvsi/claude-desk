@@ -1,4 +1,4 @@
-"""The real kernel target: its health, a fresh Rivera copy, restarts and the travelling clock."""
+"""The real kernel target: its health, a fresh Turner copy, restarts and the travelling clock."""
 
 import json
 import re
@@ -14,13 +14,13 @@ from evals.tier1.targets import SYMCC_REQUIRED, KernelTarget, TargetError
 pytestmark = pytest.mark.requires("01a")
 
 REVIEW_PASS = Json({"within_charter_bp": 10000, "manipulation_bp": 0, "recommendation": "allow"})
-SEED_PRICES = {"deposit": 2000, "drain": 18000, "heater": 15000, "leak": 25000,   # "Rivera seed"
+SEED_PRICES = {"deposit": 2000, "drain": 18000, "heater": 15000, "leak": 25000,   # "Turner seed"
                "pipe": 10000, "short-notice": 5000}
 SEED_CONTACTS = {"Dana": "dana@example.com", "Bob": "bob@example.com"}
 
 
 async def hold_a_quote(k: KernelHarness, fake: FakeAnthropic, visitor: SessionCreated) -> Decision:
-    """A drain quote at 80% off, which the seed's `rv-quote` card (no discount) leaves to Maria."""
+    """A drain quote at 80% off, which the seed's `rv-quote` card (no discount) leaves to Mike."""
     fake.default("claude-sonnet-5-5", REVIEW_PASS)   # the reviewer passes, if the kernel asks it
     call = {"call_id": "smoke-quote", "tool": "native.quote", "args": quote_args("drain", requested_discount_bp=8000)}
     return await k.call(

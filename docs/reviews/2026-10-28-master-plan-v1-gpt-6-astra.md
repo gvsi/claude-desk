@@ -86,7 +86,7 @@ Findings were triaged into master plan v2; some were declined. This is the revie
 
 15. **Important — Handoff, take-over, whispers and translation lack executable contracts.**  
     **Location:** [Spec — Owner conversation controls](../specs/2026-10-28-claude-desk-design.md), [Visitor experience](../specs/2026-10-28-claude-desk-design.md), [Master — Shared contracts](../plans/2026-10-28-00-master-plan.md#L73).  
-    There is no controller state, take-over epoch, callback request, whisper visibility or translation representation. An in-flight agent can continue executing or reveal a queued reply after Maria takes over. `language="en"|"es"` supplies neither unsupported-language routing nor owner translations.  
+    There is no controller state, take-over epoch, callback request, whisper visibility or translation representation. An in-flight agent can continue executing or reveal a queued reply after Mike takes over. `language="en"|"es"` supplies neither unsupported-language routing nor owner translations.  
     **Fix:** Add conversation ownership transitions that invalidate stale work, authenticated whisper/owner-message operations, callback state and language metadata. Keep translations owner-only. Specify how owner-authored commitments interact with the universal baseline and reply checkpoint.
 
 **Delivery, evaluation and unowned work**

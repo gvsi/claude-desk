@@ -311,8 +311,8 @@ async def test_kernel_repo_scopes_by_copy(kernel_db):
     repo.bind(kernel_db)
     await switch_copy(kernel_db, copy_b)
     kernel_db.add_all([
-        Business(business_id=f"biz-{copy_b}", copy_id=copy_b, name="Rivera Plumbing",
-                 owner_display_name="Maria Rivera", timezone="America/Los_Angeles"),
+        Business(business_id=f"biz-{copy_b}", copy_id=copy_b, name="Turner Plumbing",
+                 owner_display_name="Mike Turner", timezone="America/Los_Angeles"),
         Desk(desk_id=f"desk-{copy_b}", copy_id=copy_b, business_id=f"biz-{copy_b}", name="Main line",
              slug=f"slug-{copy_b}"),
     ])
@@ -620,7 +620,7 @@ def test_unique_keys_follow_the_data_model(kernel_tx):
 
     def desk(desk_id: str) -> Desk:
         return Desk(desk_id=desk_id, copy_id="copy-a", business_id="biz", name="Main line",
-                    slug="rivera-plumbing-abc123")
+                    slug="turner-plumbing-abc123")
 
     def approval(approval_id: str) -> Approval:
         return Approval(approval_id=approval_id, copy_id="copy-a", decision_id="decision-1", answer="allow_once",
@@ -1419,7 +1419,7 @@ def api_tx():
 
 
 def test_visitor_payloads_validate_against_contracts(api_tx):
-    block = RenderedBlock(kind="prose", text="Hi, I'm Claude, answering for Rivera Plumbing.")
+    block = RenderedBlock(kind="prose", text="Hi, I'm Claude, answering for Turner Plumbing.")
     answer = A2AResponse(session_id="session-1", disclosure="ai", blocks=[block], receipts=[])
 
     def message(blocks) -> Message:

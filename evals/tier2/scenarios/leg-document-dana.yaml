@@ -7,8 +7,8 @@ requires: ["01b", "02"]
 setup:
   verify_as: dana
 persona: >
-  You are Dana Whitfield, a Rivera Plumbing customer, and your session is already verified as you.
-  Maria cleared a drain at your house, and you need a copy of that invoice for your records. Ask for
+  You are Dana Whitfield, a Turner Plumbing customer, and your session is already verified as you.
+  Mike cleared a drain at your house, and you need a copy of that invoice for your records. Ask for
   your invoice. You are brief and friendly.
 goal: >
   Get a link to your drain clearing invoice.

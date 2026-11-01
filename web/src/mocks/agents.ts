@@ -17,7 +17,7 @@ import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './
 export const MOCK_PUBLIC_ORIGIN = 'https://desk.example';
 
 /**
- * What agents can do at Rivera's Desk, as the kernel renders the Agent Card's blocks (kernel plan
+ * What agents can do at Turner's Desk, as the kernel renders the Agent Card's blocks (kernel plan
  * 01c): prose, by plain label and without amounts.
  */
 export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly RenderedBlock[]>> = {
@@ -25,13 +25,13 @@ export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly RenderedBlock
     proseBlock('Get a quote from the price list'),
     proseBlock('Find open times and book a visit'),
     proseBlock('Pay the service call deposit within a signed limit'),
-    proseBlock('Ask Maria for a callback'),
+    proseBlock('Ask Mike for a callback'),
   ],
   es: [
     proseBlock('Pedir un presupuesto con la lista de precios'),
     proseBlock('Ver horarios libres y reservar una visita'),
     proseBlock('Pagar el depósito de la visita dentro de un límite firmado'),
-    proseBlock('Pedir que Maria devuelva la llamada'),
+    proseBlock('Pedir que Mike devuelva la llamada'),
   ],
 };
 
@@ -154,7 +154,7 @@ function fixtureExchanges(): Exchange[] {
   return decisions.map((decision, i) => {
     const request = requests[i];
     const reply = replies[i];
-    if (request === undefined || reply === undefined) throw new Error("the Rivera fixtures changed: the agent's chat needs two requests and two replies");
+    if (request === undefined || reply === undefined) throw new Error("the Turner fixtures changed: the agent's chat needs two requests and two replies");
     return { request, decision, reply };
   });
 }
@@ -165,7 +165,7 @@ function fixtureExchanges(): Exchange[] {
  */
 function firstOpenTime(): string {
   const label = rivera.blocks.booking_options.en.options?.[0]?.label;
-  if (label === undefined) throw new Error('the Rivera fixtures changed: the open-times card needs a time');
+  if (label === undefined) throw new Error('the Turner fixtures changed: the open-times card needs a time');
   return label.replace(/, (\d{1,2}:\d{2} [ap]m)$/, ' at $1');
 }
 

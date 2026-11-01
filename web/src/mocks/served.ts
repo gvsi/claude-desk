@@ -886,7 +886,7 @@ const SERVED: ServedRoutes = {
   },
   agentTasks(sv, req) {
     // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
-    // Rivera's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
     const deskId = visitor.desk.summary.desk_id;

@@ -1,6 +1,6 @@
 /**
  * Page-level parts the boards draw that no design system component draws, because the web app
- * (plan 04) owns those pages: the owner app's frame for Rivera Plumbing, Today's things to try,
+ * (plan 04) owns those pages: the owner app's frame for Turner Plumbing, Today's things to try,
  * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
  * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
  */
@@ -82,7 +82,7 @@ export interface RiveraFrameProps {
   current: NavKey;
   /** The counts beside Conversations and Safety, as each board draws them. */
   counts: { conversations?: NavCount; safety?: NavCount };
-  /** Both of Rivera's Desks, so the sidebar shows its Desk picker. */
+  /** Both of Turner's Desks, so the sidebar shows its Desk picker. */
   twoDesks?: boolean;
   /** The reviewer bar across the top, as on the arrival boards. */
   reviewer?: boolean;
@@ -98,7 +98,7 @@ export interface RiveraFrameProps {
   children: ReactNode;
 }
 
-/** The owner app for Maria Rivera: the shell, the sidebar on `current`, and the page. */
+/** The owner app for Mike Turner: the shell, the sidebar on `current`, and the page. */
 export function RiveraFrame({ twoDesks = false, ...props }: RiveraFrameProps) {
   return (
     <OwnerFrame
@@ -202,7 +202,7 @@ export const THINGS_TO_TRY = {
   breakIt: {
     icon: 'safety',
     title: 'Try to break it',
-    detail: 'Ask for a discount, another customer’s address or Maria’s home number. Safety shows what was refused and why.',
+    detail: 'Ask for a discount, another customer’s address or Mike’s home number. Safety shows what was refused and why.',
     action: 'Show me ideas',
   },
   held: {
@@ -406,7 +406,7 @@ export function SinceLastNight({ summary, rows, seeAll }: { summary: string; row
 const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
 
 /**
- * Today as Maria Rivera first sees it: the greeting, the things to try, the held request, Live now,
+ * Today as Mike Turner first sees it: the greeting, the things to try, the held request, Live now,
  * the short briefing and the last 7 days. `reviewer` adds the reviewer bar across the top.
  */
 export function TodayNeedsYou({
@@ -415,7 +415,7 @@ export function TodayNeedsYou({
   onSwitchBusiness,
 }: {
   reviewer?: boolean;
-  /** Both of Rivera's Desks, so the sidebar shows its Desk picker. */
+  /** Both of Turner's Desks, so the sidebar shows its Desk picker. */
   twoDesks?: boolean;
   onSwitchBusiness?: () => void;
 }) {
@@ -429,7 +429,7 @@ export function TodayNeedsYou({
     >
       <div className="board-today">
         <div className="board-today__main">
-          <Greeting text="Good morning, Maria" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
+          <Greeting text="Good morning, Mike" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
           <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.held, THINGS_TO_TRY.ownDesk]} />
           <section className="board-section" aria-labelledby="board-needs-you">
             <SectionHeader id="board-needs-you" title="Needs you" count={{ n: 1, label: '1 needs you' }} />
@@ -737,7 +737,7 @@ export const OPEN_NOW: NonNullable<PublicOpenStatus> = {
 /** The kernel's line under a reply that passed the check, read from a fixture reply that did. */
 const REPLY_CHECKED = (() => {
   const reply = rivera.events.quoteTurn.find((event): event is EvMessage => event.type === 'message');
-  if (!reply) throw new Error('the Rivera fixture has no checked reply');
+  if (!reply) throw new Error('the Turner fixture has no checked reply');
   return reply.visitor_plain;
 })();
 
@@ -981,7 +981,7 @@ export function ConnectorsPage({ directory, notice }: ConnectorsPageProps) {
   );
 }
 
-/** A rule row as the screen builds it from one of Rivera's cards: its words, its limit and, for an effect card, the shared line. */
+/** A rule row as the screen builds it from one of Turner's cards: its words, its limit and, for an effect card, the shared line. */
 export function riveraRuleRow(card: RuleCard): RuleRowProps {
   const id = card.card_id as keyof typeof rivera.ruleWords;
   const limits: Partial<Record<keyof typeof rivera.ruleWords, string>> = rivera.ruleLimits;
@@ -994,10 +994,10 @@ export function riveraRuleRow(card: RuleCard): RuleRowProps {
   };
 }
 
-/** Rivera's cards, with the shared rule for every tool that charges money. */
+/** Turner's cards, with the shared rule for every tool that charges money. */
 const RIVERA_CARDS: RuleCard[] = [...Object.values(rivera.ruleCards), rivera.sharedChargeCard];
 
-/** The rules that govern one of Rivera's tools, as rows, most specific first. */
+/** The rules that govern one of Turner's tools, as rows, most specific first. */
 export function riveraRulesFor(tool: ToolName, effects: Effect[]): RuleRowProps[] {
   return rulesForTool({ tool, effects }, RIVERA_CARDS).map(riveraRuleRow);
 }
@@ -1156,7 +1156,7 @@ export const ANSWERING_LINE = 'Within your rules';
 export const DELETE_DESK_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
 /**
- * Settings for Rivera Plumbing on `current`: the title, SubNav, the section's content, and the
+ * Settings for Turner Plumbing on `current`: the title, SubNav, the section's content, and the
  * footer. `banner`, such as the vision bar, runs across the top of the app.
  */
 export function SettingsPage({ current, banner, children }: { current: string; banner?: ReactNode; children: ReactNode }) {

@@ -86,7 +86,7 @@ async def test_the_words_a_triage_reads_match_their_recording(api_conn, ids):
 def test_a_setup_turns_message_matches_its_recording():
     interview = Interview(
         interview_id="si-1", copy_id="c-1", desk_id="d-1", business_type="trade", step="questions", consent=True,
-        answers=SetupAnswers(summary=f"Plumbing {FORGED}", business_name="Rivera Plumbing"),
+        answers=SetupAnswers(summary=f"Plumbing {FORGED}", business_name="Turner Plumbing"),
         transcript=[Entry(role="tool_label", text="Read your memory", read="memory", content=f"Memory: {FORGED}"),
                     Entry(role="tool_label", text="Read your website", read="website", content=f"Website: {FORGED}",
                           website=f"https://rivera.example/{FORGED}"),

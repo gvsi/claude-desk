@@ -25,7 +25,7 @@ import { START_EXAMPLES } from './copy.ts';
 beforeAll(loadWebFonts);
 
 const DESCRIPTION =
-  "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
+  "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
 
 /** Setup's steps that load, and What customers will read, which opens from Real situations. */
 type Step = 'tools' | 'rules' | 'situations' | 'safety_check' | 'public_lines';

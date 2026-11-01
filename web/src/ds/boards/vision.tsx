@@ -3,7 +3,7 @@
  * and tokens for the `Boards/Vision, *` stories only, as `parts.tsx` composes the other pages. The web
  * app (plan 04, Task 17) builds the same pages from the same components: the vision bar over each,
  * every fact in a `FactCard`, the phones in `PhoneFrame`, and Luis's access in `AccessPanel`. The
- * data here is the boards' own sample data: Rivera Plumbing's team, Dana's visit, the phone apps,
+ * data here is the boards' own sample data: Turner Plumbing's team, Dana's visit, the phone apps,
  * and Marcus Bell on Meridian Bay Permits' public page, a fictional city permits office.
  */
 import type { ReactNode } from 'react';
@@ -96,7 +96,7 @@ function Reply({ text, language = 'en' }: { text: string; language?: CopyLanguag
 }
 
 // ---------------------------------------------------------------------------------------------
-// The team Desk (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk.
+// The team Desk (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk.
 
 export const TEAM = { id: 'desk-rivera-team', name: 'Team' };
 
@@ -122,7 +122,7 @@ export const LUIS_ACCESS = {
 export const TEAM_REPLIES = [
   'Here’s Ana’s history. The gate code is on her job card.',
   'Here it is.',
-  'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
+  'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
 ] as const;
 
 /** The day's line under the page. */
@@ -147,7 +147,7 @@ function TeamTurn({ asked, reply, facts = [], receipts }: { asked: string; reply
   );
 }
 
-/** Conversations on Rivera Plumbing's team Desk, Luis's open, with what he can open beside it. */
+/** Conversations on Turner Plumbing's team Desk, Luis's open, with what he can open beside it. */
 export function TeamDeskConversations() {
   return (
     <VisionOwnerFrame
@@ -275,7 +275,7 @@ export function TeamDeskConversations() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Claude account (N-R2-Vision-ClaudeAccount): Dana, back on Rivera's public page, signed in.
+// The Claude account (N-R2-Vision-ClaudeAccount): Dana, back on Turner's public page, signed in.
 
 /** The about column as the board draws it: hours, the service area and the phone. */
 const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.policy.en, rivera.blocks.contact.en];
@@ -287,14 +287,14 @@ const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.policy.en, r
  * sentence ("Last time we booked your drain clearing."), and Claude only asks how it went.
  */
 export const CLAUDE_ACCOUNT_TURNS = {
-  ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
+  ask: 'Your Claude account has a verified email. If it matches the contact Turner Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
   matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
   releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
-  checked: 'Reply checked against Maria Rivera’s rules',
+  checked: 'Reply checked against Mike Turner’s rules',
 } as const;
 
 /**
@@ -304,17 +304,17 @@ export const CLAUDE_ACCOUNT_TURNS = {
 export const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
   title: 'Tuesday, October 20',
-  lines: ['10:00 am to 12:00 pm', 'With Maria Rivera'],
+  lines: ['10:00 am to 12:00 pm', 'With Mike Turner'],
 });
 
 /** The visitor's booking on the phone, as the kernel renders a booking card. */
 export const PHONE_BOOKING = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-77',
   title: 'Tuesday, November 3',
-  lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
+  lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'],
 });
 
-/** Rivera Plumbing's public page, under the vision bar, for a returning visitor signed in with a Claude account. */
+/** Turner Plumbing's public page, under the vision bar, for a returning visitor signed in with a Claude account. */
 export function ClaudeAccountChat() {
   const t = CLAUDE_ACCOUNT_TURNS;
   const owner = rivera.business.ownerName;
@@ -327,9 +327,9 @@ export function ClaudeAccountChat() {
       onAskForOwner={fn()}
       inertAsk
       about={CLAUDE_ACCOUNT_ABOUT}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />}
+      composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} inertSend />}
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <SystemLine text="Signed in with your Claude account." />
         <TranscriptRow margin={<MarginReceipt source={CHECKED} plain={t.checked} ledgerSeq={40} />}>
           <ClaudeMessage plainProse blocks={[proseBlock(t.ask)]} language="en" ownerName={owner} />
@@ -389,7 +389,7 @@ function OwnerPhone() {
       <div className="board-vision-phone__screen">
         <div>
           <p className="board-vision-phone__business board-quiet cd-type-caption">{rivera.business.name}</p>
-          <h2 className="cd-type-greeting board-vision-phone__greeting">Good morning, Maria</h2>
+          <h2 className="cd-type-greeting board-vision-phone__greeting">Good morning, Mike</h2>
         </div>
         {/* A vision page sends nothing: the answers keep their look and do nothing. */}
         <ApprovalCard
@@ -434,23 +434,23 @@ function VisitorPhone() {
           <span className="cd-type-control board-vision-phone__brand-name" data-copy="user">
             {brand.name}
           </span>
-          <span className="board-quiet cd-type-caption board-vision-phone__brand-line">Claude, an AI, answers for Maria Rivera</span>
+          <span className="board-quiet cd-type-caption board-vision-phone__brand-line">Claude, an AI, answers for Mike Turner</span>
         </span>
       </div>
       <div className="board-vision-phone__chat">
-        <Transcript label="Conversation with Rivera Plumbing">
+        <Transcript label="Conversation with Turner Plumbing">
           <TranscriptRow>
             <VisitorMessage text="Can someone come Tuesday afternoon?" />
           </TranscriptRow>
-          <TranscriptRow margin={<MarginReceipt source={decided('executed')} plain="Booked on Maria Rivera’s calendar" ledgerSeq={0} />}>
+          <TranscriptRow margin={<MarginReceipt source={decided('executed')} plain="Booked on Mike Turner’s calendar" ledgerSeq={0} />}>
             {/* Owner's copy ruling, 2026-10-30: the booking is the kernel's booking card, and Claude's
-                words promise nothing it doesn't back (the board's "Maria will text you when she’s on her way."). */}
+                words promise nothing it doesn't back (the board's "Mike will text you when he’s on his way."). */}
             <ClaudeMessage plainProse blocks={[proseBlock(PHONE_REPLY), PHONE_BOOKING]} language="en" ownerName={rivera.business.ownerName} />
           </TranscriptRow>
         </Transcript>
       </div>
       <div className="board-vision-phone__composer">
-        <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />
+        <Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} inertSend />
         <p className="board-quiet cd-type-caption board-vision-phone__disclosure">This chat is with Claude, an AI.</p>
       </div>
     </PhoneFrame>

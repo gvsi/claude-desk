@@ -20,7 +20,7 @@ from conftest import load_script, unsigned_client
 PASSCODE = "smoke-passcode-5b1d93"  # a made-up passcode, never a real one
 OWNER_TOKEN = "owner-token-a7c2e9f1"
 VISITOR_TOKEN = "visitor-token-3e8b0d42"
-SLUG = "rivera-plumbing-1a2b"
+SLUG = "turner-plumbing-1a2b"
 ASSET = "/assets/index-4f2a9c.js"
 INDEX = (
     '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Claude Desk</title>'
@@ -138,8 +138,8 @@ class Stub:
             if body.get("passcode") != PASSCODE:
                 self.json(handler, 401, {"error": "wrong_passcode", "got": body.get("passcode")})
                 return
-            copy = {"copy_id": "c-1", "desks": [{"desk_id": "d-1", "slug": SLUG, "name": "Rivera's Desk",
-                                                 "business_name": "Rivera Plumbing", "hours": [], "answering": "ai"}]}
+            copy = {"copy_id": "c-1", "desks": [{"desk_id": "d-1", "slug": SLUG, "name": "Turner's Desk",
+                                                 "business_name": "Turner Plumbing", "hours": [], "answering": "ai"}]}
             self.json(handler, 201, copy, [self.behavior.owner_cookie])
         elif handler.path == f"/api/public/desks/{SLUG}/sessions":
             self.json(handler, 201, {"state": {}, "resumed": False}, [self.behavior.visitor_cookie])

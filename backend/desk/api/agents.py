@@ -3,7 +3,7 @@
 A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of three
 tasks on the Desk (`DEMO_TASKS`): book, pay up front within its spending limit, or ask for a charge above that limit.
 Each task is a fixed line from the Desk's set (plan 09, C2): code picks it by the business type setup stored for the
-Desk, or Rivera's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
+Desk, or Turner's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
 landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. The kernel
 mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key and a spending limit (a mandate) its
 demo wallet signs.
@@ -156,7 +156,7 @@ def signed_headers(key: Ed25519PrivateKey, agent_key_id: str, desk_slug: str, ra
 async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> DemoTaskSet:
     """Which fixed task lines the agent reads on the Desk (`DEMO_TASKS`): the business type setup stored for it, on the
     newest of the copy's setup interviews that made it (`other` when that one has none); with no such interview, the
-    copy's own Desk, its oldest (the Rivera seed), reads `rivera` and any other `other`. Only that closed type and which
+    copy's own Desk, its oldest (the Turner seed), reads `rivera` and any other `other`. Only that closed type and which
     Desk is the copy's oldest decide the set; no business's, owner's or visitor's words reach the agent."""
     found = await conn.execute(select(INTERVIEWS.c.business_type).where(
         INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id == desk_id).order_by(

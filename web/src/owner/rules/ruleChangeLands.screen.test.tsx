@@ -465,7 +465,7 @@ describe('a preset or a new payment limit', () => {
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
-    // The tools its review lists by name, each once: its quote and document rules replace Rivera's
+    // The tools its review lists by name, each once: its quote and document rules replace Turner's
     // with ones that differ only in their ids, so it lists neither.
     const listed = [...new Set([...root.querySelectorAll('.cd-change-review__title')].map((title) => title.firstChild?.textContent ?? ''))].sort();
     expect(listed.length).toBeGreaterThan(0);
@@ -527,7 +527,7 @@ describe('a preset or a new payment limit', () => {
     return { ...rendered, root: rendered.screen.container, version: desk().lastVersion };
   }
 
-  /** Rivera's version 7 line, drawn on the page rather than in its loading shapes. */
+  /** Turner's version 7 line, drawn on the page rather than in its loading shapes. */
   const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Version 7 of your rules');
 
   it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', async () => {
@@ -610,7 +610,7 @@ describe('a preset or a new payment limit', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
   });
 
-  it.each(['Rivera Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
+  it.each(['Turner Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
     // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
     // A short window, so Payments can be wholly out of view above Stripe. The Desk keeps its job, so
     // Back lands its place on a page whose jobs section is drawn above it (#620).

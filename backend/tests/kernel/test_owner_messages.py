@@ -8,7 +8,7 @@ fact, and a receipt for the owner alone. A whisper is a note for Claude: ledgere
 else. Claude can never cite what the owner said: it backs no quote, and only the kernel issues
 `owner_said` cards.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
 """
 
 import asyncio
@@ -58,7 +58,7 @@ async def test_say_returns_one_signed_owner_said_block(app, client, reviewer):
     assert (block.kind, block.template, block.fact_id, block.title, block.text, block.lines) == (
         "card", "owner_said", fact_id, SAY, SAY, [])
     assert (verdict.message_id, verdict.generation, verdict.language, verdict.visitor_plain) == (
-        result.message_id, 0, "en", "Written by Maria Rivera")
+        result.message_id, 0, "en", "Written by Mike Turner")
     assert result.ledger_seq == verdict.ledger_seq
     verify_verdict(await public_key(client), visitor.session_id, verdict)
     assert reviewer.soft_inputs == []                                    # no model reads what the owner says
@@ -83,17 +83,17 @@ async def test_say_returns_one_signed_owner_said_block(app, client, reviewer):
     spanish = (await sent(client, copy, visitor.session_id, "Le llamo en una hora, Sam.")).verdict
     assert spanish is not None and spanish.ok
     assert (spanish.language, spanish.visitor_plain, [block.title for block in spanish.blocks]) == (
-        "es", "Escrito por Maria Rivera", ["Le llamo en una hora, Sam."])
+        "es", "Escrito por Mike Turner", ["Le llamo en una hora, Sam."])
     verify_verdict(await public_key(client), visitor.session_id, spanish)
 
 
 async def test_say_works_during_a_take_over(app, client, monkeypatch):
     copy, visitor = await visitor_of(app, client)
     key = await public_key(client)
-    assert (await set_mode(client, copy, visitor.session_id, "owner", 0))["generation"] == 1   # Maria takes over
+    assert (await set_mode(client, copy, visitor.session_id, "owner", 0))["generation"] == 1   # Mike takes over
     stalled = await post_check(client, visitor, "I can help with that.", generation=1)
     assert (stalled.status_code, stalled.json()) == (409, {"code": "mode_owner"})            # Claude waits
-    taken = (await sent(client, copy, visitor.session_id, "Hi Sam, it's Maria. I can be there by four.")).verdict
+    taken = (await sent(client, copy, visitor.session_id, "Hi Sam, it's Mike. I can be there by four.")).verdict
     assert taken is not None and (taken.ok, taken.generation) == (True, 1)
     assert [block.template for block in taken.blocks] == ["owner_said"]
     verify_verdict(key, visitor.session_id, taken)
@@ -105,7 +105,7 @@ async def test_say_works_during_a_take_over(app, client, monkeypatch):
 
     # a take-over running alongside a say waits for it: the say's verdict is at the generation the
     # conversation had when it was ledgered, never one a take-over ended before it was sent
-    assert (await set_mode(client, copy, visitor.session_id, "ai", 1))["generation"] == 2      # Maria resumes it
+    assert (await set_mode(client, copy, visitor.session_id, "ai", 1))["generation"] == 2      # Mike resumes it
     reading, release = asyncio.Event(), asyncio.Event()
     canaries = labels.copy_canaries
 
@@ -115,7 +115,7 @@ async def test_say_works_during_a_take_over(app, client, monkeypatch):
         return await canaries(ctx)
 
     monkeypatch.setattr(labels, "copy_canaries", held_open)
-    say = asyncio.create_task(post_message(client, copy, visitor.session_id, "Maria here, taking this one."))
+    say = asyncio.create_task(post_message(client, copy, visitor.session_id, "Mike here, taking this one."))
     await asyncio.wait_for(reading.wait(), 10)
     take_over = asyncio.create_task(set_mode(client, copy, visitor.session_id, "owner", 2))
     done, _ = await asyncio.wait({take_over}, timeout=0.5)
@@ -171,7 +171,7 @@ async def test_owner_statements_never_back_a_quote(app, client):
     # issues `owner_said`
     refused = {}
     for template in render.TEMPLATES:
-        verdict = await checked(client, visitor, "Here is what Maria said.", [clause(template, fact_id)])
+        verdict = await checked(client, visitor, "Here is what Mike said.", [clause(template, fact_id)])
         assert_handed_off(verdict)
         [violation] = verdict.violations
         assert (violation.span, violation.fact_ids) == (template, [fact_id])
@@ -186,7 +186,7 @@ async def test_owner_statements_never_back_a_quote(app, client):
 
     # and another conversation can't read it at all
     other = await open_visitor(client, copy)
-    verdict = await checked(client, other, "Here is what Maria said.", [clause("quote", fact_id)])
+    verdict = await checked(client, other, "Here is what Mike said.", [clause("quote", fact_id)])
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unentitled_fact", "not_a_reader")]
 
 

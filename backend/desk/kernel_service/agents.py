@@ -46,7 +46,7 @@ session's row and before the ledger head.
 **Demo agents** (`POST /agents/demo`): the owner of the copy or a session on the Desk mints one,
 at most `DEMO_AGENTS_PER_COPY_PER_HOUR` per copy (then 429 `rate_limited`, ledgered
 `rate_limit`): a fresh key, `source="demo"`, and a mandate from the copy's demo wallet ($20 a
-charge, $100 in all, for an hour; the "Agent demo" row of the Rivera seed).
+charge, $100 in all, for an hour; the "Agent demo" row of the Turner seed).
 """
 
 import hashlib

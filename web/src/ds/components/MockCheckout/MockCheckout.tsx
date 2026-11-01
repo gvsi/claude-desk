@@ -47,7 +47,7 @@ function Hint({ text, id, lock = false }: { text: string; id?: string; lock?: bo
 type Pressed = 'pay' | 'cancel';
 
 export interface MockCheckoutProps {
-  /** The business taking the payment, shown at the card's top left: "Rivera Plumbing". */
+  /** The business taking the payment, shown at the card's top left: "Turner Plumbing". */
   merchant: string;
   /** What the payment is for: the link's own title (`PaymentLinkView.title`). */
   title: string;
@@ -66,7 +66,7 @@ export interface MockCheckoutProps {
    */
   customerName?: string;
   /**
-   * The visitor's chat, as its own path (`/d/rivera-plumbing`), when the page knows it. Once paid,
+   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid,
    * the line's "Go back to the chat" links there, in the same tab. Anything but a public chat's
    * path is ignored, and the line keeps its words with no link.
    */

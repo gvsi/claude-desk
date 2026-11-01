@@ -41,9 +41,9 @@ function withBrand(brand: Record<string, string>): PublicDesk {
 describe('brandFrom', () => {
   it('rivera_brand_maps_to_the_shell', () => {
     expect(brandFrom(desk).brand).toEqual({
-      name: 'Rivera Plumbing',
+      name: 'Turner Plumbing',
       tagline: 'Main line',
-      monogram: 'R',
+      monogram: 'T',
       field: '#1F4E4A',
       ink: 'var(--text-primary)',
       inkSecondary: 'var(--text-secondary)',
@@ -76,7 +76,7 @@ describe('brandFrom', () => {
   });
 
   it('owner_name_from_the_business', () => {
-    expect(brandFrom(desk).ownerName).toBe('Maria Rivera');
+    expect(brandFrom(desk).ownerName).toBe('Mike Turner');
     expect(brandFrom({ ...desk, owner_display_name: 'Linda Chen', business_name: 'Chen & Co. CPA' })).toMatchObject({
       ownerName: 'Linda Chen',
       brand: { name: 'Chen & Co. CPA', monogram: 'C' },
@@ -87,7 +87,7 @@ describe('brandFrom', () => {
     // Exactly setup's fallback is no name: the page asks for "a person", never for "Owner".
     expect(brandFrom({ ...desk, owner_display_name: OWNER_NAME_FALLBACK }).ownerName).toBeNull();
     // Anything else is a name the owner gave, shown as written.
-    for (const name of ['owner', 'OWNER', 'Owner ', ' Owner', 'Owners', 'Maria Owner', 'Owner Rivera']) {
+    for (const name of ['owner', 'OWNER', 'Owner ', ' Owner', 'Owners', 'Mike Owner', 'Owner Turner']) {
       expect(brandFrom({ ...desk, owner_display_name: name }).ownerName, name).toBe(name);
     }
   });

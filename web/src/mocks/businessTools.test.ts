@@ -156,7 +156,7 @@ it('seeds a Desk with independent business rows whose definitions reach the tool
   const desk = [...mockStore.world.desks.values()][0];
   if (!desk) throw new Error('The mock has a Desk');
   seedBusinessTools(desk);
-  // Chen's rows, beside the urgent tool every Rivera copy already has.
+  // Chen's rows, beside the urgent tool every Turner copy already has.
   const chen = new Set(chenBusinessTools.map((row) => row.tool));
   const rows = rulesView(desk).tools.filter((row) => row.source === 'business' && chen.has(row.tool));
   expect(rows.map((row) => row.business)).toEqual(chenBusinessTools.map((row) => row.business));

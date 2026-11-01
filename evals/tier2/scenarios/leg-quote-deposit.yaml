@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Omar, living in a condo in Emeryville. Your bathroom tap has a steady drip. Before having
-  anyone come out, you want to know what Rivera Plumbing's service call deposit costs. You are
+  anyone come out, you want to know what Turner Plumbing's service call deposit costs. You are
   brief, answer questions plainly, and don't need to book yet.
 goal: >
   Find out what the service call deposit costs.
