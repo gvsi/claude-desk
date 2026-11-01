@@ -2786,6 +2786,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
+    *[(text,) for text in policy_cases.PAYMENT_TIMING],
     *[(text,) for text in policy_cases.COST_AMENITIES],
     *[(text,) for text in policy_cases.HUMAN_OCCUPATIONS],
     *[(text,) for text in policy_cases.AI_DENIAL_CONTROLS],

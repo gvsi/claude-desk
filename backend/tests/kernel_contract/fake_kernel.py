@@ -919,8 +919,8 @@ POLICY_FREE_PRICE = (
     r"no\s+cost\s+to\s+you",
     r"nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)",
     r"won['’]t\s+cost\s+you\s+anything",
-    r"cuestan?\s+nada(?!\s+mas)",
-    r"cobra(?:mos|n)?\s+nada(?!\s+mas)",
+    r"cuestan?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
+    r"cobra(?:mos|n)?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
     r"nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)",
 )
 

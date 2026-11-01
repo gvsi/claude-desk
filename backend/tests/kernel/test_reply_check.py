@@ -2344,6 +2344,7 @@ POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] +
 ]
 # Directions to reach a person, explicit AI disclosures and role words that name no speaker.
 POLICY_HONEST_PERSON_CASES = [
+    *policy_cases.PAYMENT_TIMING,
     *policy_cases.HUMAN_OCCUPATIONS,
     *policy_cases.AI_DENIAL_CONTROLS,
     "Talk to a real person by phone.", "Call to speak with a live agent.",

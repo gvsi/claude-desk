@@ -39,3 +39,8 @@ COST_SERVICE_REFUSALS = [
     ("Parking and repairs cost nothing.", "policy.free_price"),
     ("Water heater inspections cost nothing.", "policy.free_price"),
 ]
+
+PAYMENT_TIMING = [
+    "No cobramos nada hasta terminar el trabajo.", "No cobramos nada por adelantado.",
+    "No le cobramos nada hasta que apruebe el presupuesto.", "No cuesta nada hasta que el trabajo esté hecho.",
+]
