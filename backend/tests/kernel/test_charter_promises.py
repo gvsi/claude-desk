@@ -34,6 +34,41 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     "Within 1 mile of Lake Merritt.",
     "A 50-km radius.",
     "Dentro de 1 kilómetro.",
+    "We cover three counties: Alameda, Contra Costa and Marin.",
+    "We serve all nine Bay Area counties.",
+    "Two locations: Oakland and Berkeley.",
+    "Serving the five boroughs.",
+    "Atendemos tres condados: Alameda, Contra Costa y Marin.",
+    "Dos sucursales: Oakland y Berkeley.",
+    "Serving the East Bay for over twenty years.",
+    "Within half a mile of Lake Merritt.",
+    "Within a hundred miles of Oakland.",
+    "Oakland and Berkeley, 7 days a week.",
+    "Trabajamos 7 días a la semana.",
+    "We cover 20-30 miles around Oakland.",
+    "Within 20–30 miles of Oakland.",
+    "20 to 30 miles",
+    "Trabajamos por la mañana.",
+    "Serving the East Bay desde 1998.",
+    "In 1998.",
+    "From 1998.",
+    "Est. 1998.",
+    "Established 1998.",
+    "Founded 1998.",
+    "Desde 1998.",
+    "En 1998.",
+    "Since 1900.",
+    "Since 2099.",
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
 ])
 async def test_service_area_allows_area_and_weekly_availability(app, client, text):
     copy = await rivera(app, client)
@@ -218,7 +253,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     public_before = (await client.get(f"/public/{copy.slug}")).json()["charter"]
     entries = len(await entries_of(app, copy))
     fields = {f"policy:{key}": rules for key in POLICY_KEYS}
-    area_rules = {"Monday to Friday": []}.get(text, rules)
+    area_rules = {"within two hours": ["lex.en.date"], "Monday to Friday": []}.get(text, rules)
     if area_rules:
         fields["policy:service_area"] = area_rules
     else:

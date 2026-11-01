@@ -2333,6 +2333,42 @@ def test_scan_public_text(text, rules):
     "Within twenty-five miles of Oakland.", "Within a ten-mile radius.", "Dentro de treinta y cinco kilómetros.",
     "Trabajamos siete días a la semana.", "Monday to Friday, mornings and afternoons.",
     "De lunes a viernes, mañanas y tardes.", "Sábados y domingos.",
+    # Any cardinal number word, and half or a hundred before a distance unit
+    "We cover three counties: Alameda, Contra Costa and Marin.", "We serve all nine Bay Area counties.",
+    "Two locations: Oakland and Berkeley.", "Serving the five boroughs.",
+    "Atendemos tres condados: Alameda, Contra Costa y Marin.", "Dos sucursales: Oakland y Berkeley.",
+    "Serving the East Bay for over twenty years.", "Within half a mile of Lake Merritt.",
+    "Within a hundred miles of Oakland.", "Within one hundred miles of Oakland.", "Dentro de cien kilómetros.",
+    # Digits before "days a week", and a range of digits before a distance unit
+    "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
+    "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # Years need an immediately preceding year marker.
+    "Serving the East Bay desde 1998.",
+    "In 1998.",
+    "From 1998.",
+    "Est. 1998.",
+    "Established 1998.",
+    "Founded 1998.",
+    "Desde 1998.",
+    "En 1998.",
+    "Since 1900.",
+    "Since 2099.",
+    # ZIP codes, road numbers and literal round-the-clock availability.
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
+    # "mañana" as the morning, after "por la", "en la" or "de la"
+    "Trabajamos por la mañana.", "Abrimos de la mañana a la noche.", "En la mañana y en la tarde.",
+    # A known limit: a fee written in words passes, since any cardinal number word does.
+    "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
+    "Seven days to finish any job in Oakland.",
 ])
 def test_public_service_area_allowance_stays_with_its_key(text):
     assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
@@ -2346,8 +2382,19 @@ def test_public_service_area_allowance_stays_with_its_key(text):
     "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
     "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
     "Trip fee: 50.",
-    # Outside the distance allowance: round-the-clock hours, ZIP codes and years in business.
-    "Oakland and Berkeley, 24/7.", "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "24/7, $50 trip fee.",
+    "24/7, 10% off.",
+    "24/7, discounts.",
+    "24/7, guaranteed service.",
+    "24/7, free consultation.",
+    "24/7, your appointment is confirmed.",
+    "ZIP 9460.",
+    "ZIP 946012.",
+    "CA 9460.",
+    "Trip fee 94601.",
+    "Highway 101, trip fee 50.",
+    "24/7, fifty dollars.",
+    # An unmarked number of years in business remains outside the allowance.
     "Serving Oakland for 25 years.",
 ])
 def test_public_service_area_keeps_price_promise_and_language_refusals(text):
@@ -2361,20 +2408,30 @@ def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
     ("Fuera de Oakland, cobramos la mitad.", ["lex.es.number"]),
     # Amounts with no currency word
+    ("Trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 2000.", ["digit"]),
+    ("Cargo de viaje: 2000.", ["digit"]),
+    ("Oakland 1998.", ["digit"]),
+    ("For 1998 years.", ["digit"]),
+    ("Since 1899.", ["digit"]),
+    ("Since 2100.", ["digit"]),
+    ("Begin 1998.", ["digit"]),
+    ("Since 1998, trip fee 2000.", ["digit"]),
     ("Within 25 miles. Trip fee 1500.", ["digit"]),
     ("Within 25 miles, 1000 off.", ["digit"]),
     ("Oakland: 1500 minimum.", ["digit"]),
-    ("Trip charge twenty-five outside Oakland.", ["lex.en.number"]),
-    ("Trip fee: fifty.", ["lex.en.number"]),
-    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
+    ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    ("Trip fee 20 to 30.", ["digit"]),
+    ("Llegamos mañana.", ["lex.es.date"]),
+    ("Mañana por la mañana en Oakland.", ["lex.es.date"]),
+    ("Seven days a week, 2 to 3 hours each.", ["digit"]),
     # Response times and dates
-    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Service in Oakland within two hours.", ["lex.en.date"]),
     ("Same-day service in Oakland.", ["lex.en.date"]),
     ("We can be there tomorrow.", ["lex.en.date"]),
     ("Servicio el mismo día en Oakland.", ["lex.es.date"]),
-    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date", "lex.es.number"]),
+    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date"]),
     ("Oakland, until 6 pm.", ["digit", "lex.en.date"]),
-    ("Seven days to finish any job in Oakland.", ["lex.en.number"]),
 ])
 def test_public_service_area_allows_only_distances_years_and_day_words(text, rules):
     """Under the service area, these rules refuse what they refuse under any other key."""

@@ -364,12 +364,21 @@ async def test_public_withholds_only_the_failing_policy_and_alerts_once(app, cli
     ({"pricing": ["lex.en.number", "lex.en.promise"]},
      "Your public page is hiding Pricing, because it names a number and makes a promise."),
     ({"about": ["lex.en.promise"], "pricing": ["lex.en.promise"]},
-     "Your public page is hiding About us and Pricing, because they make a promise."),
+     "Your public page is hiding About us, because it makes a promise, and Pricing, because it makes a promise."),
     ({"intake": ["lex.es.booking"], "after_hours": ["lex.en.callback"], "urgent": ["lex.es.number"]},
-     "Your public page is hiding After hours, Getting started and Urgent help, because they name a number and "
-     "confirm a booking or a call."),
+     "Your public page is hiding After hours, because it confirms a booking or a call, Getting started, because "
+     "it confirms a booking or a call, and Urgent help, because it names a number."),
     ({"how_we_help": ["language", "mixed_script"]},
      "Your public page is hiding How we help, because it isn't in English or Spanish."),
+    ({"pricing": ["currency", "digit"], "service_area": ["digit"]},
+     "Your public page is hiding Pricing, because it names a price or a discount, and Service area, because "
+     "it names a number."),
+    ({"pricing": ["format_control"]},
+     "Your public page is hiding Pricing, because it has hidden formatting characters."),
+    ({"pricing": ["new_rule"]},
+     "Your public page is hiding Pricing, because it doesn't pass the page's check."),
+    ({"pricing": []},
+     "Your public page is hiding Pricing, because it doesn't pass the page's check."),
     # A line the page shows as "Policy" is named by its key's words.
     ({"first_visit": ["lex.en.date", "format_control"]},
      "Your public page is hiding First visit, because it names a date or a time and has hidden formatting "

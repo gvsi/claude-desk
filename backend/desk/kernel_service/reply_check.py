@@ -546,41 +546,63 @@ _CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
              r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
              r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+"
              r"|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
-# A distance unit straight after a number, singular or plural, with a hyphen or blanks between
-# ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
-SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
+_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
+# After a number: a distance unit, singular or plural, with a hyphen or blanks between ("25 miles",
+# "a 30-mile radius", "1 kilómetro", "50-km"), maybe after a range to a second number ("20-30 miles",
+# "20 to 30 miles", "20 a 30 km", "20 hasta 30 km"); or "days a week" ("7 días a la semana").
+SERVICE_AREA_AFTER_DIGITS = re.compile(
+    rf"(?:(?:{_BLANK}*[-–—]{_BLANK}*|{_BLANK}+(?:to|a|hasta){_BLANK}+)[0-9]+(?:[.,][0-9]+)*)?"
+    rf"{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK}", re.IGNORECASE)
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
 SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
 SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
-# After a cardinal, the rest of a compound number ("twenty-five", "treinta y cinco"), then a distance
-# unit or "days a week" ("días a la semana").
-_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
-SERVICE_AREA_AFTER_CARDINAL = re.compile(
-    rf"(?:{_BLANK}+(?:y{_BLANK}+)?{_CARDINAL}\b){{0,2}}(?:{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK})",
-    re.IGNORECASE)
+# Half or a hundred is a distance only right before its unit ("half a mile", "a hundred miles").
+SERVICE_AREA_HALF_OR_HUNDRED = re.compile(rf"half|(?:one{_BLANK}+)?hundred|cien", re.IGNORECASE)
+SERVICE_AREA_BEFORE_UNIT = re.compile(rf"{_BLANK}+(?:an?{_BLANK}+)?{_DISTANCE_UNIT}", re.IGNORECASE)
 SERVICE_AREA_UNIT_WORDS = re.compile(r"miles|millas", re.IGNORECASE)   # the Spanish lexicon's "miles" (thousands)
 # Weekdays, weekends and the parts of the day, but no date, time or time window.
 SERVICE_AREA_DAY_WORDS = re.compile(
     r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{_BLANK}+de{_BLANK}+semana"
     r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
+SERVICE_AREA_MORNING = re.compile(r"\b(?:por|en|de)\s+la\s+$", re.IGNORECASE)
+
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit or a year; a cardinal number word right before a distance unit or "days a week", or
-    "miles" as the unit; a weekday, weekend or part of the day. Nothing else: no fraction, amount, time
-    window or date, so "half off", "trip fee 1500" and "same-day" stay refused as under any other key."""
+    """Allow only the service area's numeric, geographic and day-part shapes, within its own text.
+
+    Digits need a distance unit (possibly after a range), "days a week", an explicit year marker,
+    a ZIP or road prefix, or literal "24/7". Cardinal words pass anywhere; half or a hundred needs
+    a distance unit. Weekdays, weekends and day parts pass, with singular mañana needing morning
+    context. A fee written in words ("trip fee: fifty") passes: a known limit. Other amounts,
+    fractions, dates and time windows retain their ordinary refusals."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit = text[start:end]
     if rule == "digit":
-        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
+        return ((SERVICE_AREA_YEAR.fullmatch(hit) is not None
+                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
+                or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
+                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
+                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
     if rule in ("lex.en.number", "lex.es.number"):
-        return SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or (
-            SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
-            and SERVICE_AREA_AFTER_CARDINAL.match(text, end) is not None)
+        return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
+                or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
+                    and SERVICE_AREA_BEFORE_UNIT.match(text, end) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
-        return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+        return (SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+                or (hit.casefold() in {"mañana", "manana"}
+                    and SERVICE_AREA_MORNING.search(text[:start]) is not None))
     return False
 
 
