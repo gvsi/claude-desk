@@ -634,9 +634,10 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str, raw: Seq
     names and passed cards) on the visible text, each violation whose kind, rule ID and span `raw`
     doesn't hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text) for each
     link whose text isn't its own target and whose target isn't the business's own contact
-    (`own_target`): payment and booking links come only from cards. Prose the parser can't read whole
-    (`markdown_text.TooDeep`, or any error) is one `promise_word` (`markdown.parse`), and nothing of
-    its reading is trusted."""
+    (`own_target`): payment and booking links come only from cards. Any image is one `promise_word`
+    (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser can't
+    read whole (`markdown_text.TooDeep`, or any error) is one `promise_word` (`markdown.parse`), and
+    nothing of its reading is trusted."""
     try:
         reading = markdown_text.read(prose)
     except Exception as error:   # any failure fails closed: the reply is refused
@@ -650,6 +651,8 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str, raw: Seq
         hosts, emails = await contact_endpoints(ctx, desk_id)
         found += [Violation(kind="promise_word", span=_span(link.text), rule_id="markdown.link")
                   for link in hidden if not own_target(link.href, hosts, emails)]
+    if reading.images:
+        found.append(Violation(kind="promise_word", span="image", rule_id="markdown.image"))
     return found
 
 

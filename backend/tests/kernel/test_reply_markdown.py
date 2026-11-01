@@ -137,3 +137,18 @@ async def test_honest_formatting_and_the_business_own_links_pass(app, client, pr
 ])
 def test_a_public_contact_names_its_hosts_and_emails(contact, hosts, emails):
     assert public_contact.contact_endpoints(contact) == (frozenset(hosts), frozenset(emails))
+
+
+@pytest.mark.parametrize("prose", [
+    "![](https://riveraplumbing.example/a.png)",
+    "Here is the valve to turn: ![the valve](https://riveraplumbing.example/valve.png)",
+    "[![our logo](https://riveraplumbing.example/logo.png)](https://riveraplumbing.example)",
+    "![a](https://riveraplumbing.example/a.png) and ![b](https://riveraplumbing.example/b.png)",
+])
+async def test_an_image_is_refused_whoever_hosts_it(app, client, prose):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert verdict.ok is False
+    assert [violation for violation in found(verdict) if violation[1].startswith("markdown.")] == [
+        ("promise_word", "markdown.image", "image")]
