@@ -236,6 +236,21 @@ it('growing_text_that_stops_mid_table_shows_no_pipes_or_broken_rows', () => {
   ]);
 });
 
+it('the_header_rows_line_and_fill_run_the_cards_full_width', () => {
+  // The empty corner cell is a plain cell, but it draws as the header row: its fill and hairline.
+  const md = reply(mount(<ChatMarkdown text={`${HEAD}\n| What changes | One worn part | The whole tank |`} />));
+  const [corner, repair] = [...md.querySelectorAll<HTMLElement>('thead tr > *')];
+  const style = (cell: HTMLElement | undefined) => {
+    const computed = getComputedStyle(cell as HTMLElement);
+    return [computed.backgroundColor, computed.borderBottomWidth, computed.borderBottomStyle, computed.borderBottomColor];
+  };
+  expect(corner?.tagName).toBe('TD');
+  expect(style(corner)).toEqual(style(repair));
+  expect(style(corner)[1]).toBe('1px');
+  // The last body row still draws no line against the card's edge.
+  expect(getComputedStyle(md.querySelector('tbody tr:last-child td') as Element).borderBottomWidth).toBe('0px');
+});
+
 it('a_task_list_shows_its_marks_as_written_and_no_checkboxes', () => {
   const md = reply(mount(<ChatMarkdown text={'- [x] Deposit sorted\n- [ ] Visit booked\n- [X] Photos sent'} />));
   expect(md.querySelectorAll('input')).toHaveLength(0);

@@ -138,7 +138,9 @@
   vertical-align: top;
 }
 
-.cd-md tr:last-child td {
+/* Only the body's last row meets the card's edge: the header row's cells, its empty corner
+   included, keep their hairline. */
+.cd-md tbody tr:last-child td {
   border-bottom: 0;
 }
 
