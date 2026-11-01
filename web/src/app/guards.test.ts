@@ -232,9 +232,10 @@ const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|2
 const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
-// part of the mark (owner, 2026-10-30).
+// part of the mark (owner, 2026-10-30), plus the writing dots and their story's computed color check.
 const CLAY_FOLDERS = ['ds/components/IntroDialog/', MARK_FOLDER] as const;
-const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+const CLAY_FILES = ['ds/components/WritingIndicator/WritingIndicator.css', 'ds/components/WritingIndicator/WritingIndicator.stories.tsx'];
+const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder)) || CLAY_FILES.includes(file);
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
 // A JavaScript name, and a reference to one of `names`: the name itself, or a namespace's member
@@ -1249,8 +1250,11 @@ describe('app source guards', () => {
     for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
       expect(files, file).toContain(file);
     }
-    // Clay's allowlist is two folders: the intro dialog's, and the mark's for the app icon's field.
+    // Clay's allowlist is the intro dialog's and mark's folders, plus the writing dots' CSS and story.
     expect(mayUseClay('ds/components/Mark/Mark.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.stories.tsx')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
     const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
