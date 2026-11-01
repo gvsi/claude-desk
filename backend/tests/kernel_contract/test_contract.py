@@ -3869,7 +3869,7 @@ PUBLIC_CONTACTS = [*policy_cases.CONTACT_FORMS, "(510) 555-0142 ext. 2", "+1 (51
                    "(510) 555-0142 ext. 12, hello@example.com, example.com",
                    "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
                    "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142"]
-PUBLIC_CONTACT_PROSE = ["https://example.test/" + "a" * 481, "Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
+PUBLIC_CONTACT_PROSE = [*policy_cases.CONTACT_SCAN_INPUTS, "https://example.test/" + "a" * 481, "Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
                         "https://example.test/book for a free quote", "Call us for a free quote",
                         "Call us at (510) 555-0142 anytime"]
 

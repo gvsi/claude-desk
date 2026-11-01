@@ -73,3 +73,6 @@ PAYMENT_TIMING = [
     "No cobramos nada hasta terminar el trabajo.", "No cobramos nada por adelantado.",
     "No le cobramos nada hasta que apruebe el presupuesto.", "No cuesta nada hasta que el trabajo esté hecho.",
 ]
+
+# At and below the contact cap: these must exercise parsing rather than the length guard.
+CONTACT_SCAN_INPUTS = ["a" + " " * 497 + "or", ("a" + " " * 40 + "and") * 11]
