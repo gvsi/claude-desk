@@ -2898,6 +2898,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                     "I'm not sure whether there's an after-hours fee.",
                     "Maria checks if an emergency fee applies when she calls you back."):
         assert replies(task, mention) == set(), mention
+    # The short-notice fee is on Rivera's price list and quoted on a card, so naming it is no promise.
+    for priced in ("There's an extra short-notice fee, shown on the card below.",
+                   "There's also an additional short-notice fee.",
+                   "Maria charges an emergency short-notice fee, on the card below."):
+        assert replies(task, priced) == set(), priced
     # Advice to act right away, the Desk acting right now, and an offer with no time in it, are no promise.
     # A promise stops at its clause's end, so a time word in the next clause belongs to that clause.
     for spared in ("Turn off the water right away.", "Please shut off the main valve immediately.",
