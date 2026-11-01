@@ -547,12 +547,9 @@ _CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
 SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
 SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
 SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
-# After a cardinal, the rest of a compound number ("twenty-five", "treinta y cinco"), then a distance
-# unit or "days a week" ("días a la semana").
-_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
-SERVICE_AREA_AFTER_CARDINAL = re.compile(
-    rf"(?:{_BLANK}+(?:y{_BLANK}+)?{_CARDINAL}\b){{0,2}}(?:{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK})",
-    re.IGNORECASE)
+# Half or a hundred is a distance only right before its unit ("half a mile", "a hundred miles").
+SERVICE_AREA_HALF_OR_HUNDRED = re.compile(rf"half|(?:one{_BLANK}+)?hundred|cien", re.IGNORECASE)
+SERVICE_AREA_BEFORE_UNIT = re.compile(rf"{_BLANK}+(?:an?{_BLANK}+)?{_DISTANCE_UNIT}", re.IGNORECASE)
 SERVICE_AREA_UNIT_WORDS = re.compile(r"miles|millas", re.IGNORECASE)   # the Spanish lexicon's "miles" (thousands)
 # Weekdays, weekends and the parts of the day, but no date, time or time window.
 SERVICE_AREA_DAY_WORDS = re.compile(
@@ -563,18 +560,19 @@ SERVICE_AREA_DAY_WORDS = re.compile(
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit or a year; a cardinal number word right before a distance unit or "days a week", or
-    "miles" as the unit; a weekday, weekend or part of the day. Nothing else: no fraction, amount, time
-    window or date, so "half off", "trip fee 1500" and "same-day" stay refused as under any other key."""
+    distance unit or a year; any cardinal number word ("three counties", "seven days a week"), half or a
+    hundred right before a distance unit, or "miles" as the unit; a weekday, weekend or part of the day.
+    Nothing else: no fraction, amount, time window or date, so "half off", "trip fee 1500" and "same-day"
+    stay refused as under any other key. A fee written in words ("trip fee: fifty") passes: a known limit."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit = text[start:end]
     if rule == "digit":
         return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
     if rule in ("lex.en.number", "lex.es.number"):
-        return SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or (
-            SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
-            and SERVICE_AREA_AFTER_CARDINAL.match(text, end) is not None)
+        return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
+                or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
+                    and SERVICE_AREA_BEFORE_UNIT.match(text, end) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
         return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
     return False

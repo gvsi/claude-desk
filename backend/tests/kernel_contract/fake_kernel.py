@@ -898,9 +898,9 @@ def money(cents: int) -> str:
 
 PUBLIC_POLICY_PATTERNS = (
     ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves)\b"),
+     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves|hundreds?)\b"),
     ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
-     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad)\b"),
+     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad|cien)\b"),
     ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|"
      r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
     ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
@@ -948,10 +948,8 @@ SERVICE_AREA_CARDINAL = (
     r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
     r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
     r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
-SERVICE_AREA_AFTER_CARDINAL = (
-    rf"(?:{SERVICE_AREA_BLANK}+(?:y{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_CARDINAL}\b){{0,2}}"
-    rf"(?:{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+a"
-    rf"{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b)")
+SERVICE_AREA_HALF_OR_HUNDRED = rf"half|(?:one{SERVICE_AREA_BLANK}+)?hundred|cien"
+SERVICE_AREA_BEFORE_UNIT = rf"{SERVICE_AREA_BLANK}+(?:an?{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_UNIT}"
 SERVICE_AREA_DAY_WORDS = (
     r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
@@ -960,8 +958,8 @@ SERVICE_AREA_DAY_WORDS = (
 
 def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
-    number before a distance unit or a year, a cardinal word before a unit or "days a week", "miles" as the
-    unit, and weekdays, weekends and parts of the day."""
+    number before a distance unit or a year, any cardinal word, half or a hundred before a unit, "miles" as
+    the unit, and weekdays, weekends and parts of the day."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit, after = text[start:end], text[end:]
@@ -969,9 +967,9 @@ def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, r
         return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
                 or re.match(rf"{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}", after, re.IGNORECASE) is not None)
     if rule in ("lex.en.number", "lex.es.number"):
-        return re.fullmatch(r"miles|millas", hit, re.IGNORECASE) is not None or (
-            re.fullmatch(SERVICE_AREA_CARDINAL, hit, re.IGNORECASE) is not None
-            and re.match(SERVICE_AREA_AFTER_CARDINAL, after, re.IGNORECASE) is not None)
+        return (re.fullmatch(rf"miles|millas|{SERVICE_AREA_CARDINAL}", hit, re.IGNORECASE) is not None
+                or (re.fullmatch(SERVICE_AREA_HALF_OR_HUNDRED, hit, re.IGNORECASE) is not None
+                    and re.match(SERVICE_AREA_BEFORE_UNIT, after, re.IGNORECASE) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
         return re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
     return False

@@ -2750,8 +2750,14 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     ("Outside Oakland, half off.", ["lex.en.number"]),
     ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
     ("Within 25 miles. Trip fee 1500.", ["digit"]),
-    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
-    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Service in Oakland within two hours.", ["lex.en.date"]),
+    ("We serve all nine Bay Area counties.", []),
+    ("Dos sucursales: Oakland y Berkeley.", []),
+    ("Within half a mile of Lake Merritt.", []),
+    ("Within a hundred miles of Oakland.", []),
+    ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    # A known limit: a fee written in words passes, since any cardinal number word does.
+    ("Cargo de viaje: cincuenta.", []),
     ("Same-day service in Oakland.", ["lex.en.date"]),
 ])
 async def test_service_area_policy_contract(kernel, ro_read, text, rules):

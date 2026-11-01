@@ -2328,6 +2328,15 @@ def test_scan_public_text(text, rules):
     "Within twenty-five miles of Oakland.", "Within a ten-mile radius.", "Dentro de treinta y cinco kilómetros.",
     "Trabajamos siete días a la semana.", "Monday to Friday, mornings and afternoons.",
     "De lunes a viernes, mañanas y tardes.", "Sábados y domingos.",
+    # Any cardinal number word, and half or a hundred before a distance unit
+    "We cover three counties: Alameda, Contra Costa and Marin.", "We serve all nine Bay Area counties.",
+    "Two locations: Oakland and Berkeley.", "Serving the five boroughs.",
+    "Atendemos tres condados: Alameda, Contra Costa y Marin.", "Dos sucursales: Oakland y Berkeley.",
+    "Serving the East Bay for over twenty years.", "Within half a mile of Lake Merritt.",
+    "Within a hundred miles of Oakland.", "Within one hundred miles of Oakland.", "Dentro de cien kilómetros.",
+    # A known limit: a fee written in words passes, since any cardinal number word does.
+    "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
+    "Seven days to finish any job in Oakland.",
 ])
 def test_public_service_area_allowance_stays_with_its_key(text):
     assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
@@ -2359,17 +2368,14 @@ def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     ("Within 25 miles. Trip fee 1500.", ["digit"]),
     ("Within 25 miles, 1000 off.", ["digit"]),
     ("Oakland: 1500 minimum.", ["digit"]),
-    ("Trip charge twenty-five outside Oakland.", ["lex.en.number"]),
-    ("Trip fee: fifty.", ["lex.en.number"]),
-    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
+    ("Outside Oakland, a hundred off.", ["lex.en.number"]),
     # Response times and dates
-    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Service in Oakland within two hours.", ["lex.en.date"]),
     ("Same-day service in Oakland.", ["lex.en.date"]),
     ("We can be there tomorrow.", ["lex.en.date"]),
     ("Servicio el mismo día en Oakland.", ["lex.es.date"]),
-    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date", "lex.es.number"]),
+    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date"]),
     ("Oakland, until 6 pm.", ["digit", "lex.en.date"]),
-    ("Seven days to finish any job in Oakland.", ["lex.en.number"]),
 ])
 def test_public_service_area_allows_only_distances_years_and_day_words(text, rules):
     """Under the service area, these rules refuse what they refuse under any other key."""
