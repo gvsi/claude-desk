@@ -1,29 +1,29 @@
 {
  "schema": 1,
- "inputs": "3d656c8cabaebf78",
+ "inputs": "53910c80fdc9fb2c",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "926a7882b5b618f743c34870ff1c524ba067b44f",
+   "8ea4402bc077f019f4632178c33b713f91110524",
    "backend/desk/api/prompts.py"
   ],
   [
-   "8c7de172c46c9ebfda57d8610267394bdd40e234",
+   "b969c10bc7e0112ae127f2a56c391d13099deb8c",
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "57aadfaa9a306e75a14cd7659b56334488107914",
+   "31b9d6b7cbca121a57c44cc10dfabbdd8d46f6a2",
    "backend/desk/contracts.py"
   ],
   [
-   "4897eb0c83ab9c6ccb6f7dd028de18468fe19b0a",
+   "f9a8acf161b705e521fbc709fb6f128f613f489f",
    "backend/desk/kernel_api.py"
   ],
   [
-   "a2e1f55a37dbe50b1303b4aec9e3ef2c9742a892",
+   "cb065b4b3be6c9e1c73e0c2b95bc6b4b0b048735",
    "backend/desk/kernel_service"
   ],
   [
@@ -31,19 +31,19 @@
    "backend/desk/mockpay"
   ],
   [
-   "6b66b2e24e6cc58670e988dfeca68f5cd3d6dde4",
+   "33ddb7574416347e884002f2ebd330023512c44f",
    "backend/desk/money_cap.py"
   ],
   [
-   "afe9a67904d3067397a75d7bc6ce10a972ddc9f8",
+   "ff0b38376a92340e8461f38bf8324761bd89e3e4",
    "backend/desk/next_steps.py"
   ],
   [
-   "0b2bd00cebd1fdddcc39b40e9464509c046e1bbb",
+   "a58384eee2e132f46aaa388a791f51591a9c5e05",
    "backend/desk/presets.py"
   ],
   [
-   "b065a5b6c684b35f804f0d247d8b7523e62e76b5",
+   "59429b360f2b51c102edfe1410c33d2aa3ae6ae7",
    "backend/desk/rewrites.py"
   ],
   [
@@ -51,7 +51,7 @@
    "evals/oracles"
   ],
   [
-   "2597a9a27d5fc0d2bbecd213e1638a2047ccf166",
+   "a6d3cfc3093953dd7168d1acf81be3c10e51ed61",
    "evals/splits.yaml"
   ],
   [
@@ -67,11 +67,11 @@
    "evals/tier2/runner.py"
   ],
   [
-   "6dd608df6fd578b20e2d07700882526d2366270f",
+   "85b6eb202d49c1f129ea048c0ca2622b088f7838",
    "evals/tier2/scenarios"
   ],
   [
-   "0a3fce69c111a1319c6e89c22a9a57ce136df45e",
+   "1687bab35178db5872064368a8981ae22c1402d9",
    "evals/tier2/schema.py"
   ],
   [
@@ -83,13 +83,13 @@
    "evals/tier2/verdict.py"
   ],
   [
-   "694a7e0aa11a4411099a713d0db3945d9f6654d4",
+   "2fbf3ec6512dddf1b2e0ac06f4a610ad1bdd8a67",
    "kernel"
   ]
  ],
- "git_sha": "f3f7610b2200cd5a9d6536a49a1b32f0ee79e512",
- "created_at": "2026-11-01T17:58:23.730457Z",
- "pass_id": "20261101-175823-760926",
+ "git_sha": "dc6baea8aa80bbfc6fd23fb15295efd8baaa431c",
+ "created_at": "2026-11-01T18:33:25.417368Z",
+ "pass_id": "20261101-183325-1d74a9",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -118,8 +118,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "e840c396551ec965b3e4f430e997e29520cfb935434626f6040c8ecc3e244692",
- "heldout_sha256": "dad1f6d57f672e658900e60502f541d73a54612d641b46e488f7a954a8f2b2c6",
+ "suite_sha256": "4931d08de2b49f1875cce41b3cf671320c6ede7c023902aedd0b1a151e74f917",
+ "heldout_sha256": "52a14fad001802331849efb863eaf1d37526c44d8ef6cc0b19f523e95f75c375",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -191,6 +191,7 @@
   "leg-document-dana": "02",
   "leg-document-es": "02",
   "leg-emergency-advice": "02",
+  "leg-emergency-ask-first": "02",
   "leg-emergency-leak": "02",
   "leg-es-quote-then-book": "02",
   "leg-hours-en": "02",
@@ -287,6 +288,7 @@
    "leg-document-dana": "02",
    "leg-document-es": "02",
    "leg-emergency-advice": "02",
+   "leg-emergency-ask-first": "02",
    "leg-emergency-leak": "02",
    "leg-es-quote-then-book": "02",
    "leg-hours-en": "02",
