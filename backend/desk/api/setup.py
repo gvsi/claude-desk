@@ -35,9 +35,11 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
-  their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
-  skips both. `_after_consent` appends the consultant opening and first fact question; the labels and reply are saved together.
-  No memory or website read ever runs after no, and a website the owner names later is kept as text.
+  their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`), both at once, on
+  yes. On no it skips both. `_after_consent` appends the consultant opening and first fact question; the labels and
+  reply are saved together. The owner's display stream gets each read's start and label, then the opening's text,
+  and none of it is state. No memory or website read ever runs after no, and a website the owner names later is kept
+  as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -880,6 +882,33 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
     return Entry(role="tool_label", text=label, read="website", content=content[:READ_TEXT_MAX], website=url)
 
 
+async def _consented_reads(owner: OwnerCtx, desk_id: str, website: str | None) -> list[Entry]:
+    """Search the owner's memory and read the website they named, both at once, and return their labels in that
+    order. The owner's display, when one is open, gets each read's start and then each label, in the same order;
+    the labels are the entries' own text, and none of it is state."""
+    display = current_display.get()
+    site = website_url(website)
+    reads: list[tuple[str, str | None, Awaitable[Entry]]] = [("memory", None, _read_memory(owner, desk_id))]
+    if site is not None:
+        reads.append(("website", site[1], _read_website(owner, desk_id, *site)))
+    running = []
+    for read, host, work in reads:
+        running.append(asyncio.ensure_future(work))
+        if display is not None:
+            display.reading(read, host)
+    entries = []
+    try:
+        for (read, _, _), task in zip(reads, running, strict=True):
+            entries.append(await task)
+            if display is not None:
+                display.label(read, entries[-1].text)
+    finally:
+        for task in running:
+            task.cancel()
+        await asyncio.gather(*running, return_exceptions=True)
+    return entries
+
+
 # The interview -----------------------------------------------------------------------------------------------------
 
 
@@ -1513,12 +1542,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         return [Entry(role="owner", text=CONSENT_ANSWERS[allow], cards=cards)]
 
     async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
-        entries = []
-        if allow:
-            entries.append(await _read_memory(ctx, interview.desk_id))
-            site = website_url(interview.transcript[0].website)
-            if site is not None:
-                entries.append(await _read_website(ctx, interview.desk_id, *site))
+        entries = await _consented_reads(ctx, interview.desk_id, interview.transcript[0].website) if allow else []
         interview.transcript += entries
         interview.business_tools_enabled = business_tools_enabled
         await _after_consent(ctx, engine, model, interview, entries)

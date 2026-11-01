@@ -112,7 +112,8 @@ class StringField:
 
 
 class Display:
-    """Only the current display snapshot is retained; slow subscribers may coalesce deltas."""
+    """Only the current display snapshot is retained; slow subscribers may coalesce deltas. A turn's few read events
+    are kept in order, so every subscriber, a late one too, gets each of them before the reply's text."""
 
     def __init__(self, run: str | None = None):
         self.run = run
@@ -121,6 +122,7 @@ class Display:
         self._begun = False
         self._text: str | None = None
         self._terminal: tuple[str, dict] | None = None
+        self._reads: list[tuple[str, dict]] = []
         self._waiters: set[asyncio.Event] = set()
 
     def _wake(self) -> None:
@@ -144,6 +146,16 @@ class Display:
 
         return text
 
+    def reading(self, read: str, host: str | None) -> None:
+        """A read started: which one, and the website's host (None for any other read). No text."""
+        self._reads.append(("reading", {"read": read, "host": host}))
+        self._wake()
+
+    def label(self, read: str, text: str) -> None:
+        """A read finished: `text` is exactly the label its saved entry holds."""
+        self._reads.append(("label", {"read": read, "text": text}))
+        self._wake()
+
     def finish(self, event: str, data: dict) -> None:
         self._terminal = (event, data)
         self._wake()
@@ -151,7 +163,7 @@ class Display:
     async def events(self) -> AsyncIterator[dict]:
         waiter = asyncio.Event()
         self._waiters.add(waiter)
-        version, generation, previous = -1, self._generation, None
+        version, generation, previous, sent = -1, self._generation, None, 0
         base = {} if self.run is None else {"run": self.run}
         try:
             while True:
@@ -159,6 +171,9 @@ class Display:
                 if version != self._version:
                     # Snapshot before yielding: a retry may finish while an HTTP send is blocked.
                     version, changed, text, terminal = self._version, self._generation, self._text, self._terminal
+                    reads, sent = self._reads[sent:], len(self._reads)
+                    for name, data in reads:
+                        yield event(name, {**base, **data})
                     if generation != changed:
                         generation, previous = changed, None
                         yield event("reset", base)

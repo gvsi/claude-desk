@@ -150,6 +150,169 @@ async def question_ready(app, browser, kernel_http, model):
     return owner, state, f"/api/owner/setup/{state['interview_id']}"
 
 
+OPENING = "Thanks. From your site, you fix leaks and water heaters."
+HOST = "rivera-plumbing.example"
+
+
+def opening():
+    """The consultant's opening as raw JSON, and its reply split over two pieces: "…you fix leaks", then the rest."""
+    from tests.api.test_setup_questions import understanding
+
+    raw = json.dumps(understanding(reply=OPENING))
+    prefix, rest = raw.split('"reply": ', 1)
+    remaining = rest[len(json.dumps(OPENING)):]
+    return raw, [prefix + '"reply": "Thanks. From your site, you fix leaks', ' and water heaters."' + remaining]
+
+
+async def consenting(app, browser, fake, kernel_http, model, website):
+    """A new interview whose site reads as `website` ("pages" or "failed"); its owner and state path."""
+    from tests.api.test_setup_questions import WEBSITE
+
+    if website == "pages":
+        fake.script("native.fetch_website", model_view={"title": "Rivera Plumbing", "text": "Leaks.", "pages": 3})
+    else:
+        fake.script("native.fetch_website", exec_state="failed")
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE)
+    return owner, f"/api/owner/setup/{state['interview_id']}", state["interview_id"]
+
+
+def saved_messages(state):
+    return [(message["role"], message["text"]) for message in state["messages"]]
+
+
+@pytest.mark.parametrize("website", ["pages", "failed"])
+async def test_setup_yes_streams_each_read_then_the_opening_and_saves_only_the_turn(
+        app, browser, fake, kernel_http, model, website, caplog):
+    from tests.api.test_setup_questions import landed, understanding
+
+    owner, path, interview_id = await consenting(app, browser, fake, kernel_http, model, website)
+    raw, pieces = opening()
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    reads = fake.gate("POST /execute")
+    live = None
+    try:
+        busy = await asyncio.wait_for(owner.browser.post(path + "/consent?cards=1", json={"allow": True}), 2)
+        assert busy.status_code == 202 and busy.json()["busy"] is True
+        await until(lambda: len(fake.called("POST /execute")) == 2)   # both reads are running at once
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        run = data["run"]
+        assert isinstance(run, str) and run
+        assert (name, data) == ("reading", {"run": run, "read": "memory", "host": None})
+        assert await live.next() == ("reading", {"run": run, "read": "website", "host": HOST})
+        await asyncio.sleep(0.05)
+        assert live.sent.empty() and not live.buffer                   # nothing finishes while the reads wait
+        reads.set()
+        site = f"Read {HOST}, 3 pages" if website == "pages" else f"Couldn't read {HOST}"
+        assert await live.next() == ("label", {"run": run, "read": "memory", "text": "Searched your Claude memory"})
+        assert await live.next() == ("label", {"run": run, "read": "website", "text": site})
+        await asyncio.wait_for(entered.wait(), 5)
+        assert await live.next() == ("delta", {"run": run, "text": "Thanks. From your site, you fix leaks"})
+        assert (await owner.browser.get(path)).json()["busy"] is True   # nothing is saved before the turn lands
+        gates[0].set()
+        assert await live.next() == ("delta", {"run": run, "text": OPENING})
+        gates[1].set()
+        assert await live.next() == ("done", {"run": run})
+        await live.task
+        saved = await landed(owner, interview_id, cards=True)
+        assert saved_messages(saved) == [
+            ("claude", setup.CONSENT_QUESTION), ("owner", "Yes, use it"), ("tool_label", "Searched your Claude memory"),
+            ("tool_label", site), ("claude", OPENING), ("claude", understanding()["question"])]
+        assert OPENING not in caplog.text
+        # The same consent with nobody subscribed saves the same state.
+        other, other_path, other_id = await consenting(app, browser, fake, kernel_http, model, website)
+        model.add(response(text(raw)))
+        assert (await other.browser.post(other_path + "/consent?cards=1", json={"allow": True})).status_code == 202
+        omit = {"interview_id", "desk_id", "slug"}
+        assert {key: value for key, value in (await landed(other, other_id, cards=True)).items()
+                if key not in omit} == {key: value for key, value in saved.items() if key not in omit}
+    finally:
+        reads.set()
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
+async def test_setup_no_streams_only_the_opening(app, browser, fake, kernel_http, model):
+    from tests.api.test_setup_questions import landed, understanding
+
+    owner, path, interview_id = await consenting(app, browser, fake, kernel_http, model, "pages")
+    raw, pieces = opening()
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    live = None
+    try:
+        busy = await asyncio.wait_for(owner.browser.post(path + "/consent?cards=1", json={"allow": False}), 2)
+        assert busy.status_code == 202 and busy.json()["busy"] is True
+        await asyncio.wait_for(entered.wait(), 5)
+        # Opened once the opening is being written, so any read event would have come first.
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        run = data["run"]
+        assert (name, data) == ("delta", {"run": run, "text": "Thanks. From your site, you fix leaks"})
+        gates[0].set()
+        assert await live.next() == ("delta", {"run": run, "text": OPENING})
+        gates[1].set()
+        assert await live.next() == ("done", {"run": run})
+        await live.task
+        saved = await landed(owner, interview_id, cards=True)
+        assert saved_messages(saved) == [("claude", setup.CONSENT_QUESTION), ("owner", "No, I'll type it"),
+                                         ("claude", OPENING), ("claude", understanding()["question"])]
+        assert fake.called("POST /decide") == [] and fake.called("POST /execute") == []
+    finally:
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
+async def test_setup_late_subscribers_get_the_reads_in_order_then_done(app, browser, fake, kernel_http, model):
+    from tests.api.test_setup_questions import landed
+
+    owner, path, interview_id = await consenting(app, browser, fake, kernel_http, model, "failed")
+    raw, pieces = opening()
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    live = None
+    try:
+        busy = await asyncio.wait_for(owner.browser.post(path + "/consent?cards=1", json={"allow": True}), 2)
+        assert busy.status_code == 202
+        await asyncio.wait_for(entered.wait(), 5)       # both reads have finished and the opening is being written
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        frames = [await live.next() for _ in range(5)]
+        run = frames[0][1]["run"]
+        assert frames == [
+            ("reading", {"run": run, "read": "memory", "host": None}),
+            ("reading", {"run": run, "read": "website", "host": HOST}),
+            ("label", {"run": run, "read": "memory", "text": "Searched your Claude memory"}),
+            ("label", {"run": run, "read": "website", "text": f"Couldn't read {HOST}"}),
+            ("delta", {"run": run, "text": "Thanks. From your site, you fix leaks"})]
+        for gate in gates:
+            gate.set()
+        assert await live.next() == ("delta", {"run": run, "text": OPENING})
+        assert await live.next() == ("done", {"run": run})
+        await live.task
+        await landed(owner, interview_id)
+        await app.state.runtime.turn_runs.wait(interview_id)
+        # After the turn has landed, a subscriber gets done at once and refetches the saved state.
+        after = await owner.browser.get(path + "/events")
+        assert after.status_code == 200 and after.text.replace("\r\n", "\n") == 'event: done\ndata: {"run":null}\n\n'
+    finally:
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
 async def test_setup_contract_example_is_live_and_saves_only_validated_state(
         app, browser, kernel_http, model, monkeypatch, caplog):
     owner, initial, path = await question_ready(app, browser, kernel_http, model)
