@@ -174,6 +174,7 @@ from desk.api.prompts import (
     SETUP_CARD_ANSWER_SYSTEM,
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
+    SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_TAG,
     SETUP_RETRY,
     SETUP_START_SYSTEM,
@@ -1342,8 +1343,8 @@ def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
     shown = {entry.card.proposal_id: entry.card for entry in transcript if entry.card}
     planned = [shown.get(card.proposal_id, card) for entry in transcript for card in entry.planned]
     dropped = {proposal_id for entry in transcript for proposal_id in entry.dropped}
-    # The one real Stripe attempt runs after Claude's reply; once it's claimed, an accepted app still not connected
-    # failed (or is still running), so Claude must not call it connected.
+    # The one real Stripe attempt runs after Claude's reply; once it's claimed, an accepted Stripe card still not
+    # connected failed, so Claude must not call it connected.
     attempted = any(entry.connector_connect_attempted for entry in interview.transcript)
     items = []
     for card in planned:
@@ -1352,8 +1353,9 @@ def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
                   "shown" if card.proposal_id in shown else "planned")
         if card.state == "changed":
             status = f"changed (replaced by {card.superseded_by})"
-        if attempted and card.state == "accepted" and card.connector is not None and not card.connector.connected:
-            status = "accepted, not connected"
+        if (attempted and card.state == "accepted" and card.connector is not None
+                and card.connector.app == "stripe" and not card.connector.connected):
+            status = SETUP_PLAN_NOT_CONNECTED
         payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
                    card.connector.model_dump(include={"app", "label", "why"}))
         items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})

@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import setup
-from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SetupAnswers
+from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SETUP_PLAN_NOT_CONNECTED, SetupAnswers
 from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
@@ -1608,8 +1608,11 @@ def test_setup_plan_shows_an_accepted_app_whose_connection_did_not_go_through():
     # The decision turn itself: code connects Stripe only after Claude's reply.
     assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
     assert setup._claim_connector_connect(state, stripe_id) is True
-    # The one real attempt failed (or is still running): Claude must not call it connected.
-    assert (status(stripe_id), status(calendar_id)) == ("accepted, not connected", "accepted")
+    # The one real attempt failed: Claude must not call it connected.
+    assert (status(stripe_id), status(calendar_id)) == (SETUP_PLAN_NOT_CONNECTED, "accepted")
+    # A simulated app is never attempted, even one stored without the connected flag from before it existed.
+    entries[0].card.connector.connected = False
+    assert (status(stripe_id), status(calendar_id)) == (SETUP_PLAN_NOT_CONNECTED, "accepted")
     setup._mark_stripe_connected(state, {stripe_id})
     assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
 
@@ -2141,7 +2144,7 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, mode
     request = next(request for request in model.requests[before:] if request.output_schema is setup.SetupNextStep)
     text = request.messages[0]["content"][0]["text"]
     plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
-    assert next(item for item in plan["items"] if item["id"] == ids[2])["status"] == "accepted, not connected"
+    assert next(item for item in plan["items"] if item["id"] == ids[2])["status"] == SETUP_PLAN_NOT_CONNECTED
 
 
 @pytest.mark.parametrize("conflicts", [1, 2])
