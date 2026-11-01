@@ -3008,7 +3008,7 @@ class FakeKernelState:
             window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
             start, end = window or (None, None)
             handoff_id = new_id('handoff')
-            closed = [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
+            closed = [] if session.preview else [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
                       and row['session_id'] == session.session_id and row['status'] == 'open']
             for row in closed:
                 row['status'] = 'done'
@@ -3020,19 +3020,21 @@ class FakeKernelState:
                 'handoff_id': handoff_id, **ids, 'session_id': session.session_id,
                 'reason': f"{args['name']} · {args['contact']} · {args['reason']}",
                 'callback_window': f'{start.isoformat()}/{end.isoformat()}' if start and end else None,
-                'status': 'open', 'kind': 'callback'}
+                'status': 'done' if session.preview else 'open', 'kind': 'callback'}
             self._put('handoffs', (handoff_id,), dict(self.handoffs[handoff_id]))
+            callback_label = Label(readers=['owner', f'session:{session.session_id}']) if session.preview else label
             facts.append(Fact(fact_id=f'handoff:{handoff_id}', kind='handoff', status='committed', source='kernel',
-                              label=label, claims=window_claims(window), expires_at=end))
+                              label=callback_label, claims=window_claims(window), expires_at=end))
             view = {'fact_id': facts[0].fact_id, 'handoff_id': handoff_id}
             for row in closed:
                 self.append(desk, 'desk_data', {'part': 'handoffs', 'refs': [row['handoff_id']],
                                                'replaced_by': handoff_id})
             # Urgent delivery is immediate even when no notification settings request it.
-            self.inbox.append((desk.copy_id, DemoInboxEntry(
-                entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
-                body=f'Reported as urgent through {quoted(urgent.business.title)}. '
-                     + alert_body(window, RequestCallbackArgs(**args)))))
+            if not session.preview:
+                self.inbox.append((desk.copy_id, DemoInboxEntry(
+                    entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
+                    body=f'Reported as urgent through {quoted(urgent.business.title)}. '
+                         + alert_body(window, RequestCallbackArgs(**args)))))
         elif tool == "native.request_callback":
             # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")

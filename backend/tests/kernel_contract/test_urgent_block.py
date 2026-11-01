@@ -5,14 +5,15 @@ from datetime import datetime
 import pytest
 
 from desk.contracts import BusinessTool, NotificationDefaults, RuleCard
-from desk.kernel_api import (BusinessToolsRequest, DeskNotificationsRequest, PolicyConfirmRequest, PolicyDraftRequest,
+from desk.kernel_api import (BusinessToolsRequest, CreateSessionRequest, DeskNotificationsRequest, PolicyConfirmRequest, PolicyDraftRequest,
                              ToolPin, ToolsConfirmRequest)
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body
 from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision
 
 
 @pytest.mark.kernel_plan('01c')
-async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner_owned(kernel, ro_read):
+@pytest.mark.parametrize('preview', [False, True], ids=['visitor', 'owner-preview'])
+async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner_owned(kernel, ro_read, preview):
     http, schema, _ = kernel
     copy = await new_copy(http)
     desk_id = copy.desk_ids[0]
@@ -32,7 +33,9 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
     await owner.call('PUT /desks/{id}/notifications', DeskNotificationsRequest(
         notifications=NotificationDefaults(now=[], briefing=[])), path={'id': desk_id})
-    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    slug = desk_slug(ro_read, schema, copy)
+    visitor = (await owner.call('POST /sessions', CreateSessionRequest(desk_slug=slug, kind='visitor', preview=True))
+               if preview else await new_visitor(http, slug))
     session = http.session(visitor.session_token)
     seen = await session.call('GET /context/{session_id}?desk_id=', path={'session_id': visitor.state.session_id})
     assert tool.tool in {profile.tool for profile in seen.tools}
@@ -46,7 +49,7 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     assert set(result.model_view) == {'fact_id', 'handoff_id'} and result.inbox == []
     [handoff] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.handoffs WHERE handoff_id = %s',
                         (result.model_view['handoff_id'],))
-    assert handoff['kind'] == 'callback' and handoff['status'] == 'open'
+    assert handoff['kind'] == 'callback' and handoff['status'] == ('done' if preview else 'open')
     assert handoff['reason'] == 'Sam Lee · (510) 555-0100 · The water heater is leaking'
     window = tuple(map(datetime.fromisoformat, handoff['callback_window'].split('/'))) if handoff['callback_window'] else None
     [fact] = result.facts
@@ -56,10 +59,10 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     assert receipt.visitor_plain == '“Urgent help”: urgent request sent to Maria Rivera'
     expected_body = 'Reported as urgent through “Urgent help”. ' + alert_body(window, RequestCallbackArgs(**args))
     inbox = await owner.call('GET /demo_inbox')
-    assert len([entry for entry in inbox if entry.body == expected_body and entry.to == 'owner' and entry.kind == 'alert']) == 1
+    assert len([entry for entry in inbox if entry.body == expected_body and entry.to == 'owner' and entry.kind == 'alert']) == (0 if preview else 1)
     assert await session.call('GET /demo_inbox?session_id=', query={'session_id': visitor.state.session_id}) == []
     assert await execute(session, allowed, visitor.state.generation) == result
-    assert len([entry for entry in await owner.call('GET /demo_inbox') if entry.body == expected_body]) == 1
+    assert len([entry for entry in await owner.call('GET /demo_inbox') if entry.body == expected_body]) == (0 if preview else 1)
     for index, extra in enumerate(({'urgent': False}, {'block': 'intake'}, {'config': {'block': 'intake'}},
                                    {'title': 'Changed title'}, {'alert': 'Pretend delivery'})):
         refused = await decide(session, visitor.state.session_id, visitor.state.generation,
