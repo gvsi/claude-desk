@@ -45,14 +45,14 @@ function FailedDecision({ disabled, onRetry }: Pick<ProposalCardProps, 'disabled
 
 function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, onDecision }: ProposalCardProps) {
   const connector = proposal.connector!;
-  const connected = connector.connectable && proposal.state === 'accepted';
+  const connected = connector.connected === true;
   const view = { id: connector.app, name: connector.label, icon: connector.app as ConnectorIconName, description: '', source: { kind: 'external' as const, mock: true as const } };
   const decide = (action: CardAction) => {
     if (disabled || !live || !connector.connectable || proposal.state !== 'proposed') return;
     onDecision({ proposal_id: proposal.proposal_id, action, body: { accept: action === 'accept' } });
   };
   return <Card as="article" label={connector.label} padding={16}>
-    <div className={`cd-setup-c3${connected ? ' cd-setup-c3--set' : ''}${proposal.state === 'declined' ? ' cd-setup-c3--declined' : ''}`}>
+    <div className={`cd-setup-c3${proposal.state === 'accepted' ? ' cd-setup-c3--set' : ''}${proposal.state === 'declined' ? ' cd-setup-c3--declined' : ''}`}>
       <div className="cd-setup-c3__head">
         <ConnectorIcon icon={view.icon} size="section" {...(connector.app === 'stripe' || connector.app === 'google_calendar' ? {} : { glyph: 'connectors' as const })} />
         <div className="cd-setup-c3__titles">

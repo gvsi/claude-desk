@@ -98,6 +98,7 @@ interface Interview {
   /** The next answer turn runs long and commits only when a test lets it (`holdNextAnswer`). */
   holdNext: boolean;
   holdDecision: boolean;
+  failConnection: boolean;
   decisionDone: (() => void) | null;
   /** An answer turn still running: the API refuses another answer until it commits. */
   running: { text: string; ownerStored?: boolean } | null;
@@ -555,8 +556,8 @@ function consultantProposals(): ProposalCard[] {
     },
   ];
   const connectors: ConnectorProposal[] = [
-    { app: 'stripe', label: 'Stripe', why: 'Take card payments for retainers. Test mode in this preview, so no money moves.', connectable: true },
-    { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: true },
+    { app: 'stripe', label: 'Stripe', why: 'Take card payments for retainers. Test mode in this preview, so no money moves.', connectable: true, connected: false },
+    { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: true, connected: false },
   ];
   const fields = [
     ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
@@ -626,9 +627,9 @@ function nextConsultant(interview: Interview): void {
     }
     const job = next.job;
     const intro = next.connector?.app === 'google_calendar' ? CPA_COPY.consult
-      : job?.job === 'schedule' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'google_calendar') ? CPA_COPY.calendarConnected : null
+      : job?.job === 'schedule' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'google_calendar' && connector.connected === true) ? CPA_COPY.calendarConnected : null
       : job?.job === 'intake' ? CPA_COPY.intake
-      : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe') ? CPA_COPY.stripeConnected : CPA_COPY.retainer
+      : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe' && connector.connected === true) ? CPA_COPY.stripeConnected : CPA_COPY.retainer
       : next.connector?.app === 'stripe' ? CPA_COPY.stripe
       : job?.job === 'status' ? CPA_COPY.statusIntro
       : job?.how ?? next.connector!.why;
@@ -642,10 +643,19 @@ function nextConsultant(interview: Interview): void {
 
 /** Connecting in chat still leaves every newly discovered tool awaiting review. */
 function connectAcceptedProposal(world: MockWorld, interview: Interview, card: ProposalCard): void {
-  if (card.state !== 'accepted' || card.connector?.app !== 'stripe' || !card.connector.connectable) return;
-  const desk = world.desk(interview.state.desk_id);
-  if (!desk) throw new Error('the setup Desk must exist');
-  connectPayments(desk);
+  if (card.state !== 'accepted' || !card.connector?.connectable || card.connector.connected === true) return;
+  if (interview.failConnection) {
+    interview.failConnection = false;
+    card.connector.connected = false;
+    return;
+  }
+  if (card.connector.app === 'stripe') {
+    const desk = world.desk(interview.state.desk_id);
+    if (!desk) throw new Error('the setup Desk must exist');
+    connectPayments(desk);
+  }
+  // The other catalog apps connect in simulation without adding unsupported tools.
+  card.connector.connected = true;
 }
 
 function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
@@ -686,11 +696,8 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     say(interview, 'claude', QUESTIONS_DONE);
   }
   moveTo(interview, 'tools');
-  const acceptedStripe = interview.state.messages.some(({ card }) => card?.state === 'accepted' && card.connector?.app === 'stripe' && card.connector.connectable);
-  if (acceptedStripe) {
-    const desk = world.desk(interview.state.desk_id);
-    if (!desk) throw new Error('the setup Desk must exist');
-    connectPayments(desk);
+  for (const { card } of interview.state.messages) {
+    if (card) connectAcceptedProposal(world, interview, card);
   }
 }
 
@@ -719,13 +726,18 @@ export function holdNextConsent(world: MockWorld, interviewId: string): (outcome
   };
 }
 
-/** For tests: a pending decision returns 202 and completes when released. */
-export function holdNextDecision(world: MockWorld, interviewId: string): () => void {
+/** For tests: a decision returns 202 until released; one simulated connection can fail. */
+export function holdNextDecision(world: MockWorld, interviewId: string): (outcome?: 'connection_failed') => void {
   const interview = interviewsOf(world).get(interviewId);
   if (!interview) throw new Error(`no setup interview ${interviewId}`);
   interview.holdDecision = true;
-  return () => {
+  return (outcome) => {
     if (!interview.decisionDone) throw new Error('no decision is running');
+    if (outcome === 'connection_failed') {
+      const card = interview.state.messages.find(({ card }) => card?.proposal_id === interview.state.pending_card)?.card;
+      if (!card?.connector) throw new Error('no connection decision is running');
+      interview.failConnection = true;
+    }
     interview.decisionDone();
     interview.decisionDone = null;
     interview.state.busy = false;
@@ -953,6 +965,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     draftVersion: null,
     holdNext: false,
     holdDecision: false,
+    failConnection: false,
     decisionDone: null,
     running: null,
     holdConsent: false,

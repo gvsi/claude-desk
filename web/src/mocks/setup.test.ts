@@ -131,22 +131,41 @@ describe('setup consultant run and decisions', () => {
     expect(state.messages.at(-1)?.card?.job?.config).toEqual({ block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 });
   });
 
+  it.each(['google_calendar', 'stripe'] as const)('keeps_an_accepted_%s_disconnected_when_its_simulated_connect_fails_once', async (app) => {
+    let state = await cpaAt(app);
+    const id = state.interview_id;
+    const proposal_id = state.pending_card!;
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    const release = holdNextDecision(mockStore.world, id);
+    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, query: { cards: '1' }, body: { accept: true } })).toMatchObject({ status: 202, body: { busy: true } });
+    release('connection_failed');
+    state = await setupState('setup', id);
+    expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card).toMatchObject({ state: 'accepted', connector: { connected: false } });
+    expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+    expect(state.messages.at(-2)?.text).not.toMatch(/^Connected\./);
+    // A failure affects just one simulated attempt; reaching Tools can complete it later.
+    state = await setupState('setupSuggestions', id, {});
+    expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card?.connector?.connected).toBe(true);
+  });
+
   it('connects_google_calendar_in_chat_without_adding_unsupported_tools', async () => {
     let state = await startState();
     const id = state.interview_id;
     state = await setupState('setupConsent', id, { allow: true });
     state = await setupState('setupAnswer', id, { question: state.question, text: 'Both, about evenly' });
     const calendar = state.messages.at(-1)!.card!;
-    expect(calendar).toMatchObject({ kind: 'connector', state: 'proposed', connector: { app: 'google_calendar', connectable: true } });
+    expect(calendar).toMatchObject({ kind: 'connector', state: 'proposed', connector: { app: 'google_calendar', connectable: true, connected: false } });
     expect(state.pending_card).toBe(calendar.proposal_id);
     const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
     state = await setupState('setupProposal', id, { accept: true }, calendar.proposal_id);
     expect(state.messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
+    expect(state.messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.connector?.connected).toBe(true);
     expect(state.messages.at(-1)!.card?.job?.job).toBe('schedule');
     expect(state.messages.at(-2)).toMatchObject({ role: 'claude', text: 'Connected. Now the intro call.', card: null });
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
     state = await setupState('setupSuggestions', id, {});
     expect(state.messages.flatMap(({ card }) => card?.connector ? [card.connector.connectable] : [])).toEqual([true, true]);
+    expect(state.messages.flatMap(({ card }) => card?.connector ? [card.connector.connected] : [])).toEqual([true, true]);
     expect(state.messages.filter(({ role }) => role === 'claude').map(({ text }) => text).join('\n')).not.toMatch(/once it’s available|once it’s in this demo/i);
     expect((await setupState('setup', id)).messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
   });

@@ -540,6 +540,8 @@ export type ConnectorProposal = {
   label: string;
   why: string;
   connectable: boolean;
+  /** True only once the connection succeeded; older responses omit it (false). */
+  connected?: boolean;
 };
 
 /** Card messages have role Claude, empty text and no choices; ordinary messages have card null. */

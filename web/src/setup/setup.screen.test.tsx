@@ -3039,6 +3039,54 @@ describe('consultant setup', () => {
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
   });
 
+  it.each([false, undefined] as const)('collapses_an_accepted_app_without_a_connected_status_when_connected_is_%s', async (connected) => {
+    const state = await consultantAt('google_calendar');
+    const proposal = structuredClone(state.messages.at(-1)!.card!);
+    proposal.state = 'accepted';
+    if (connected === undefined) delete proposal.connector!.connected;
+    else proposal.connector!.connected = connected;
+    const screen = await render(<ProposalCard proposal={proposal} live={false} disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('accepted app must be read-only'); }} />);
+    await expect.element(screen.getByRole('heading', { name: 'Google Calendar Mock', exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(screen.container.querySelector('.cd-setup-c3__decision')).toBeNull();
+    expect(screen.container.querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(screen.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it.each([
+    ['google_calendar', undefined], ['google_calendar', 'connection_failed'],
+    ['stripe', undefined], ['stripe', 'connection_failed'],
+  ] as const)('collapses_a_simulated_%s_connection_after_polling_%s', async (app, outcome) => {
+    const state = await consultantAt(app);
+    const id = state.interview_id;
+    const proposal = state.messages.at(-1)!.card!;
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    const release = holdNextDecision(mockStore.world, id);
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const card = screen.getByRole('article', { name: proposal.connector!.label, exact: true });
+    const posts = requests('setupProposal').length;
+    await card.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.poll(() => requests('setupProposal').length).toBe(posts + 1);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    release(outcome);
+    await expect.element(screen.getByRole('article', { name: app === 'stripe' ? 'Send a retainer link' : 'Book a free intro call', exact: true })).toBeVisible();
+    await expect.poll(() => card.getByRole('button').elements().length).toBe(0);
+    await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    if (outcome === 'connection_failed') {
+      expect(card.element().querySelector('.cd-setup-c3__decision')).toBeNull();
+      expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+    } else {
+      await expect.element(card.getByText('Connected', { exact: true })).toBeVisible();
+      expect(card.element().querySelector('.cd-setup-c3__decision svg')).not.toBeNull();
+    }
+    const read = await mockStore.dispatch('setup', { params: { id }, query: { cards: '1' } });
+    if ('network' in read) throw new Error('read failed');
+    expect((read.body as SetupState).messages.find(({ card }) => card?.proposal_id === proposal.proposal_id)?.card).toMatchObject({ state: 'accepted', connector: { connected: outcome !== 'connection_failed' } });
+    expectNoHorizontalScroll();
+  });
+
   it.each(['proposed', 'accepted', 'declined'] as const)('keeps_%s_unavailable_app_cards_read_only_with_their_explanation', async (decision) => {
     const state = await consultantAt('google_calendar');
     const proposal = structuredClone(state.messages.at(-1)!.card!);
@@ -3066,7 +3114,7 @@ describe('consultant setup', () => {
     if (app !== 'stripe' && app !== 'google_calendar') expect(tile.classList.contains('cd-connector-icon--built-in')).toBe(true);
     await screen.getByRole('button', { name: 'Connect', exact: true }).click();
     expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true } }]);
-    await screen.rerender(<ProposalCard {...props} proposal={{ ...proposal, state: 'accepted' }} live={false} />);
+    await screen.rerender(<ProposalCard {...props} proposal={{ ...proposal, state: 'accepted', connector: { ...proposal.connector!, connected: true } }} live={false} />);
     await expect.element(screen.getByText('Connected', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
     expect(screen.getByRole('button').elements()).toHaveLength(0);
