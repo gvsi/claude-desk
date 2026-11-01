@@ -2,7 +2,7 @@
  * The mock's setup interview, driven the way its handlers drive it: the business's name it reads
  * from the owner's description, the way a reader would, and the slug and first question that follow;
  * the unfinished setup the owner's Desks name until the Desk goes live; the situations it tries,
- * titled for the business; and the Desk it makes, handing a visitor off to its own owner.
+ * titled for the business; and the Desk it makes, which speaks for its own owner.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1241,6 +1241,26 @@ describe('a Desk setup made, speaking for its own owner', () => {
       await mockStore.dispatch('ownerMessage', { params: { session_id }, body: { text: 'Hi, it is Linda.', kind: 'say' } });
     });
     expect(linesOf(said)).toEqual(['Written by Linda']);
+  });
+
+  it('a_name_that_ends_in_a_stop_gets_one', async () => {
+    // Setup names an owner by one word, but a Desk's display name can end in a stop: a sentence
+    // that ends on it never gets a second.
+    const slug = await liveDesk(CPA);
+    const desk = mockStore.world.deskBySlug(slug);
+    if (!desk) throw new Error('setup made the Desk');
+    desk.ownerName = 'Bob Smith Jr.';
+    expect(await repliesTo(slug, PUBLIC_COPY.en.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Let me check with Bob Smith Jr.', lines: ['Bob Smith Jr. will reply here.'] }),
+    ]);
+    expect(await repliesTo(slug, PUBLIC_COPY.es.askForOwner('Bob Smith Jr.'))).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Bob Smith Jr.', lines: ['Bob Smith Jr. te responderá aquí.'] }),
+    ]);
+    await turnOn(slug, '¿Puedo pagar el depósito?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      'Este enlace de pago se canceló porque cambiaron las reglas de Bob Smith Jr. Pídelo de nuevo si todavía quieres pagar.',
+    ]);
   });
 
   it('what_only_the_owner_can_answer_names_that_owner', async () => {

@@ -62,10 +62,10 @@ export interface DeskOwner {
 export const RIVERA_OWNER: DeskOwner = { name: rivera.business.ownerName, business: rivera.business.name };
 
 /**
- * How the visitor's lines name an owner who gave no name: the words the project owner approved
- * for the public page's "Ask for a person", "the business owner" ("el dueño del negocio").
- * Proposed here for his sign-off. Should he decline, set this to `null`: the lines then name the
- * business instead, as the handoff card did before.
+ * How the visitor's lines name an owner who gave no name: "the business owner" ("el dueño del
+ * negocio"), the words the public page already uses for them ("The business owner is in this
+ * chat."). Proposed here for the project owner's sign-off. Should he decline, set this to `null`:
+ * the lines then name the business instead, as the handoff card did before.
  */
 export const NO_NAME_OWNER: Record<Language, string> | null = { en: 'the business owner', es: 'el dueño del negocio' };
 
@@ -87,10 +87,15 @@ function naming(template: string, who: string, language: Language): string {
   return language === 'es' ? line.replace(/(?<!\p{L})(de|a) el(?!\p{L})/gu, '$1l') : line;
 }
 
+/** `template` naming the Desk's owner (`owner`) as a line in `language` does (`ownerIn`). */
+function withOwner(template: string, language: Language, owner: DeskOwner): string {
+  return naming(template, ownerIn(language, owner), language);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Visitor-facing text: the kernel's templates and the fixture cards, by language
 
-/** A visitor status line: a decision state's, but an executed one's, and a reply's. */
+/** A visitor status line: each decision state's but `executed`, the mandate refusal's, a reply's and the owner's words'. */
 export type VisitorLine = Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said';
 
 /**
@@ -135,7 +140,7 @@ const VISITOR_TEMPLATES = {
 
 /** The visitor's status line `line` on a Desk whose owner is `owner`, in `language`. */
 export function visitorLine(language: Language, line: VisitorLine, owner: DeskOwner): string {
-  return naming(VISITOR_TEMPLATES[language][line], ownerIn(language, owner), language);
+  return withOwner(VISITOR_TEMPLATES[language][line], language, owner);
 }
 
 /** Every visitor status line on a Desk whose owner is `owner`, in `language`. */
@@ -177,7 +182,7 @@ export function statusLine(language: Language, state: DecisionState | 'refused_o
   if (state !== 'executed') return visitorLine(language, state, owner);
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
   // The tool's line as the fixtures write it, with `{owner}` left in, named as every line here is.
-  return naming(executedLine(tool, language, '{owner}'), ownerIn(language, owner), language);
+  return withOwner(executedLine(tool, language, '{owner}'), language, owner);
 }
 
 const { blocks } = rivera;
@@ -234,13 +239,12 @@ const CALLBACK_TITLES: Record<'window' | 'open', Record<Language, string>> = {
 
 /** The kernel's callback card on a Desk whose owner is `owner`, in `language`. */
 function callbackCard(when: 'window' | 'open', language: Language, owner: DeskOwner): CardBlock {
-  return cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: naming(CALLBACK_TITLES[when][language], ownerIn(language, owner), language) });
+  return cardBlock('callback_confirmed', { fact_id: 'handoff:callback', title: withOwner(CALLBACK_TITLES[when][language], language, owner) });
 }
 
 /**
  * Booking the first time offered: Claude's checked words carry no price or date and promise
- * nothing the card doesn't back, and the kernel's card says what was booked. The Spanish card is
- * the design system fixture's.
+ * nothing the card doesn't back, and the kernel's card says what was booked (`bookedCard`).
  */
 const bookedProse: Record<Language, RenderedBlock> = {
   en: proseBlock("You're all set. Here's your visit."),
@@ -256,8 +260,7 @@ const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
 /** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Rivera's Desk, the fixtures' card. */
 function bookedCard(language: Language, owner: DeskOwner): CardBlock {
   const { title, lines } = BOOKED[language];
-  const who = ownerIn(language, owner);
-  return cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title, lines: lines.map((line) => naming(line, who, language)) });
+  return cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title, lines: lines.map((line) => withOwner(line, language, owner)) });
 }
 
 /**
@@ -328,7 +331,7 @@ function firstName(name: string): string {
  * `NAMED_OWNER_PROSE` by first name, else `NO_NAME_PROSE`.
  */
 function ownerProse(language: Language, owner: DeskOwner, line: keyof OwnerProse): string {
-  if (owner.name === null) return naming(NO_NAME_PROSE[language][line], ownerIn(language, owner), language);
+  if (owner.name === null) return withOwner(NO_NAME_PROSE[language][line], language, owner);
   const prose = owner.name === RIVERA_OWNER.name ? RIVERA_PROSE : NAMED_OWNER_PROSE;
   return naming(prose[language][line], firstName(owner.name), language);
 }
@@ -360,7 +363,7 @@ const LINK_CANCELLED_TEMPLATES: Record<Language, string> = {
 
 /** The kernel's `link_cancelled` line on a Desk whose owner is `owner`, in `language`. */
 function linkCancelledLine(language: Language, owner: DeskOwner): string {
-  return naming(LINK_CANCELLED_TEMPLATES[language], ownerIn(language, owner), language);
+  return withOwner(LINK_CANCELLED_TEMPLATES[language], language, owner);
 }
 
 /** The kernel's `link_cancelled` line on Rivera's Desk. */
@@ -721,8 +724,7 @@ const HANDOFF: Record<Language, { title: string; line: string }> = {
  */
 export function handoffBlock(language: Language, owner: DeskOwner): CardBlock {
   const { title, line } = HANDOFF[language];
-  const who = ownerIn(language, owner);
-  return cardBlock('handoff', { fact_id: null, title: naming(title, who, language), lines: [naming(line, who, language)] });
+  return cardBlock('handoff', { fact_id: null, title: withOwner(title, language, owner), lines: [withOwner(line, language, owner)] });
 }
 
 /** The turn's handoff card: the Desk's own, in the turn's language. */
