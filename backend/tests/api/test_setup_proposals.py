@@ -233,6 +233,54 @@ async def test_fact_support_uses_only_owner_transcript(proposals, model, engine,
     assert record["answers"]["suggested_fields"] == ([] if supported else ["public_contact"])
 
 
+async def test_suggested_facts_stay_unpublished_from_setup_to_live(app, browser, kernel_http, model, engine, fake):
+    from tests.api.test_setup_questions import understanding, unparsed
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    facts = dict(public_contact="attacker@example.test", service_area="",
+                 hours=[{"days": ["mon"], "start": "03:00", "end": "04:00"}], after_hours="",
+                 price_items=[{"title": "Repair", "unit_cents": 100}])
+    model.add(unparsed(understanding(jobs=[], connectors=[], suggested=facts)))
+    await consent(owner, interview_id, False, model)
+    model.add(next_step("what_you_do", next={"kind": "done"}))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert response.status_code == 200, response.text
+    held = {"public_contact", "hours", "price_items"}
+    assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == held
+
+    async def assert_unpublished():
+        for route, part in (("charter", "charter"), ("hours", "hours"), ("prices", "price_items"),
+                            ("calendar", "calendar_slots")):
+            calls = fake.called(f"PUT /desks/{{id}}/{route}")
+            assert calls and all(call.body[part] == [] for call in calls), route
+        desk = fake.desks[state["desk_id"]]
+        assert desk.hours == [] and not desk.prices and not desk.slots
+        public = await owner.browser.get(f"/api/public/{state['slug']}")
+        assert public.status_code == 200, public.text
+        assert public.json()["charter"] == [] and public.json()["open_status"] is None
+        assert "attacker@example.test" not in public.text
+
+    path = f"/api/owner/policy/setup/{interview_id}"
+    model.add(unparseable(), unparseable())
+    first = await settled(owner, path + "/rules")
+    assert first.status_code == 200, first.text
+    await assert_unpublished()
+    # A fresh request resumes the stored draft, without drafting or confirming any fact.
+    again = await settled(owner, path + "/rules")
+    assert again.status_code == 200 and again.json() == first.json()
+    await assert_unpublished()
+    for step, expected in (("safety_check", "safety_check"), ("confirm", "preview"), ("go_live", "live")):
+        response = await settled(owner, path + "/" + step)
+        assert response.status_code == 200, response.text
+        assert (await stored(engine, interview_id))["step"] == expected
+        await assert_unpublished()
+    assert fake.desks[state["desk_id"]].answering is True
+    assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == held
+
+
 async def mint_opening(monkeypatch, answer, *, business_tools_enabled=False):
     state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role="owner", text="Tax advice")])
     state.business_tools_enabled = business_tools_enabled
