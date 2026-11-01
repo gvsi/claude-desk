@@ -16,12 +16,13 @@ and kernel; later calls add seconds of overhead.
 Test runs and kernel builds go through this machine by default (AGENTS.md, "Tests"); run them locally only when it's unreachable. Tier 2, model calls and jobs needing secrets stay local. `make dev` and browser
 QA also stay on the laptop. CI continues using its own runners.
 
-The always-on, on-demand test machine is a c8g.24xlarge (96 arm64 vCPUs, 192 GB RAM) in
+The always-on, on-demand test machine is a c8g.12xlarge (48 arm64 vCPUs, 96 GB RAM) in
 us-east-1, with Ubuntu 24.04 and an encrypted 1 TiB gp3 root disk (16,000 IOPS, 1,000 MiB/s).
-Budget about **$3,000/month** while running 24/7 (730 hours): roughly $2,795 for
-[on-demand Linux compute](https://aws.amazon.com/ec2/pricing/on-demand/) at $3.8285/hour in
+Budget about **$2.17/hour, $1,600/month** while running 24/7 (730 hours): roughly $1,397 for
+[on-demand Linux compute](https://aws.amazon.com/ec2/pricing/on-demand/) at $1.91424/hour in
 us-east-1, plus about $182 for the configured gp3 disk and a small public IPv4 charge
-(before tax and data transfer; estimate dated 2026-10-31). Stop it when sustained parallel
+(before tax and data transfer; estimate dated 2026-11-01). It replaced a c8g.24xlarge (96 vCPUs,
+about $4.08/hour) whose load peaked near 12 of its 96 vCPUs. Stop it when sustained parallel
 testing ends or before an extended idle period; stopping ends compute charges but retains
 the billed disk. The owner approves stopping or retiring it.
 CI runners remain the merge gate, but their minutes per round trip slow interactive fixes;
@@ -124,6 +125,27 @@ policy, whatever its name, when all its statements deny, since such a policy can
 never removes one. Another inline policy that allows anything, or has no statements, is refused. Before
 deleting the role by hand, delete its inline policies first, or `delete-role` fails; provisioning's own
 rollback does this for a role it created.
+
+## Replace in the same region
+
+A replacement (another size, say) is proven beside the active machine before any lane moves to it:
+
+```sh
+tools/testbox/provision.sh --region us-east-1 --standby    # launch and bootstrap the standby
+tools/testbox/run --standby make kernel                    # prove it from a lane; other lanes stay put
+tools/testbox/provision.sh --region us-east-1 --promote    # every lane moves on its next call
+```
+
+Clients only discover the one running instance tagged `Purpose=agent-test-box`, so the standby
+(`agent-test-box-standby`) is reached only with `--standby`, which never changes the connection
+other lanes share. Promotion re-tags the old machine `agent-test-box-retired` before tagging the
+standby active, so an interruption leaves no active machine, which re-running `--promote` repairs,
+never two. It then stops this laptop's shared connection to the old machine taking new calls:
+calls already running there finish, and the next call in each lane connects to the new machine
+and sets the lane up again there (about 5 minutes the first time, as for any new lane). Once no
+call runs on the retired machine (`systemctl list-units 'desk-testbox-run-*'` there is empty),
+lift its termination protection and terminate it, with the owner's approval. Anything scheduled
+against the old instance, such as a planned stand-down, must be pointed at the new one.
 
 ## Re-create or move
 

@@ -13,7 +13,12 @@ import hashlib
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
-TAGS = [{"Key": "Project", "Value": "claude-desk"}, {"Key": "Purpose", "Value": "agent-test-box"}]
+INSTANCE_TYPE = "c8g.12xlarge"
+# Clients use the one running instance tagged ACTIVE. A replacement in the same region launches beside it as STANDBY,
+# which no client discovers unless asked (`tools/testbox/run --standby`); once proven, --promote tags the old one
+# RETIRED and the standby ACTIVE, so every lane moves on its next call while calls already running finish.
+ACTIVE, STANDBY, RETIRED = "agent-test-box", "agent-test-box-standby", "agent-test-box-retired"
+TAGS = [{"Key": "Project", "Value": "claude-desk"}, {"Key": "Purpose", "Value": ACTIVE}]
 NAME = "claude-desk-test-box"
 SESSION_POLICY_NAME = NAME + "-session"
 # The account may add deny-only inline policies to every IAM role. The check accepts any other inline policy whose
@@ -26,11 +31,25 @@ SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManager
     "ec2messages:GetMessages", "ec2messages:SendReply"], "Resource": "*"}]}
 
 
+def stop_warm_connection(region, instance):
+    """Stop this laptop's shared SSH connection to a retired machine taking new calls; calls already on it finish."""
+    sys.path.insert(0, str(HERE.parent))
+    from desk_tools.testbox_client import cache_directory, control_path
+    socket = control_path(cache_directory(), region, instance)
+    if socket.exists():
+        subprocess.run(["ssh", "-S", str(socket), "-O", "stop", "ubuntu@" + instance], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", required=True)
-    parser.add_argument("--check", action="store_true", help="read-only validation of the existing machine; never start or bootstrap it")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="read-only validation of the existing machine; never start or bootstrap it")
+    mode.add_argument("--standby", action="store_true", help="provision (or re-check) a replacement beside the active machine; clients reach it only with --standby")
+    mode.add_argument("--promote", action="store_true", help="make the running standby the active machine and retire the old one")
     args = parser.parse_args()
+    read_only = args.check or args.promote
+    purpose = STANDBY if args.standby else ACTIVE
     created = []
 
     def aws(service, operation, **kwargs):
@@ -111,7 +130,7 @@ def main():
             if not owned(role_info.get("Tags", [])):
                 raise RuntimeError("Refusing an existing IAM role without this project's ownership tags")
         else:
-            if args.check:
+            if read_only:
                 raise RuntimeError("Test box role is missing")
             role_info = aws("iam", "create-role", role_name=role, tags=TAGS,
                 assume_role_policy_document={"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]})["Role"]
@@ -147,7 +166,7 @@ def main():
             if len(roles) != 1 or roles[0].get("RoleName") != role or roles[0].get("Arn") != role_info["Arn"]:
                 raise RuntimeError("Instance profile must hold exactly the expected role by name and ARN")
         else:
-            if args.check:
+            if read_only:
                 raise RuntimeError("Test box instance profile is missing")
             profile_info = aws("iam", "create-instance-profile", instance_profile_name=profile, tags=TAGS)["InstanceProfile"]
             created.append("profile")
@@ -166,22 +185,50 @@ def main():
             if groups[0]["IpPermissions"]:
                 raise RuntimeError("Test box security group has inbound rules; refusing it")
         else:
-            if args.check:
+            if read_only:
                 raise RuntimeError("Test box security group is missing")
             group = aws("ec2", "create-security-group", group_name=NAME, description="Disposable agent tests; SSM access only; no inbound", vpc_id=vpc,
                         tag_specifications=[{"ResourceType": "security-group", "Tags": TAGS}])["GroupId"]
             created.append("group")
-        found = aws("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": ["agent-test-box"]}, {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}])
-        instances = [i for r in found["Reservations"] for i in r["Instances"]]
-        if len(instances) > 1:
-            raise RuntimeError("Multiple test boxes in region; refusing ambiguous setup")
-        if instances:
-            i = instances[0]
-            instance = i["InstanceId"]
-            if i["InstanceType"] != "c8g.24xlarge" or i["MetadataOptions"]["HttpTokens"] != "required" or [s["GroupId"] for s in i["SecurityGroups"]] != [group]:
+        def tagged(purpose):
+            found = aws("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": [purpose]}, {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}])
+            instances = [i for r in found["Reservations"] for i in r["Instances"]]
+            if len(instances) > 1:
+                raise RuntimeError(f"Multiple instances tagged {purpose} in region; refusing ambiguous setup")
+            return instances
+
+        def require_configured(i):
+            if i["InstanceType"] != INSTANCE_TYPE or i["MetadataOptions"]["HttpTokens"] != "required" or [s["GroupId"] for s in i["SecurityGroups"]] != [group]:
                 raise RuntimeError("Existing test box differs from required instance, metadata or network configuration")
             if i.get("IamInstanceProfile", {}).get("Arn") != profile_info["Arn"]:
                 raise RuntimeError("Existing test box has an unexpected attached instance profile ARN")
+
+        if args.promote:
+            standby = tagged(STANDBY)
+            if not standby or standby[0]["State"]["Name"] != "running":
+                raise RuntimeError("No running standby to promote: provision one with --standby and prove it with tools/testbox/run --standby")
+            require_configured(standby[0])
+            active = tagged(ACTIVE)
+
+            def retag(i, value):
+                resources = [i["InstanceId"]] + [m["Ebs"]["VolumeId"] for m in i.get("BlockDeviceMappings", []) if "Ebs" in m]
+                resources += [n["NetworkInterfaceId"] for n in i.get("NetworkInterfaces", [])]
+                aws("ec2", "create-tags", resources=resources, tags=[{"Key": "Purpose", "Value": value}])
+            # Retire first: an interruption between the two leaves no active machine, which a re-run repairs, never two.
+            for old in active:
+                retag(old, RETIRED)
+            retag(standby[0], ACTIVE)
+            for old in active:
+                stop_warm_connection(args.region, old["InstanceId"])
+            retired = ", ".join(old["InstanceId"] for old in active) or "none"
+            print(f"Promoted {standby[0]['InstanceId']} ({args.region}) to the active test box; retired: {retired}. "
+                  "Lanes move on their next call; terminate a retired box once no call runs on it (docs/testbox.md).")
+            return
+        instances = tagged(purpose)
+        if instances:
+            i = instances[0]
+            instance = i["InstanceId"]
+            require_configured(i)
             if args.check:
                 print("Test box check: expected profile ARN, role ARN and exact inline session policy; other inline policies only deny; "
                       "no managed policies; instance/network configuration valid")
@@ -189,30 +236,30 @@ def main():
             aws("ec2", "modify-instance-attribute", instance_id=instance, disable_api_termination={"Value": True})
             if i["State"]["Name"] == "stopped":
                 aws("ec2", "start-instances", instance_ids=[instance])
-            print(f"Existing test box: {instance} ({args.region}); checking bootstrap version")
+            print(f"Existing {'standby ' if args.standby else ''}test box: {instance} ({args.region}); checking bootstrap version")
             bootstrap_and_wait(instance)
             return
         if args.check:
             raise RuntimeError("Test box instance is missing")
         image = aws("ssm", "get-parameter", name="/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id")["Parameter"]["Value"]
         subnets = aws("ec2", "describe-subnets", filters=[{"Name": "vpc-id", "Values": [vpc]}, {"Name": "default-for-az", "Values": ["true"]}])["Subnets"]
-        offerings = aws("ec2", "describe-instance-type-offerings", location_type="availability-zone", filters=[{"Name": "instance-type", "Values": ["c8g.24xlarge"]}])["InstanceTypeOfferings"]
+        offerings = aws("ec2", "describe-instance-type-offerings", location_type="availability-zone", filters=[{"Name": "instance-type", "Values": [INSTANCE_TYPE]}])["InstanceTypeOfferings"]
         zones = {o["Location"] for o in offerings}
         subnets = [s for s in subnets if s["AvailabilityZone"] in zones and s["MapPublicIpOnLaunch"]]
         if not subnets:
-            raise RuntimeError("No public default subnet offers c8g.24xlarge; SSM needs internet egress")
+            raise RuntimeError(f"No public default subnet offers {INSTANCE_TYPE}; SSM needs internet egress")
         # SSM owns the single bootstrap/version path after cloud-init completes.
         user_data = "#!/bin/bash\nset -eu\ninstall -d -o root -g root /opt/testbox\n"
         # Only retry capacity errors across AZs. ClientToken prevents duplicate launches on retry.
         for subnet in subnets:
             try:
-                response = aws("ec2", "run-instances", image_id=image, instance_type="c8g.24xlarge", count=1,
+                response = aws("ec2", "run-instances", image_id=image, instance_type=INSTANCE_TYPE, count=1,
                     client_token=f"desk-testbox-{uuid.uuid4()}",
                     iam_instance_profile={"Name": profile},
                     network_interfaces=[{"DeviceIndex": 0, "SubnetId": subnet["SubnetId"], "Groups": [group], "AssociatePublicIpAddress": True}],
                     metadata_options={"HttpTokens": "required", "HttpPutResponseHopLimit": 1}, disable_api_termination=True,
                     block_device_mappings=[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 1024, "VolumeType": "gp3", "Iops": 16000, "Throughput": 1000, "Encrypted": True, "DeleteOnTermination": True}}],
-                    tag_specifications=[{"ResourceType": resource, "Tags": TAGS + [{"Key": "Name", "Value": NAME}]} for resource in ("instance", "volume", "network-interface")],
+                    tag_specifications=[{"ResourceType": resource, "Tags": [TAGS[0], {"Key": "Purpose", "Value": purpose}, {"Key": "Name", "Value": NAME}]} for resource in ("instance", "volume", "network-interface")],
                     user_data=user_data)
                 instance = response["Instances"][0]["InstanceId"]
                 created.append("instance")
@@ -222,7 +269,7 @@ def main():
                     raise
         if not instance:
             raise RuntimeError("No capacity in default VPC availability zones")
-        print(f"Created test box: {instance} ({args.region}), security group {group}, role/profile {role}")
+        print(f"Created {'standby ' if args.standby else ''}test box: {instance} ({args.region}), security group {group}, role/profile {role}")
         print("Bootstrap runs through SSM after cloud-init. Log: /var/log/desk-testbox-bootstrap.log", flush=True)
         bootstrap_and_wait(instance)
     except BaseException:

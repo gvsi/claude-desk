@@ -269,6 +269,11 @@ def read_remote_state(holder):
     raise RuntimeError("Could not lock the remote lane")
 
 
+def cache_directory() -> Path:
+    """This laptop's SSH key, host keys and shared connections; never in the repository."""
+    return Path.home() / ".cache/desk-testbox"
+
+
 def control_path(cache: Path, region: str, instance: str) -> Path:
     return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
 
@@ -282,6 +287,26 @@ def warm_instance(cache: Path, region: str) -> str | None:
         return None
     result = subprocess.run(["ssh", "-S", str(control_path(cache, region, instance)), "-O", "check", "ubuntu@" + instance], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return instance if result.returncode == 0 else None
+
+
+def choose_instance(cache: Path, region: str, api, standby: bool) -> str:
+    """The machine this call runs on: the remembered one while its connection is alive, else the one running instance
+    tagged active. A standby (a replacement being proven before lanes move to it) is reached only when asked for."""
+    instance = None if standby else warm_instance(cache, region)
+    if instance is None:
+        purpose = "agent-test-box-standby" if standby else "agent-test-box"
+        found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": [purpose]}, {"Name": "instance-state-name", "Values": ["running"]}])
+        instances = [i for r in found["Reservations"] for i in r["Instances"]]
+        if len(instances) != 1:
+            raise RuntimeError(f"Expected one running {'standby ' if standby else ''}test box in {region}, found {len(instances)}")
+        instance = instances[0]["InstanceId"]
+    return instance
+
+
+def remember_connection(cache: Path, region: str, instance: str, standby: bool):
+    # Every lane on this laptop reads it, so only the active machine is remembered.
+    if not standby:
+        (cache / f"connection-{region}.json").write_text(json.dumps({"instance": instance}))
 
 
 def create_bundle(root: Path, bundle: Path, previous: str) -> bool:
@@ -309,6 +334,7 @@ def main():
     parser.add_argument("--region", default=os.environ.get("TESTBOX_REGION", "us-east-1"))
     parser.add_argument("--ci", action="store_const", const="1", help="explicitly set CI on the remote run")
     parser.add_argument("--lane", help="scratch lane override; normally the worktree directory name")
+    parser.add_argument("--standby", action="store_true", help="run on the standby machine being proven (docs/testbox.md)")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command[:1] == ["--"]:
@@ -323,7 +349,7 @@ def main():
     os.environ["PATH"] = str(Path.home() / ".local/bin") + os.pathsep + os.environ["PATH"]
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     lane = lane_name(args.lane or str(root))
-    cache = Path.home() / ".cache/desk-testbox"
+    cache = cache_directory()
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache.chmod(0o700)
     # Serialize callers for the same lane before changing its worktree or database.
@@ -344,13 +370,7 @@ def run(args, root, lane, cache):
             cmd += ["--" + k.replace("_", "-"), json.dumps(v) if isinstance(v, (list, dict)) else str(v)]
         return json.loads(capture(cmd))
 
-    instance = warm_instance(cache, args.region)
-    if instance is None:
-        found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": ["agent-test-box"]}, {"Name": "instance-state-name", "Values": ["running"]}])
-        instances = [i for r in found["Reservations"] for i in r["Instances"]]
-        if len(instances) != 1:
-            raise RuntimeError(f"Expected one running test box in {args.region}, found {len(instances)}")
-        instance = instances[0]["InstanceId"]
+    instance = choose_instance(cache, args.region, api, args.standby)
     timing.mark("discovery")
     print(f"testbox: connecting in {args.region}; lane={lane}", file=sys.stderr, flush=True)
     # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
@@ -390,7 +410,7 @@ def run(args, root, lane, cache):
         # A separate session prevents one caller's process-group cleanup killing other lanes.
         if check.returncode:
             subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
-        (cache / f"connection-{args.region}.json").write_text(json.dumps({"instance": instance}))
+        remember_connection(cache, args.region, instance, args.standby)
     ssh = ["ssh", *ssh_opts, host]
     timing.mark("connection")
     base = f"/srv/testbox/lanes/{lane}"

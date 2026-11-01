@@ -335,3 +335,32 @@ def test_a_machine_that_is_not_ready_says_whether_its_setup_is_running_or_failed
     result = run_prepare(tmp_path, ready=False, failed=failed)
     assert result.returncode == code
     assert 'continued' not in result.stdout
+
+
+@pytest.mark.parametrize('standby', [False, True])
+def test_only_a_standby_call_reaches_the_standby_and_it_never_moves_other_lanes(tmp_path, monkeypatch, standby):
+    """Lanes share this laptop's remembered connection; a call proving a standby machine must not repoint them."""
+    import json
+    from types import SimpleNamespace
+    from desk_tools import testbox_client as client
+
+    (tmp_path / 'connection-us-east-1.json').write_text(json.dumps({'instance': 'i-0aaaaaaaaaaaaaaaa'}))
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=0))   # the warm master is alive
+    asked = []
+    def api(service, operation, **params):
+        asked.append(next(f['Values'] for f in params['filters'] if f['Name'] == 'tag:Purpose'))
+        return {'Reservations': [{'Instances': [{'InstanceId': 'i-0bbbbbbbbbbbbbbbb'}]}]}
+    instance = client.choose_instance(tmp_path, 'us-east-1', api, standby)
+    client.remember_connection(tmp_path, 'us-east-1', instance, standby)
+    remembered = json.loads((tmp_path / 'connection-us-east-1.json').read_text())['instance']
+    if standby:
+        assert (instance, asked, remembered) == ('i-0bbbbbbbbbbbbbbbb', [['agent-test-box-standby']], 'i-0aaaaaaaaaaaaaaaa')
+    else:
+        assert (instance, asked, remembered) == ('i-0aaaaaaaaaaaaaaaa', [], 'i-0aaaaaaaaaaaaaaaa')
+
+
+def test_discovery_needs_exactly_one_running_machine(tmp_path):
+    from desk_tools import testbox_client as client
+    api = lambda *a, **kw: {'Reservations': []}
+    with pytest.raises(RuntimeError, match='Expected one running standby test box in us-east-1, found 0'):
+        client.choose_instance(tmp_path, 'us-east-1', api, True)

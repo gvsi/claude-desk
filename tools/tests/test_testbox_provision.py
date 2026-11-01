@@ -36,9 +36,11 @@ class AWS:
         self.documents = {name: copy.deepcopy(DENY_DOCUMENT) for name in account_policies}   # other inline policies
         self.inline = self.account_policies[:] if fresh else [POLICY_NAME, *self.account_policies]
         self.deleted_policies = []     # policy names delete-role-policy was called with
-        self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.24xlarge",
+        self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.12xlarge",
                          "IamInstanceProfile": {"Arn": PROFILE_ARN}, "MetadataOptions": {"HttpTokens": "required"},
                          "SecurityGroups": [{"GroupId": "sg-test"}], "State": {"Name": "stopped"}}
+        self.standby = None            # an instance tagged as the standby, if any
+        self.tagged = []               # (instance id, Purpose value) per create-tags call
 
     def __call__(self, command, **kwargs):
         service, op = command[3:5]
@@ -77,7 +79,15 @@ class AWS:
         elif op == "create-security-group":
             data = {"GroupId": "sg-test"}
         elif op == "describe-instances":
-            data = {"Reservations": [] if self.fresh else [{"Instances": [self.instance]}]}
+            filters = json.loads(command[command.index("--filters") + 1])
+            purpose = next(f["Values"][0] for f in filters if f["Name"] == "tag:Purpose")
+            found = (None if self.fresh else self.instance) if purpose == provision.ACTIVE else \
+                    self.standby if purpose == provision.STANDBY else None
+            data = {"Reservations": [{"Instances": [found]}] if found else []}
+        elif op == "create-tags":
+            tags = json.loads(command[command.index("--tags") + 1])
+            self.tagged.append((json.loads(command[command.index("--resources") + 1])[0],
+                                next(t["Value"] for t in tags if t["Key"] == "Purpose")))
         elif op == "get-parameter":
             data = {"Parameter": {"Value": "ami-test"}}
         elif op == "describe-subnets":
@@ -343,3 +353,83 @@ def test_a_reprovision_that_cannot_drain_running_lanes_in_time_records_a_failed_
     assert not (opt / 'ready').exists()
     assert (opt / 'bootstrap-failed').exists()
     assert not (opt / 'bootstrap.sh').exists()
+
+
+def launched(monkeypatch, fixture, *args):
+    """The run-instances request a provisioning run makes, as instance type and instance tags."""
+    requests = []
+    def record(command, **kwargs):
+        if command[4] == 'run-instances':
+            specs = json.loads(command[command.index('--tag-specifications') + 1])
+            requests.append((command[command.index('--instance-type') + 1],
+                             {t['Key']: t['Value'] for t in next(s for s in specs if s['ResourceType'] == 'instance')['Tags']}))
+        return fixture(command, **kwargs)
+    invoke(monkeypatch, record, *args)
+    return requests
+
+
+def test_the_test_machine_is_a_c8g_12xlarge(monkeypatch):
+    assert launched(monkeypatch, AWS(fresh=True)) == [('c8g.12xlarge', {'Project': 'claude-desk', 'Purpose': 'agent-test-box', 'Name': 'claude-desk-test-box'})]
+
+
+def test_a_standby_launches_beside_the_active_machine_under_a_tag_clients_never_discover(monkeypatch):
+    """The active machine may be of another size: a replacement is proven before lanes move to it."""
+    fixture = AWS()
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'})
+    fixture.standby = None
+    def no_standby_yet(command, **kwargs):
+        result = fixture(command, **kwargs)
+        if command[4] == 'run-instances':
+            fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge')
+        return result
+    requests = launched(monkeypatch, no_standby_yet, '--standby')
+    assert requests == [('c8g.12xlarge', {'Project': 'claude-desk', 'Purpose': 'agent-test-box-standby', 'Name': 'claude-desk-test-box'})]
+    assert fixture.tagged == []
+
+
+def test_a_rerun_reuses_the_standby_and_leaves_the_active_machine_alone(monkeypatch):
+    fixture = AWS()
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'})
+    fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge')
+    assert launched(monkeypatch, fixture, '--standby') == []
+    assert 'start-instances' not in fixture.calls and fixture.tagged == []
+
+
+def test_promote_retires_the_active_machine_before_activating_the_proven_standby(monkeypatch, tmp_path):
+    """Clients discover exactly one active machine, so the old one leaves before the new one joins: a failure
+    between the two leaves none, which a re-run of the promotion repairs, never two."""
+    fixture = AWS()
+    fixture.instance.update(InstanceType='c8g.24xlarge', State={'Name': 'running'})
+    fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', InstanceType='c8g.12xlarge')
+    stopped = []
+    monkeypatch.setattr(provision, 'stop_warm_connection', lambda region, instance: stopped.append((region, instance)))
+    invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == [('i-0123456789abcdef0', 'agent-test-box-retired'), ('i-0fedcba9876543210', 'agent-test-box')]
+    assert stopped == [('us-east-1', 'i-0123456789abcdef0')]
+
+
+def test_promote_after_an_interrupted_promotion_activates_the_standby(monkeypatch):
+    fixture = AWS()
+    fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', State={'Name': 'running'})
+    fixture.instance = None        # the old machine was retired before the promotion stopped
+    monkeypatch.setattr(provision, 'stop_warm_connection', lambda region, instance: None)
+    invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == [('i-0fedcba9876543210', 'agent-test-box')]
+
+
+@pytest.mark.parametrize('standby', [None, 'stopped', 'c8g.24xlarge', 'metadata'])
+def test_promote_refuses_a_standby_that_is_missing_stopped_or_misconfigured(monkeypatch, standby):
+    fixture = AWS()
+    fixture.instance.update(State={'Name': 'running'})
+    if standby:
+        fixture.standby = dict(fixture.instance, InstanceId='i-0fedcba9876543210', State={'Name': 'running'})
+        if standby == 'stopped':
+            fixture.standby['State'] = {'Name': 'stopped'}
+        elif standby == 'metadata':
+            fixture.standby['MetadataOptions'] = {'HttpTokens': 'optional'}
+        else:
+            fixture.standby['InstanceType'] = standby
+    monkeypatch.setattr(provision, 'stop_warm_connection', lambda region, instance: None)
+    with pytest.raises(RuntimeError):
+        invoke(monkeypatch, fixture, '--promote')
+    assert fixture.tagged == []
