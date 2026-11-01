@@ -10,6 +10,21 @@ from evals.tests.eval_repo import commit, write
 from evals.tests.test_soft_promise_calibration import deps
 
 
+def test_retry_cannot_hide_an_unsafe_sample(deps, tmp_path):
+    from evals.calibration import soft_promise_experiment as exp
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1,
+                            output=tmp_path / "experiment.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    assert not first["attempts"][0]["acceptance"]["accepted"]
+    deps.client.client.answer = lambda prose: "flag" if "sort everything" in prose else "pass"
+    second = asyncio.run(exp.experiment(config, deps))
+    assert not second["attempts"][0]["stale"]
+    assert not second["attempts"][1]["acceptance"]["accepted"]
+    assert second["attempts"][1]["acceptance"]["unsafe_or_unmeasured"] == ["promise-sort"]
+
+
 def test_experiment_refuses_the_whole_estimate_before_any_call(deps, tmp_path):
     from evals.calibration.soft_promise_experiment import Experiment, experiment
     from evals.calibration.soft_promise import Refused

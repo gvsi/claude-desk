@@ -57,6 +57,34 @@ def acceptance(new: sp.RunResult) -> dict:
             "voice_ai": {case.id: case.outcome for case in new.cases if case.group == "voice_ai"}}
 
 
+def aggregate_acceptance(history: dict, output: Path) -> dict:
+    """All current-identity samples count, including failures from an earlier attempt."""
+    runs = []
+    for attempt in history["attempts"]:
+        if attempt["stale"] or attempt["identity_sha256"] != history["identity_sha256"]:
+            continue
+        if arm := attempt["arms"].get("new"):
+            saved = arm.get("outcome")
+            if saved is None:
+                saved = json.loads((output.parent / arm["results"]).read_text())
+            saved = {**saved, "cases": [{key: value for key, value in case.items()
+                                        if key in sp.CaseResult.model_fields} for case in saved["cases"]]}
+            runs.append(sp.RunResult.model_validate(saved))
+    if not runs:
+        return {"accepted": False}
+    combined = runs[0].model_copy(deep=True)
+    for run in runs[1:]:
+        combined.stopped_by_cap |= run.stopped_by_cap
+        combined.over_cap |= run.over_cap
+        for total, case in zip(combined.cases, run.cases, strict=True):
+            if (total.id, total.input_sha256, total.expected) != (case.id, case.input_sha256, case.expected):
+                raise sp.Refused("saved evidence differs from the experiment identity")
+            total.requested += case.requested
+            for verdict, count in case.verdicts.items():
+                total.verdicts[verdict] = total.verdicts.get(verdict, 0) + count
+    return acceptance(combined)
+
+
 async def experiment(config: Experiment, deps: sp.Deps) -> dict:
     if config.arms != "old,new":
         raise sp.Refused("--arms must be old,new, both arms of one experiment")
@@ -122,10 +150,11 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
         attempt["reserved_usd"] = 0
         attempt["spend_usd"] += outcome.spend_usd
         attempt["arms"][arm] = {"results": str(path.relative_to(config.output.parent)),
-                               "spend_usd": outcome.spend_usd}
+                               "spend_usd": outcome.spend_usd,
+                               "outcome": outcome.model_dump(mode="json")}
         remaining -= outcome.spend_usd
         if arm == "new":
-            attempt["acceptance"] = acceptance(outcome)
+            attempt["acceptance"] = aggregate_acceptance(history, config.output)
         save()
         if outcome.stopped_by_cap or outcome.over_cap:
             break
