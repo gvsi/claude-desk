@@ -22,6 +22,8 @@ function checkedLines(value: SetupPublicLines): SetupPublicLines {
   return value;
 }
 
+const knownKey = (key: string) => PUBLIC_LINE_KEYS.some((known) => known === key);
+
 const canEdit = (line: SetupPublicLine) => line.editable && line.key !== 'policy:how_we_help';
 
 export interface PublicLinesStepProps {
@@ -66,7 +68,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     refetchOnWindowFocus: false,
   });
   const shown = PUBLIC_LINE_KEYS.flatMap((key) => lines.data?.lines.filter((line) => line.key === key && line.text.trim() !== '') ?? []);
-  const empty = lines.data !== undefined && shown.length === 0;
+  const unknown = lines.data?.lines.some((line) => !knownKey(line.key)) ?? false;
+  const empty = lines.data !== undefined && lines.data.lines.length === 0;
   useEffect(() => {
     if (empty) onNext('safety_check');
   }, [empty, onNext]);
@@ -104,11 +107,12 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
   const confirm = async () => {
-    if (editingKey !== null || busy !== null || lines.data === undefined) return;
+    if (editingKey !== null || busy !== null || lines.data === undefined || unknown) return;
     setBusy('confirm');
     setError(null);
     try {
-      checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: {} }));
+      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: {} }));
+      if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
       onNext('safety_check');
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) await reread();
@@ -129,7 +133,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      {error !== null ? <Notice tone="error">{error}</Notice> : null}
+      {error !== null || unknown ? <Notice tone="error">{unknown ? ownerErrorCopy(null) : error}</Notice> : null}
       {lines.data === undefined ? (
         lines.isError ? (
           <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>
@@ -202,7 +206,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
             </div>
           </Card>
           <div className="cd-setup-step__actions">
-            {editingKey !== null ? (
+            {editingKey !== null || unknown ? (
               <Button variant="primary" size="main" disabled>{SETUP_COPY.situations.looksRight}</Button>
             ) : (
               <Button variant="primary" size="main" busy={busy === 'confirm'} onClick={() => void confirm()}>

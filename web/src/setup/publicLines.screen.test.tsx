@@ -306,3 +306,18 @@ it('disables Save for empty and whitespace-only text without sending a write', a
   await field.fill('We help local businesses.');
   await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });
+
+
+it.each([true, false])('holds unknown public-line keys without confirming, alongside known rows: %s', async (withKnown) => {
+  const state = await atSituations();
+  const unknown = { key: 'policy:unknown', text: 'Hidden text.', editable: true, source: 'suggested' };
+  const known = { key: 'policy:about', text: 'We help local businesses.', editable: true, source: 'owner' };
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: withKnown ? [known, unknown] : [unknown] } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.unavailable);
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  expect(screen.getByText('Hidden text.', { exact: true }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
