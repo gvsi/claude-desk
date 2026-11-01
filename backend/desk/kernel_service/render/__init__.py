@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Literal
 
-from desk.contracts import CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
+from desk.contracts import BusinessToolDef, CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
 from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
 
@@ -105,10 +105,16 @@ def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> s
     return template.format(**fields, **({"owner": owner} if owner is not None else {}))
 
 
-def executed_status(tool: str, lang: str, *, owner: str) -> str:
+def executed_status(tool: str, lang: str, *, owner: str, business: BusinessToolDef | None = None) -> str:
     """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
     for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
     KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
+    from desk.contracts import is_business_tool
+    if is_business_tool(tool):
+        from desk.kernel_service.adapters.base import quoted
+        if business is None:
+            raise KeyError(tool)
+        return EXECUTED[lang][business.config.block].format(owner=owner, title=quoted(business.title))
     return EXECUTED[lang][tool].format(owner=owner)
 
 

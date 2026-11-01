@@ -108,7 +108,8 @@ export const Board: Story = {
       [393, 719, 520, 115],
     ]);
     for (const card of cards) expectComputed(card, { backgroundColor: SPEC.card.backgroundColor, borderTopColor: SPEC.card.borderTopColor });
-    // The agent's own words are never shown: each request is the page's title and its count.
+    // The signed board draws each request as the page's title and its count; the page now quotes
+    // the agent's words under the title too, as the review board UXC-P901-After draws them.
     await expect(requests.map((request) => request.textContent)).toEqual(['Book the earliest visitRequest 1', 'Signed requestRequest 2']);
     await expect(within(run).getByText('The agent finished.')).toBeVisible();
     await expectFooter(canvasElement);

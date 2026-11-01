@@ -457,6 +457,21 @@
   color: var(--text-secondary);
 }
 
+/* Since last night's one line, in Claude's voice, over the rows: level with their words, 14 px
+   down to the first row, which then has a hairline over it. */
+.cd-since__line {
+  margin: 0;
+  padding: 0 var(--space-8);
+}
+
+.cd-since__line + .cd-briefing {
+  margin-top: var(--space-14);
+}
+
+.cd-since__line + .cd-briefing > .cd-briefing__item:first-child {
+  border-top: 1px solid var(--line-hairline);
+}
+
 .cd-since__all {
   padding: var(--space-12) var(--space-8) 0;
 }

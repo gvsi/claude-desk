@@ -332,6 +332,55 @@ def test_kernel_error_codes_include_rate_limited():
         "invalid", "rate_limited", "seed_unproved", "internal"}
 
 
+@pytest.mark.parametrize('detail', [
+    {'A visitor wrote this': ['public_promise']},
+    {'desk.x.title': ['This text is a promise']},
+    {'': ['public_promise']},
+    {'x' * 121: ['public_promise']},
+    {'desk.x.title\n': ['public_promise']},
+    {'desk.x/title': ['public_promise']},
+    {'desk.x.title': ['']},
+    {'desk.x.title': ['x' * 65]},
+    {'desk.x.title': ['Public_Promise']},
+    {'desk.x.title': ['lex.en.promise\n']},
+    {'desk.x.title': ['lex.en/promise']},
+    {'desk.x.title': ['prómise']},
+])
+def test_kernel_error_detail_refuses_free_text_and_invalid_identifiers(detail):
+    with pytest.raises(ValidationError):
+        KernelError(code='invalid', detail=detail)
+    with pytest.raises(ValidationError):
+        KernelError.model_validate_json(json.dumps({'code': 'invalid', 'detail': detail}))
+
+
+def test_kernel_error_detail_accepts_emitted_fields_and_bounded_rule_ids():
+    from desk.contracts import BusinessTool
+    from desk.kernel_service import business_tools, reply_check
+
+    for config in ({'block': 'intake', 'questions': ['What?']},
+                   {'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30},
+                   {'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000},
+                   {'block': 'urgent', 'urgent_when': 'A burst pipe'}):
+        for title in ('Guaranteed service', 'Intake \u202edeetnaraug\u202c'):
+            tool = BusinessTool(tool='desk.' + 'x' * 40, title=title, description='Take details.', config=config)
+            values = business_tools.public_fields(tool)
+            detail = business_tools.hidden_fields(values) or business_tools.card_refusal(
+                tool, reply_check.scan_public_policies(values, allow_words=business_tools.free_allow_words(tool),
+                                                  amenities=False))
+            assert detail and KernelError(code='invalid', detail=detail).detail == detail
+
+    detail = {'charter:policy:service_area': [f'lex.{language}.{category}'
+              for language, entries in reply_check.LEXICONS.items() for category, _ in entries],
+              'desk.x.0-title': ['public_promise', 'format_control'], 'A' * 120: ['r' * 64]}
+    answer = KernelError(code='invalid', detail=detail)
+    assert KernelError.model_validate_json(answer.model_dump_json()).detail == detail
+
+
+def test_kernel_error_detail_schema_constrains_every_key():
+    detail = KernelError.model_json_schema()['properties']['detail']
+    assert detail['propertyNames'] == {'pattern': '^[A-Za-z0-9_.:-]{1,120}$'}
+
+
 def test_ev_error_codes_are_closed():
     # the web app shows a static string per code, so the list is fixed and nothing else gets through
     events = TypeAdapter(SseEvent)

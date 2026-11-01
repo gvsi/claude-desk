@@ -14,11 +14,14 @@
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
  *
- * The agent's own words never show. Its turns carry none (plan 02b), and anything a turn of its
- * holds is ignored: each request is drawn by code, titled with the chosen task first and "Signed
- * request" after. The Desk's turns are its checked replies, shown as they came, each with its
- * receipts' `visitor_plain` under it, read-only. They are in English, the language the built-in
- * agent writes in, so their cards' chrome is too.
+ * Each of the agent's requests is titled by code, with the chosen task first and "Signed request"
+ * after, and quotes the request as the agent sent it (its turn's `text`) under the title: the
+ * agent's own words, untrusted, so `AgentMessage` draws them as quoted user text with a rule at
+ * their left, a text node only, apart from the Desk's replies, and the panel first collapses their
+ * whitespace and cuts them to 280 characters, so a long model message can't flood the page.
+ * Anything else an agent turn holds is ignored. The Desk's turns are its checked replies, shown as
+ * they came, each with its receipts' `visitor_plain` under it, read-only. They are in English, the
+ * language the built-in agent writes in, so their cards' chrome is too.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -69,8 +72,23 @@ export const pageActions = {
  */
 export const KEY_RETRY_WINDOW_MS = 55 * 60_000;
 
-/** The language of the Desk's replies to the built-in agent, which writes in English. */
+/** The language of the built-in agent's words and of the Desk's replies to them: it writes in English. */
 const RUN_LANGUAGE: CopyLanguage = 'en';
+
+/** The most of an agent's request the panel quotes, "…" included. */
+export const AGENT_WORDS_MAX = 280;
+
+/**
+ * An agent turn's request as the panel quotes it: its whitespace collapsed to single spaces, so it
+ * reads as one run of words, and cut to 279 characters and "…" past `AGENT_WORDS_MAX`, with no
+ * space left before the "…". Undefined when the turn has no words, so the row draws without a quote.
+ */
+function agentWords(turn: AgentTurn): string | undefined {
+  if (typeof turn.text !== 'string') return undefined;
+  const chars = Array.from(turn.text.split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return undefined;
+  return chars.length > AGENT_WORDS_MAX ? `${chars.slice(0, AGENT_WORDS_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
 
 /** Cards that report something done: their executed receipt draws the check. */
 const DONE_CARDS: ReadonlySet<string> = new Set(['booking_confirmed', 'payment_confirmed', 'charge_confirmed']);
@@ -404,8 +422,10 @@ interface RunRowsProps {
 }
 
 /**
- * The run's turns in order: each of the agent's requests built by code, never from what the turn
- * holds, and each Desk reply with its receipts under it. A turn by anyone else shows nothing.
+ * The run's turns in order: each of the agent's requests titled and numbered by code, quoting the
+ * words it sent (`agentWords`), marked as English (`RUN_LANGUAGE`) whatever the page's language,
+ * and nothing else the turn holds, and each Desk reply with its receipts under it. A turn by anyone
+ * else shows nothing.
  */
 function RunRows({ turns, task, ownerName, language }: RunRowsProps) {
   const copy = AGENTS_COPY[language];
@@ -422,6 +442,8 @@ function RunRows({ turns, task, ownerName, language }: RunRowsProps) {
                 signed
                 title={requests === 1 ? DEMO_TASK_COPY[language][task] : copy.signedRequest}
                 meta={copy.request(requests)}
+                text={agentWords(turn)}
+                textLanguage={RUN_LANGUAGE}
                 language={language}
               />
             </TranscriptRow>
