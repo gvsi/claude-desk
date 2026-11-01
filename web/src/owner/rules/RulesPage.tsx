@@ -24,6 +24,7 @@ import {
   type NoticeTone,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { CONNECTORS } from '../connectors/catalog.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
@@ -121,6 +122,45 @@ function bringToMiddle(row: HTMLElement): void {
   const box = row.getBoundingClientRect();
   if (box.top >= port.top && box.bottom <= port.bottom) return;
   row.scrollIntoView({ block: 'center', behavior: reducesMotion() ? 'auto' : 'smooth' });
+}
+
+/**
+ * The control that opened a review from Rules. Once the review returns to the history entry Rules
+ * showed (`key`), by Keep my rules, Confirm change or Back, `find` finds it again in Rules' page, or
+ * says it has gone (null), as a suggestion has once its rule is confirmed and `landed`. One at a
+ * time: each review Rules opens replaces it.
+ */
+interface Opener {
+  deskId: string;
+  key: string;
+  find: (page: HTMLElement, landed: boolean) => HTMLElement | null;
+}
+
+let opener: Opener | null = null;
+
+/** `el` when the owner can use it, not under a layer no one can (a skeleton's, as it fades); else null. */
+const usable = (el: HTMLElement | null | undefined): HTMLElement | null => (el != null && el.closest('[inert]') === null ? el : null);
+
+/** The first control in `row` that takes focus: a tool's link, or a button such as the payment limit's "Change". */
+function firstControl(row: HTMLElement): HTMLElement | null {
+  return usable(row.querySelector<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+}
+
+/** "Start from a preset", in Rules' header. */
+const presetButton = (page: HTMLElement) => usable(page.querySelector<HTMLElement>('.cd-preset-menu > button'));
+
+/** The payment limit's "Change" atop the connector group `group` (its id), in that group's section. */
+function limitChange(page: HTMLElement, group: string): HTMLElement | null {
+  const name = CONNECTORS.find((connector) => connector.view.id === group)?.view.name;
+  const section = [...page.querySelectorAll<HTMLElement>('section[aria-label]')].find((el) => el.getAttribute('aria-label') === name && usable(el) !== null);
+  return usable(section?.querySelector<HTMLElement>('.cd-money-limit__reading button'));
+}
+
+/** The suggested rule for `tool`'s "Draft this rule", until its rule is confirmed. */
+function suggestionButton(page: HTMLElement, tool: string, landed: boolean): HTMLElement | null {
+  if (landed) return null;
+  const card = [...page.querySelectorAll<HTMLElement>('[data-suggestion]')].find((el) => el.dataset.suggestion === tool);
+  return usable(card?.querySelector<HTMLElement>('button'));
 }
 
 /** The payment limit's field while it is open, in one group at a time. */
@@ -236,11 +276,26 @@ export function RulesPage() {
     return () => cancelAnimationFrame(frame);
   }, [toReveal]);
 
-  /** Opens a card draft's review, with what it was drafted from. */
-  const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
+  // A review this entry of Rules opened, back by Keep my rules, Confirm change or Back: once Rules is
+  // drawn, at the place it restored, focus goes back to the control that opened it, or, when that
+  // has gone, to the first control of the first row the change landed on, without moving the place.
+  const [returning] = useState(() => (opener !== null && opener.deskId === deskId && opener.key === location.key ? opener : null));
+  const refocused = useRef(false);
+  useLayoutEffect(() => {
+    if (returning === null || refocused.current || !drawn || page.current === null) return;
+    refocused.current = true;
+    if (opener === returning) opener = null;
+    const row = ready && landing !== null ? firstLandedRow(page.current, landing) : null;
+    const target = returning.find(page.current, row !== null) ?? (row === null ? null : firstControl(row));
+    target?.focus({ preventScroll: true });
+  }, [returning, drawn, ready, landing]);
+
+  /** Opens a card draft's review, with what it was drafted from and how to find the control that opened it. */
+  const review = (draft: RulesDraft, from: PolicyVersionOut, find: Opener['find'], extra: { preset?: RulesPreset; title?: string } = {}) => {
     const built: RuleDraft = draftFromDiff(draft, from, extra.preset);
     // Once confirmed, the review comes back here, where the change lands.
     const state: RuleDraftState = { draft: built, ...(extra.title === undefined ? {} : { title: extra.title }), fromRules: true };
+    opener = { deskId, key: location.key, find };
     void navigate(draftPath(deskId, draft.version), { state });
   };
 
@@ -251,7 +306,7 @@ export function RulesPage() {
     try {
       const draft = await request('draftPreset', { params: { desk_id: deskId }, body: { preset } });
       const label = PRESET_WORDS.find((item) => item.value === preset)?.label;
-      review(draft, active, label === undefined ? { preset } : { preset, title: label });
+      review(draft, active, presetButton, label === undefined ? { preset } : { preset, title: label });
     } catch (err) {
       setPresetSaid(draftFailure(err));
     } finally {
@@ -274,7 +329,8 @@ export function RulesPage() {
     setLimit({ ...limit, error: undefined, pending: true });
     try {
       const draft = await request('draftMoneyCap', { params: { desk_id: deskId }, body: { auto_money_cap_cents: parsed.cents } });
-      review(draft, active, { title: 'Change your payment limit' });
+      const { group } = limit;
+      review(draft, active, (page) => limitChange(page, group), { title: 'Change your payment limit' });
     } catch (err) {
       const said = err instanceof ApiError && err.code === 'above_platform_ceiling' ? { tone: 'error' as const, line: ABOVE_CEILING } : draftFailure(err);
       setLimit((now) => (now === null ? null : { ...now, pending: false, ...(said === null ? {} : { error: said.line }) }));
@@ -390,7 +446,7 @@ export function RulesPage() {
       </div>
       {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
-        {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+        {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft, tool) => review(draft, active, (page, landed) => suggestionButton(page, tool, landed))} />}
         {peopleFailure === null ? null : (
           <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
         )}
@@ -405,7 +461,7 @@ export function RulesPage() {
  * Rules the owner's answers suggest, each a card with its words and "Draft this rule", which
  * drafts it and opens its review; nothing applies before then.
  */
-function SuggestedRules({ deskId, suggestions, onDrafted }: { deskId: string; suggestions: readonly Suggestion[]; onDrafted: (draft: RulesDraft) => void }) {
+function SuggestedRules({ deskId, suggestions, onDrafted }: { deskId: string; suggestions: readonly Suggestion[]; onDrafted: (draft: RulesDraft, tool: Suggestion['tool']) => void }) {
   const [pending, setPending] = useState<string | null>(null);
   const [said, setSaid] = useState<{ tool: string; said: Said } | null>(null);
   if (suggestions.length === 0) return null;
@@ -415,7 +471,7 @@ function SuggestedRules({ deskId, suggestions, onDrafted }: { deskId: string; su
     setSaid(null);
     setPending(tool);
     try {
-      onDrafted(await request('draftSuggestion', { params: { desk_id: deskId, tool } }));
+      onDrafted(await request('draftSuggestion', { params: { desk_id: deskId, tool } }), tool);
     } catch (err) {
       const failure = draftFailure(err);
       if (failure !== null) setSaid({ tool, said: failure });
@@ -428,7 +484,7 @@ function SuggestedRules({ deskId, suggestions, onDrafted }: { deskId: string; su
     <div className="cd-rules__suggestions">
       {suggestions.map((suggestion) => (
         <Card key={suggestion.tool} as="section" label="Suggested rule">
-          <div className="cd-rules__suggestion">
+          <div className="cd-rules__suggestion" data-suggestion={suggestion.tool}>
             <p className="cd-rules__suggestion-text cd-type-body">{suggestion.text}</p>
             {said?.tool === suggestion.tool ? <Notice tone={said.said.tone}>{said.said.line}</Notice> : null}
             <div>

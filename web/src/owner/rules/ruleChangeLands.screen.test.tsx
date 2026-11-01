@@ -618,6 +618,75 @@ describe('a preset or a new payment limit', () => {
   });
 });
 
+describe('focus once a review Rules opened returns', () => {
+  /** The words of the payment limit's field. */
+  const LIMIT_FIELD = 'Most a payment can be without asking you, in dollars';
+
+  /**
+   * Rules with Payments at the top of what shows, then its limit's review from Payments' "Change",
+   * by keyboard: 600, then Enter. Returns the place Rules was at.
+   */
+  async function reviewPaymentsLimit() {
+    const rendered = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    const { screen } = rendered;
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    await expect.element(payments.getByRole('button', { name: 'Change' })).toBeVisible();
+    // The shell's main area, once the Desk has opened, which scrolls on its own.
+    const main = screen.getByRole('main').element();
+    payments.element().scrollIntoView({ block: 'start' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const place = main.scrollTop;
+    payments.getByRole('button', { name: 'Change' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(payments.getByRole('textbox', { name: LIMIT_FIELD })).toHaveFocus();
+    await userEvent.keyboard('600{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    return { ...rendered, main, place };
+  }
+
+  /** Presses `name` on the review by keyboard, as the owner tabs to it. */
+  async function press(screen: Awaited<ReturnType<typeof renderRoute>>['screen'], name: string) {
+    screen.getByRole('button', { name }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+  }
+
+  it('keep_my_rules_puts_focus_back_on_the_change_that_opened_it', async () => {
+    const { screen, main, place } = await reviewPaymentsLimit();
+    await press(screen, 'Keep my rules');
+
+    // Back on Rules at its place, focus on Payments' "Change", not the page: the next Tab goes on from there.
+    const change = screen.getByRole('region', { name: 'Payments' }).getByRole('button', { name: 'Change' });
+    await expect.element(change).toHaveFocus();
+    expect(main.scrollTop).toBe(place);
+    await pause(300);
+    expect(document.activeElement).toBe(change.element());
+    expect(main.scrollTop).toBe(place);
+  });
+
+  it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
+    const { screen, main, place } = await reviewPaymentsLimit();
+    await press(screen, 'Confirm change');
+
+    // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
+    const payments = screen.getByRole('region', { name: 'Payments' });
+    await expect.poll(() => payments.element().querySelector('.cd-money-limit .cd-pill')?.textContent).toBe('Updated');
+    await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
+    await pause(300);
+    expect(main.scrollTop).toBe(place);
+    expect(document.activeElement).toBe(payments.getByRole('button', { name: 'Change' }).element());
+  });
+
+  it('keep_my_rules_on_a_preset_puts_focus_back_on_start_from_a_preset', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    await press(screen, 'Keep my rules');
+    await expect.element(screen.getByRole('button', { name: 'Start from a preset' })).toHaveFocus();
+  });
+});
+
 describe('under reduced motion', () => {
   it('a_confirmed_change_is_at_its_end_state_at_once', async () => {
     await reduceMotion();
