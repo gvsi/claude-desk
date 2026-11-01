@@ -146,7 +146,7 @@ it('uses the shared warm focus ring without changing the selected ring', async (
   (teal.element() as HTMLElement).focus();
   expect(teal.element().matches(':focus-visible')).toBe(true);
   const probe = document.createElement('span');
-  probe.style.color = 'var(--ring-focus, var(--text-primary))';
+  probe.style.color = 'var(--ring-focus)';
   document.body.append(probe);
   try {
     expect(getComputedStyle(teal.element()).outlineColor).toBe(getComputedStyle(probe).color);

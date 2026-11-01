@@ -96,7 +96,7 @@
 }
 
 .cd-header-colour__swatch:focus-visible {
-  outline: 2px solid var(--ring-focus, var(--text-primary));
+  outline: 2px solid var(--ring-focus);
   outline-offset: var(--space-6);
 }
 
