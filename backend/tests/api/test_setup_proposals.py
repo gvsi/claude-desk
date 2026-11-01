@@ -1,6 +1,7 @@
 """Setup proposal decisions and the shared finish routine."""
 
 import json
+import re
 import html
 from datetime import date
 from dataclasses import replace
@@ -25,6 +26,35 @@ PAYMENT_HOW = "Sends a retainer payment link"
 ])
 def test_contact_leftover_words_must_be_the_owners(contact, owner_text, supported):
     assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
+@pytest.mark.parametrize("contact,owner_text,supported", [
+    ("Tel: 415-555-0118", "Our number is 415-555-0118", True),
+    ("Phone: 415-555-0118", "Our number is 415-555-0118", True),
+    ("Office 415-555-0118", "Our number is 415-555-0118", True),
+    ("Mobile 415-555-0118", "Our number is 415-555-0118", True),
+    ("Teléfono: 415-555-0118", "Nuestro número es 415-555-0118", True),
+    ("Llámanos al 415-555-0118", "Nuestro número es 415-555-0118", True),
+    ("Escríbenos a 415-555-0118", "Nuestro número es 415-555-0118", True),
+    ("Escríbenos a hola@bobs.com", "Nuestro correo es hola@bobs.com", True),
+    ("Llámanos al 415-555-0118 o escríbenos a hola@bobs.com", "415-555-0118, hola@bobs.com", True),
+    ("Call 415-555-0118 ext. 12", "Our number is 415-555-0118, extension 12", True),
+    # The extension's digits are still the owner's to give.
+    ("Call 415-555-0118 ext. 12", "Our number is 415-555-0118", False),
+    ("Tel: 415-555-0118, free estimates", "Our number is 415-555-0118", False),
+])
+def test_contact_labels_are_never_the_owners_missing_words(contact, owner_text, supported):
+    assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
+def test_every_label_the_contact_format_allows_is_stripped():
+    from desk.api.prompts import PUBLIC_CONTACT_FORMAT
+
+    allowed = re.findall(r'"([^"]+)"', PUBLIC_CONTACT_FORMAT.split("only from this list:")[1].split(";")[0])
+    assert "Call us at" in allowed and "Correo" in allowed
+    assert set(allowed) <= set(setup._CONTACT_LABELS)
+    for label in allowed:
+        assert setup.owner_supports("public_contact", f"{label}: 415-555-0118", "Our number is 415-555-0118"), label
 
 
 @pytest.mark.parametrize("field,value,owner_text,supported", [

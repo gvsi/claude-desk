@@ -1590,6 +1590,15 @@ _CONTACT_ADDRESS = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?
 _CONTACT_DOMAIN = re.compile(r"(?<![\w@.-])(?:[^\W_](?:[\w-]*[^\W_])?\.)+[^\W\d_]{2,63}(?![\w-]|\.[^\W_])"
                              r"(?:/[^\s<>\"']*)?")
 _CONTACT_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().\-\u2010-\u2015\u2212]*\d(?!\w)")
+# The labels a public contact may carry: `PUBLIC_CONTACT_FORMAT`'s list (a test keeps the two in step), their Spanish
+# equivalents, an extension's "ext" and the words that join parts. Their words are never the owner's to type.
+_CONTACT_LABELS = (
+    "Call us at", "Call", "Call or text", "Text us at", "Text", "Email us at", "Email", "Phone", "Tel", "Mobile",
+    "Office", "Website", "Web", "Ll\u00e1manos al", "Escr\u00edbenos a", "Tel\u00e9fono", "Correo",
+    "Llama al", "M\u00f3vil", "Celular", "Oficina", "Sitio web", "P\u00e1gina web", "Correo electr\u00f3nico",
+    "ext", "Ask for", "Site", "or", "and", "o", "y",
+)
+_CONTACT_LABEL_WORDS = frozenset(re.findall(r"\w+", " ".join(_CONTACT_LABELS).casefold()))
 
 
 def _contact_parts(text: str) -> tuple[set[str], list[str]]:
@@ -1608,11 +1617,10 @@ def _contact_parts(text: str) -> tuple[set[str], list[str]]:
 
 
 def _contact_words(text: str) -> set[str]:
-    """Words beyond recognized contact parts and their ordinary labels."""
+    """Words beyond recognized contact parts and their labels (`_CONTACT_LABELS`)."""
     rest = _CONTACT_DOMAIN.sub(" ", _CONTACT_ADDRESS.sub(" ", text.casefold()))
     rest = _CONTACT_PHONE.sub(lambda match: " " if len(re.sub(r"\D", "", match.group())) >= 7 else match.group(), rest)
-    rest = re.sub(r"\b(?:ask\s+for|call|text|email|phone|website|web|site|or|and|at|us)\b", " ", rest)
-    return set(re.findall(r"\w+", rest))
+    return set(re.findall(r"\w+", rest)) - _CONTACT_LABEL_WORDS
 
 
 def owner_supports(field: Literal["public_contact", "price_items", "hours"],
