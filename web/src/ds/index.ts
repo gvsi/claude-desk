@@ -179,7 +179,7 @@ export { KnowledgeList, type KnowledgeListProps, type KnowledgeRowView } from '.
 export { KnowledgeAdd, type KnowledgeAddProps, type KnowledgeAddedView } from './components/KnowledgeAdd/KnowledgeAdd.tsx';
 
 // Share
-export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';
+export { SHARE_CARD_QR_COLORS, ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';
 export { CopyList, type CopyListItem, type CopyListProps } from './components/CopyList/CopyList.tsx';
 
 // Payments

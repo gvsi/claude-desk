@@ -45,6 +45,12 @@ const IN_A_CHANGE_REVIEW = '.cd-change-review';
 /** The change review's cards: the card look at the compact 16 px padding the design system gives them. */
 const CHANGE_REVIEW_CARD = { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' } as const;
 
+/** Where Rules lists the Desk's own jobs: a tool's rules card for each (`ToolRulesCard`), as All rules draws them. */
+const IN_THE_JOBS = '.cd-business-jobs';
+
+/** A tool's rules card: the card look at the 16 px padding `ToolRulesCard` gives itself. */
+const TOOL_RULES_CARD = { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' } as const;
+
 /** A card of rows that pad themselves (`Card` `padding={0}`, such as a `DetailList` or an `AlertList`). */
 const CARD_OF_ROWS = 'cd-card--padding-0';
 
@@ -67,8 +73,9 @@ const SKELETON_GONE_MS = 3_000;
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
  * is checked on every other card there, such as a held request's. On a rules change's review, the
  * change review's own two cards are checked at the compact padding `ChangeReview` gives them; on
- * the Rules page, each connector's section in the section look the connectors boards give it. A
- * card of rows has the card look with no padding of its own, since each of its rows pads itself.
+ * the Rules page, each connector's section in the section look the connectors boards give it, and
+ * each of the Desk's own jobs at the padding `ToolRulesCard` gives itself. A card of rows has the
+ * card look with no padding of its own, since each of its rows pads itself.
  */
 export async function expectOwnerBoard(
   root: HTMLElement,
@@ -98,11 +105,12 @@ export async function expectOwnerBoard(
     }
   } else if (root.querySelector(CONNECTOR_SECTION) !== null) {
     // The Rules page (N-Conn-17): each connector's section is a card with no padding of its own,
-    // in the section look, its header and rows as the board draws them; every other card is in
-    // the card look.
+    // in the section look, its header and rows as the board draws them; each of the Desk's own
+    // jobs is a tool's rules card, as All rules draws it; every other card is in the card look.
     expectConnectorSections(root);
     for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
-      expectComputed(card, card.querySelector(CONNECTOR_SECTION) === null ? SPEC.card : CONNECTORS_SPEC.section);
+      const look = card.querySelector(CONNECTOR_SECTION) !== null ? CONNECTORS_SPEC.section : card.closest(IN_THE_JOBS) !== null ? TOOL_RULES_CARD : SPEC.card;
+      expectComputed(card, look);
     }
   } else {
     const cards = [...root.querySelectorAll<HTMLElement>('.cd-card')];

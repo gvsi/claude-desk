@@ -48,6 +48,9 @@
   --illustration-line: rgba(28,27,25,0.14);
   --illustration-handled: #3f7a2e;
   --illustration-arc: rgba(250,249,245,0.12);
+  --qr-tile: #eae6dc;
+  --qr-ink: var(--bg-app);
+  --qr-hairline: rgba(28,27,25,0.13);
   --connector-stripe: #ffffff;
   --connector-google-blue: #4285f4;
   --shadow-composer: 0 4px 20px rgba(0,0,0,0.25);
@@ -104,6 +107,7 @@
   --motion-base: 200ms;
   --motion-stagger: 150ms;
   --motion-settle: 150ms;
+  --motion-follow: 120ms;
   --motion-ease: ease-out;
   --motion-ease-emphasis: cubic-bezier(.165,.84,.44,1);
   --motion-ease-bounce: cubic-bezier(0.37, 0, 0.63, 1);

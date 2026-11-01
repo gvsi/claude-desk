@@ -1215,6 +1215,10 @@ def test_a_reasked_topic_keeps_its_earlier_answer_and_follow_up():
      "Who are your clients mostly?"),
     ("Who are your clients mostly? That helps me word the Desk's answers.", ""),
     ("Who are your clients mostly?", "Who are your clients mostly?"),
+    # Markdown emphasis may close the question
+    ("**Who are your clients mostly?**", ""),
+    ("Got it, tax work.\n\n*Who are your clients mostly?*", ""),
+    ("_Who are your clients mostly?_", ""),
 ])
 async def test_a_compliant_follow_up_asks_exactly_one_question(
     app, browser, kernel_http, model, engine, caplog, follow_up, question,
@@ -2005,6 +2009,26 @@ async def test_exhausted_homework_and_stalled_understanding_still_ask_the_first_
     assert not any("suggested" in entry for entry in row["transcript"])
 
 
+def test_each_consent_read_deadline_outlasts_what_it_waits_for():
+    from desk.api.kernel_client import DEFAULT_TIMEOUT_S
+    # The kernel's search deadline: this process can't import it, so the test holds the two together.
+    from desk.kernel_service.decisions import WEB_SEARCH_TIMEOUT_S
+
+    execute, budget, run = (desk_setup.WEB_SEARCH_EXECUTE_TIMEOUT_S, desk_setup.HOMEWORK_BUDGET_S,
+                            desk_setup.TURN_RUN_TIMEOUT_S)
+    # A search's /execute waits past the kernel's own deadline, so the kernel's fail-closed answer arrives first.
+    assert DEFAULT_TIMEOUT_S < WEB_SEARCH_TIMEOUT_S < execute
+    # The margins setup.py documents, each pinned at its floor so neither can quietly shrink to nothing: three
+    # seconds for the owner's context and the decisions before a search's execute starts, and ten for clock skew.
+    assert budget - execute >= desk_setup.HOMEWORK_DECIDE_S >= 3
+    # After the reads, the run keeps the whole understanding call, ten seconds to finish and five for a retry.
+    assert run >= (budget + desk_setup.UNDERSTAND_TIMEOUT_S + desk_setup.TURN_FINISH_S
+                   + desk_setup.UNDERSTAND_RETRY_MIN_S)
+    # A run and its cleanup end before another process may recover the row as abandoned, with room for the clocks.
+    assert (desk_setup.TURN_ABANDONED_S - (run + desk_setup.TURN_ROLLBACK_TIMEOUT_S)
+            >= desk_setup.TURN_CLOCK_SLACK_S >= 10)
+
+
 async def test_a_search_execute_can_outlast_the_default_kernel_timeout(
     app, browser, fake, kernel_http, model, monkeypatch,
 ):
@@ -2023,7 +2047,7 @@ async def test_a_search_execute_can_outlast_the_default_kernel_timeout(
             decision_id = json.loads(request.content)["decision_id"]
             if fake.decisions[decision_id].tool == "native.web_search":
                 execute_timeouts.append(request.extensions["timeout"])
-                await asyncio.sleep(0.05)  # Scaled 6 s default < search < 22 s execute deadline.
+                await asyncio.sleep(0.05)  # Scaled 6 s default < search < 32 s execute deadline.
         return await send(request, **kwargs)
 
     monkeypatch.setattr(kernel, "_timeout_s", 0.02)
@@ -3764,6 +3788,7 @@ async def test_a_covered_topic_with_no_ask_gets_the_next_question(covered, next_
 @pytest.mark.parametrize("key", tuple(LIMIT_CHOICES))
 @pytest.mark.parametrize("text", [
     "Could you clarify?", "Which amount? That will set the limit.", "Got it, a drain clean is $150.", "  ",
+    "**Could you clarify?**", "Got it.\n\n_Which amount should that be?_",
 ])
 async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, caplog):
     reply = desk_setup.Entry(role="claude", text=text)
@@ -3790,8 +3815,10 @@ async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, ca
 
 
 @pytest.mark.parametrize("key", ["contact_and_after_hours", "quote_limit"])
-async def test_a_question_mark_that_ends_no_sentence_still_asks_the_topics_question(key, caplog):
-    text = "Got it, your site is rivera.example/?ref=desk."
+@pytest.mark.parametrize("text", ["Got it, your site is rivera.example/?ref=desk.",
+                                  "Got it, your site is **rivera.example/?ref=desk**.",
+                                  "Got it, your site is rivera.example/?_gl=desk."])
+async def test_a_question_mark_that_ends_no_sentence_still_asks_the_topics_question(key, text, caplog):
     question = "What should the Desk do with messages that come in after hours?"
     reply = desk_setup.Entry(role="claude", text=text)
     interview = interview_with(SetupAnswers(summary="Plumbing."), [
@@ -4663,19 +4690,26 @@ async def test_a_planned_id_is_asked_whatever_kind_names_it(app, browser, kernel
     assert response.json()["pending_card"] == proposal_id
 
 
-async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, kernel_http, model, engine):
+# The card shows why as plain text, so the question's Markdown bold doesn't carry into it.
+@pytest.mark.parametrize("question,why", [
+    ("Use Stripe?", "Use Stripe?"),
+    ("Should I set up **Stripe** for deposits?", "Should I set up Stripe for deposits?"),
+    ("Should I set up __Stripe__ for deposits?", "Should I set up Stripe for deposits?"),
+])
+async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, kernel_http, model, engine,
+                                                                  question, why):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do", connectors=[])))
     await consent(owner, interview_id, False, model, cards=True)
     response = await answer(owner, model, interview_id, "We take deposits.",
-                            turn(next={"kind": "connector", "connector": "stripe"}, question="Use Stripe?"))
+                            turn(next={"kind": "connector", "connector": "stripe"}, question=question))
     assert response.status_code == 200, response.text
     row = await stored(engine, interview_id)
     card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
-        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True, "connected": False}
+        "app": "stripe", "label": "Stripe", "why": why, "connectable": True, "connected": False}
     assert response.json()["pending_card"] == card["proposal_id"]
     assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
                for item in entry.get("planned", []))

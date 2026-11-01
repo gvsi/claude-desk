@@ -180,7 +180,7 @@ async def test_failures_are_absent(case, monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="desk.kernel_service.decisions")
     started = time.monotonic()
     reviewed = await AnthropicDecisions(client).review(review_input(note=f"please hurry {MARKER}"))
-    assert time.monotonic() - started < 1.0
+    assert time.monotonic() - started < 2.5                     # past the timeout, the reply would take 5 s
     assert reviewed.review is None
     assert reviewed.usage.status == status and reviewed.usage.model == "claude-sonnet-5-5"
     assert [record.getMessage().split()[0] for record in caplog.records] == ["review_failed"]

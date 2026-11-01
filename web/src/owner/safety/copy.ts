@@ -119,7 +119,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * The `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), by
  * `handoffEntryOf`, in the owner's signed words: the handoff card handing one over, the owner
  * marking one done, and the kernel closing one when a call-back request replaced it, the owner
- * took the chat over, or the owner wrote in it.
+ * took the chat over, the owner wrote in it, or the visitor booked a time in it.
  */
 export const HANDOFF_ENTRY_COPY = {
   opened: 'Chat handed to you',
@@ -127,6 +127,7 @@ export const HANDOFF_ENTRY_COPY = {
   replaced: 'Chat moved to a call-back',
   took_over: 'Handoff closed when you took over',
   wrote: 'Handoff closed when you wrote in the chat',
+  booked: 'Handoff closed when they booked a time',
 } as const satisfies Record<HandoffEntry, string>;
 
 /**

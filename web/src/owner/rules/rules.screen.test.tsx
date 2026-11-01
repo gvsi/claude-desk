@@ -351,11 +351,12 @@ describe('rules page', () => {
     const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
     expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
 
-    // All rules draws each tool's name and line without a link too.
+    // All rules draws each tool's name and line without a link too: Rivera's urgent job first, then
+    // the connectors' eleven tools.
     const house = await renderRoute(`${DESK}/rules/all`);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
     const main = house.screen.getByRole('main').element();
-    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(11);
+    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(12);
     expect(main.querySelectorAll('a.cd-tool-rules__tool, .cd-tool-rules__chevron')).toHaveLength(0);
     expect(house.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' }).getByText('Payment link', { exact: true })).toBeVisible();
@@ -969,8 +970,10 @@ describe('rules page', () => {
     expect(inView(limit(), main)).toBe(true);
 
     // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
-    // returns to the end of Rules.
+    // returns to the end of Rules. The place is kept as the scroll is heard: wait for it before leaving.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
@@ -1061,7 +1064,7 @@ describe('rules page', () => {
     expect(reached.filter((el) => el.closest('.cd-connector-section') !== null)).toEqual(changes);
 
     // As the board spaces them: the composer 20 px under the header, its suggestions 10 px under
-    // it, the connectors' summary 20 px under them; the menu at the right of the title's line.
+    // it; the menu at the right of the title's line.
     const top = (el: Element) => Math.round(el.getBoundingClientRect().top);
     const bottom = (el: Element) => Math.round(el.getBoundingClientRect().bottom);
     const box = composer.closest('.cd-composer__box') as HTMLElement;
@@ -1069,7 +1072,11 @@ describe('rules page', () => {
     const row = main.querySelector('.cd-suggestion-chips') as HTMLElement;
     expect(top(box) - bottom(header)).toBe(20);
     expect(top(row) - bottom(box)).toBe(10);
-    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(row)).toBe(20);
+    // Then the Desk's own jobs (Rivera's urgent callback) 20 px under them, and the connectors'
+    // summary 20 px under those, at the page's own gap.
+    const jobs = main.querySelector('.cd-business-jobs') as HTMLElement;
+    expect(top(jobs) - bottom(row)).toBe(20);
+    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(jobs)).toBe(20);
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
@@ -1837,7 +1844,11 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);

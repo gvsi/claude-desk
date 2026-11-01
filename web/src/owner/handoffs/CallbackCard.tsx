@@ -117,7 +117,7 @@ export function CallbackCard({ item, showJoin = true, onDone, showSummary = true
               Join the chat
             </Button>
           ) : null}
-          <Button variant="ghost" busy={closing} waiting={joining} onClick={() => void markDone()}>
+          <Button variant="secondary" busy={closing} waiting={joining} onClick={() => void markDone()}>
             Mark done
           </Button>
         </div>

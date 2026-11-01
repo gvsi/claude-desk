@@ -8,11 +8,12 @@
  * live ones do.
  */
 import type { HoursWindow, KnowledgeItem, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
-import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
+import type { JobProposal, PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { seedAgentChat } from './agents.ts';
+import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
-import type { MockWorld, ReplayTurn, ToolRecord } from './world.ts';
+import type { DeskRecord, MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
 export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document';
 
@@ -334,6 +335,35 @@ export function riveraTools(): ToolRecord[] {
   ];
 }
 
+/**
+ * Maria's urgent business tool, as the kernel's Rivera seed gives every copy (`RIVERA_BUSINESS_TOOLS`):
+ * an emergency callback that alerts her at once, whatever her notification settings.
+ */
+const RIVERA_URGENT_JOB = {
+  title: 'Emergency callback',
+  how: 'Asks Maria to call back urgently about an emergency.',
+  config: { block: 'urgent', urgent_when: 'A burst or leaking pipe, flooding, a sewage backup, or no water' },
+} as const satisfies Pick<JobProposal, 'title' | 'how' | 'config'>;
+
+/** The kernel seed's card that lets anyone use Maria's urgent tool (`rv-urgent`). */
+const RIVERA_URGENT_CARD = presetCard({
+  card_id: 'rv-urgent',
+  applies_to: 'desk.emergency-callback',
+  mode: 'auto',
+  who: 'anyone',
+  reason: 'Anyone can ask for an urgent callback, which alerts you at once.',
+});
+
+/**
+ * Gives a Rivera copy's Desk its urgent tool, turned on, and the card that allows it, as the
+ * kernel's copy does: the tool built as setup builds a Desk's own tools, then turned on as the
+ * seed's rules version activates, with `rv-urgent` last among the seed's cards.
+ */
+function seedRiveraUrgentTool(desk: DeskRecord): void {
+  seedBusinessTools(desk, businessToolRows([RIVERA_URGENT_JOB]).map((row) => ({ ...row, status: 'enabled', review_reason: null })));
+  desk.policy = { ...desk.policy, cards: [...desk.policy.cards, { ...RIVERA_URGENT_CARD }] };
+}
+
 const MINUTE = 60_000;
 
 /** What the seeded visitor asked, twelve minutes before the copy opened: the hold on Today. */
@@ -370,6 +400,7 @@ export function seedWorld(world: MockWorld): void {
     hours: RIVERA_HOURS,
     openStatus: RIVERA_OPEN_STATUS,
   });
+  seedRiveraUrgentTool(main);
   const knowledge: KnowledgeItem[] = [
     {
       item_id: 'kn-website',

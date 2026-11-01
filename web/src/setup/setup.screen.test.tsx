@@ -30,6 +30,7 @@ import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -1454,7 +1455,7 @@ describe('setup', () => {
     await expect.element(notice).not.toBeInTheDocument();
   });
 
-  it('async_consent_gives_up_at_90_seconds_and_try_again_reads_the_landed_work', async () => {
+  it('async_consent_that_lands_after_90_seconds_is_picked_up_without_try_again', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1467,7 +1468,42 @@ describe('setup', () => {
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
     await answered;
-    await vi.advanceTimersByTimeAsync(89999);
+    // A turn may run to the API's 110 s run deadline, well past the old 90 s give-up.
+    await vi.advanceTimersByTimeAsync(108000);
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    finish('landed');
+    // Each poll is a real request under a fake clock, and a tick that finds a read still in flight is skipped: step
+    // the clock 100 ms at a time, with real time for the reads to answer, until a poll picks up the landed turn. No
+    // give-up may show on the way, and the poll must come long before the 140 s limit (108 s + 20 s at most).
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    for (let waited = 0; (box.element() as HTMLTextAreaElement).disabled; waited += 100) {
+      expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+      expect(waited, 'a poll picks up the landed turn').toBeLessThan(20_000);
+      await vi.advanceTimersByTimeAsync(100);
+      await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
+    }
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
+    vi.useRealTimers();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(requests('setupConsent')).toHaveLength(1);
+  });
+
+  it('async_consent_gives_up_once_a_turn_can_no_longer_be_running_and_try_again_reads_the_landed_work', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
+    });
+    await answered;
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS - 1);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
     await until(() => {
@@ -1588,7 +1624,7 @@ describe('setup', () => {
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
     await answered;
-    await vi.advanceTimersByTimeAsync(90000);
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
@@ -2202,8 +2238,11 @@ describe('setup', () => {
     expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
 
     // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    // The landing class leaves on the render after the last animation ends, so wait for that too.
     await expect.poll(() => moving(list.element())).toEqual([]);
-    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    const landed = () => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName);
+    await expect.poll(() => landed().filter((name) => name !== 'none')).toEqual([]);
+    expect(landed().length).toBeGreaterThan(0);
     await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A screen reader reads the check's own count from the first, never the ticks, all six rows
