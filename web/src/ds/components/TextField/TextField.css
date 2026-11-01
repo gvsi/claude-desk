@@ -29,6 +29,14 @@
   color: var(--text-primary);
 }
 
+/* Held words stay readable and selectable; the muted fill distinguishes them from editable words. */
+.cd-text-field__input[readonly] {
+  border-color: var(--line-control);
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+  cursor: default;
+}
+
 /* Four lines that grow taller by dragging, never wider; long words wrap. */
 .cd-text-field--multiline .cd-text-field__input {
   height: auto;

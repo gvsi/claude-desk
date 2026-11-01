@@ -20,6 +20,7 @@ import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from typing import get_args, get_origin
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -1159,6 +1160,42 @@ def turn_text(model: ScriptedModel, call: int = -1) -> str:
     return block["text"]
 
 
+def test_a_reasked_topic_keeps_its_earlier_answer_and_follow_up():
+    interview = interview_with(SetupAnswers(summary="Tax work."), [
+        desk_setup.Entry(role="claude", text="Old limit question", question="money_limit", covered=[]),
+        desk_setup.Entry(role="owner", text="Old limit answer"),
+        desk_setup.Entry(role="claude", text="What do you do?", question="what_you_do"),
+        desk_setup.Entry(role="owner", text="Tax work."),
+        desk_setup.Entry(role="claude", text="Got it."),
+        desk_setup.Entry(role="claude", text="For individuals or businesses?", question="what_you_do"),
+    ])
+    text = desk_setup._turn_message(interview, "what_you_do", "Both")["content"][0]["text"]
+    assert "<question_asked>For individuals or businesses?</question_asked>" in text
+    assert ("<this_question_so_far>\nowner: Tax work.\nyou: Got it.\n"
+            "you: For individuals or businesses?\n</this_question_so_far>") in text
+    assert "Old limit answer" not in text
+    assert text.count("<owner_answer>") == 1
+
+
+async def test_a_compliant_follow_up_asks_exactly_one_question(app, browser, kernel_http, model, engine, caplog):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    follow_up = "Who are your clients mostly?"
+    response = await answer(owner, model, interview_id, "Tax work.",
+                            turn(reply=follow_up, step_done=False))
+    assert response.status_code == 200, response.text
+    messages = response.json()["messages"]
+    owner_index = next(index for index, message in enumerate(messages) if message["text"] == "Tax work.")
+    assert [message["text"] for message in messages[owner_index + 1:] if message["role"] == "claude"] == [follow_up]
+    assert (await stored(engine, interview_id))["transcript"][-1]["question"] == "what_you_do"
+    assert "setup answer gap filled" not in caplog.text
+    response = await answer(owner, model, interview_id, "Individuals.")
+    assert response.status_code == 200, response.text
+    assert f"<question_asked>{follow_up}</question_asked>" in turn_text(model)
+
+
 async def test_a_short_answer_reads_with_claudes_follow_up(app, browser, kernel_http, model, engine):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type="office")
@@ -1222,8 +1259,7 @@ async def test_a_later_questions_exchange_leaves_out_earlier_replies(app, browse
     assert final.status_code == 200, final.text
 
     text = turn_text(model)
-    exchange = ("<this_question_so_far>\nowner: Weekdays, 8 to 6.\nyou: Which areas do you cover?\n"
-                "</this_question_so_far>")
+    exchange = "<this_question_so_far>\nowner: Weekdays, 8 to 6.\nyou: Which areas do you cover?\n</this_question_so_far>"
     assert text.endswith(f"{exchange}\n\n<owner_answer>Oakland</owner_answer>")
     assert text.index("</memory>") < text.index("</website>") < text.index(exchange)
     assert planted in html.unescape(text[:text.index(exchange)])  # reads stay available outside the exchange
@@ -1233,8 +1269,19 @@ SETUP_TOOL_ROUTES = ("GET /context/{session_id}?desk_id=", "POST /decide", "POST
 
 
 async def test_start_writes_the_sample_memory_before_the_consent_read(app, browser, fake, kernel_http, model,
-                                                                     engine):
+                                                                     engine, db, monkeypatch):
     owner = await new_owner(app, browser, kernel_http)
+    build_memory = desk_setup.memory_items
+
+    def memory_after_link(drafts):
+        ((desk_id, transcript),) = db.execute(
+            "SELECT desk_id, transcript FROM app.setup_interviews WHERE copy_id = %s",
+            (owner.copy_id,)).fetchall()
+        assert desk_id is not None and transcript == []
+        assert not fake.called("PUT /desks/{id}/answering")
+        return build_memory(drafts)
+
+    monkeypatch.setattr(desk_setup, "memory_items", memory_after_link)
     notes = [{"title": "Customer habits", "topics": [" Customers ", ""],
               "text": "I ask customers to send a photo of the leak before a visit."},
              {"title": "Service hours", "topics": [" HOURS "], "text": "I work weekdays from 8 to 5."}]
@@ -1244,7 +1291,7 @@ async def test_start_writes_the_sample_memory_before_the_consent_read(app, brows
     state = reply.json()
     routes = [call.route for call in fake.calls]
     (written,) = fake.called("PUT /desks/{id}/memory")
-    assert routes.index("POST /desks") < routes.index("PUT /desks/{id}/answering") < routes.index(written.route)
+    assert routes.index("POST /desks") < routes.index(written.route) < routes.index("PUT /desks/{id}/answering")
     assert written.path == f"/desks/{state['desk_id']}/memory"
     assert written.headers["x-owner-session"] == owner.token
     assert written.body == {"about": "Rivera Plumbing fixes leaks and water heaters around Oakland.", "items": [
@@ -1438,8 +1485,8 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     assert not fake.desks[state["desk_id"]].answering
     assert len(fake.called("PUT /desks/{id}/answering")) == 2 and not fake.called("DELETE /desks/{id}")
 
-    # It fails again: the new Desk is deleted, so nothing answers the public at its address, no interview is made (the
-    # start's row keeps its failure, with no Desk, so its key is spent), and the owner gets the kernel's error.
+    # It fails again: the new Desk is deleted, so nothing answers the public at its address. The row keeps the
+    # returned Desk's ID and its failure, but no readable interview; the owner gets the kernel's error.
     fake.fail("PUT /desks/{id}/answering", "timeout")
     before = set(fake.desks)
     model.add(started())
@@ -1458,7 +1505,7 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     async with engine.connect() as conn:
         kept = (await conn.execute(sql("SELECT desk_id, start_error IS NOT NULL FROM app.setup_interviews"
                                        " ORDER BY created_at"))).all()
-    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (None, True)]
+    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (made, True)]
 
     # The delete is best effort: when it fails too, the owner still gets the kernel's error, and it is logged.
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
@@ -1582,7 +1629,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     await consent(owner, interview_id, False, model)
 
     for key in QUESTION_KEYS:
-        if key == "discounts":                          # a follow-up first: the same question stays, asked once
+        if key == "discounts":                          # a follow-up keeps the code-owned limit choices
             followed = await answer(owner, model, interview_id, "Maybe?", turn("How much, at most?", step_done=False))
             assert followed.json()["question"] == "discounts"
             assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
@@ -1604,7 +1651,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     assert done["step"] == "tools" and done["question"] is None
     assert done["messages"][-1]["role"] == "claude"
     asked = [message["text"] for message in done["messages"] if message["role"] == "claude"]
-    assert all(asked.count(question_text(key, "trade")) == 1 for key in QUESTION_KEYS)    # each asked once
+    assert all(asked.count(question_text(key, "trade")) == 1 for key in QUESTION_KEYS)
     (renamed,) = fake.called("PUT /desks/{id}/business")                 # the named owner, sent once
     assert renamed.path == f"/desks/{state['desk_id']}/business"
     assert renamed.body == {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE,
@@ -2254,6 +2301,21 @@ def idle_in_transaction(db) -> int:
                       " AND usename = 'desk_api' AND state LIKE 'idle in transaction%'").fetchone()[0]
 
 
+async def test_start_holds_no_transaction_while_the_kernel_makes_its_desk(
+        app, browser, kernel_http, model, fake, db):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    release = fake.gate("POST /desks")
+    first = asyncio.create_task(owner.browser.post("/api/owner/setup", json=start_body()))
+    try:
+        await until(lambda: fake.called("POST /desks"))
+        assert idle_in_transaction(db) == 0
+    finally:
+        release.set()
+        reply = await asyncio.wait_for(first, 10)
+        assert reply.status_code == 201, reply.text
+
+
 async def lockable(engine, interview_id: str) -> None:
     """Lock the interview's row from a transaction of its own, failing at once (55P03) when another holds it."""
     async with engine.connect() as conn, conn.begin():
@@ -2777,6 +2839,182 @@ async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, ke
                                              "choices": choices, "card": None}
 
 
+async def test_a_follow_up_with_its_question_in_the_question_field_asks_it(
+    app, browser, kernel_http, model, engine, caplog,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    await answer(owner, model, interview_id, "We prepare tax returns.",
+                 turn(next=next_ask("contact_and_after_hours")))
+    acknowledgement = "Got it, clients will see linda@chenco-cpa.example as the way to reach the office directly."
+    question = "What should the Desk do with messages that come in after hours?"
+    choices = [{"text": "Take a message", "recommended": False},
+               {"text": "Ask for their details", "recommended": True}]
+    response = await answer(owner, model, interview_id, "linda@chenco-cpa.example",
+                            turn(acknowledgement, step_done=False, question=question, choices=choices))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "contact_and_after_hours"
+    assert [message["text"] for message in response.json()["messages"][-2:]] == [acknowledgement, question]
+    assert response.json()["messages"][-1]["choices"] == [choices[1], choices[0]]
+    row = await stored(engine, interview_id)
+    assert row["transcript"][-1]["question"] == "contact_and_after_hours"
+    assert "setup answer gap filled (contact_and_after_hours, turn_question)" in caplog.text
+    assert "linda@chenco-cpa.example" not in caplog.text
+
+
+@pytest.mark.parametrize("reply", ["Got it.", ""])
+async def test_a_turn_with_nothing_to_answer_asks_the_topic_again(reply, caplog):
+    key = "contact_and_after_hours"
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="claude", text="How can clients reach you?", question=key, covered=[]),
+        desk_setup.Entry(role="owner", text="office@example.com"),
+    ])
+    since = len(interview.transcript)
+    entry = desk_setup.Entry(role="claude", text=reply)
+    interview.transcript.append(entry)
+    replies = desk_setup._TurnReplies()
+    replies.track(entry)
+    await desk_setup._ensure_answerable(None, None, None, interview, since=since, replies=replies, key=key,
+                                        follow_up=answer_turn(SETUP_TURNS[key], reply, step_done=False, question="  "))
+    assert interview.transcript[-1] == desk_setup._ask(interview, key)
+    assert interview.transcript[-2] is entry and entry.text == reply
+    assert "setup answer gap filled (contact_and_after_hours, topic_again)" in caplog.text
+
+
+@pytest.mark.parametrize("covered,next_topic", [
+    (["what_you_do"], "hours_and_area"),
+    (["what_you_do", "hours_and_area"], "quote_limit"),
+])
+async def test_a_covered_topic_with_no_ask_gets_the_next_question(covered, next_topic, caplog):
+    reply = desk_setup.Entry(role="claude", text="Got it.", covered=covered)
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."), reply,
+    ])
+    replies = desk_setup._TurnReplies()
+    replies.track(reply)
+    await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    assert interview.transcript[-1] == desk_setup._ask(interview, next_topic)
+    assert reply.text == ("" if next_topic in LIMIT_CHOICES else "Got it.")
+    assert f"setup answer gap filled ({next_topic}, next_topic)" in caplog.text
+
+
+@pytest.mark.parametrize("key", tuple(LIMIT_CHOICES))
+@pytest.mark.parametrize("text", ["Could you clarify?", "  "])
+async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, caplog):
+    reply = desk_setup.Entry(role="claude", text=text)
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="claude", text="Earlier ask", question=key, covered=[]),
+        desk_setup.Entry(role="owner", text="I'm not sure."), reply,
+    ])
+    replies = desk_setup._TurnReplies()
+    replies.track(reply, reads_untrusted=False)
+    before = interview.answers.model_dump()
+    await desk_setup._ensure_answerable(None, None, None, interview, since=2, replies=replies, key=key,
+                                        follow_up=answer_turn(SETUP_TURNS[key], reply.text, step_done=False))
+    if text.strip():
+        assert len(interview.transcript) == 3
+        assert interview.transcript[-1] is reply and reply.question == key
+        assert reply.text == text and reply.choices == desk_setup._ask(interview, key).choices
+        assert "setup answer gap filled" not in caplog.text
+    else:
+        assert interview.transcript[-1] == desk_setup._ask(interview, key)
+    assert interview.answers.model_dump() == before
+
+
+@pytest.mark.parametrize("path", ["fact", "next_step", "card_turn", "guard"])
+@pytest.mark.parametrize("closing", ["plan", "empty", "failed", "empty_then_failed"])
+async def test_every_close_ends_with_the_plan_or_the_fixed_line(monkeypatch, path, closing, caplog):
+    plan = "Your Desk will take tax preparation requests."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="Got it.", covered=list(QUESTION_KEYS)),
+    ])
+    next_turn = SetupNextStep(reply="", next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                              add_jobs=[], plan=plan if closing == "plan" else "")
+    calls = [None] if closing == "failed" else [next_turn, None if closing == "empty_then_failed" else next_turn]
+    if path == "card_turn":
+        card = desk_setup.Entry.model_validate(proposal_entries()[1])
+        card.card.state = "accepted"
+        interview.transcript.append(card)
+        calls.insert(0, next_turn)
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(side_effect=calls))
+    finish = desk_setup.finish
+
+    def checked_finish(current):
+        assert current.step == "questions"
+        assert current.transcript[-1].role == "claude"
+        assert current.transcript[-1].text == (plan if closing == "plan" else desk_setup.QUESTIONS_DONE)
+        finish(current)
+
+    monkeypatch.setattr(desk_setup, "finish", checked_finish)
+    if path == "card_turn":
+        await desk_setup.card_turn(None, None, None, interview, card.card.proposal_id)
+    elif path == "guard":
+        await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=desk_setup._TurnReplies())
+    else:
+        source = (answer_turn(SETUP_TURNS["contact_and_after_hours"], next=next_ask("done"))
+                  if path == "fact" else next_turn)
+        await desk_setup._advance(None, None, None, interview, source, interview.transcript[-1])
+    assert interview.step == "tools"
+    assert interview.transcript[-1].text == (plan if closing == "plan" else desk_setup.QUESTIONS_DONE)
+    if path == "guard":
+        assert "setup answer gap filled (done, close)" in caplog.text
+
+
+@pytest.mark.parametrize("typed", [True, False])
+@pytest.mark.parametrize("next_topic", ["what_you_do", "quote_limit"])
+async def test_a_card_answer_with_no_ask_uses_the_same_guard(monkeypatch, typed, next_topic, caplog):
+    covered = [] if next_topic == "what_you_do" else ["what_you_do", "hours_and_area"]
+    card = desk_setup.Entry.model_validate(proposal_entries()[1])
+    if not typed:
+        card.card.state = "accepted"
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use cards.", cards=True),
+        desk_setup.Entry(role="claude", text="Take appointment requests?", covered=covered), card,
+        desk_setup.Entry(role="owner", text="Yes."),
+    ])
+    following = desk_setup.SetupCardAnswer(reply="Got it.", decision="accept", revised=[],
+                                           next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                                           add_jobs=[], plan="")
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(return_value=following))
+    # Force the missing-ask seam: the public card_turn must repair it before its caller saves.
+    monkeypatch.setattr(desk_setup, "_advance_ask", AsyncMock())
+    await desk_setup.card_turn(None, None, None, interview, card.card.proposal_id, text="Yes." if typed else None)
+    assert card.card.state == "accepted" and interview.pending_card is None
+    assert interview.transcript[-1] == desk_setup._ask(interview, next_topic)
+    assert interview.transcript[-2].text == ("" if next_topic in LIMIT_CHOICES else "Got it.")
+    assert f"setup answer gap filled ({next_topic}, next_topic)" in caplog.text
+
+
+@pytest.mark.parametrize("missing", [True, False])
+async def test_a_card_turn_that_does_nothing_does_not_fill_a_gap(monkeypatch, missing):
+    card = desk_setup.Entry.model_validate(proposal_entries()[1])
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [card])
+    guard = AsyncMock()
+    monkeypatch.setattr(desk_setup, "_ensure_answerable", guard)
+    await desk_setup.card_turn(None, None, None, interview, "missing" if missing else card.card.proposal_id)
+    guard.assert_not_awaited()
+    assert interview.transcript == [card]
+
+
+async def test_a_gap_shows_the_next_planned_card_before_closing(monkeypatch, caplog):
+    card = desk_setup.Entry.model_validate(proposal_entries()[1]).card
+    reply = desk_setup.Entry(role="claude", text="Got it.", covered=list(QUESTION_KEYS), planned=[card])
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use cards.", cards=True), reply,
+    ])
+    close = AsyncMock()
+    monkeypatch.setattr(desk_setup, "close_setup", close)
+    await desk_setup._ensure_answerable(None, None, None, interview, since=1,
+                                        replies=desk_setup._TurnReplies(entries=[(reply, True)]))
+    assert interview.pending_card == card.proposal_id
+    assert interview.transcript[-1].card == card and interview.transcript[-1].card is not card
+    close.assert_not_awaited()
+    assert "setup answer gap filled (card, next_topic)" in caplog.text
+
+
 async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser, kernel_http, model):
     from desk.api.prompts import LIMIT_CHOICES
     owner = await new_owner(app, browser, kernel_http)
@@ -2944,9 +3182,30 @@ async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "what_you_do"
     assert response.json()["messages"][-1]["text"] == "Which dogs?"
+    assert "Move on?" not in [message["text"] for message in response.json()["messages"]]
     row = await stored(engine, state["interview_id"])
     assert not any(entry.get("covered") for entry in row["transcript"])
     assert not any(entry.get("question") == "money_limit" for entry in row["transcript"])
+
+
+@pytest.mark.parametrize("reply", ["Which clients?", "Got it."])
+async def test_a_fact_follow_up_never_shows_a_limit_question_or_its_choices(
+    app, browser, kernel_http, model, reply,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    response = await answer(owner, model, interview_id, "Tax work.",
+                            turn(reply, step_done=False, next=next_ask("quote_limit"),
+                                 question="May I quote $5,000?",
+                                 choices=[{"text": "$5,000", "recommended": True}]))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "what_you_do"
+    assert response.json()["messages"][-1]["text"] == (
+        reply if reply.endswith("?") else question_text("what_you_do", "trade"))
+    assert response.json()["messages"][-1]["choices"] == []
+    assert "$5,000" not in json.dumps(response.json()["messages"])
 
 
 async def test_skip_ignores_covered_topics_and_a_covered_topic_is_never_asked_again(

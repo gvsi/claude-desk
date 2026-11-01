@@ -46,7 +46,8 @@ every head scenario is pending (no recorded rate); otherwise exit 1, the reason 
 `merge-ready` checks the head (default HEAD) against origin/main from their merge base, with no
 network or model call: exit 0 when ready, 1 when both sides changed results inputs and a scenario
 can run under their combined landed plans or in their merge, or a recorded rate prevents the
-unarmed shortcut. A merge conflict also exits 1; other check errors exit 2.
+unarmed shortcut. It also exits 1 on a merge conflict, or when the merge has other than exactly one
+Alembic head; other check errors exit 2.
 
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
 calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a

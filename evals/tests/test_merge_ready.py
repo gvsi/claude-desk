@@ -29,6 +29,143 @@ def change_main(repo: Path, path: str) -> None:
     git(repo, "checkout", "-q", "plan/change")
 
 
+def write_revision(repo: Path, revision: str, down_revision: str | tuple[str, ...] | list[str] | None) -> None:
+    write(repo, f"backend/alembic/versions/{revision}.py",
+          f"revision: str = {revision!r}\ndown_revision = {down_revision!r}\n"
+          "raise RuntimeError('migration modules must never be imported')\n")
+
+
+@pytest.fixture
+def merge_trees(monkeypatch) -> list[list[str]]:
+    calls = []
+    original = subprocess.run
+
+    def record(command, *args, **kwargs):
+        if "merge-tree" in command:
+            calls.append(command)
+        return original(command, *args, **kwargs)
+
+    monkeypatch.setattr(results.subprocess, "run", record)
+    return calls
+
+
+def test_parallel_migrations_refuse_even_without_changed_results_inputs(repo, capsys):
+    write_revision(repo, "pr_head", "0001_core")
+    change(repo, "README.md")
+    git(repo, "checkout", "-q", "main")
+    write_revision(repo, "main_head", "0001_core")
+    change_main(repo, "docs/guide.md")
+
+    assert run.merge_ready([], root=repo) == 1
+    output = capsys.readouterr()
+    assert output.out.startswith("merge-ready: not ready:")
+    assert "pr_head" in output.out and "main_head" in output.out
+    assert "re-chain the PR's migration onto origin/main's head" in output.out
+    assert len(output.out.splitlines()) == 1
+    assert not output.err
+
+
+def test_revision_chained_onto_mains_new_head_is_ready(repo, merge_trees):
+    write_revision(repo, "pr_head", "main_head")
+    change(repo, "README.md")
+    git(repo, "checkout", "-q", "main")
+    write_revision(repo, "main_head", "0001_core")
+    change_main(repo, "docs/guide.md")
+    # The checked-out tree lacks main_head. Its dirty file must not influence readiness either.
+    write_revision(repo, "dirty_head", "0001_core")
+
+    ready, reason = results.merge_ready(root=repo)
+
+    assert ready, reason
+    assert len(merge_trees) == 1
+
+
+@pytest.mark.parametrize("parents", [("pr_head", "main_head"), ["pr_head", "main_head"]])
+def test_merge_revision_joins_both_heads(repo, merge_trees, parents):
+    write_revision(repo, "pr_head", "0001_core")
+    write_revision(repo, "joined_head", parents)
+    change(repo, "README.md")
+    git(repo, "checkout", "-q", "main")
+    write_revision(repo, "main_head", "0001_core")
+    change_main(repo, "docs/guide.md")
+
+    ready, reason = results.merge_ready(root=repo)
+
+    assert ready, reason
+    assert len(merge_trees) == 1
+
+
+def test_nonliteral_down_revision_returns_two_and_one_line(repo, capsys):
+    write(repo, "backend/alembic/versions/dynamic.py",
+          "revision = 'dynamic'\ndown_revision = choose_parent()\n")
+    change(repo, "README.md")
+
+    assert run.merge_ready([], root=repo) == 2
+    output = capsys.readouterr()
+    assert output.out.startswith("merge-ready: error:")
+    assert "dynamic.py" in output.out and "down_revision" in output.out
+    assert len(output.out.splitlines()) == 1
+    assert not output.err
+
+
+def test_repo_without_migrations_is_ready(repo, merge_trees):
+    (repo / "backend/alembic/versions/0001_core.py").unlink()
+    change(repo, "README.md")
+    change_main(repo, "docs/guide.md")
+
+    ready, reason = results.merge_ready(root=repo)
+
+    assert ready, reason
+    assert len(merge_trees) == 1
+
+
+def test_pending_scenarios_and_migrations_share_one_merge_tree(tmp_path, merge_trees):
+    repo = make_repo(tmp_path / "repo", landed=("master",))
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "-b", "plan/change")
+    write_revision(repo, "pr_head", "main_head")
+    change(repo, "kernel/src/lib.rs")
+    git(repo, "checkout", "-q", "main")
+    write_revision(repo, "main_head", "0001_core")
+    change_main(repo, "backend/desk/api/prompts.py")
+
+    ready, reason = results.merge_ready(root=repo)
+
+    assert ready, reason
+    assert "every scenario is pending" in reason
+    assert len(merge_trees) == 1
+
+
+@pytest.mark.parametrize("source", [
+    "revision = choose_revision()\ndown_revision = None\n",
+    "revision = 'bad'\ndown_revision = [123]\n",
+    "revision = 'bad'\n",
+    "revision = 'bad'\ndown_revision = (\n",
+])
+def test_invalid_revision_metadata_fails_closed(repo, capsys, source):
+    write(repo, "backend/alembic/versions/bad.py", source)
+    change(repo, "README.md")
+
+    assert run.merge_ready([], root=repo) == 2
+    output = capsys.readouterr()
+    assert output.out.startswith("merge-ready: error:")
+    assert "bad.py" in output.out
+    assert len(output.out.splitlines()) == 1
+    assert not output.err
+
+
+def test_migrations_directory_with_no_revisions_is_not_ready(repo, capsys):
+    (repo / "backend/alembic/versions/0001_core.py").unlink()
+    write(repo, "backend/alembic/versions/.gitkeep", "")
+    change(repo, "README.md")
+
+    assert run.merge_ready([], root=repo) == 1
+    output = capsys.readouterr()
+    assert "0 heads" in output.out
+    assert len(output.out.splitlines()) == 1
+    assert not output.err
+
+
 def test_both_sides_gated_refuses_and_names_each_sides_paths(repo):
     change(repo, "kernel/src/lib.rs")
     change_main(repo, "backend/desk/api/prompts.py")
@@ -190,3 +327,25 @@ def test_make_target_passes_default_or_selected_head(head):
 
     assert planned.returncode == 0, planned.stderr
     assert planned.stdout.strip().endswith(f'python -m evals.run merge-ready --head "{head or "HEAD"}"')
+
+
+def test_files_alembic_ignores_in_the_versions_folder_never_block(repo):
+    write(repo, "backend/alembic/versions/__init__.py", "")
+    write(repo, "backend/alembic/versions/archive/old_helper.py", "HELPERS = []\n")
+    commit(repo, "files Alembic doesn't read as revisions")
+
+    assert results.merge_ready(root=repo) == (
+        True, "ready: results inputs changed on at most one side since the merge base with origin/main")
+
+
+def test_a_conflict_is_not_ready_even_when_only_one_side_changed_results_inputs(repo):
+    write(repo, "README.md", "This branch's README.\n")
+    commit(repo, "branch README")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "README.md", "Main's README.\n")
+    commit(repo, "main README")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "plan/change")
+
+    assert results.merge_ready(root=repo) == (
+        False, "not ready: the PR conflicts with origin/main in 'README.md'; rebase onto origin/main")
